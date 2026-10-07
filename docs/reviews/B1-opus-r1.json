@@ -1,0 +1,103 @@
+{
+  "duration_api_ms": 409330,
+  "stop_reason": "end_turn",
+  "session_id": "40cfa0c1-e378-45df-883e-2a877478babe",
+  "total_cost_usd": 2.5853814000000006,
+  "usage": {
+    "input_tokens": 42,
+    "cache_creation_input_tokens": 160650,
+    "cache_read_input_tokens": 2674167,
+    "output_tokens": 38259,
+    "output_tokens_details": {
+      "thinking_tokens": 29613
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 160650,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 11699,
+        "cache_read_input_tokens": 184001,
+        "cache_creation_input_tokens": 5077,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 5077
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+  },
+  "modelUsage": {
+    "claude-opus-5-5": {
+      "inputTokens": 42,
+      "outputTokens": 38259,
+      "cacheReadInputTokens": 2674167,
+      "cacheCreationInputTokens": 160650,
+      "webSearchRequests": 0,
+      "costUSD": 2.5853814000000006,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinkingTokens": 29613,
+      "canonicalModel": "claude-opus-5-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "subagent_stats": {
+    "spawned": 0,
+    "requested": {
+      "background": 0,
+      "foreground": 0,
+      "unset": 0
+    },
+    "started_in_background": 0,
+    "max_depth": 0,
+    "spawned_by_subagents": 0,
+    "completed": 0,
+    "failed": 0,
+    "killed": {
+      "parent": 0,
+      "user": 0,
+      "system": 0
+    },
+    "refused": {
+      "depth_limit": 0,
+      "concurrency_limit": 0,
+      "budget": 0
+    },
+    "by_type": {}
+  },
+  "is_error": false,
+  "num_turns": 37,
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "I recommend **CHANGES REQUIRED** for B1. Nothing here touches the protected `natural` default, and the manifest/reference part could be accepted on its own. The A1–A3 experiment and its E1 evidence can't support any conclusion yet: one defect undermines the A1 ablation, and the boards can't show the forms the visual gate judges.\n\nThis was a read-only review: I ran no code. Reproductions are commands to run, and values marked \"expected\" are inferred from the code and from `e1_report.json`, not measured.\n\n## Proven defects\n\n**P1-1 — A1 keeps the climate computed for A0's elevation, so it doesn't isolate geography.**\n- **Where:** `terrain_macro.py:248-250`. `_natural_at()` (`:256-263`) runs `finalize(raw)` using A0's elevation, which applies the lapse rate, the −10 °C clip and the BIO4 baseline. Only afterwards is the elevation swapped for the macro one. `test_terrain_macro.py:23-24` asserts this behaviour as correct.\n- **Effect:** a cell that was a mountain in A0 keeps a cold climate in A1 even when A1 makes it a 200 m plain. Ocean that becomes land keeps its warm sea-level climate.\n- **Evidence in `e1_report.json`, site `mountain_seed0`:**\n  - A1 and A3 have identical conditioning elevation (94–304 m).\n  - A1's DEM comes out at 2,425–3,298 m; A3's at 271–302 m.\n  - The only input difference is climate. This matches A0's mountain (DEM 4,967–6,230 m) reappearing through temperature.\n  - The same inflation shows on A1 plains: coarse-stage maxima reach 2.4–3.6 km from conditioning that never exceeds 343 m.\n- **To reproduce:**\n  - `f0=make_macro_factory(0,'A0').sample_raw(699,-529,763,-465)` and `f1=…('A1')…`\n  - Then `raw=NaturalConditioning(0).sample_raw(...)`, set `raw[0]=f1[0]`, and run `NaturalConditioning(0).finalize(raw)[1]`.\n  - Expected: this BIO1 differs from `f1[1]` by up to tens of °C at the cell centre.\n- **Fix:**\n  - In `sample()`, substitute the macro elevation into the raw stack before `finalize` for A1/A3.\n  - Replace the test with \"climate equals `finalize(raw with A1 elevation)`\".\n  - Rerun E1 for A1. Until then, no A1 conclusion is valid.\n\n**P1-2 — A2/A3 climate has no bound on the range the checkpoint has seen.**\n- **Where:** `terrain_macro.py:205-232`.\n- **What's missing:**\n  - Natural clips BIO1 to [−10, 40] before its stretch, so its floor is −27.5 °C (`:87-88`).\n  - A2/A3 draw quantiles from latitude bands all the way to 90°, including Antarctica (`terrain_world.py:79-88`). They then add the lapse rate for up to about 6.9 km of elevation, with no clip.\n  - The upstream statistics exclude latitudes beyond ±60°, which is a third of this world's latitude range.\n  - Elevation *was* clipped for exactly this out-of-range reason (`:198-201`); climate wasn't.\n  - The negative-climate projection exists only for the `earth` profile (`terrain_inference.py:200`).\n- **Status:** the missing bound is proven from the code; how far values actually go out of range is not measured.\n- **Fix:**\n  - Measure, per channel on the global 256×128 lattice, the fraction of cells outside A0's support and the z-score against `coarse_means/stds`.\n  - Then pick a policy: clip/compress to A0's support, or limit latitude to ±60° plus a documented out-of-range band.\n  - Add a test.\n\n**P1-3 — The E1 boards and report can't support the coast/mountain/plain visual gate.**\n- **Crop too small:** the native crop is 128 px, i.e. 3.84 km, half of one 7.68 km coarse cell (`terrain_reference.py:241`). The corpus field `native_dem_window_pixels: 256` is never read.\n- **Palette saturates:** `PALETTE_STOPS` tops out at 6,000 m (`:21-25`). The A3 mountain DEM is 6,115–6,878 m, so `macro_mountain_seed0/neural-comparison.png` is a uniform white square. A0's mountain is partly saturated too.\n- **No relief shading:** there's no hillshade or profile on the neural boards (`:142`).\n- **Missing levels:** the learned coarse and latent stages are saved as arrays only, so the continental and regional levels the audit requires (§13.1) have no board.\n- **Footprints don't match:** `write_e1_report` (`:164-201`) summarises conditioning and coarse over 491 km, latent over 15.4 km and the DEM over 3.84 km. That can't show at which stage a coast or mountain disappears, and the docstring's \"identical native pixels\" is true only for the DEM.\n- **Focus point:** the default focus `ci*256` (`:121-122`) is a cell corner, not the centre.\n- **Fix:**\n  - DEM crops of at least 1,024–2,048 px (30–60 km) with hillshade.\n  - A learned-coarse board over about 491 km and a latent low-frequency board over about 250 km.\n  - Auto-range legends alongside the fixed palette.\n  - Per-stage statistics resampled onto the same footprint.\n  - Coast-crossing profiles.\n\n**P1-4 — The E1 evidence isn't tied to a world identity.**\n- **Wrong numerical profile recorded:** manifests are built with `inference_profile={}` and default strings `bf16` / `cuda-resident-v1` (`terrain_reference.py:204-219`). The neural run uses `choose_profile(world.device)` (`:257-258`), which is never recorded.\n- **Evidence came from a different script version:** `index.json` contains `neural_sites`, which the current `terrain_reference.py` never writes (`:266-268`). That file isn't in the hashed implementation list, so the run can't be verified.\n- **Stale output:** there's an extra `A0-neural/` directory from an earlier layout.\n- **Unverifiable claim:** whether E1 was rerun after the documented ridge-uplift reduction can't be confirmed read-only. The manifest hash of `terrain_macro.py` would need comparing against the current file.\n- **Fix:**\n  - Write `world_identity(build_manifest(..., inference_profile=asdict(world._terrain_profile)))` into each neural `metrics.json` and `e1_report.json`.\n  - Hash `terrain_reference.py`.\n  - Refuse to write the report if the manifest doesn't match the files currently on disk.\n  - Purge the stale output.\n\n## P2 — cache identity, contracts, hardening\n\n- **Manifest describes intent, not the runtime.** `terrain_manifest.py:115-128` hard-codes `cond_snr`, `drop_water_pct`, windows, strides and steps instead of reading the world's config. `checkpoint.revision` (`:110`) is claimed even for an arbitrary `checkpoint_source`. The server already has to patch the `earth` manifest by hand (`terrain_server.py:132-137`). **Fix:** derive these from the config/kwargs and assert they match the checkpoint.\n- **Identity is too broad.** `:59-76` hashes `terrain_server.py`, `terrain_app.py`, `terrain_jobs.py`, `terrain_disk_cache.py` and `terrain_background.py`. Any server edit therefore invalidates the global coarse cache keyed by `world_hash` (`terrain_coarse.py:88`), which is about 120k coarse forwards to rebuild. **Fix:** split into a generation hash and separate build provenance, and test that a server-only edit keeps the hash.\n- **Version name never bumps.** `MACRO_VERSION` (`terrain_macro.py:20`) stayed the same after the ridge change. Tile and physical cache keys use `macro-a3` plus `VERSION`, not the hash (`terrain_server.py:495-496, 549-550`). Only native-mip children check identity (`:344`). This is a B3 gate. **Fix:** golden-value tests pinning a few samples per ablation, which force a version bump, plus hash-keyed caches.\n- **A3 basins create uncalibrated inland seas.** `terrain_macro.py:197` subtracts up to 500 m on land after the sea threshold is calibrated, so A3's land fraction is no longer the calibrated one. The 0.25–0.55 test is loose. **Fix:** floor basins above 0 unless they're explicit lakes, and report A3's global land fraction against the target.\n- **A3 coasts are flat by construction.** Land rank rises steadily with the continent score, and ridges are multiplied by `shore` (`:183-195`). Coasts therefore always start as low plains; E1 shows −0.9 to 6.9 m. This is a design limitation, not a bug. **Fix:** relief that doesn't depend on distance to the coast, and ridges allowed to reach the shoreline.\n- **Possible repeated values in `sea_knots`** (`:156`). `np.interp` requires strictly increasing breakpoints; whether ties actually occur is unproven. **Fix:** apply the same strict-increase guard as `build_quantiles`.\n- **Digest cache headroom.** `_cached_digest` has `maxsize=64` and 47 files are hashed today. Past 64, the least-recently-used cache would rehash the 1.1 GB weights on every call.\n- **Small items:**\n  - Dead `ci0`/`cj0` at `:245-246`.\n  - `earth` would produce an \"TH\" ablation directory (`terrain_reference.py:131`).\n  - The constants 38.6/−31.4 are duplicated from `world_pipeline.py:1377`.\n  - `write_e1_report` has no unit test.\n  - The doc says \"model units\" where the comparison is in physical units after the square root.\n\n## Measured observation (not a code defect)\n\nA2 changes only climate, yet at `coast_seed0` it removes the protected A0 coast: land goes from 50% to 0%, with the DEM at −2.06 to −0.70 km. The other A0-coordinate sites also shift by hundreds of metres. The coarse model's elevation is highly sensitive to climate.\n\nAny climate scheme must therefore be judged on whether protected sites survive. A useful extra variant: latitude organisation that keeps natural's clip/stretch and BIO4 regression, to separate \"organisation\" from \"distribution shift\".\n\n## Confirmed sound\n\n- A0 matches upstream on square windows, and seed 0 is fixed to seeds 1–5.\n- The natural path is unchanged for non-zero seeds.\n- Cell-centre and row/column conventions are consistent with `world_pipeline.py:886-998`.\n- Macro objects and calibration are independent of the requested crop.\n- Switching profiles rebuilds the tile store, so A0 and A1 windows don't mix.\n- Seeds are stored as decimal strings.\n- Physical units are correct.\n- The square root is applied once.\n- Memory per chunk is bounded.\n\n## Verdict: CHANGES REQUIRED\n\n**Outstanding gates:**\n1. Fix P1-1 and P1-2, then rerun E1.\n2. Rebuild the boards and co-registered report (P1-3).\n3. Bind the evidence to `world_hash` plus the actual numerical profile (P1-4).\n4. A natural regression crop compared against `audit-implementation/baseline`; there is currently no evidence that natural is bit-identical.\n5. NN-level coverage of the seed-42, negative-coordinate and window-border sites, plus observed good/bad locations.\n6. Human visual approval.\n\nI make no claim here about visual quality or performance.\n\nSeparately, the Google Calendar, Google Drive and Sentry connectors need authorising in your claude.ai connector settings before they can be used.",
+  "ttft_ms": 2053,
+  "type": "result",
+  "duration_ms": 410788,
+  "uuid": "a0bc9cf7-2bca-481e-b927-b7b6ebc5c43f",
+  "ttft_stream_ms": 1906,
+  "time_to_request_ms": 114,
+  "first_content_frame_ms": 1906,
+  "queued_turn_count": 0,
+  "result_index": 0,
+  "cli_returncode": 0,
+  "elapsed_seconds": 414.32820677757263,
+  "requested_model": "claude-opus-5-5",
+  "requested_effort": "high",
+  "stderr": ""
+}

@@ -1,0 +1,166 @@
+"""Opt-in CUDA validation of A4 inputs through the actual checkpoint.
+
+Run only in the coordinator's exclusive GPU slot. Each site/profile rebuilds
+the world, and terrain_reference records full manifest and artifact hashes.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import time
+
+import numpy as np
+from PIL import Image, ImageDraw
+from scipy.interpolate import RegularGridInterpolator
+
+from terrain_macro import make_macro_factory
+from terrain_reference import export_neural_intermediates
+from terrain_bootstrap_preview import panel, topology, verify_cpu_sources
+
+
+def coarse_conditioning_at_native(factory, xs, ys):
+    """The model's physical 7.68 km lattice, interpolated at native centres."""
+    cj0, cj1 = int(np.floor(xs[0]/7680-.5)), int(np.ceil(xs[-1]/7680-.5))+1
+    ci0, ci1 = int(np.floor(ys[0]/7680-.5)), int(np.ceil(ys[-1]/7680-.5))+1
+    cx, cy = (np.arange(cj0, cj1)+.5)*7680, (np.arange(ci0, ci1)+.5)*7680
+    lattice = factory.sample(cx, cy)
+    yy, xx = np.meshgrid(ys, xs, indexing="ij")
+    coordinates = np.stack((yy, xx), axis=-1)
+    fields = np.stack([RegularGridInterpolator((cy, cx), channel)(coordinates)
+                       for channel in lattice]).astype(np.float32)
+    return fields, {"physical_lattice_shape": list(lattice.shape),
+        "bounds_indices_x0_y0_x1_y1": [cj0, ci0, cj1, ci1],
+        "cell_m": 7680, "interpolation": "bilinear physical fields at native centres"}
+
+
+def point_probe_metrics(elevation):
+    return {"land_fraction": float(np.mean(elevation > 0)),
+            "finite": bool(np.isfinite(elevation).all()),
+            "elevation_quantiles_m": np.quantile(elevation, [0, .01, .5, .99, 1]).tolist()}
+
+
+def sparse_global(world, seed, profile, width=32):
+    """Stratified point probe; every point includes complete NN contributors."""
+    xs = -20e6+(np.arange(width)+.5)*40e6/width
+    ys = -10e6+(np.arange(width//2)+.5)*40e6/width
+    ci = np.floor(ys/7680).astype(int)
+    cj = np.floor(xs/7680).astype(int)
+    learned = np.empty((len(ys), len(xs)), np.float32)
+    for row, i in enumerate(ci):
+        for col, j in enumerate(cj):
+            point = world.coarse[:, int(i):int(i)+1, int(j):int(j)+1].float().cpu().numpy()
+            signed = point[0, 0, 0]/point[-1, 0, 0]
+            learned[row, col] = np.sign(signed)*signed**2
+        print(f"NN global {seed} {profile} row {row+1}/{len(ys)}", flush=True)
+    physical_x, physical_y = (cj+.5)*7680, (ci+.5)*7680
+    conditioning = make_macro_factory(seed, profile).sample(physical_x, physical_y)
+    return {"learned_m": learned, "conditioning": conditioning,
+            "sample_x_m": physical_x, "sample_y_m": physical_y}
+
+
+def validate(cpu_report, output, seeds=(0, 42), pixels=1024, global_width=32,
+             profiles=("A0", "A3", "A4")):
+    cpu_report, output = Path(cpu_report).resolve(), Path(output).resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    cpu = json.loads(cpu_report.read_text(encoding="utf-8"))
+    verify_cpu_sources(cpu)
+    from terrain_app import load_pipeline, resolve_model_source
+    from terrain_inference import configure_world
+    checkpoint = Path(resolve_model_source())
+    report = {"stage": "checkpoint-coarse-latent-decoder", "cpu_report": str(cpu_report),
+              "cpu_report_sha256": hashlib.sha256(cpu_report.read_bytes()).hexdigest(),
+              "exporter_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+              "sites": {}, "complete_global_nn_not_generated": True,
+              "global_probe_kind": "stratified-NN-point-samples-not-LOD11-area-means",
+              "global_probes": {}}
+    if global_width:
+        # One seed is enough to establish that the NN accepts the planetary
+        # organization; local relief gate includes both independent seeds.
+        seed = seeds[0]
+        global_profiles = tuple(p for p in ("A0", "A4") if p in profiles)
+        global_board = Image.new("RGB", (1024*2, 542*len(global_profiles)), (18, 24, 30))
+        for row, ablation in enumerate(global_profiles):
+            started = time.perf_counter()
+            world = load_pipeline(seed)
+            configure_world(world, world_profile="natural" if ablation == "A0" else f"macro-{ablation.lower()}")
+            world.rebuild()
+            probe = sparse_global(world, seed, ablation, global_width)
+            from terrain_reference import neural_manifest
+            manifest = neural_manifest(world, ablation, checkpoint_source=checkpoint)
+            path = output/f"seed{seed}-{ablation}-global-probe.npz"
+            np.savez_compressed(path, **probe, manifest_hash=np.array(manifest["world_hash"]))
+            (output/f"seed{seed}-{ablation}-global-probe-manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+            for col, field in enumerate((probe["conditioning"][0], probe["learned_m"])):
+                fields = np.broadcast_to(field, (5, *field.shape))
+                shown = panel(fields, 40e6/global_width, f"{ablation} seed{seed}: {'conditioning' if col == 0 else 'learned coarse'} | sparse {global_width}x{global_width//2} POINTS")
+                resized = shown.crop((0, 30, global_width, global_width//2+30)).resize((1024, 512), Image.Resampling.NEAREST)
+                global_board.paste(resized, (col*1024, row*542+30))
+                ImageDraw.Draw(global_board).text((col*1024+8, row*542+9), f"{ablation} {'conditioning' if col == 0 else 'actual NN coarse'} | sparse point samples; not LOD11 area means", fill="white")
+            report["global_probes"][ablation] = {
+                "shape": list(probe["learned_m"].shape), "seed": str(seed),
+                "seconds": time.perf_counter()-started, "manifest_hash": manifest["world_hash"],
+                "npz_sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "conditioning": point_probe_metrics(probe["conditioning"][0]),
+                "learned": point_probe_metrics(probe["learned_m"]),
+                "land_sign_agreement": float(np.mean((probe["conditioning"][0]>0) == (probe["learned_m"]>0)))}
+            (output/"neural-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+        global_board.save(output/f"seed{seed}-global-learned-probe-board.png")
+    for selected in cpu["sites"]:
+        if int(selected["seed"]) not in seeds:
+            continue
+        site = {"id": selected["id"], "seed": selected["seed"],
+                "center_ci": int(np.floor(selected["center_y_m"]/7680)),
+                "center_cj": int(np.floor(selected["center_x_m"]/7680)),
+                "focus_native_i": int(np.floor(selected["center_y_m"]/30)),
+                "focus_native_j": int(np.floor(selected["center_x_m"]/30))}
+        row = {"site": site, "profiles": {}}
+        board = Image.new("RGB", (pixels*len(profiles), (pixels+30)*3), (18, 24, 30))
+        for col, ablation in enumerate(profiles):
+            started = time.perf_counter()
+            world = load_pipeline(int(site["seed"]))
+            configure_world(world, world_profile="natural" if ablation == "A0" else f"macro-{ablation.lower()}")
+            world.rebuild()
+            artifact = export_neural_intermediates(world, site, output,
+                native_pixels=pixels, checkpoint_source=checkpoint)
+            with np.load(output/artifact["npz"]) as data:
+                dem = data["dem_m"]
+                bounds = data["native_bounds"]
+                coarse = data["coarse_unweighted"][0]
+                coarse_m = np.sign(coarse)*coarse**2
+            xs = (np.arange(bounds[0], bounds[2])+.5)*30
+            ys = (np.arange(bounds[1], bounds[3])+.5)*30
+            factory = make_macro_factory(int(site["seed"]), ablation)
+            fields = factory.sample(xs, ys)
+            coarse_fields, coarse_footprint = coarse_conditioning_at_native(factory, xs, ys)
+            board.paste(panel(fields, 30, f"{ablation} analytic conditioning at 30m {site['id']}"), (col*pixels, 0))
+            board.paste(panel(coarse_fields, 30, f"{ablation} actual 7680m lattice, bilinear display {site['id']}"), (col*pixels, pixels+30))
+            generated = np.concatenate((dem[None], fields[1:]), axis=0)
+            board.paste(panel(generated, 30, f"{ablation} NN DEM 30 m {site['id']}"), (col*pixels, 2*(pixels+30)))
+            row["profiles"][ablation] = {"artifact": artifact,
+                "seconds": time.perf_counter()-started,
+                "analytic_native_conditioning": topology(fields[0], 30),
+                "actual_coarse_lattice_bilinear_at_native": topology(coarse_fields[0], 30),
+                "conditioning_coarse_footprint": coarse_footprint,
+                "native_dem": topology(dem, 30), "coarse_context": topology(coarse_m, 7680),
+                "dem_finite": bool(np.isfinite(dem).all())}
+            print(f"NN {site['id']} {ablation} complete", flush=True)
+        board.save(output/f"{site['id']}-native-board.png")
+        report["sites"][site["id"]] = row
+        (output/"neural-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return report
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cpu-report", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--seed", type=int, action="append")
+    parser.add_argument("--pixels", type=int, default=1024)
+    parser.add_argument("--global-width", type=int, default=32,
+                        help="stratified learned coarse probe width; 0 skips")
+    parser.add_argument("--profile", choices=("A0", "A3", "A4"), action="append")
+    args = parser.parse_args()
+    validate(args.cpu_report, args.output, args.seed or (0, 42), args.pixels, args.global_width,
+             tuple(args.profile or ("A0", "A3", "A4")))

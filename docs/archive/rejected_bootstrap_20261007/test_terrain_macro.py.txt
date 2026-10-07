@@ -1,0 +1,259 @@
+import json
+import hashlib
+import os
+from pathlib import Path
+import sys
+import tempfile
+from types import SimpleNamespace
+import unittest
+
+import numpy as np
+
+from terrain_macro import climate_diagnostics, make_macro_factory, sample_conditioning_preview
+from terrain_manifest import _canonical, build_manifest, world_identity
+from terrain_reference import (export_corpus, export_neural_intermediates,
+                               fixed_palette, read_corpus, write_e1_report)
+
+
+class MacroContractTests(unittest.TestCase):
+    def test_ablation_isolation_and_units(self):
+        bounds = (-40, -40, 40, 40)
+        fields = {a: make_macro_factory(0, a).sample_raw(*bounds) for a in
+                  ("A0", "A1", "A2", "A3")}
+        for a, f in fields.items():
+            self.assertEqual(f.shape, (5, 80, 80), a)
+            self.assertTrue(np.isfinite(f).all(), a)
+        natural_physical = make_macro_factory(0, "A0").finalize(fields["A0"])
+        coupled_raw = fields["A0"].copy()
+        coupled_raw[0] = fields["A1"][0]
+        coupled_climate = make_macro_factory(0, "A0").finalize(coupled_raw)[1:]
+        self.assertTrue(np.allclose(coupled_climate, fields["A1"][1:], atol=.001))
+        self.assertFalse(np.array_equal(natural_physical[1], fields["A1"][1]))
+        self.assertTrue(np.array_equal(natural_physical[0], fields["A2"][0]))
+        self.assertFalse(np.array_equal(fields["A1"][0], fields["A3"][0]))
+        self.assertGreaterEqual(fields["A3"][2].min(), 0)  # BIO4, x100 °C
+        self.assertGreaterEqual(fields["A3"][3].min(), 0)  # BIO12, mm/year
+        self.assertGreaterEqual(fields["A3"][4].min(), 0)  # BIO15, CV %
+        encoded = make_macro_factory(0, "A3")(*bounds).numpy()
+        self.assertTrue(np.allclose(encoded[0], np.sign(fields["A3"][0]) *
+                                         np.sqrt(np.abs(fields["A3"][0]))))
+        self.assertTrue(np.array_equal(encoded[1:], fields["A3"][1:]))
+
+    def test_seed_zero_negative_coordinates_and_shared_crop_edges(self):
+        for a in ("A0", "A1", "A2", "A3"):
+            factory = make_macro_factory(0, a)
+            whole = factory.sample_raw(-57, -41, 36, 30)
+            left = factory.sample_raw(-57, -41, 0, 30)
+            right = factory.sample_raw(0, -41, 36, 30)
+            self.assertTrue(np.array_equal(whole, np.concatenate((left, right), 2)), a)
+            self.assertTrue(np.array_equal(whole, factory.sample_raw(-57, -41, 36, 30)), a)
+            self.assertTrue(np.array_equal(whole, make_macro_factory(0, a).sample_raw(-57, -41, 36, 30)), a)
+            self.assertFalse(np.array_equal(whole, make_macro_factory(1, a).sample_raw(-57, -41, 36, 30)), a)
+
+    def test_natural_matches_upstream_square_window(self):
+        root = Path(__file__).resolve().parent
+        sys.path.insert(0, str(root / "terrain-diffusion"))
+        from terrain_diffusion.inference.synthetic_map import make_synthetic_map_factory
+        previous = Path.cwd()
+        try:
+            os.chdir(root / "terrain-diffusion")
+            for seed in (0, 42):
+                upstream = make_synthetic_map_factory(seed=seed or (1 << 31),
+                    frequency_mult=[1.0]*5, drop_water_pct=.5)
+                actual = make_macro_factory(seed, "A0")(-17, -13, 21, 25).numpy()
+                expected = upstream(-17, -13, 21, 25).numpy()
+                self.assertLess(float(np.max(np.abs(actual-expected))), .001)
+        finally:
+            os.chdir(previous)
+
+    def test_global_marginals_and_latitude(self):
+        xs = np.linspace(-20e6, 20e6, 256, endpoint=False)+78125
+        ys = np.linspace(-10e6, 10e6, 128, endpoint=False)+78125
+        a0 = sample_conditioning_preview(0, "natural", xs, ys)["fields"]
+        a3 = sample_conditioning_preview(0, "A3", xs, ys)["fields"]
+        self.assertTrue(.25 < np.mean(a3[0] >= 0) < .55)
+        self.assertLess(abs(np.quantile(a3[0], .9)-np.quantile(a0[0], .9)), 900)
+        self.assertLess(abs(np.quantile(a3[0], .1)-np.quantile(a0[0], .1)), 1200)
+        self.assertGreater(np.mean(a3[1, 54:74]), np.mean(a3[1, :16])+8)
+        self.assertGreater(np.quantile(a3[0], .99), 2000)
+        diagnostics = climate_diagnostics(0, "A3")
+        for row in diagnostics["channels"].values():
+            self.assertEqual(row["postclip_outside_fraction"], 0)
+            self.assertTrue(np.isfinite(row["checkpoint_z_abs_p99"]))
+
+    def test_versioned_macro_golden_samples(self):
+        from terrain_macro import MACRO_VERSION
+        self.assertEqual(MACRO_VERSION, "finite-geography-v2")
+        expected = {
+            "A1": [92.752, -4.842, 1009.914, 138.817, 124.805],
+            "A2": [-4095.094, 26.799, 54.699, 1858.408, 51.594],
+            "A3": [83.074, 26.467, 54.699, 1858.408, 51.594],
+        }
+        for ablation, values in expected.items():
+            actual = make_macro_factory(0, ablation).sample_raw(-17, -13, -16, -12)[:, 0, 0]
+            self.assertTrue(np.allclose(actual, values, atol=.02), ablation)
+
+    def test_manifest_identity_contract(self):
+        a = build_manifest(0, "A0", file_hashes=False)
+        b = build_manifest(0, "A1", file_hashes=False)
+        self.assertNotEqual(a["world_hash"], b["world_hash"])
+        with self.assertRaises(ValueError):
+            world_identity(a)
+        self.assertEqual(a["seed_u64"], "0")
+        self.assertEqual(a["conditioning"]["cond_snr"], [0.5]*5)
+        with self.assertRaises(ValueError):
+            build_manifest(-1, file_hashes=False)
+
+    def test_manifest_hash_is_portable_and_detects_model_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            roots = [Path(tmp)/name for name in ("install_a", "install_b")]
+            for root in roots:
+                (root/"config.json").parent.mkdir(parents=True, exist_ok=True)
+                (root/"config.json").write_text('{"native_resolution":30}', encoding="utf-8")
+                for stage in ("coarse_model", "base_model", "decoder_model"):
+                    (root/stage).mkdir()
+                    (root/stage/"config.json").write_text("{}", encoding="utf-8")
+                    (root/stage/"diffusion_pytorch_model.safetensors").write_bytes(b"same weights")
+            a = build_manifest(0, model_root=roots[0])
+            b = build_manifest(0, model_root=roots[1])
+            self.assertEqual(world_identity(a), world_identity(b))
+            self.assertNotIn("path", a["files"]["model"]["config.json"])
+            (roots[1]/"coarse_model"/"diffusion_pytorch_model.safetensors").write_bytes(b"changed weights")
+            changed = build_manifest(0, model_root=roots[1])
+            self.assertNotEqual(world_identity(a), world_identity(changed))
+            changed["seed_u64"] = "1"
+            with self.assertRaises(ValueError):
+                world_identity(changed)
+
+    def test_manifest_covers_upstream_model_dependencies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            model = Path(tmp)
+            (model/"config.json").write_text("{}", encoding="utf-8")
+            for stage in ("coarse_model", "base_model", "decoder_model"):
+                (model/stage).mkdir()
+                (model/stage/"config.json").write_text("{}", encoding="utf-8")
+                (model/stage/"diffusion_pytorch_model.safetensors").write_bytes(b"fake")
+            manifest = build_manifest(0, model_root=model)
+            impl = manifest["files"]["implementation"]
+            prefix = "terrain-diffusion/terrain_diffusion/"
+            for relative in ("onnx/__init__.py", "inference/explorer/__init__.py",
+                             "models/unet_block.py", "common/model_utils.py"):
+                self.assertIn(prefix+relative, impl)
+            self.assertEqual(world_identity(manifest), manifest["world_hash"])
+            # Simulate a dependency byte change without touching the installed code.
+            changed = json.loads(json.dumps(manifest))
+            changed["files"]["implementation"][prefix+"models/unet_block.py"]["sha256"] = "0"*64
+            payload = {k: v for k, v in changed.items() if k != "world_hash"}
+            changed["world_hash"] = hashlib.sha256(_canonical(payload)).hexdigest()
+            self.assertNotEqual(world_identity(changed), world_identity(manifest))
+
+    def test_corpus_and_palette(self):
+        corpus = read_corpus()
+        self.assertTrue(any(s["seed"] == "0" for s in corpus["sites"]))
+        self.assertTrue(any(s["center_ci"] < 0 and s["center_cj"] < 0 for s in corpus["sites"]))
+        palette = fixed_palette(np.array([[-5000, 0, 3000]], np.float32))
+        self.assertEqual(palette.shape, (1, 3, 3))
+        self.assertFalse(np.array_equal(palette[0, 0], palette[0, 2]))
+
+    def test_artifact_identity_isolation_and_mixed_report_rejection(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent / "terrain-diffusion"))
+        from terrain_inference import InferenceProfile
+
+        class ArrayTensor:
+            def __init__(self, value): self.value = value
+            def float(self): return self
+            def cpu(self): return self
+            def numpy(self): return self.value
+
+        class FakeStage:
+            def __init__(self, channels): self.channels = channels
+            def __getitem__(self, key):
+                _, rows, cols = key
+                a = np.zeros((self.channels, rows.stop-rows.start,
+                              cols.stop-cols.start), np.float32)
+                a[-1] = 1
+                if self.channels == 6: a[4] = 1
+                return ArrayTensor(a)
+
+        class FakeWorld:
+            def __init__(self, ablation, latent_batch=16):
+                self.seed = 0
+                self._terrain_world_profile = "natural" if ablation == "A0" else f"macro-{ablation.lower()}"
+                self._terrain_profile = InferenceProfile(name="free-memory-label", latent_batch=latent_batch)
+                self.kwargs = {"cond_snr": [.5]*5, "frequency_mult": [1.]*5,
+                               "drop_water_pct": .5}
+                self.torch_compile = False
+                self._dtype = "bf16"
+                self.device = "cpu"
+                self.coarse = FakeStage(7)
+                self.latents = FakeStage(6)
+            def get(self, i1, j1, i2, j2, with_climate=True):
+                h, w = i2-i1, j2-j1
+                elev = np.broadcast_to(np.linspace(-20, 20, w, dtype=np.float32),
+                                       (h, w)).copy()
+                return {"elev": ArrayTensor(elev),
+                        "climate": ArrayTensor(np.ones((5, h, w), np.float32))}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            model = Path(tmp)/"model"
+            (model/"config.json").parent.mkdir(parents=True)
+            (model/"config.json").write_text(json.dumps({"native_resolution": 30,
+                "coarse_means": [0, 0, 18, 333, 1332, 53],
+                "coarse_stds": [1, 1, 9, 322, 843, 31]}), encoding="utf-8")
+            for stage in ("coarse_model", "base_model", "decoder_model"):
+                (model/stage).mkdir()
+                (model/stage/"config.json").write_text("{}", encoding="utf-8")
+                (model/stage/"diffusion_pytorch_model.safetensors").write_bytes(b"fake")
+            out = Path(tmp)/"reference"
+            site = read_corpus()["sites"][0]
+            index = export_corpus(out, model_root=model, sites=[site["id"]])
+            for ablation in ("A0", "A1", "A2", "A3"):
+                record = export_neural_intermediates(FakeWorld(ablation), site, out,
+                    native_pixels=64, checkpoint_source=model)
+                index["neural_artifacts"].setdefault(site["id"], {})[ablation] = record
+            report = write_e1_report(out, [site], index)
+            row = report["sites"][site["id"]]["profiles"]["A0"]
+            self.assertEqual(row["matched_coarse_grid"]["footprint"]["shape_rows_cols"], [64, 64])
+            self.assertEqual(row["context_distributions"]["coarse"]["footprint"]["cell_size_m"], 7680)
+            self.assertEqual(row["matched_native_footprint"]["latent_lowfreq"]["native_bounds"],
+                             row["context_distributions"]["dem"]["footprint"]["bounds_indices_x0_y0_x1_y1"])
+            original = index["neural_artifacts"][site["id"]]["A0"]
+            npz_path, metrics_path = out/original["npz"], out/original["metrics"]
+            original_npz, original_metrics = npz_path.read_bytes(), metrics_path.read_bytes()
+            with np.load(npz_path, allow_pickle=False) as saved:
+                arrays = {name: saved[name] for name in saved.files}
+            arrays["exporter_sha256"] = np.array("0"*64)
+            np.savez_compressed(npz_path, **arrays)
+            metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+            metrics["exporter_sha256"] = "0"*64
+            metrics["npz_sha256"] = hashlib.sha256(npz_path.read_bytes()).hexdigest()
+            metrics_path.write_text(json.dumps(metrics), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "exporter differs"):
+                write_e1_report(out, [site], index)
+            npz_path.write_bytes(original_npz)
+            metrics_path.write_bytes(original_metrics)
+            changed = export_neural_intermediates(FakeWorld("A0", latent_batch=8), site, out,
+                native_pixels=64, checkpoint_source=model)
+            self.assertNotEqual(original["manifest_hash"], changed["manifest_hash"])
+            self.assertTrue((out/original["npz"]).is_file())
+            index["neural_artifacts"][site["id"]]["A1"] = original
+            with self.assertRaises(ValueError):
+                write_e1_report(out, [site], index)
+            index["neural_artifacts"][site["id"]]["A1"] = changed
+            with self.assertRaises(ValueError):
+                write_e1_report(out, [site], index)
+            index["neural_artifacts"][site["id"]]["A1"] = next_record = export_neural_intermediates(
+                FakeWorld("A1"), site, out, native_pixels=64, checkpoint_source=model)
+            with (out/next_record["npz"]).open("ab") as stream:
+                stream.write(b"stale")
+            with self.assertRaises(ValueError):
+                write_e1_report(out, [site], index)
+            index["neural_artifacts"][site["id"]]["A1"] = export_neural_intermediates(
+                FakeWorld("A1"), site, out, native_pixels=64, checkpoint_source=model)
+            (model/"coarse_model"/"diffusion_pytorch_model.safetensors").write_bytes(b"changed")
+            with self.assertRaises(ValueError):
+                write_e1_report(out, [site], index)
+
+
+if __name__ == "__main__":
+    unittest.main()

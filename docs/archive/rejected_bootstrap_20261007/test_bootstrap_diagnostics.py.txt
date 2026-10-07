@@ -1,0 +1,74 @@
+"""CPU regression checks for coastal pair coordinates and raster sampling."""
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+
+import numpy as np
+import rasterio
+from rasterio.transform import from_origin
+
+import terrain_bootstrap_diagnostics as diagnostics
+
+
+class PlanarCoast:
+    def __init__(self, axis):
+        self.axis = axis
+
+    def _signed_distance(self, x, y):
+        return (x if self.axis == 'x' else y) - 1000
+
+    def _elevation(self, x, y):
+        return self._signed_distance(x, y).astype(np.float32)
+
+
+class BootstrapDiagnosticsTests(unittest.TestCase):
+    def test_planar_pairs_have_correct_axes_centres_and_unique_coordinates(self):
+        coordinates = np.array([-7680., 0., 7680.])
+        xx, yy = np.meshgrid(coordinates, coordinates)
+        for axis in ('x', 'y'):
+            with self.subTest(axis=axis):
+                factory = PlanarCoast(axis)
+                records, _ = diagnostics.shore_inventory(
+                    factory, factory._elevation(xx, yy), coordinates, coordinates)
+                self.assertEqual(len(records), 5)
+                self.assertEqual({row['axis'] for row in records}, {axis})
+                self.assertEqual(len({(row['start_ci'], row['start_cj'], row['axis'])
+                                     for row in records}), len(records))
+                normal = 'center_x_m' if axis == 'x' else 'center_y_m'
+                tangent = 'center_y_m' if axis == 'x' else 'center_x_m'
+                self.assertEqual({row[normal] for row in records}, {0.})
+                self.assertEqual({row[tangent] for row in records},
+                                 {-11520., -3840., 3840., 11520., 19200.})
+                for row in records:
+                    self.assertEqual(row['heights_m'], [-4840., 2840.])
+                    self.assertEqual(row['absolute_height_step_m'], 7680.)
+
+    def test_etopo_planar_raster_half_pixel_and_north_south_mapping(self):
+        # A 0.1-degree synthetic source is fine enough that the zero crossing
+        # lies in the sampled 3x3 coarse neighbourhood. Offset it from zero:
+        # reversing latitude or omitting the half-pixel offset loses the coast.
+        transform = from_origin(-.4, .4, .1, .1)
+        longitude = -.4 + (np.arange(8) + .5) * .1
+        latitude = .4 - (np.arange(8) + .5) * .1
+        for axis in ('longitude', 'latitude'):
+            with self.subTest(axis=axis), tempfile.TemporaryDirectory() as folder:
+                coordinate = (np.broadcast_to(longitude[None], (8, 8))
+                              if axis == 'longitude' else
+                              np.broadcast_to(latitude[:, None], (8, 8)))
+                values = ((coordinate - .07) * 1000).astype(np.float32)
+                with rasterio.open(Path(folder) / 'etopo_10m.tif', 'w',
+                                   driver='GTiff', width=8, height=8, count=1,
+                                   dtype='float32', transform=transform) as dataset:
+                    dataset.write(values, 1)
+                with patch.object(diagnostics, 'DATA_ROOT', Path(folder)):
+                    result = diagnostics.etopo_reference()
+                self.assertGreater(result['pair_count'], 0)
+                # Both flat-world axes have 9e-6 degrees per metre.
+                np.testing.assert_allclose(
+                    result['absolute_height_step_m_quantiles_min_p05_median_p95_max'],
+                    np.full(5, 69.12), rtol=0, atol=.002)
+
+
+if __name__ == '__main__':
+    unittest.main()

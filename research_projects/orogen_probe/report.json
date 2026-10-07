@@ -1,0 +1,209 @@
+{
+  "source_commit": "cc2662b4edd52231c4f65d8765f3ef12cd82d9b7",
+  "cpu_only": true,
+  "climate_computed": false,
+  "probe": "worker terrain pipeline; nearest-neighbor raster preview is research-only",
+  "cases": [
+    {
+      "name": "default",
+      "seed": 42,
+      "P": 80,
+      "continents": 4,
+      "variety": 0.35,
+      "coverage": 0.3,
+      "n": 20001,
+      "elapsed_s": 0.7696057000000001,
+      "min_m": -8893.8896484375,
+      "max_m": 5986.38818359375,
+      "land_fraction": 0.25748712564371784,
+      "elevation_stages": [
+        {
+          "stage": "1. Tectonic state",
+          "ms": 56.07420000000002
+        },
+        {
+          "stage": "2. Spatial fields",
+          "ms": 31.987799999999993
+        },
+        {
+          "stage": "3. Terrain classification",
+          "ms": 4.787199999999984
+        },
+        {
+          "stage": "4. Skeleton",
+          "ms": 49.099000000000046
+        },
+        {
+          "stage": "5. Phasor ridges",
+          "ms": 29.076999999999998
+        },
+        {
+          "stage": "6. Edifices",
+          "ms": 61.683599999999956
+        },
+        {
+          "stage": "7. Tectonic-band noise",
+          "ms": 28.061699999999973
+        },
+        {
+          "stage": "8. Detail texture",
+          "ms": 3.001600000000053
+        },
+        {
+          "stage": "9. Coastal detail",
+          "ms": 26.06370000000004
+        },
+        {
+          "stage": "10. Uniform land noise",
+          "ms": 7.042599999999993
+        },
+        {
+          "stage": "11. Dynamic topography",
+          "ms": 0.6316000000000486
+        },
+        {
+          "stage": "12. Final shaping",
+          "ms": 5.360200000000077
+        },
+        {
+          "stage": "13. Topology fixup",
+          "ms": 3.4692000000000007
+        }
+      ]
+    },
+    {
+      "name": "continental",
+      "seed": 100,
+      "P": 8,
+      "continents": 2,
+      "variety": 0.35,
+      "coverage": 0.6,
+      "n": 20001,
+      "elapsed_s": 0.6185822999999999,
+      "min_m": -6807.83935546875,
+      "max_m": 6000,
+      "land_fraction": 0.4103794810259487,
+      "elevation_stages": [
+        {
+          "stage": "1. Tectonic state",
+          "ms": 29.32230000000004
+        },
+        {
+          "stage": "2. Spatial fields",
+          "ms": 15.147699999999986
+        },
+        {
+          "stage": "3. Terrain classification",
+          "ms": 3.4302999999999884
+        },
+        {
+          "stage": "4. Skeleton",
+          "ms": 25.822799999999916
+        },
+        {
+          "stage": "5. Phasor ridges",
+          "ms": 15.273099999999886
+        },
+        {
+          "stage": "6. Edifices",
+          "ms": 24.584600000000137
+        },
+        {
+          "stage": "7. Tectonic-band noise",
+          "ms": 27.888799999999947
+        },
+        {
+          "stage": "8. Detail texture",
+          "ms": 4.627500000000055
+        },
+        {
+          "stage": "9. Coastal detail",
+          "ms": 22.439099999999826
+        },
+        {
+          "stage": "10. Uniform land noise",
+          "ms": 10.150499999999965
+        },
+        {
+          "stage": "11. Dynamic topography",
+          "ms": 0.532799999999952
+        },
+        {
+          "stage": "12. Final shaping",
+          "ms": 4.44809999999984
+        },
+        {
+          "stage": "13. Topology fixup",
+          "ms": 0.6799000000000888
+        }
+      ]
+    },
+    {
+      "name": "oceanic",
+      "seed": 314,
+      "P": 100,
+      "continents": 8,
+      "variety": 0.35,
+      "coverage": 0.2,
+      "n": 20001,
+      "elapsed_s": 0.6090548000000001,
+      "min_m": -8821.3544921875,
+      "max_m": 5993.130859375,
+      "land_fraction": 0.1807409629518524,
+      "elevation_stages": [
+        {
+          "stage": "1. Tectonic state",
+          "ms": 23.347999999999956
+        },
+        {
+          "stage": "2. Spatial fields",
+          "ms": 29.350799999999936
+        },
+        {
+          "stage": "3. Terrain classification",
+          "ms": 4.873900000000049
+        },
+        {
+          "stage": "4. Skeleton",
+          "ms": 40.21399999999994
+        },
+        {
+          "stage": "5. Phasor ridges",
+          "ms": 25.13370000000009
+        },
+        {
+          "stage": "6. Edifices",
+          "ms": 57.41630000000009
+        },
+        {
+          "stage": "7. Tectonic-band noise",
+          "ms": 28.699800000000096
+        },
+        {
+          "stage": "8. Detail texture",
+          "ms": 2.774900000000116
+        },
+        {
+          "stage": "9. Coastal detail",
+          "ms": 25.539600000000064
+        },
+        {
+          "stage": "10. Uniform land noise",
+          "ms": 5.318599999999833
+        },
+        {
+          "stage": "11. Dynamic topography",
+          "ms": 1.0718999999999141
+        },
+        {
+          "stage": "12. Final shaping",
+          "ms": 2.8002000000001317
+        },
+        {
+          "stage": "13. Topology fixup",
+          "ms": 2.7765999999999167
+        }
+      ]
+    }
+  ]
+}

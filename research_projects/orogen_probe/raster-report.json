@@ -1,0 +1,41 @@
+[
+  {
+    "name": "default",
+    "height_sha256": "0accb2510011c6f639d2f62e461e0b19bdd40eedfa7ebe1844eb06b04b5a5b5a",
+    "raster_shape": [
+      512,
+      1024
+    ],
+    "height_min_m": -8893.8896484375,
+    "height_max_m": 5986.38818359375,
+    "finite": true,
+    "raster_land_fraction": 0.3048133850097656,
+    "rasterization": "nearest spherical neighbor; research preview, not production interpolation"
+  },
+  {
+    "name": "continental",
+    "height_sha256": "72e5ed0b46cd55227e74ae408e753fa409bd4d9f538ce4754e8091bcd82c8ef1",
+    "raster_shape": [
+      512,
+      1024
+    ],
+    "height_min_m": -6807.83935546875,
+    "height_max_m": 6000.0,
+    "finite": true,
+    "raster_land_fraction": 0.3706645965576172,
+    "rasterization": "nearest spherical neighbor; research preview, not production interpolation"
+  },
+  {
+    "name": "oceanic",
+    "height_sha256": "338660e3b49aa409d18a7c0038f2873f40b21d63f5f72f2b165223872ab89f94",
+    "raster_shape": [
+      512,
+      1024
+    ],
+    "height_min_m": -8821.3544921875,
+    "height_max_m": 5993.130859375,
+    "finite": true,
+    "raster_land_fraction": 0.15495872497558594,
+    "rasterization": "nearest spherical neighbor; research preview, not production interpolation"
+  }
+]

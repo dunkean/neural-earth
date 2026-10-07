@@ -1,0 +1,23 @@
+{
+  "schema": "terrain-reference-corpus-v1",
+  "description": "Fixed A0 and A3 selected sites. Labels describe selection targets, not validated neural outcomes.",
+  "coarse_cell_m": 7680,
+  "conditioning_window_cells": 64,
+  "native_dem_window_pixels": 256,
+  "sites": [
+    {"id": "coast_seed0", "seed": "0", "kind": "coast", "center_cj": 267, "center_ci": 259, "focus_native_i": 66738, "focus_native_j": 68625, "native_dem_window_pixels": 1024},
+    {"id": "mountain_seed0", "seed": "0", "kind": "mountain", "center_cj": 731, "center_ci": -497, "focus_native_i": -125755, "focus_native_j": 187800},
+    {"id": "plain_seed0", "seed": "0", "kind": "plain", "center_cj": -15, "center_ci": -5, "focus_native_i": -2893, "focus_native_j": -7400},
+    {"id": "coast_negative", "seed": "42", "kind": "coast", "center_cj": -203, "center_ci": -447},
+    {"id": "mountain_negative", "seed": "42", "kind": "mountain", "center_cj": 27, "center_ci": -449},
+    {"id": "plain_negative", "seed": "42", "kind": "plain", "center_cj": -1378, "center_ci": 320},
+    {"id": "coarse_window_border", "seed": "42", "kind": "border", "center_cj": 48, "center_ci": -48},
+    {"id": "seed0_negative_origin", "seed": "0", "kind": "negative", "center_cj": -48, "center_ci": -48},
+    {"id": "macro_coast_seed0", "seed": "0", "kind": "coast", "selected_from": "A3", "center_cj": 272, "center_ci": -400, "focus_native_i": -101441, "focus_native_j": 67993, "native_dem_window_pixels": 1024},
+    {"id": "macro_mountain_seed0", "seed": "0", "kind": "mountain", "selected_from": "A3", "center_cj": 562, "center_ci": 439, "focus_native_i": 113028, "focus_native_j": 144614, "native_dem_window_pixels": 1024},
+    {"id": "macro_plain_seed0", "seed": "0", "kind": "plain", "selected_from": "A3", "center_cj": 1091, "center_ci": 1202, "focus_native_i": 310770, "focus_native_j": 277905},
+    {"id": "macro_coast_negative", "seed": "42", "kind": "coast", "selected_from": "A3", "center_cj": -1529, "center_ci": 378},
+    {"id": "macro_mountain_negative", "seed": "42", "kind": "mountain", "selected_from": "A3", "center_cj": -1498, "center_ci": -130},
+    {"id": "macro_plain_negative", "seed": "42", "kind": "plain", "selected_from": "A3", "center_cj": -547, "center_ci": -69}
+  ]
+}

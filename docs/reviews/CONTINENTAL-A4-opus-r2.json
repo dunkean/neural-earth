@@ -1,0 +1,103 @@
+{
+  "duration_api_ms": 399061,
+  "stop_reason": "end_turn",
+  "session_id": "2d29e783-6f42-4f47-9c99-160abb3e8b23",
+  "total_cost_usd": 2.4343506,
+  "usage": {
+    "input_tokens": 50,
+    "cache_creation_input_tokens": 141368,
+    "cache_read_input_tokens": 2676033,
+    "output_tokens": 38400,
+    "output_tokens_details": {
+      "thinking_tokens": 29102
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 141368,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 9116,
+        "cache_read_input_tokens": 168128,
+        "cache_creation_input_tokens": 5052,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 5052
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+  },
+  "modelUsage": {
+    "claude-opus-5-5": {
+      "inputTokens": 50,
+      "outputTokens": 38400,
+      "cacheReadInputTokens": 2676033,
+      "cacheCreationInputTokens": 141368,
+      "webSearchRequests": 0,
+      "costUSD": 2.4343506,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinkingTokens": 29102,
+      "canonicalModel": "claude-opus-5-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "subagent_stats": {
+    "spawned": 0,
+    "requested": {
+      "background": 0,
+      "foreground": 0,
+      "unset": 0
+    },
+    "started_in_background": 0,
+    "max_depth": 0,
+    "spawned_by_subagents": 0,
+    "completed": 0,
+    "failed": 0,
+    "killed": {
+      "parent": 0,
+      "user": 0,
+      "system": 0
+    },
+    "refused": {
+      "depth_limit": 0,
+      "concurrency_limit": 0,
+      "budget": 0
+    },
+    "by_type": {}
+  },
+  "is_error": false,
+  "num_turns": 40,
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "**Verdict: ACCEPT WITH LIMITATIONS.** None of the findings is P0 or P1. A4 v2 stays experimental and cannot be promoted yet; the NN v2 results are pending, and I don't count that as a defect. The statistics cache is accepted. The harness fixes are accepted with limitations.\n\nI didn't edit files, run commands or use the GPU. Two things to know about scope:\n- `terrain_bootstrap_reference.py` doesn't exist. I reviewed `terrain_bootstrap_preview.py` instead (plus how it uses `terrain_reference`).\n- `docs/CONTINENTAL_BOOTSTRAP.md` changed while I was reading it. Line references are to the newer version.\n\n## 1. A4 continental-bootstrap-v2\n\n**These v1 review items are fixed:**\n- **Coast formula.** In distance units, the shore now slopes at sea level on both sides (`terrain_macro.py:405-412`). Land, shelf and deep ocean all meet at 0 when distance is 0. I checked the doc's −111 m (one cell offshore), −213 m (two cells) and +60 m (one cell inland at the 65 m floor) by hand; they are correct in distance units.\n- **Ridge cap.** The cap is now a smooth shoulder that keeps rising (`:387-392`), with a test.\n- **Land-fraction test.** It now uses a different lattice from calibration (`test_terrain_bootstrap.py:21-22`).\n- **CPU guard.** It checks the full 10-file inventory, tested (`terrain_bootstrap_preview.py:24-39`).\n- **Global probe.** It keeps only land fraction and sign agreement (`terrain_bootstrap_validate.py:38-41`).\n- **Conditioning labels.** The report gives both the 30 m analytic field and the bilinear field from the actual 7.68 km cells, labelled (`:23-35,143-144`).\n- **Climate clipping.** It is now split by latitude and by elevation. Measured: 62.7%/62.4% of the 60–90° band falls outside, against ≤0.43% at 30–60°. This mostly refutes v1's idea that mid-latitude mountains were a big contributor.\n- Crop invariance and the manifests are unchanged.\n\n| # | Sev | Kind | Location | Problem | Fix |\n|---|---|---|---|---|---|\n| A1 | P2 | **Missing evidence (main open question on the v1 P1 coast fix)** | `terrain_macro.py:363`, `:408-411`; `test_terrain_bootstrap.py:43-55`; doc `:27-30` | The slope is only guaranteed in \"distance\" units. The real slope on the map is that slope times how fast the distance field changes (\\|∇d\\|). The two noise terms in that field are about as strong as the capsule distance itself: 1100e3·0.006/7680 ≈ 0.86 and 230e3·0.024/7680 ≈ 0.72 per unit of noise gradient. So \\|∇d\\| can be near 0 at noise saddles (straits, isthmuses) and above 2 elsewhere. A near-flat band at sea level can therefore survive in places. The test and the doc's \"one 7.68 km cell offshore\" values hold only where \\|∇d\\| ≈ 1. | CPU check: sample A4 on 7.68 km cell centres worldwide. For every land/sea neighbour pair, record both elevations and \\|∇d\\| (central differences). Report the share with land < 20 m and sea > −20 m. Either feed the ramp `d/max(\\|∇d\\|, ε)` or add a lattice test with a minimum per-cell step. |\n| A2 | P2 | Biased validation | `terrain_bootstrap_preview.py:77-90` | Coast sites are picked at the steepest sign crossing, and v2 replays those v1 sites. The coast check therefore tests the most favourable case for the flat-band failure. The audit itself warns against cherry-picked crops (`ASTRA_TERRAIN_AUDIT.md:188`). | Add, per seed, a coast site at the median crossing step and one at the smallest. |\n| A3 | P2 | Credibility risk, not measured | `terrain_macro.py:402-404` | Where `broad` ≥ 0.35 (cliff = 1), the ramp is 10.5–21.75 km whatever the inland height. The slope at the shore is 2·inland/ramp, so neighbouring 7.68 km cells can differ by 1.5–5 km. The seed42 coast crop rises from −480 m to 4,092 m within 30.72 km. That is at or beyond Earth's steepest coastal fronts at this scale, so it is likely outside what the checkpoint was trained on. | Add a maximum-slope bound, e.g. `ramp = max(ramp, 2*inland/s_max)`. Compare the distribution of coastal height steps between cells with ETOPO resampled to 7.68 km. |\n| A4 | P2 | Measured on conditioning; doc incomplete | `cpu-report.json`; doc `:95`; test `:33` | In v2, land below 100 m is 1.9%/1.8% (natural: 14.7%/14.1%). Land above 1,500 m is 19.8%/20.8% (natural: 10.6%/10.9%). Coastal plains almost disappear. The doc gives only the v1 figure (3.1%), and the test only bounds the low-land share from above. | State the v2 numbers. Compare the land elevation distribution against `source_distributions()['land_elevation']`, and bound it on both sides. |\n| A5 | P2 | Evidence limit | Ridge crops in the CPU report; `:178,505` | The ridge crops still show only 194 m and 160 m of relief at 5.06–5.28 km. The shoulder there passes only 0.24–0.37 of each extra metre of inland height (e^{−(h−4070)/1744}). `hard_positive_clip_fraction` is 0 by construction, so it tells us nothing. | Report the fraction of land above the knee and how much it is compressed. Add one ridge site chosen on a v2 crest with the largest local relief. |\n| A6 | P2 | Stale wording | `terrain_macro.py:299-301`; doc `:28-30` | The class docstring still says the shore ramps are \"portable copies\" of the `coast.rs` algebra; v2 no longer uses that ramp. The doc presents distance-unit numbers as distances on the map. | Fix the docstring. Label the numbers \"per unit signed distance\". |\n| A7 | P2 | Small label gap from v1, still open | `terrain_bootstrap_shore.py:159` | `matched_conditioning` is the 30 m analytic field only, and is not labelled as such. | Rename it, or add the coarse-lattice bilinear field. |\n| A8 | — | Evidence limit | doc `:118` | The planned v2 NN run uses `--profile A4` only, so there is no side-by-side A0 at the same coordinates. The v1 A0 artifacts have a different identity because `terrain_macro.py` is hashed into it. | Add A0, or explicitly cite the v1 A0 artifacts as an unchanged code path. |\n\nTwo further notes:\n- If `terrain_world.py` changed after the v2 CPU export, `verify_cpu_sources` will correctly refuse to run, and the CPU export must be redone first. I did not hash the files to check.\n- Known limits, which the doc already states: climate bounds still depend on the seed, and the ocean floor is not Earth-like (shelf at −750 m, continental slope about 10× gentler than Earth's).\n\n## 2. Source statistics cache\n\n**Accepted.** What I checked:\n- The cache key covers the content of every source file, plus the computation code and library versions.\n- The reader checks file metadata, array hashes, dtype, shape and finite values.\n- Writes go to a temporary file and are swapped in atomically. If the cache folder can't be written, generation carries on without it.\n- Cached and freshly computed values come back with the same dtypes.\n- `source_digest` still covers the same 6 files as the baseline (`baseline/terrain_world.py:59-97`), so the server's `world_sources` value is unchanged.\n\n| # | Sev | Location | Problem | Fix |\n|---|---|---|---|---|\n| S1 | P2, hardening | `terrain_world.py:42-58`, `:181` | The cache key doesn't include the *order* of `SOURCE_FILES` (the file hashes are sorted by name), nor the GDAL version. Reordering `SOURCE_FILES` would give the same key and serve stats with the wrong channel mapping. | Add `source_order` and `rasterio.__gdal_version__` to the key, and bump the schema version. |\n| S2 | P2, operational | `terrain_manifest.py:56` | `terrain_world.py` and `terrain_macro.py` are part of the world identity. These edits therefore throw away every persisted coarse and physical cache, including the 6,160-window preparation that took 439.6 s, and this includes `natural`. That is a heavy cost for a 0.35 s saving per process. | Say so in `SOURCE_STATISTICS_CACHE.md`. Deploy together with A4 v2 so the re-preparation happens only once. |\n| S3 | P2, tests | `test_source_statistics_cache.py` | The doc's \"unwritable cache falls back\" and \"implementation change invalidates\" claims have no tests. | Add a read-only cache folder case and a case with patched source. |\n\n## 3. Runtime harness follow-ups (RUNTIME-NN r1)\n\n**Fixed:**\n- `--require-exact` now requires both numeric and byte-for-byte equality, including signed zeros.\n- Receipts record the reference file's path, SHA-256 and label, and hash the modules actually imported.\n- The exact saved `_f` is restored.\n- Coverage is reported as 6 unique + 6 repeats, and the method wording is corrected.\n- There is a NaN/±inf/zero-weight test at batch sizes 1, 4, 9 and 16.\n\n| # | Sev | Kind | Location | Problem | Fix |\n|---|---|---|---|---|---|\n| R1 | P2 | **Misleading validation** | `test_runtime_latent_batch.py:52-57,124-126`; `RUNTIME_LOD_OPTIMIZATION.md:56` | The stub base model returns zeros, so the `(sin·σ)·pred` term is never exercised. Repro: delete the `pred` term at `terrain_inference.py:335` and the test still passes. This is the operation order the RUNTIME-NN review called critical. | Make the stub return a deterministic non-zero value that varies per element, e.g. `(x.float()*.37+.11).to(x.dtype)`, and compute the same in the reference. |\n| R2 | P2 | Evidence limit | same file `:36-49` | The reference is a hand-copied \"before\" path, not upstream `_process_latent_conditioning` (`world_pipeline.py:1116`), which r1 #5 asked for. | Also compare per window against the upstream method called with `SimpleNamespace(seed=…)`. |\n| R3 | P2 | Misleading receipt | `benchmark_runtime_lod.py:203-205,218-220` | If a run fails the exactness or fidelity check, the receipt on disk holds only the earlier passing samples and has no status field. Under `python -O` the asserts disappear entirely. | Write `status: running/failed/complete`, save the failing item before re-raising, and raise explicitly instead of using `assert`. |\n| R4 | P2 | Provenance | `benchmark_runtime_lod.py:35-40` | The hashed modules leave out code that determines the outputs: `terrain_app`, `terrain_macro` (natural factory), `terrain_world`, `terrain_manifest`, and upstream `world_pipeline`/`mp_layers`. `terrain_macro` and `terrain_world` have both changed since the receipts. | Add them via `module.__file__`. |\n| R5 | P2 | Provenance | `cpu-evidence-supplement.json:516,598,680,762` | The harness source used for the 4 paired runs isn't archived (no match found). Fidelity isn't affected, because the arrays were recompared on CPU, but the timing protocol can't be reconstructed. | Archive that source, or say so in the doc. |\n| R6 | P2 | Misleading label | `supplement_runtime_lod_evidence.py:57-65` | `all_passed: true` is hard-coded right next to the test-file hashes, but the supplement doesn't run those tests. The baseline and progression-baseline rows compare files against themselves. | Rename it to `all_array_recomparisons_byte_exact`, mark self-comparisons, and record test results only when the tests are actually run. |\n\n**Timing:** each paired process has 2 warm samples, so 4 per side. The protocol I proposed earlier (at least 5 alternating pairs) has not been met. The doc correctly says the LOD2 gain is not certified. The LOD3 assessment is unchanged from my RUNTIME-NN review.\n\n## Outstanding gates\n1. Measure the shoreline step in real map units on the 7.68 km lattice (A1), and add median and weakest coast sites (A2).\n2. NN v2 at the replayed coordinates, compared against A0. Native and LOD11 visual review is still needed; I am not certifying visual quality.\n3. Coastal steepness and land-elevation distribution compared with ETOPO (A3, A4); a ridge site on a v2 crest (A5).\n4. Use seed-independent climate bounds; the doc already lists this as future work.\n5. Non-zero `pred` in the latent test (R1), and a receipt status field (R3).\n6. LOD2 paired timing with at least 5 alternating pairs. Repeat the HTTP and browser measurements on the new identity once the cache invalidation (S2) has been accepted.\n\nSeparately, the Google Calendar, Google Drive and Sentry connectors need authorising in your claude.ai connector settings before they can be used. None was needed for this review.",
+  "ttft_ms": 1435,
+  "type": "result",
+  "duration_ms": 400708,
+  "uuid": "c224dae5-acba-4f63-82c3-4b414886439c",
+  "ttft_stream_ms": 1192,
+  "time_to_request_ms": 57,
+  "first_content_frame_ms": 1192,
+  "queued_turn_count": 0,
+  "result_index": 0,
+  "cli_returncode": 0,
+  "elapsed_seconds": 403.2824251651764,
+  "requested_model": "claude-opus-5-5",
+  "requested_effort": "high",
+  "stderr": ""
+}

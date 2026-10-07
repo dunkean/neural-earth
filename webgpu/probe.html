@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Terrain Diffusion WebGPU feasibility probe</title>
+  <style>
+    body { max-width: 960px; margin: 2rem auto; padding: 0 1rem; font: 16px/1.5 system-ui, sans-serif; background: #111820; color: #e5edf4; }
+    button { margin: .3rem; padding: .7rem 1rem; cursor: pointer; }
+    pre { white-space: pre-wrap; overflow-wrap: anywhere; background: #0a1016; padding: 1rem; border-radius: .5rem; }
+    .note { color: #adbdc9; }
+  </style>
+</head>
+<body>
+  <h1>Terrain Diffusion WebGPU feasibility probe</h1>
+  <p class="note">Runs pinned ONNX forwards and a fixed 64² upland crop on WebGPU. The crop is a feasibility check; its numerical and L1 results are reported separately.</p>
+  <button data-model="coarse_model">Run coarse 64²</button>
+  <button data-model="base_model">Run base 64² (2.03 GB)</button>
+  <button data-model="decoder_model">Run decoder 512²</button>
+  <p><button data-reference="coarse_model">Compare captured coarse forward</button>
+  <button data-reference="base_model">Compare captured base forward</button>
+  <button data-reference="decoder_model">Compare captured decoder forward</button></p>
+  <p><button id="run-crop">Run seed 42 upland crop (64²)</button></p>
+  <pre id="status">Ready.</pre>
+  <script src="./vendor/ort.webgpu.min.js"></script>
+  <script type="module" src="./probe.js"></script>
+</body>
+</html>

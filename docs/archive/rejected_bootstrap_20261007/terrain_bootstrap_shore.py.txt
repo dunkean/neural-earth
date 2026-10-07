@@ -1,0 +1,179 @@
+"""Focused re-centering at measured A4 neural shores; original cases retained."""
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import time
+
+import numpy as np
+from PIL import Image
+from scipy.ndimage import binary_dilation
+
+from terrain_macro import make_macro_factory
+from terrain_reference import export_neural_intermediates
+from terrain_bootstrap_preview import panel, topology
+
+
+def _sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def _attest_artifact(root, artifact, site, ablation):
+    """Check artifact → metrics → complete identity without loading a model."""
+    from terrain_manifest import world_identity
+    root = Path(root)
+    source, metrics_path, manifest_path = (root/artifact[k] for k in ("npz", "metrics", "manifest"))
+    metrics = json.loads(metrics_path.read_text(encoding="utf-8"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    identity = world_identity(manifest)
+    npz_hash = _sha(source)
+    if npz_hash != metrics["npz_sha256"]:
+        raise ValueError("Original NN source artifact hash differs")
+    if identity != artifact["manifest_hash"] or identity != metrics["manifest_hash"]:
+        raise ValueError("Artifact/metrics manifest identity differs")
+    if manifest["seed_u64"] != site["seed"] or manifest["ablation"] != ablation:
+        raise ValueError("Artifact world differs from selected site/profile")
+    if metrics["site"] != site["id"] or metrics["seed_u64"] != site["seed"]:
+        raise ValueError("Metrics site differs")
+    with np.load(source, allow_pickle=False) as data:
+        for name, expected in (("manifest_hash", identity), ("seed_u64", site["seed"]),
+                               ("ablation", ablation), ("exporter_sha256", metrics["exporter_sha256"])):
+            if str(data[name].item()) != expected:
+                raise ValueError(f"NPZ binding differs: {name}")
+        if not np.array_equal(data["focus_native"], [site["focus_native_i"], site["focus_native_j"]]):
+            raise ValueError("NPZ focus differs from site")
+    return {"npz": artifact["npz"], "npz_sha256": npz_hash,
+            "metrics": artifact["metrics"], "metrics_sha256": _sha(metrics_path),
+            "manifest": artifact["manifest"], "manifest_sha256": _sha(manifest_path),
+            "manifest_hash": identity, "internal_bindings_verified": True,
+            "reference_exporter_sha256": metrics["exporter_sha256"],
+            "current_reference_exporter_sha256": _sha(Path(__file__).with_name("terrain_reference.py"))}
+
+
+def attest_shore_provenance(original_report, shore_report):
+    """Supplement historical GPU evidence; never rewrite the executed report."""
+    from terrain_manifest import _files
+    original_report, shore_report = Path(original_report).resolve(), Path(shore_report).resolve()
+    original = json.loads(original_report.read_text(encoding="utf-8"))
+    shore = json.loads(shore_report.read_text(encoding="utf-8"))
+    if _sha(original_report) != shore["original_report_sha256"]:
+        raise ValueError("Historical shore report references another original report")
+    archive = shore_report.parent/"executed-terrain_bootstrap_shore.py"
+    if _sha(archive) != shore["exporter_sha256"]:
+        raise ValueError("Archived executed exporter differs from original receipt")
+    result = {"schema": "terrain-shore-provenance-supplement-v1", "stage": "cpu-attestation-only",
+              "gpu_rerun": False, "executed_shore_report_preserved": True,
+              "original_report_sha256": _sha(original_report),
+              "executed_shore_report_sha256": _sha(shore_report),
+              "executed_shore_exporter_sha256": _sha(archive),
+              "current_attester_sha256": _sha(__file__), "sites": {}}
+    files_cache = {}
+    def flatten(value, prefix=""):
+        if "sha256" in value and "size" in value:
+            return {prefix: value}
+        out = {}
+        for key, nested in value.items():
+            out.update(flatten(nested, f"{prefix}/{key}" if prefix else key))
+        return out
+    for shore_id, row in shore["sites"].items():
+        original_id = shore_id.replace("neural_shore", "coast")
+        original_row = original["sites"][original_id]
+        original_artifact = original_row["profiles"]["A4"]["artifact"]
+        source = _attest_artifact(original_report.parent, original_artifact, original_row["site"], "A4")
+        manifest = json.loads((original_report.parent/original_artifact["manifest"]).read_text(encoding="utf-8"))
+        checkpoint = original_artifact["checkpoint_source"]
+        if checkpoint not in files_cache:
+            files_cache[checkpoint] = flatten(_files(Path(checkpoint)))
+        expected, current = flatten(manifest["files"]), files_cache[checkpoint]
+        differences = {name: {"generation_snapshot": record, "current": current.get(name)}
+                       for name, record in expected.items() if current.get(name) != record}
+        source["source_files_verification"] = {
+            "manifest_recorded_file_count": len(expected),
+            "current_matched_file_count": len(expected)-len(differences),
+            "current_bytes_match_generation_snapshot": not differences,
+            "historical_source_differences": differences}
+        outputs = {ablation: _attest_artifact(shore_report.parent, value["artifact"], row["site"], ablation)
+                   for ablation, value in row["profiles"].items()}
+        outputs["native_board_sha256"] = _sha(shore_report.parent/f"{shore_id}-native-board.png")
+        result["sites"][shore_id] = {"original_site": original_id, "original_artifact": source,
+            "executed_shore_outputs_current_hashes": outputs,
+            "input_focus_to_actual_nn_shore_shift_xy_m": row["input_focus_to_actual_nn_shore_shift_xy_m"]}
+    target = shore_report.parent/"shore-provenance.json"
+    target.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    return result
+
+
+def validate_shores(original_report, output):
+    original_report, output = Path(original_report).resolve(), Path(output).resolve()
+    original = json.loads(original_report.read_text(encoding="utf-8"))
+    output.mkdir(parents=True, exist_ok=True)
+    from terrain_app import load_pipeline, resolve_model_source
+    from terrain_inference import configure_world
+    checkpoint = Path(resolve_model_source())
+    report = {"selection": "nearest existing A4 native NN shoreline to original input focus",
+              "original_report_sha256": hashlib.sha256(original_report.read_bytes()).hexdigest(),
+              "exporter_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+              "original_cases_preserved": True, "sites": {}}
+    for site_id, original_row in original["sites"].items():
+        if "coast" not in site_id:
+            continue
+        artifact = original_row["profiles"]["A4"]["artifact"]
+        source = original_report.parent/artifact["npz"]
+        source_attestation = _attest_artifact(original_report.parent, artifact, original_row["site"], "A4")
+        with np.load(source) as data:
+            dem, bounds = data["dem_m"], data["native_bounds"]
+        coast = (dem > 0) & binary_dilation(dem <= 0)
+        if not coast.any():
+            raise ValueError(f"No actual neural shoreline in {site_id}; expand learned search")
+        yy, xx = np.indices(dem.shape)
+        radius2 = (xx-dem.shape[1]/2)**2+(yy-dem.shape[0]/2)**2
+        ci, cj = np.unravel_index(np.argmin(np.where(coast, radius2, np.inf)), dem.shape)
+        site = dict(original_row["site"])
+        old_i, old_j = site["focus_native_i"], site["focus_native_j"]
+        site["id"] = site_id.replace("coast", "neural_shore")
+        site["focus_native_i"], site["focus_native_j"] = int(bounds[1]+ci), int(bounds[0]+cj)
+        site["center_ci"], site["center_cj"] = site["focus_native_i"]//256, site["focus_native_j"]//256
+        shift = [(site["focus_native_j"]-old_j)*30, (site["focus_native_i"]-old_i)*30]
+        row = {"site": site, "input_focus_to_actual_nn_shore_shift_xy_m": shift,
+               "shift_distance_m": float(np.hypot(*shift)), "profiles": {},
+               "original_npz_sha256": source_attestation["npz_sha256"],
+               "original_manifest_hash": source_attestation["manifest_hash"],
+               "original_metrics_sha256": source_attestation["metrics_sha256"]}
+        board = Image.new("RGB", (3072, 2108), (18, 24, 30))
+        for col, ablation in enumerate(("A0", "A3", "A4")):
+            started = time.perf_counter()
+            world = load_pipeline(int(site["seed"]))
+            configure_world(world, world_profile="natural" if ablation == "A0" else f"macro-{ablation.lower()}")
+            world.rebuild()
+            artifact = export_neural_intermediates(world, site, output,
+                native_pixels=1024, checkpoint_source=checkpoint)
+            with np.load(output/artifact["npz"]) as data:
+                elev, bounds = data["dem_m"], data["native_bounds"]
+            xs = (np.arange(bounds[0], bounds[2])+.5)*30
+            ys = (np.arange(bounds[1], bounds[3])+.5)*30
+            fields = make_macro_factory(int(site["seed"]), ablation).sample(xs, ys)
+            board.paste(panel(fields, 30, f"{ablation} input; actual A4 NN shore focus; seed {site['seed']}"), (col*1024, 0))
+            generated = np.concatenate((elev[None], fields[1:]), axis=0)
+            board.paste(panel(generated, 30, f"{ablation} NN DEM 30m; shifted {row['shift_distance_m']/1000:.2f}km from input focus"), (col*1024, 1054))
+            row["profiles"][ablation] = {"artifact": artifact, "seconds": time.perf_counter()-started,
+                "native_dem": topology(elev, 30), "matched_conditioning": topology(fields[0], 30)}
+            print(f"NN recentered {site['id']} {ablation} complete", flush=True)
+        board.save(output/f"{site['id']}-native-board.png")
+        report["sites"][site["id"]] = row
+        (output/"shore-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return report
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--original-report", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--attest-shore-report", type=Path,
+                        help="CPU-only sidecar for an existing executed shore report")
+    args = parser.parse_args()
+    if args.attest_shore_report:
+        attest_shore_provenance(args.original_report, args.attest_shore_report)
+    else:
+        if not args.output:
+            parser.error("GPU export requires --output")
+        validate_shores(args.original_report, args.output)

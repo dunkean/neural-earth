@@ -1,0 +1,18 @@
+[submodule "terrain-diffusion"]
+	path = terrain-diffusion
+	url = https://github.com/xandergos/terrain-diffusion.git
+[submodule "research_projects/azgaar"]
+	path = research_projects/azgaar
+	url = https://github.com/Azgaar/Fantasy-Map-Generator.git
+[submodule "research_projects/fantasy_cpp"]
+	path = research_projects/fantasy_cpp
+	url = https://github.com/dunkean/FantasyMapGenerator.git
+[submodule "research_projects/fastnoise2"]
+	path = research_projects/fastnoise2
+	url = https://github.com/Auburn/FastNoise2.git
+[submodule "research_projects/island_generator"]
+	path = research_projects/island_generator
+	url = https://github.com/Minimata/IslandGenerator.git
+[submodule "research_projects/map_denoise"]
+	path = research_projects/map_denoise
+	url = https://github.com/dunkean/map_denoise.git

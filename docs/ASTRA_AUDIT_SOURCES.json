@@ -1,0 +1,238 @@
+{
+  "audit_date": "2026-10-07",
+  "scope": "Read-only audit. Fingerprints identify cited working-tree files and installed model configurations, not a claim that all files match Git HEAD.",
+  "terrain_diffusion_head": "e8dcb4b1a834ab2f6b1a6f5256ed7c9f2f3e8230",
+  "city_generator_head": "ba9f305e5e1c49311b29cee7778cf6a257ef77f5",
+  "model_revision": "9ef8030cb805b433b98ec25c5dddefbac07a9e26",
+  "files": [
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\bridge\\hydrologyGpu.ts",
+      "bytes": 11224,
+      "sha256": "fce25b9556531fb581844154482d0ca3f55a38d8f4d4a8ae946e24c3cd961e8c",
+      "modified_utc": "2026-10-07T07:15:15.6066705Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\bridge\\terrainErosion.ts",
+      "bytes": 13147,
+      "sha256": "0e45afc4ab2793a1ad57770c5f4f93685c2b8f4bd3eb7012d8dbe5d12f89e86e",
+      "modified_utc": "2026-10-06T23:09:33.2458558Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\bridge\\terrainErosion.wgsl",
+      "bytes": 24357,
+      "sha256": "7e407644e38419cca6e36e1fdf1a0bc1c8caed4e22a8ee8fc4129420b08e095a",
+      "modified_utc": "2026-10-06T23:08:46.0972926Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\bridge\\terrainRender.ts",
+      "bytes": 10369,
+      "sha256": "72b160cf9a1d367d31fe607111939049bf30cdec9c0401fbc44508a7008573c1",
+      "modified_utc": "2026-10-07T09:27:06.6861415Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\crates\\core\\Cargo.toml",
+      "bytes": 141,
+      "sha256": "ce71d7eab9dc9f0454114670e2f19d0d177640d95d2f9b5e248a8f5b89528bc8",
+      "modified_utc": "2026-10-06T14:37:03.8824325Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\crates\\core\\src\\coast.rs",
+      "bytes": 16944,
+      "sha256": "ce823d68b4c40647cf9e3d630b3b545e3c936e85bf74df10fbbed6b277835fad",
+      "modified_utc": "2026-10-07T09:53:01.9348807Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\crates\\core\\src\\engine.rs",
+      "bytes": 30994,
+      "sha256": "5022fdd70876baf0ecbcc99a030a596aa8a7caf91515147c4a3471592ceacec9",
+      "modified_utc": "2026-10-06T23:18:59.0930929Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\crates\\core\\src\\erosion.rs",
+      "bytes": 35555,
+      "sha256": "a75af1ed419aecb70a10ef4747a8ad27e557a90e66cf8face601332bf185b5ae",
+      "modified_utc": "2026-10-06T21:32:58.0354322Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\crates\\core\\src\\generation_noise.rs",
+      "bytes": 6854,
+      "sha256": "dc848eee60277fe017d4f0e404581f8f8c4e9447988a1250721c0a98aa9d823f",
+      "modified_utc": "2026-10-06T21:32:58.0354322Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\crates\\core\\src\\hydrology.rs",
+      "bytes": 100134,
+      "sha256": "855c1fb1653b0c851bc9cf17151ca3b5b6602d3b38ff3dab7b1651c4d23b86d5",
+      "modified_utc": "2026-10-07T10:57:45.8455265Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\crates\\core\\src\\lib.rs",
+      "bytes": 29316,
+      "sha256": "4b9c4814202cd18b7833886f35f25789a286993902e8d9a345e1fa724332d153",
+      "modified_utc": "2026-10-07T07:14:36.0056427Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\crates\\core\\src\\noise.rs",
+      "bytes": 4179,
+      "sha256": "772b4b4a4bc9c1358f226feeb42ab4c6af92692d9b3567e0db03a15724bf3b3b",
+      "modified_utc": "2026-10-06T19:44:43.9515273Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\crates\\wasm\\Cargo.toml",
+      "bytes": 296,
+      "sha256": "5aa7cff66239e6088f02d6080a39ea1868de50c0c91596b9d4745c2c2cc48ffd",
+      "modified_utc": "2026-10-06T14:37:03.8824325Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\rust\\docs\\PERFORMANCE_AUDIT.md",
+      "bytes": 51413,
+      "sha256": "d4bfd7ee123d090d7a3bbd34224535804f9763d36e860a9035367de55deb9273",
+      "modified_utc": "2026-10-06T20:38:02.4422462Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\city_generator\\web\\src\\ui\\terrainbench.ts",
+      "bytes": 39518,
+      "sha256": "2354d49834e50ef0783e35da86fcab30cbfb8faf53902974ef247ba755e1fc2e",
+      "modified_utc": "2026-10-07T09:27:57.8058192Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\benchmark_navigation.py",
+      "bytes": 2232,
+      "sha256": "4c3e994c732bfc535fc3c9ca3a1250019221d01cdaa135447e8818436ccd3974",
+      "modified_utc": "2026-10-07T09:51:37.8666443Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_app.py",
+      "bytes": 9668,
+      "sha256": "dcd983366ea8ee6cc2e89031af0a49742cb1f24c28c170d55f680468ebbed14f",
+      "modified_utc": "2026-10-07T10:19:06.6182007Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_device.py",
+      "bytes": 2764,
+      "sha256": "e4e6b84155ece7ef3203f73d2f39d41a1bef6a723dec3e76c0354053f1afac9f",
+      "modified_utc": "2026-10-07T10:15:49.0080373Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_inference.py",
+      "bytes": 24084,
+      "sha256": "67db75b5cd8b5f81ac550e0f0f25528f3c0dfb80fea442831c1edd57fe9a539c",
+      "modified_utc": "2026-10-07T10:48:04.4471940Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_jobs.py",
+      "bytes": 10099,
+      "sha256": "46bd2da65e67324b412244bf35dde4f4cf0a8b8dc64024e992281d40d4d802e9",
+      "modified_utc": "2026-10-07T10:19:16.0874561Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_nn_constants.py",
+      "bytes": 3708,
+      "sha256": "1bc239fb63bc0e8e0bd56a4fff71120a639345ad3728f3faad2b16321596d2f4",
+      "modified_utc": "2026-10-07T10:06:15.8189732Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_server.py",
+      "bytes": 28491,
+      "sha256": "7e33b8d4b7ef322c49d0f845536a61367a8f158f9d7c447afb735459aa87d7a7",
+      "modified_utc": "2026-10-07T10:44:09.8872184Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_world.py",
+      "bytes": 13831,
+      "sha256": "47f208ebe3ef00204f3d78e5a30df5f080ca7a906c2eb27ae21443b631f53f7a",
+      "modified_utc": "2026-10-07T10:48:04.4461855Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain-diffusion\\terrain_diffusion\\inference\\synthetic_map.py",
+      "bytes": 12556,
+      "sha256": "1e6b441c416ed404f6b01daa0ffc3f9679f5a359f42a02d0d37c8a90642c92d5",
+      "modified_utc": "2026-10-07T08:18:56.0775806Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain-diffusion\\terrain_diffusion\\inference\\world_pipeline.py",
+      "bytes": 66038,
+      "sha256": "9bcb496cd61a7a1aa2d1e75c4279be2b387db860ff6eec1f27fa12eebaf977f0",
+      "modified_utc": "2026-10-07T08:18:56.0795863Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain-diffusion\\terrain_diffusion\\onnx\\export.py",
+      "bytes": 9468,
+      "sha256": "ea04be1a37616149f29218c84023fabb9fae9313e66b357bd96d826c58db29e4",
+      "modified_utc": "2026-10-07T08:18:56.0815855Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain-diffusion\\TRAINING.md",
+      "bytes": 6913,
+      "sha256": "d6cced03b33c41596d14c3d2c317de15dbec7b2dea2c68c950d52e8cf34277b4",
+      "modified_utc": "2026-10-07T08:18:55.8939846Z"
+    },
+    {
+      "path": "E:\\TerrainDiffusionRuntime\\inference-decoder\\report.json",
+      "bytes": 23821,
+      "sha256": "260eb48e143a2133fbe4426fc7e85bfafbc11dad453f33a2db9d6f2d45b26cd9",
+      "modified_utc": "2026-10-07T09:59:41.1862726Z"
+    },
+    {
+      "path": "E:\\TerrainDiffusionRuntime\\inference-graph-pipeline.json",
+      "bytes": 2131,
+      "sha256": "0b83a9bd1518b27ad5f9c043d12bd806d4cc79b1e370b797ae087fbb65c82a30",
+      "modified_utc": "2026-10-07T10:10:41.7154546Z"
+    },
+    {
+      "path": "E:\\TerrainDiffusionRuntime\\inference-realtime\\report.json",
+      "bytes": 30147,
+      "sha256": "92b2b282d5b7cd636fa52166a237d2a63ef12f49c7bc3a43f46a7381061c1432",
+      "modified_utc": "2026-10-07T09:57:57.7717342Z"
+    },
+    {
+      "path": "E:\\TerrainDiffusionRuntime\\inference-runtime-verification.json",
+      "bytes": 3232,
+      "sha256": "8741ab1f6a1f60e959b364f2a3892f3b16fc34fe8378e21e254b82d7d690bb5b",
+      "modified_utc": "2026-10-07T10:09:15.6363206Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\docs\\REALTIME_IMPLEMENTATION.md",
+      "bytes": 9289,
+      "sha256": "a89872eb39fafdc4bf79fd2870db545ceb57c7b92229e79c7689232f9f49c53d",
+      "modified_utc": "2026-10-07T10:48:32.5074006Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\docs\\TERRAIN_REALTIME_DESIGN.md",
+      "bytes": 84062,
+      "sha256": "64f01c9acf05b273388e513bc1164c72113a94b1d5c79525f62f699b71b37a32",
+      "modified_utc": "2026-10-07T10:47:52.9552910Z"
+    },
+    {
+      "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\docs\\WORLD_GENERATION.md",
+      "bytes": 9645,
+      "sha256": "7b6062814b26f9e063e96ac101ddb5ccc697e1358c4dd2c893bdf638c3c868f1",
+      "modified_utc": "2026-10-07T10:53:46.5894893Z"
+    },
+    {
+      "path": "E:\\TerrainDiffusionRuntime\\huggingface\\hub\\models--xandergos--terrain-diffusion-30m\\snapshots\\9ef8030cb805b433b98ec25c5dddefbac07a9e26\\config.json",
+      "bytes": 774,
+      "sha256": "c60f0b74d89317e64cfc623fbfdd828f1b5b2e50aa75020ac4001103381853bd",
+      "modified_utc": "2026-10-07T08:26:36.7924166Z"
+    },
+    {
+      "path": "E:\\TerrainDiffusionRuntime\\huggingface\\hub\\models--xandergos--terrain-diffusion-30m\\snapshots\\9ef8030cb805b433b98ec25c5dddefbac07a9e26\\coarse_model\\config.json",
+      "bytes": 828,
+      "sha256": "3256a71d181dc3b10f7e44320920694b6aba1572ee5200872a503f89c8cbb3b4",
+      "modified_utc": "2026-10-07T08:26:37.0879175Z"
+    },
+    {
+      "path": "E:\\TerrainDiffusionRuntime\\huggingface\\hub\\models--xandergos--terrain-diffusion-30m\\snapshots\\9ef8030cb805b433b98ec25c5dddefbac07a9e26\\base_model\\config.json",
+      "bytes": 682,
+      "sha256": "2400da3c7bed5dbc331a0cfabd3f4a5a3c5c977d4c4b3fb1037f4e285d320598",
+      "modified_utc": "2026-10-07T08:26:39.0696298Z"
+    },
+    {
+      "path": "E:\\TerrainDiffusionRuntime\\huggingface\\hub\\models--xandergos--terrain-diffusion-30m\\snapshots\\9ef8030cb805b433b98ec25c5dddefbac07a9e26\\decoder_model\\config.json",
+      "bytes": 609,
+      "sha256": "fc69e7c75bcc8b92d687306cb38cca2868a6034cdf73ddf7cfbf7078af6ac55e",
+      "modified_utc": "2026-10-07T08:26:53.5847572Z"
+    }
+  ],
+  "missing_links": []
+}

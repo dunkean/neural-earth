@@ -1,0 +1,130 @@
+"""CPU world audit; --gpu adds an explicitly exclusive CUDA integration gate."""
+import argparse
+import json
+from pathlib import Path
+import time
+
+import numpy as np
+from scipy.ndimage import label
+from PIL import Image
+
+from terrain_world import make_earth_factory, latitude, profile_metadata, COARSE_RESOLUTION
+
+RUNTIME = Path('E:/TerrainDiffusionRuntime')
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--gpu', action='store_true', help='Run only while the terrain server is stopped')
+    parser.add_argument('--snr', type=float, default=None, help='Experiment: overwrite earth conditioning noise parameter')
+    args = parser.parse_args()
+    start = time.perf_counter()
+    factory = make_earth_factory(42)
+    initialization = time.perf_counter()-start
+    start = time.perf_counter()
+    preview = factory.overview()
+    preview_seconds = time.perf_counter()-start
+    elev, climate = preview['elev'], preview['climate']
+    components, _ = label(elev > 0)
+    sizes = np.bincount(components.ravel())[1:]
+    temperature, _, rain, _, _ = climate
+    ocean = elev <= 0
+    rgb = np.zeros((*elev.shape, 3), np.float32)
+    depth = np.clip(-elev/6500, 0, 1)
+    rgb[..., 0] = 39-25*depth
+    rgb[..., 1] = 113-62*depth
+    rgb[..., 2] = 163-59*depth
+    aridity = np.clip((600-rain)/500, 0, 1)*(temperature > 8)
+    green = np.array([73, 124, 70])
+    sand = np.array([216, 190, 121])
+    land_color = green[None, None]*(1-aridity[..., None])+sand[None, None]*aridity[..., None]
+    high = np.clip((elev-1200)/2500, 0, 1)
+    land_color = land_color*(1-high[..., None])+np.array([160, 151, 137])[None, None]*high[..., None]
+    land_color = land_color*(1-.7*(temperature < -2)[..., None])+np.array([237, 245, 245])[None, None]*.7*(temperature < -2)[..., None]
+    rgb = np.where(ocean[..., None], rgb, land_color).astype(np.uint8)
+    image_path = RUNTIME/'earth-conditioning-preview.png'
+    Image.fromarray(rgb).save(image_path)
+    report = {'profile': profile_metadata(), 'factory_seconds': initialization,
+              'preview_seconds': preview_seconds, 'preview_dimensions': list(elev.shape),
+              'land_fraction': float((elev > 0).mean()),
+              'largest_land_component_km2': float(sizes.max()*40e3/2048*20e3/1024),
+              'preview_path': str(image_path), 'gpu_regions': []}
+    if args.gpu:
+        import torch
+        from terrain_app import load_pipeline, gpu_calls
+        from terrain_inference import configure_world, inference_status
+        world = load_pipeline(42)
+        configure_world(world, world_profile='earth')
+        if args.snr is not None:
+            world.kwargs['cond_snr'] = [args.snr]*5
+            world.rebuild()
+        # Coordinates selected from one fixed audit lattice, then sampled at
+        # exact neural cells; no condition depends on request or crop dimensions.
+        xs = (np.arange(512)+.5)*40e6/512-20e6
+        ys = (np.arange(256)+.5)*20e6/256-10e6
+        fields = factory.sample(xs, ys)
+        lat = np.broadcast_to(latitude(ys)[:, None], fields[0].shape)
+        candidates = {
+            'equatorial_land': (np.abs(lat) < 8) & (fields[0] > 100) & (fields[0] < 350),
+            'equatorial_ocean': (np.abs(lat) < 8) & (fields[0] < -4000),
+            'polar_land': (lat > 75) & (fields[0] > 100),
+            'subtropical_dry_plain': (np.abs(lat) > 18) & (np.abs(lat) < 38) & (fields[0] > 30) &
+                                      (fields[0] < 250) & (fields[3] < 200),
+        }
+        with torch.inference_mode():
+            for name, mask in candidates.items():
+                points = np.argwhere(mask)
+                assert len(points), f'No input candidates for {name}'
+                row, col = points[len(points)//2]
+                ci, cj = int(np.floor(ys[row]/COARSE_RESOLUTION)), int(np.floor(xs[col]/COARSE_RESOLUTION))
+                expected = factory.sample_raw(cj, ci, cj+1, ci+1)[:, 0, 0]
+                before = dict(gpu_calls)
+                started = time.perf_counter()
+                # Coarse patch measures the actual NN, prior to latents/decoder.
+                coarse = world.coarse[:, ci:ci+1, cj:cj+1]
+                learned = (coarse[:-1]/coarse[-1:])[:, 0, 0].cpu().numpy()
+                # A tiny final crop proves the exact fields reach base+decoder
+                # and the public five-channel climate output stays on CUDA.
+                crop = world.get(ci*256, cj*256, ci*256+32, cj*256+32, with_climate=True)
+                torch.cuda.synchronize()
+                assert crop['elev'].is_cuda and crop['climate'].is_cuda
+                assert crop['climate'].shape == (5, 32, 32)
+                final_elev = crop['elev'].float().cpu().numpy()
+                final_climate = crop['climate'].float().cpu().numpy()
+                assert np.isfinite(final_elev).all() and np.isfinite(final_climate).all()
+                if args.snr is None:
+                    assert (final_climate[1:4] >= 0).all(), 'Earth BIO4/BIO12/BIO15 must remain physical'
+                    if name == 'equatorial_ocean':
+                        assert np.median(final_elev) < 0, 'Ocean sketch was lost by the NN'
+                    else:
+                        assert np.median(final_elev) > 0, 'Continental sketch was lost by the NN'
+                    if name == 'polar_land':
+                        assert np.median(final_climate[0]) < -10, 'Polar climate was lost by the NN'
+                    if name.startswith('equatorial'):
+                        assert np.median(final_climate[0]) > 20, 'Tropical climate was lost by the NN'
+                    if name == 'subtropical_dry_plain':
+                        assert np.median(final_climate[2]) < 250, 'Dry climate was lost by the NN'
+                result = {'region': name, 'coarse_coordinates': [int(cj), int(ci)],
+                          'latitude': float(latitude((ci+.5)*COARSE_RESOLUTION)),
+                          'seconds': time.perf_counter()-started,
+                          'conditioning_physical': expected.tolist(),
+                          'learned_coarse_physical': [float(np.sign(learned[0])*learned[0]**2), *map(float, learned[2:6])],
+                          'final_elevation_median': float(np.median(final_elev)),
+                          'final_climate_medians': np.median(final_climate, axis=(1, 2)).tolist(),
+                          'gpu_calls': {key: gpu_calls[key]-before[key] for key in before}}
+                report['gpu_regions'].append(result)
+                print(json.dumps(result), flush=True)
+        report['inference'] = inference_status(world)
+        assert report['inference']['solver_steps'] == 20
+        assert report['inference']['latent_fusion_steps'] == 2
+        assert report['inference']['precision'] == 'torch.bfloat16'
+        report['gpu_validation_passed'] = True
+    path = RUNTIME/('earth-world-verification.json' if args.snr is None else f'earth-world-snr-{args.snr}.json')
+    path.write_text(json.dumps(report, indent=2), encoding='utf-8')
+    print(json.dumps({'report': str(path), 'factory_seconds': initialization,
+                      'preview_seconds': preview_seconds, 'land_fraction': report['land_fraction'],
+                      'largest_continent_km2': report['largest_land_component_km2']}), flush=True)
+
+
+if __name__ == '__main__':
+    main()

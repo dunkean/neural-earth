@@ -1,0 +1,14 @@
+[package]
+name = "terrain-bootstrap"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+world-core = { path = "../../../world-builder-rs/crates/world-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"

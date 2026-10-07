@@ -1,0 +1,127 @@
+"""CPU-only coarse-cell shore inventory and honest crest compression metrics."""
+import json
+from pathlib import Path
+
+import numpy as np
+import rasterio
+from scipy.ndimage import map_coordinates
+
+from terrain_macro import make_macro_factory
+from terrain_world import DATA_ROOT
+
+
+def step_summary(steps):
+    return {"pair_count": len(steps),
+            "absolute_height_step_m_quantiles_min_p05_median_p95_max": np.quantile(
+                steps, [0, .05, .5, .95, 1]).tolist(),
+            "absolute_axis_slope_m_per_km_quantiles": (np.quantile(steps, [0, .05, .5, .95, 1])/7.68).tolist()}
+
+
+def shore_inventory(factory, elevation, xs, ys):
+    """Deduplicate actual 7.68 km pairs near every overview coast edge."""
+    land = elevation > 0
+    iy, ix = np.nonzero(land[:, 1:] != land[:, :-1])
+    px, py = (xs[ix]+xs[ix+1])/2, ys[iy]
+    jy, jx = np.nonzero(land[1:] != land[:-1])
+    px, py = np.r_[px, xs[jx]], np.r_[py, (ys[jy]+ys[jy+1])/2]
+    ci, cj = np.floor(py/7680).astype(int), np.floor(px/7680).astype(int)
+    offsets = np.arange(-1, 2)
+    ii = ci[:, None, None]+offsets[None, :, None]
+    jj = cj[:, None, None]+offsets[None, None, :]
+    x = np.broadcast_to((jj+.5)*7680, (len(ci), 3, 3))
+    y = np.broadcast_to((ii+.5)*7680, (len(ci), 3, 3))
+    height = factory._elevation(x, y)
+    pairs = {}
+    for axis in (0, 1):
+        a, b = (height[:, :, :-1], height[:, :, 1:]) if axis == 0 else (height[:, :-1], height[:, 1:])
+        n, r, c = np.nonzero((a > 0) != (b > 0))
+        for sample, row, col in zip(n, r, c):
+            key = (int(ci[sample]+row-1), int(cj[sample]+col-1), axis)
+            pairs[key] = [float(a[sample, row, col]), float(b[sample, row, col])]
+    records = []
+    for (i, j, axis), heights in pairs.items():
+        records.append({"start_ci": i, "start_cj": j, "axis": "x" if axis == 0 else "y",
+            "heights_m": heights, "absolute_height_step_m": abs(heights[1]-heights[0]),
+            "center_x_m": (j+.5)*7680+(3840 if axis == 0 else 0),
+            "center_y_m": (i+.5)*7680+(3840 if axis == 1 else 0)})
+    records.sort(key=lambda row: (row["absolute_height_step_m"], row["start_ci"], row["start_cj"], row["axis"]))
+    return records, len(px)
+
+
+def etopo_reference():
+    """Independent source shoreline: its own grid, bilinearly resampled to 7.68km."""
+    with rasterio.open(DATA_ROOT/"etopo_10m.tif") as dataset:
+        height = dataset.read(1).astype(np.float32)
+        transform = dataset.transform
+    land = height > 0
+    iy, ix = np.nonzero(land[:, 1:] != land[:, :-1])
+    jy, jx = np.nonzero(land[1:] != land[:-1])
+    cols, rows = np.r_[ix+1., jx+.5], np.r_[iy+.5, jy+1.]
+    lon, lat = transform.a*cols+transform.c, transform.e*rows+transform.f
+    ci, cj = np.floor(-lat*10e6/90/7680).astype(int), np.floor(lon*20e6/180/7680).astype(int)
+    offsets = np.arange(-1, 2)
+    ii, jj = ci[:, None, None]+offsets[None, :, None], cj[:, None, None]+offsets[None, None, :]
+    x = np.broadcast_to((jj+.5)*7680, (len(ci), 3, 3))
+    y = np.broadcast_to((ii+.5)*7680, (len(ci), 3, 3))
+    sample_cols = (x*180/20e6-transform.c)/transform.a-.5
+    sample_rows = (-y*90/10e6-transform.f)/transform.e-.5
+    sampled = map_coordinates(height, [sample_rows.ravel(), sample_cols.ravel()], order=1, mode="nearest").reshape(x.shape)
+    unique = {}
+    for axis in (0, 1):
+        a, b = (sampled[:, :, :-1], sampled[:, :, 1:]) if axis == 0 else (sampled[:, :-1], sampled[:, 1:])
+        n, r, c = np.nonzero((a > 0) != (b > 0))
+        for sample, row, col in zip(n, r, c):
+            unique[(int(ci[sample]+row-1), int(cj[sample]+col-1), axis)] = float(abs(a[sample, row, col]-b[sample, row, col]))
+    return {"source": "etopo_10m.tif", "mapping": "flat 40 million metres x20 million metres equirectangular, bilinear at 7.68km centres",
+            "inventory": "3x3 actual coarse neighborhoods around all source-raster coast edges",
+            "resolution_limit": "10 arc-minute source is upsampled; gradients are not a 30m shoreline reference",
+            **step_summary(list(unique.values()))}
+
+
+def add_diagnostics(output, report, worlds, xs, ys, seed):
+    factory = make_macro_factory(seed, "A4")
+    elevation = worlds["A4"][0]
+    records, candidates = shore_inventory(factory, elevation, xs, ys)
+    summaries = step_summary([row["absolute_height_step_m"] for row in records])
+    summaries["method"] = "all 1024-wide overview coast edges, 3x3 actual coarse neighborhoods; deduplicated x/y sign-changing pairs"
+    summaries["overview_candidate_count"] = candidates
+    summaries["not_exhaustive_entire_global_coarse_lattice"] = True
+    heights = np.asarray([row["heights_m"] for row in records])
+    summaries["share_pairs_land_below20m_and_sea_above_minus20m"] = float(np.mean(
+        (heights.max(axis=1) < 20) & (heights.min(axis=1) > -20)))
+    px = np.asarray([row["center_x_m"] for row in records])
+    py = np.asarray([row["center_y_m"] for row in records])
+    gx = (factory._signed_distance(px+7680, py)-factory._signed_distance(px-7680, py))/15360
+    gy = (factory._signed_distance(px, py+7680)-factory._signed_distance(px, py-7680))/15360
+    gradients = np.hypot(gx, gy)
+    summaries["signed_distance_gradient_norm_quantiles_min_p05_median_p95_max"] = np.quantile(
+        gradients, [0, .05, .5, .95, 1]).tolist()
+    summaries["signed_distance_gradient_method"] = "central differences ±7.68km at sampled shore-pair midpoints; not global guarantee"
+    for row, dx, dy, norm in zip(records, gx, gy, gradients):
+        row["signed_distance_gradient_xy"] = [float(dx), float(dy)]
+        row["signed_distance_gradient_norm"] = float(norm)
+    selected = {"weakest": records[0], "median": records[len(records)//2]}
+    summaries["selected_pairs"] = selected
+    for kind, pair in selected.items():
+        report["sites"].append({"id": f"bootstrap_{kind}_coast_seed{seed}", "seed": str(seed),
+            "center_x_m": pair["center_x_m"], "center_y_m": pair["center_y_m"],
+            "selection": f"{kind} actual coarse shore-pair height step in complete deduplicated sampled inventory",
+            "selected_pair": pair})
+    xx, yy = np.meshgrid(xs, ys)
+    raw, _, _ = factory._relief_fields(xx, yy)
+    limit = float(factory.natural.stats["data_quantile_tables"][0][-1])
+    capped = factory.soft_land_cap(raw, limit)
+    mask = elevation > 0
+    compression = {"source_positive_bound_m": limit, "knee_m": .7*limit,
+        "above_knee_fraction_of_land": float(np.mean(raw[mask] > .7*limit)),
+        "raw_above_source_bound_fraction_of_land": float(np.mean(raw[mask] > limit)),
+        "raw_inland_quantiles_m": np.quantile(raw[mask], [.5, .95, .99, 1]).tolist(),
+        "soft_capped_inland_quantiles_m": np.quantile(capped[mask], [.5, .95, .99, 1]).tolist(),
+        "height_reduction_m_quantiles": np.quantile((raw-capped)[mask], [.5, .95, .99, 1]).tolist()}
+    report["seeds"][str(seed)]["shore_pair_diagnostics"] = summaries
+    report["seeds"][str(seed)]["crest_compression"] = compression
+    np.savez_compressed(Path(output)/f"seed{seed}-shore-pairs.npz",
+        start_ci=np.array([row["start_ci"] for row in records]),
+        start_cj=np.array([row["start_cj"] for row in records]),
+        axis=np.array([row["axis"] for row in records]),
+        heights_m=np.array([row["heights_m"] for row in records]))

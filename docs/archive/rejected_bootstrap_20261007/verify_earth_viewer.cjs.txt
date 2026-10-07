@@ -1,0 +1,95 @@
+/* Real application integration: run while no other NN benchmark is active. */
+const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const assert=require('node:assert/strict');
+const fs=require('node:fs');
+const path=require('node:path');
+const origin=process.env.TERRAIN_URL||'http://127.0.0.1:8765';
+const output=process.env.TERRAIN_QA_OUTPUT||'E:/TerrainDiffusionRuntime/earth-qa';
+fs.mkdirSync(output,{recursive:true});
+(async()=>{
+ const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
+ const page=await browser.newPage({viewport:{width:1100,height:760}}),errors=[],requests=[],stages=[];
+ page.on('pageerror',e=>errors.push(e.message));
+ page.on('request',r=>{if(r.url().includes('/height/'))requests.push(r.url())});
+ page.on('response',r=>{if(r.url().includes('/height/')&&r.ok())stages.push(r.headers()['x-terrain-stage'])});
+ async function snapshot(){return page.evaluate(()=>window.terrainDebug.snapshot())}
+ async function settled({after=-1,lod=null,mode=null}={}){
+  await page.waitForFunction(({after,lod,mode})=>{
+   const s=window.terrainDebug?.snapshot();
+   return s&&s.cameraEpoch>after&&s.visible.wanted>0&&s.visible.pending===0&&
+    s.visible.lod===s.camera.lod&&(lod===null||s.camera.lod===lod)&&
+    (mode===null||s.mode===mode)&&s.rendered.patches>0;
+  },{after,lod,mode},{timeout:240000});
+  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
+  return snapshot();
+ }
+ try{
+  const start=Date.now();
+  await page.goto(`${origin}/?seed=42&profile=earth&mode=relief`);
+  const global=await settled();
+  await page.waitForFunction(()=>window.terrainDebug.snapshot().overview,{},{timeout:30000});
+  const globalMs=Date.now()-start;
+  assert.equal(global.profile,'earth');
+  assert.deepEqual(global.worldBounds,[-20000000,-10000000,20000000,10000000]);
+  assert(global.camera.lod>=7);
+  assert(global.rendered.sources.every(s=>s==='conditioning-preview'));
+  assert(global.rendered.lods.every(l=>l>=global.camera.lod));
+  const meta=await(await page.request.get(`${origin}/api/world?seed=42&world_profile=earth`)).json();
+  assert.equal(meta.native_resolution,30);
+  assert.equal(meta.initial_image,null);
+  assert.equal(meta.generation_profile,'earth');
+  await page.screenshot({path:path.join(output,'earth-relief.png')});
+  const climate=[];
+  for(const mode of ['biomes','temperature','precipitation']){
+   const before=await snapshot();
+   await page.locator('#mapMode').selectOption(mode);
+   const state=await settled({after:before.cameraEpoch,mode});
+   climate.push(state);
+   assert(state.cache.keys.every(k=>k.includes(`/${mode}/`)));
+   await page.screenshot({path:path.join(output,`earth-${mode}.png`)});
+  }
+  await page.locator('#mapMode').selectOption('biomes');
+  await settled({mode:'biomes'});
+  // Select the fixed, audited dry land location via the user-facing minimap.
+  const auditPath='E:/TerrainDiffusionRuntime/earth-world-verification.json';
+  if(fs.existsSync(auditPath)){
+   await page.waitForFunction(()=>window.terrainDebug.snapshot().overview,{},{timeout:30000});
+   const land=JSON.parse(fs.readFileSync(auditPath,'utf8')).gpu_regions.find(r=>r.region==='subtropical_dry_plain');
+   const [cj,ci]=land.coarse_coordinates,mini=await page.locator('#mini').boundingBox();
+   await page.locator('#mini').click({position:{x:((cj+.5)*7680+20000000)/40000000*mini.width,y:((ci+.5)*7680+10000000)/20000000*mini.height}});
+  }
+  const beforeNative=await snapshot();
+  await page.locator('#native').click();
+  const native=await settled({after:beforeNative.cameraEpoch,lod:0});
+  assert(native.rendered.sources.every(s=>s==='decoder'));
+  await page.screenshot({path:path.join(output,'earth-native.png')});
+  await page.locator('#fit').click();
+  const returned=await settled({after:native.cameraEpoch});
+  assert(returned.camera.lod>=7);
+  assert.equal(returned.rendered.hasFineHistory,false);
+  assert(returned.rendered.lods.every(l=>l>=returned.camera.lod));
+  assert(returned.cache.keys.some(k=>/\/0\/-?\d+\/-?\d+$/.test(k)),'Fine cached tiles must exist for the zoom-out regression');
+  await page.screenshot({path:path.join(output,'earth-returned.png')});
+  const gpu=page.locator('#gpuRender');
+  if(await gpu.isEnabled()){
+   const beforePNG=await snapshot();await gpu.uncheck();
+   const png=await settled({after:beforePNG.cameraEpoch});assert.equal(png.backend,'png');
+   const n=requests.length,beforeGPU=await snapshot();await gpu.check();
+   const again=await settled({after:beforeGPU.cameraEpoch});assert.equal(again.backend,'webgpu');
+   assert(requests.length>n);
+  }
+  const final=await snapshot();
+  assert(final.cache.bytes<=final.cache.budget);
+  if(final.renderer)assert(final.renderer.totalBytes<=final.renderer.maxBytes);
+  await page.setViewportSize({width:390,height:844});await page.waitForTimeout(250);
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+  await page.screenshot({path:path.join(output,'earth-mobile.png')});
+  assert.deepEqual(errors,[]);
+  const report={passed:true,globalMs,global,climate,native,returned,final,stages,errors,heightRequests:requests.length};
+  fs.writeFileSync(path.join(output,'viewer.json'),JSON.stringify(report,null,2));
+  console.log(JSON.stringify({passed:true,globalMs,backend:final.backend,globalLod:global.camera.lod,nativeLod:native.camera.lod,returnedLods:returned.rendered.lods,heightRequests:requests.length},null,2));
+ }finally{
+  try{const session=await page.evaluate(()=>window.terrainDebug?.snapshot().session);if(session)await page.request.post(`${origin}/api/view/release`,{data:{session}})}catch(_){}
+  await browser.close();
+ }
+})().catch(e=>{console.error(e);process.exit(1)});

@@ -1,0 +1,112 @@
+"""Geographic contract gates: sources, units, layout, latitude and crop identity."""
+import unittest
+from types import SimpleNamespace
+import sys
+from pathlib import Path
+
+import numpy as np
+from scipy.ndimage import label
+
+from terrain_world import (COARSE_RESOLUTION, WORLD_BOUNDS, make_earth_factory,
+                           sample_macro, source_distributions, latitude)
+
+
+class EarthWorldTests(unittest.TestCase):
+    def setUp(self):
+        self.xs = (np.arange(512)+.5)*40e6/512-20e6
+        self.ys = (np.arange(256)+.5)*20e6/256-10e6
+
+    def test_all_real_sources_and_climate_units(self):
+        stats = source_distributions()
+        self.assertEqual(len(stats['source_hashes']), 6)
+        self.assertTrue(all(len(digest) == 64 for digest in stats['source_hashes'].values()))
+        self.assertTrue(.65 < stats['sea_probability'] < .75)
+        fields = make_earth_factory(42).sample(self.xs, self.ys)
+        self.assertTrue(np.isfinite(fields).all())
+        self.assertTrue((fields[2:5] >= 0).all())
+        # BIO4 is temperature std *100; this must not be the regression residual.
+        self.assertGreater(float(np.percentile(fields[2], 95)), 1000)
+        beta = sample_macro(42, self.xs[:20], self.ys[:20])['climate'][4]
+        self.assertTrue(((beta >= -.0098) & (beta <= -.004+1e-8)).all())
+
+    def test_continents_and_world_diversity(self):
+        previous = None
+        for seed in (0, 1, 42, 987654321):
+            fields = make_earth_factory(seed).sample(self.xs, self.ys)
+            land = fields[0] > 0
+            self.assertTrue(.24 < float(land.mean()) < .34, (seed, land.mean()))
+            components, count = label(land)
+            sizes = np.bincount(components.ravel())[1:]
+            cell_km2 = (40e3/512)*(20e3/256)
+            self.assertGreater(float(sizes.max()*cell_km2), 10_000_000,
+                               f'Seed {seed} did not produce a continent')
+            if previous is not None:
+                self.assertGreater(float(np.mean(land != previous)), .15)
+            previous = land
+
+    def test_two_poles_equator_and_deserts(self):
+        fields = make_earth_factory(42).sample(self.xs, self.ys)
+        lat = latitude(self.ys)
+        equatorial = np.abs(lat) < 10
+        north = lat > 75
+        south = lat < -75
+        self.assertGreater(float(fields[1, equatorial].mean()), 20)
+        self.assertLess(float(fields[1, north].mean()), -10)
+        self.assertLess(float(fields[1, south].mean()), -10)
+        land = fields[0] > 0
+        desert = land & (fields[3] < 250) & (fields[1] > 10)
+        self.assertGreater(float(desert.sum()/land.sum()), .02)
+        lowland = land & (fields[0] < 250)
+        self.assertGreater(float(lowland.sum()/land.sum()), .08)
+
+    def test_seed_zero_negative_coordinates_and_nonsquare_crop(self):
+        factory = make_earth_factory(0)
+        whole = factory(-13, -9, 22, 17)
+        piece = factory(-3, -4, 5, 7)
+        np.testing.assert_array_equal(piece.numpy(), whole[:, 5:16, 10:18].numpy())
+        make_earth_factory.cache_clear()
+        np.testing.assert_array_equal(piece.numpy(), make_earth_factory(0)(-3, -4, 5, 7).numpy())
+        actual = sample_macro(0, (np.arange(-3, 5)+.5)*COARSE_RESOLUTION,
+                              (np.arange(-4, 7)+.5)*COARSE_RESOLUTION)
+        expected = np.sign(piece[0].numpy())*piece[0].numpy()**2
+        np.testing.assert_allclose(actual['elev'], expected, atol=.002, rtol=1e-6)
+        np.testing.assert_array_equal(actual['climate'][:4], piece[1:].numpy())
+
+    def test_global_preview_contract(self):
+        result = make_earth_factory(42).overview(width=129, height=65)
+        self.assertEqual(result['elev'].shape, (65, 129))
+        self.assertEqual(result['climate'].shape, (5, 65, 129))
+        self.assertEqual(result['bounds'], WORLD_BOUNDS)
+        self.assertEqual(result['stage'], 'conditioning')
+
+    def test_climate_projection_preserves_height_and_natural_profile(self):
+        import torch
+        sys.path.insert(0, str(Path(__file__).resolve().parent/'terrain-diffusion'))
+        from terrain_inference import _project_earth_climate
+        sample = torch.tensor([-3., -5., -40., -8., -12., -20.]).view(1, 6, 1, 1)
+        natural = SimpleNamespace(_terrain_world_profile='natural')
+        self.assertIs(_project_earth_climate(natural, sample), sample)
+        self.assertTrue(torch.equal(sample.flatten(), torch.tensor([-3., -5., -40., -8., -12., -20.])))
+        earth = SimpleNamespace(_terrain_world_profile='earth')
+        result = _project_earth_climate(earth, sample.clone())
+        self.assertTrue(torch.equal(result[:, :3], sample[:, :3]))
+        self.assertTrue(torch.equal(result[:, 3:], torch.zeros_like(result[:, 3:])))
+        self.assertEqual(earth._terrain_climate_projection_counts.tolist(), [1, 1, 1])
+
+    def test_earth_noise_profile_restores_reference_natural_conditioning(self):
+        import torch
+        sys.path.insert(0, str(Path(__file__).resolve().parent/'terrain-diffusion'))
+        from terrain_inference import configure_world, InferenceProfile
+        profile = InferenceProfile('cpu-contract', cached_weights=False, cuda_graphs=False)
+        world = SimpleNamespace(device=torch.device('cpu'), torch_compile=False,
+                                coarse_model=None, base_model=None, decoder_model=None,
+                                tile_store=None, kwargs={'cond_snr': [.5]*5})
+        configure_world(world, profile, world_profile='earth')
+        self.assertEqual(world.kwargs['cond_snr'], [.1]*5)
+        configure_world(world, profile, world_profile='natural')
+        self.assertEqual(world.kwargs['cond_snr'], [.5]*5)
+        self.assertEqual(world._terrain_world_profile, 'natural')
+
+
+if __name__ == '__main__':
+    unittest.main()

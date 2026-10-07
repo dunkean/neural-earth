@@ -1,0 +1,175 @@
+"""CPU-only topology and visual evidence for continental bootstrap A4.
+
+No checkpoint is loaded and no GPU is used. Images show conditioning in
+physical metres, never claim to be a learned DEM. Native tests are separate.
+"""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+from pathlib import Path
+import time
+
+import numpy as np
+from PIL import Image, ImageDraw
+from scipy.ndimage import label, maximum_filter, minimum_filter, binary_dilation
+
+from terrain_macro import (BOOTSTRAP_VERSION, CHANNELS, STATS_PATH,
+                           climate_diagnostics, make_macro_factory)
+from terrain_reference import fixed_palette, fixed_hillshade
+from terrain_world import DATA_ROOT, SOURCE_FILES, WORLD_BOUNDS
+from terrain_bootstrap_diagnostics import add_diagnostics, etopo_reference
+
+
+def conditioning_source_files():
+    root = Path(__file__).resolve().parent
+    paths = [root/name for name in ("terrain_macro.py", "terrain_world.py",
+                                    "terrain_reference.py", "terrain_bootstrap_preview.py",
+                                    "terrain_bootstrap_diagnostics.py")]
+    paths += [STATS_PATH]+[DATA_ROOT/name for name in SOURCE_FILES]
+    return {p.name: p for p in paths}
+
+
+def verify_cpu_sources(report):
+    """Every recorded field/diagnostic input is part of the CPU evidence guard."""
+    paths = conditioning_source_files()
+    if set(report["source_sha256"]) != set(paths):
+        raise ValueError("CPU evidence source inventory differs; re-export first")
+    for name, path in paths.items():
+        if hashlib.sha256(path.read_bytes()).hexdigest() != report["source_sha256"][name]:
+            raise ValueError(f"CPU evidence source differs: {name}")
+
+
+def topology(elevation, cell_m):
+    land = elevation > 0
+    labels, count = label(land, np.ones((3, 3)))
+    sizes = np.sort(np.bincount(labels.ravel())[1:])[::-1]
+    land_pixels = max(1, int(land.sum()))
+    ocean_labels, oceans = label(~land, np.ones((3, 3)))
+    ocean_sizes = np.sort(np.bincount(ocean_labels.ravel())[1:])[::-1]
+    return {"land_fraction": float(land.mean()), "land_components": int(count),
+            "land_components_at_least_1M_km2": int(np.sum(sizes*cell_m**2 >= 1e12)),
+            "largest_landmass_fraction_of_land": float(sizes[0]/land_pixels) if sizes.size else 0,
+            "top5_fraction_of_land": float(sizes[:5].sum()/land_pixels),
+            "top10_landmass_area_km2": (sizes[:10]*cell_m**2/1e6).tolist(),
+            "ocean_components": int(oceans),
+            "largest_ocean_fraction_of_water": float(ocean_sizes[0]/max(1, (~land).sum())) if ocean_sizes.size else 0,
+            "coast_edge_fraction": float(np.mean(land[:, :-1] != land[:, 1:])),
+            "land_1500m_fraction": float(np.mean(elevation[land] > 1500)) if land.any() else 0,
+            "land_0_100m_fraction": float(np.mean(elevation[land] < 100)) if land.any() else 0,
+            "elevation_quantiles_m": np.quantile(elevation, [0, .01, .05, .5, .95, .99, 1]).tolist()}
+
+
+def panel(fields, cell_m, title):
+    rgb = fixed_palette(fields[0])
+    shade = fixed_hillshade(fields[0], cell_m).astype(np.float32)/255
+    rgb = np.clip(rgb*(.60+.40*shade[..., None]), 0, 255).astype(np.uint8)
+    out = Image.new("RGB", (rgb.shape[1], rgb.shape[0]+30), (18, 24, 30))
+    out.paste(Image.fromarray(rgb), (0, 30))
+    ImageDraw.Draw(out).text((8, 9), title, fill="white")
+    return out
+
+
+def select_sites(factory, seed, xs, ys, elev):
+    land = elev > 0
+    coast = binary_dilation(land) & binary_dilation(~land)
+    relief = maximum_filter(elev, 5)-minimum_filter(elev, 5)
+    ci, cj = np.unravel_index(np.argmax(np.where(coast, relief, -1)), elev.shape)
+    # Refine sign-changing coast on physical coarse-cell centres, choosing the
+    # steepest actual neighbour crossing rather than a visually flat margin.
+    center = np.array([xs[cj], ys[ci]])
+    cx = (np.arange(round(center[0]/7680)-48, round(center[0]/7680)+48)+.5)*7680
+    cy = (np.arange(round(center[1]/7680)-48, round(center[1]/7680)+48)+.5)*7680
+    small = factory.sample(cx, cy)[0]
+    crossing = (small[:, :-1] > 0) != (small[:, 1:] > 0)
+    dy, dx = np.unravel_index(np.argmax(np.where(crossing, np.abs(np.diff(small, axis=1)), -1)), crossing.shape)
+    coast_x = (cx[dx]+cx[dx+1])*.5
+    coast_y = cy[dy]
+    # Interpolate the signed crossing, so the 30 km native crop straddles water.
+    if small[dy, dx] != small[dy, dx+1]:
+        fraction = -small[dy, dx]/(small[dy, dx+1]-small[dy, dx])
+        coast_x = cx[dx]+fraction*7680
+    mi, mj = np.unravel_index(np.argmax(elev), elev.shape)
+    return [{"id": f"bootstrap_coast_seed{seed}", "seed": str(seed),
+             "center_x_m": float(coast_x), "center_y_m": float(coast_y)},
+            {"id": f"bootstrap_ridge_seed{seed}", "seed": str(seed),
+             "center_x_m": float(xs[mj]), "center_y_m": float(ys[mi])}]
+
+
+def export(output, seeds=(0, 42), width=1024, replay_sites=None):
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True)
+    height = width//2
+    cell = (WORLD_BOUNDS[2]-WORLD_BOUNDS[0])/width
+    xs = WORLD_BOUNDS[0]+(np.arange(width)+.5)*cell
+    ys = WORLD_BOUNDS[1]+(np.arange(height)+.5)*cell
+    report = {"stage": "conditioning-only-cpu", "version": BOOTSTRAP_VERSION,
+              "bounds_m": list(WORLD_BOUNDS), "global_shape": [height, width],
+              "global_cell_m": cell, "seeds": {}, "neural_validated": False,
+              "source_sha256": {name: hashlib.sha256(p.read_bytes()).hexdigest()
+                  for name, p in conditioning_source_files().items()}}
+    replay = json.loads(Path(replay_sites).read_text(encoding="utf-8")) if replay_sites else None
+    if replay:
+        report["replay_site_report_sha256"] = hashlib.sha256(Path(replay_sites).read_bytes()).hexdigest()
+    sites = []
+    for seed in seeds:
+        started = time.perf_counter()
+        worlds, metrics = {}, {}
+        for ablation in ("A0", "A3", "A4"):
+            factory = make_macro_factory(seed, ablation)
+            fields = factory.sample(xs, ys)
+            worlds[ablation] = fields
+            metrics[ablation] = topology(fields[0], cell)
+            metrics[ablation]["physical_channel_support"] = {
+                name: [float(fields[i].min()), float(fields[i].max())]
+                for i, name in enumerate(CHANNELS)}
+            if ablation == "A4":
+                support = np.asarray(factory.natural.stats["data_quantile_tables"][0])
+                metrics[ablation]["hard_positive_clip_fraction"] = float(np.mean(fields[0] >= support[-1]))
+            np.savez_compressed(output/f"seed{seed}-{ablation}-global.npz", fields=fields,
+                                xs_m=xs, ys_m=ys, stage=np.array("conditioning"))
+        board = Image.new("RGB", (width, (height+30)*3))
+        for row, ablation in enumerate(("A0", "A3", "A4")):
+            m = metrics[ablation]
+            title = f"{ablation} seed {seed} | INPUT metres | land {m['land_fraction']:.1%} | components {m['land_components']} | top5 {m['top5_fraction_of_land']:.1%}"
+            board.paste(panel(worlds[ablation], cell, title), (0, row*(height+30)))
+        board.save(output/f"seed{seed}-world-board.png")
+        selected = [dict(s) for s in replay["sites"] if int(s["seed"]) == seed] if replay else select_sites(
+            make_macro_factory(seed, "A4"), seed, xs, ys, worlds["A4"][0])
+        sites.extend(selected)
+        for site in selected:
+            regional_board = Image.new("RGB", (768*3, 414*2))
+            for scale, extent in enumerate((768e3, 30.72e3)):
+                zx = site["center_x_m"]+(np.arange(768)+.5-384)*extent/768
+                zy = site["center_y_m"]+(np.arange(384)+.5-192)*extent/768
+                for col, ablation in enumerate(("A0", "A3", "A4")):
+                    fields = make_macro_factory(seed, ablation).sample(zx, zy)
+                    title = f"{ablation} {site['id']} | {extent/1000:.1f} km | {fields[0].min():.0f}..{fields[0].max():.0f} m"
+                    regional_board.paste(panel(fields, extent/768, title), (col*768, scale*414))
+                    if ablation == "A4":
+                        site[f"conditioning_{extent/1000:g}km"] = topology(fields[0], extent/768)
+            regional_board.save(output/f"{site['id']}-zoom-board.png")
+        report["seeds"][str(seed)] = {"profiles": metrics,
+            "cpu_seconds": time.perf_counter()-started,
+            "sea_offset_m": make_macro_factory(seed, "A4").sea_offset_m,
+            "climate_diagnostics": climate_diagnostics(seed, "A4")}
+        print(f"CPU seed {seed} complete", flush=True)
+    report["sites"] = sites
+    for seed in seeds:
+        with np.load(output/f"seed{seed}-A4-global.npz", allow_pickle=False) as saved:
+            add_diagnostics(output, report, {"A4": saved["fields"]}, saved["xs_m"], saved["ys_m"], seed)
+    report["etopo_shore_pair_reference"] = etopo_reference()
+    (output/"cpu-report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return report
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--width", type=int, default=1024)
+    parser.add_argument("--seed", type=int, action="append")
+    parser.add_argument("--replay-sites", type=Path,
+                        help="original CPU report whose fixed physical sites are retained")
+    args = parser.parse_args()
+    export(args.output, args.seed or (0, 42), args.width, args.replay_sites)

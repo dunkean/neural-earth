@@ -1,0 +1,493 @@
+"""Experimental, random-access five-field geography for the 30 m checkpoint.
+
+A0 is the installed natural factory. A1 changes only elevation geography, A2
+only climate, and A3 adds finite ridge/basin features to A1+A2. No variant is
+an approved replacement for natural. All fields returned by ``sample_raw``
+are physical (metres, Celsius, BIO4, BIO12, BIO15), not model-normalized.
+"""
+from __future__ import annotations
+
+from functools import lru_cache
+import json
+from pathlib import Path
+
+import numpy as np
+import torch
+from pyfastnoiselite.pyfastnoiselite import FastNoiseLite, FractalType, NoiseType
+
+from terrain_world import COARSE_RESOLUTION, WORLD_BOUNDS, latitude, lapse_rate, source_distributions
+
+MACRO_VERSION = "finite-geography-v2"
+BOOTSTRAP_VERSION = "continental-bootstrap-v2"
+ABLATIONS = ("A0", "A1", "A2", "A3")
+CHANNELS = ("elevation_m", "BIO1_c", "BIO4_c_x100", "BIO12_mm_year", "BIO15_percent")
+STATS_PATH = Path(__file__).resolve().parent / "terrain-diffusion/data/global/synthetic_map_stats.json"
+
+
+def _noise(seed: int, frequency: float, octaves: int) -> FastNoiseLite:
+    n = FastNoiseLite(seed=int(seed) & 0x7fffffff)
+    n.noise_type = NoiseType.NoiseType_Perlin
+    n.frequency = frequency
+    n.fractal_type = FractalType.FractalType_FBm
+    n.fractal_octaves = octaves
+    n.fractal_lacunarity = 2.
+    n.fractal_gain = .5
+    return n
+
+
+@lru_cache(maxsize=1)
+def _natural_stats() -> dict:
+    data = json.loads(STATS_PATH.read_text(encoding="utf-8"))
+    if len(data["noise_quantile_tables"]) != 5 or len(data["data_quantile_tables"]) != 5:
+        raise ValueError("Natural statistics require five channels")
+    return data
+
+
+class NaturalConditioning:
+    """A0 matching the installed upstream factory, including the seed-0 fix."""
+
+    def __init__(self, seed: int):
+        self.seed = int(seed) & 0xffffffffffffffff
+        self.stats = _natural_stats()
+        self.noises = [_noise(self.seed + i + 1, .05, 2 if i == 1 else 4) for i in range(5)]
+
+    def sample_raw(self, cj0, ci0, cj1, ci1):
+        x, y = np.meshgrid(np.arange(cj0, cj1, dtype=np.float32),
+                           np.arange(ci0, ci1, dtype=np.float32))
+        coords = np.ascontiguousarray(np.stack((x.ravel(), y.ravel())), dtype=np.float32)
+        result = []
+        for i, noise in enumerate(self.noises):
+            values = noise.gen_from_coords(coords)
+            values = np.interp(values, self.stats["noise_quantile_tables"][i],
+                               self.stats["data_quantile_tables"][i]).reshape(x.shape)
+            result.append(values.astype(np.float32))
+        return np.stack(result)
+
+    def sample(self, xs_metres, ys_metres):
+        xs = np.asarray(xs_metres, np.float64)
+        ys = np.asarray(ys_metres, np.float64)
+        if xs.ndim != 1 or ys.ndim != 1:
+            raise ValueError("sample expects one-dimensional x/y arrays")
+        out = np.empty((5, len(ys), len(xs)), np.float32)
+        rows = max(1, 131072//max(1, len(xs)))
+        for start in range(0, len(ys), rows):
+            x, y = np.meshgrid(xs/COARSE_RESOLUTION-.5,
+                               ys[start:start+rows]/COARSE_RESOLUTION-.5)
+            coords = np.ascontiguousarray(np.stack((x.ravel(), y.ravel())), dtype=np.float32)
+            raw = np.stack([np.interp(n.gen_from_coords(coords),
+                                      self.stats["noise_quantile_tables"][i],
+                                      self.stats["data_quantile_tables"][i]).reshape(x.shape).astype(np.float32)
+                            for i, n in enumerate(self.noises)])
+            out[:, start:start+rows] = self.finalize(raw)
+        return out
+
+    def finalize(self, raw):
+        e, t, tstd, p, pcv = [np.asarray(v, np.float32).copy() for v in raw]
+        s = self.stats
+        t += lapse_rate(p).astype(np.float32) * np.maximum(e, 0)
+        t = np.clip(t, -10, 40)
+        t = np.where(t > 20, t, (t-20)*1.25+20)
+        frac = (tstd-float(s["temp_std_p1"]))/(float(s["temp_std_p99"])-float(s["temp_std_p1"]))
+        baseline = np.maximum(float(s["temp_std_p1"]),
+                              -(float(s["a_temp_std"])*t+float(s["b_temp_std"])))
+        tstd = np.maximum(frac*(float(s["temp_std_p99"])-baseline)+baseline+
+                          float(s["a_temp_std"])*t+float(s["b_temp_std"]), 20)
+        pcv *= np.maximum(0, (185-.04111*p)/185)
+        return np.stack((e, t, tstd, p, pcv)).astype(np.float32)
+
+    def __call__(self, cj0, ci0, cj1, ci1):
+        fields = self.finalize(self.sample_raw(cj0, ci0, cj1, ci1))
+        fields[0] = np.sign(fields[0])*np.sqrt(np.abs(fields[0]))
+        return torch.from_numpy(fields)
+
+
+def _smooth(a, b, x):
+    t = np.clip((x-a)/(b-a), 0, 1)
+    return t*t*(3-2*t)
+
+
+class MacroConditioning:
+    """World-coordinate objects; sampling never calibrates to the requested crop."""
+
+    def __init__(self, seed: int, ablation: str = "A3"):
+        if ablation not in ABLATIONS:
+            raise ValueError(f"ablation must be one of {ABLATIONS}")
+        self.seed = int(seed) & 0xffffffffffffffff
+        self.ablation = ablation
+        self.natural = NaturalConditioning(self.seed)
+        self.rng = np.random.default_rng(self.seed)
+        # Object geometry is global, finite and persisted by seed and version.
+        anchors = np.column_stack((
+            self.rng.uniform(-15e6, 15e6, 6), self.rng.uniform(-6.5e6, 6.5e6, 6),
+            self.rng.uniform(2.8e6, 5.0e6, 6), self.rng.uniform(1.5e6, 2.8e6, 6),
+            self.rng.uniform(-np.pi, np.pi, 6)))
+        satellites = []
+        for cx, cy, rx, ry, angle in anchors:
+            for _ in range(3):
+                theta = self.rng.uniform(-np.pi, np.pi)
+                distance = self.rng.uniform(.50, 1.15)
+                satellites.append((cx+rx*distance*np.cos(theta),
+                                   cy+ry*distance*np.sin(theta),
+                                   rx*self.rng.uniform(.43, .75),
+                                   ry*self.rng.uniform(.55, .95),
+                                   angle+self.rng.normal(0, .7)))
+        self.continents = np.concatenate((anchors, np.asarray(satellites)), axis=0).astype(np.float64)
+        self.ridges = np.column_stack((
+            self.rng.uniform(-17e6, 17e6, 18), self.rng.uniform(-8e6, 8e6, 18),
+            self.rng.uniform(0.9e6, 2.6e6, 18), self.rng.uniform(.14e6, .40e6, 18),
+            self.rng.uniform(-np.pi, np.pi, 18))).astype(np.float64)
+        self.basins = np.column_stack((
+            self.rng.uniform(-17e6, 17e6, 14), self.rng.uniform(-8e6, 8e6, 14),
+            self.rng.uniform(.45e6, 1.3e6, 14), self.rng.uniform(.30e6, .9e6, 14),
+            self.rng.uniform(-np.pi, np.pi, 14))).astype(np.float64)
+        self.noises = [_noise(self.seed + 18787*i + 251, f, o) for i, (f, o) in enumerate(
+            ((.004, 3), (.012, 3), (.019, 2), (.011, 3), (.016, 3)))]
+        self.sources = source_distributions() if ablation in ("A2", "A3") else None
+        # One fixed, modest global lattice establishes a seed-specific sea-level
+        # threshold. It does not depend on crop size, order, or overview pixels.
+        xs = np.linspace(WORLD_BOUNDS[0], WORLD_BOUNDS[2], 256, endpoint=False)+78125
+        ys = np.linspace(WORLD_BOUNDS[1], WORLD_BOUNDS[3], 128, endpoint=False)+78125
+        xx, yy = np.meshgrid(xs, ys)
+        natural_reference = self.natural.sample(xs, ys)
+        self.climate_support = np.column_stack((natural_reference[1:].min(axis=(1, 2)),
+                                                 natural_reference[1:].max(axis=(1, 2))))
+        scores = self._continent_score(xx, yy)
+        table = np.asarray(self.natural.stats["data_quantile_tables"][0])
+        probabilities = np.linspace(.0001, .9999, len(table))
+        self.water_fraction = float(np.interp(0, table, probabilities))
+        self.sea_threshold = float(np.quantile(scores, self.water_fraction))
+        land_score = scores + .18*self._field(3, xx/COARSE_RESOLUTION, yy/COARSE_RESOLUTION)
+        self.sea_knots = np.quantile(scores[scores < self.sea_threshold], probabilities)
+        self.land_knots = np.quantile(land_score[scores >= self.sea_threshold], probabilities)
+
+    def _field(self, i, x, y):
+        coords = np.ascontiguousarray(np.stack((x.ravel(), y.ravel())), dtype=np.float32)
+        return self.noises[i].gen_from_coords(coords).reshape(x.shape)
+
+    @staticmethod
+    def _object_field(x, y, objects):
+        out = np.zeros(x.shape, np.float32)
+        for cx, cy, rx, ry, angle in objects:
+            dx, dy = x-cx, y-cy
+            u = (dx*np.cos(angle)+dy*np.sin(angle))/rx
+            v = (-dx*np.sin(angle)+dy*np.cos(angle))/ry
+            out = np.maximum(out, np.exp(-2*(u*u+v*v)).astype(np.float32))
+        return out
+
+    def _continent_score(self, x, y):
+        nx, ny = x/COARSE_RESOLUTION, y/COARSE_RESOLUTION
+        warp_x = self._field(0, nx, ny)*220e3
+        warp_y = self._field(1, nx, ny)*220e3
+        shape = self._object_field(x+warp_x, y+warp_y, self.continents)
+        return shape + .055*self._field(2, nx, ny)*_smooth(.003, .15, shape)
+
+    def _elevation(self, x, y, regional):
+        score = self._continent_score(x, y)
+        landness = score-self.sea_threshold
+        shore = _smooth(-.04, .12, landness)
+        rough = self._field(3, x/COARSE_RESOLUTION, y/COARSE_RESOLUTION)
+        probabilities = np.linspace(.0001, .9999, len(self.sea_knots))
+        sea_p = self.water_fraction*np.interp(score, self.sea_knots, probabilities)
+        land_p = self.water_fraction+(1-self.water_fraction)*np.interp(
+            score+.18*rough, self.land_knots, probabilities)
+        table = np.asarray(self.natural.stats["data_quantile_tables"][0])
+        elev = np.interp(np.where(landness >= 0, land_p, sea_p), probabilities, table)
+        elev = np.where(landness >= 0, np.maximum(elev, 0), np.minimum(elev, 0))
+        if regional:
+            warp_x = self._field(0, x/COARSE_RESOLUTION, y/COARSE_RESOLUTION)*190e3
+            warp_y = self._field(1, x/COARSE_RESOLUTION, y/COARSE_RESOLUTION)*190e3
+            ridge = self._object_field(x+warp_x, y+warp_y, self.ridges)*shore
+            basin = self._object_field(x, y, self.basins)*shore
+            # Medium band reaches continental margins; the finite ridge objects
+            # can terminate at the shoreline instead of fading everywhere.
+            margin_gate = _smooth(-.07, .03, landness)
+            elev += 450*ridge*margin_gate + 350*np.maximum(rough, 0)**2*margin_gate
+            elev -= 500*basin
+            # The five-channel checkpoint has seen only the installed source
+            # support. Avoid asking it to extrapolate >8 km conditioning peaks.
+            table = np.asarray(self.natural.stats["data_quantile_tables"][0])
+            elev = np.clip(elev, table[0], table[-1])
+        # Preserve signed sea-level crossings instead of flattening a mask.
+        return elev.astype(np.float32)
+
+    def _climate(self, x, y, elev, *, clip=True):
+        stats = self.sources
+        lat = latitude(y).astype(np.float32)
+        nx, ny = x/COARSE_RESOLUTION, y/COARSE_RESOLUTION
+        humid = self._field(4, nx, ny)
+        regional = self._field(3, nx, ny)
+        # Global WorldClim quantiles, interpolated by absolute latitude. Climate
+        # is physical before checkpoint normalization, including source BIO units.
+        def quantile(channel, p):
+            nodes = stats["latitudes"]
+            tables = stats["climate"][channel]
+            pos = np.clip(np.abs(lat)/5, 0, len(nodes)-1)
+            low = np.minimum(pos.astype(np.int32), len(nodes)-2)
+            f = pos-low
+            result = np.empty(p.shape, np.float32)
+            for k in np.unique(low):
+                m = low == k
+                a = np.interp(p[m], stats["probabilities"], tables[k])
+                b = np.interp(p[m], stats["probabilities"], tables[k+1])
+                result[m] = a*(1-f[m])+b*f[m]
+            return result
+        wet_p = np.clip(.50+.36*humid-.22*np.exp(-((np.abs(lat)-29)/13)**2), .005, .995)
+        precip = quantile(2, wet_p)
+        temp = quantile(0, np.clip(.53+.25*regional, .01, .99))
+        temp += lapse_rate(precip).astype(np.float32)*np.maximum(elev, 0)
+        bio4 = quantile(1, np.clip(.50+.22*regional, .01, .99))
+        bio15 = quantile(3, np.clip(.53-.20*humid, .01, .99))
+        result = np.stack((temp, bio4, precip, bio15)).astype(np.float32)
+        if clip:
+            for i in range(4):
+                result[i] = np.clip(result[i], *self.climate_support[i])
+        return result
+
+    def sample(self, xs_metres, ys_metres):
+        xs = np.asarray(xs_metres, np.float64)
+        ys = np.asarray(ys_metres, np.float64)
+        if xs.ndim != 1 or ys.ndim != 1:
+            raise ValueError("sample expects one-dimensional x/y arrays")
+        if xs.size == 0 or ys.size == 0:
+            return np.empty((5, ys.size, xs.size), np.float32)
+        out = np.empty((5, len(ys), len(xs)), np.float32)
+        rows = max(1, 131072//len(xs))
+        for start in range(0, len(ys), rows):
+            yy, xx = np.meshgrid(ys[start:start+rows], xs, indexing="ij")
+            # Arbitrary overview coordinates use analytical natural noise too.
+            raw = self._natural_raw_at(xx, yy)
+            natural = self.natural.finalize(raw)
+            if self.ablation in ("A1", "A3", "A4"):
+                elevation = self._elevation(xx, yy, self.ablation in ("A3", "A4"))
+                if self.ablation == "A1":
+                    raw[0] = elevation
+                    natural = self.natural.finalize(raw)
+                else:
+                    natural[0] = elevation
+            if self.ablation in ("A2", "A3", "A4"):
+                natural[1:] = self._climate(xx, yy, natural[0])
+            out[:, start:start+rows] = natural
+        return out
+
+    def _natural_raw_at(self, x, y):
+        coords = np.ascontiguousarray(np.stack(((x/COARSE_RESOLUTION-.5).ravel(),
+                                                 (y/COARSE_RESOLUTION-.5).ravel())), dtype=np.float32)
+        s = self.natural.stats
+        raw = np.stack([np.interp(n.gen_from_coords(coords), s["noise_quantile_tables"][i],
+                                   s["data_quantile_tables"][i]).reshape(x.shape).astype(np.float32)
+                        for i, n in enumerate(self.natural.noises)])
+        return raw
+
+    def sample_raw(self, cj0, ci0, cj1, ci1):
+        xs = (np.arange(cj0, cj1, dtype=np.float64)+.5)*COARSE_RESOLUTION
+        ys = (np.arange(ci0, ci1, dtype=np.float64)+.5)*COARSE_RESOLUTION
+        return self.sample(xs, ys)
+
+    @staticmethod
+    def finalize(raw):
+        return np.asarray(raw, np.float32)
+
+    def __call__(self, cj0, ci0, cj1, ci1):
+        result = self.sample_raw(cj0, ci0, cj1, ci1)
+        result[0] = np.sign(result[0])*np.sqrt(np.abs(result[0]))
+        return torch.from_numpy(result)
+
+
+class ContinentalBootstrap(MacroConditioning):
+    """A4: capsule continents and attached relief, supplied before coarse NN.
+
+    Capsule distance is an exact portable copy of Rust coast.rs algebra.
+    Shore architecture is adapted to nonzero gradient at planetary scale;
+    ramp distances are metres (10,500–145,000), not regional Rust units.
+    Noise/RNG and planetary layout differ; regional erosion is not invoked.
+    """
+
+    def __init__(self, seed: int):
+        super().__init__(seed, "A3")
+        self.ablation = "A4"
+        # Keep kilometre-scale detail out of the world silhouette. Coordinates
+        # remain absolute metres; no sampling resolution changes these fields.
+        self.noises = [_noise(self.seed+7949*i+51031, f, o) for i, (f, o) in enumerate(
+            ((.006, 3), (.024, 3), (.010, 3), (.014, 4), (.006, 3)))]
+        rng = np.random.default_rng(self.seed ^ 0x434f4e54494e454e)
+        anchors = np.array([[-13., -4.7], [-11.5, 4.8], [-1., -.5],
+                            [9., -4.5], [12., 5.]])*1e6
+        anchors += rng.uniform(-.9e6, .9e6, anchors.shape)
+        anchors[:, 0] *= rng.choice([-1, 1])
+        anchors[:, 1] *= rng.choice([-1, 1])
+        self.capsules, self.chain_segments, self.basin_objects = [], [], []
+        for cx, cy in anchors:
+            angle = rng.uniform(-np.pi, np.pi)
+            length = rng.uniform(6.0e6, 9.0e6)
+            width = rng.uniform(1.6e6, 2.3e6)
+            def point(u, v):
+                return np.array([cx+u*np.cos(angle)-v*np.sin(angle),
+                                 cy+u*np.sin(angle)+v*np.cos(angle)])
+            points = [point(-.5*length, -.15*width), point(0, .25*width),
+                      point(.5*length, -.2*width)]
+            radii = [width*.72, width, width*rng.uniform(.55, .85)]
+            for k in range(2):
+                self.capsules.append((*points[k], *points[k+1], radii[k], radii[k+1]))
+            side = rng.choice([-1, 1])
+            branch = point(rng.uniform(-.15, .25)*length, side*width*2.3)
+            self.capsules.append((*points[1], *branch, width*.80, width*.38))
+            # Long range runs near an active margin, then turns into a branch.
+            offset = side*width*.56
+            ridge_points = [point(-.52*length, offset*.6), point(-.05*length, offset),
+                            point(.42*length, offset*.75), branch]
+            for k in range(3):
+                self.chain_segments.append((*ridge_points[k], *ridge_points[k+1],
+                    rng.uniform(.18e6, .34e6), rng.uniform(2800, 5100)))
+            self.basin_objects.append((*point(.08*length, -side*width*.35),
+                                       length*.34, width*.50, angle))
+        self.capsules = np.asarray(self.capsules, np.float64)
+        self.chain_segments = np.asarray(self.chain_segments, np.float64)
+        self.basin_objects = np.asarray(self.basin_objects, np.float64)
+        xs = np.linspace(WORLD_BOUNDS[0], WORLD_BOUNDS[2], 512, endpoint=False)+39062.5
+        ys = np.linspace(WORLD_BOUNDS[1], WORLD_BOUNDS[3], 256, endpoint=False)+39062.5
+        xx, yy = np.meshgrid(xs, ys)
+        self.sea_offset_m = float(np.quantile(self._signed_distance(xx, yy), .68))
+
+    @staticmethod
+    def capsule_distance(x, y, capsule):
+        """Exact varying-radius segment algebra from Rust Coast::distance."""
+        ax, ay, bx, by, ra, rb = capsule
+        dx, dy = bx-ax, by-ay
+        t = np.clip(((x-ax)*dx+(y-ay)*dy)/max(dx*dx+dy*dy, 1e-12), 0, 1)
+        return ra*(1-t)+rb*t-np.hypot(x-ax-t*dx, y-ay-t*dy)
+
+    def _signed_distance(self, x, y):
+        distance = np.full(x.shape, -np.inf, np.float64)
+        for capsule in self.capsules:
+            distance = np.maximum(distance, self.capsule_distance(x, y, capsule))
+        nx, ny = x/COARSE_RESOLUTION, y/COARSE_RESOLUTION
+        return distance+1100e3*self._field(0, nx, ny)+230e3*self._field(1, nx, ny)
+
+    def _relief_fields(self, x, y):
+        nx, ny = x/COARSE_RESOLUTION, y/COARSE_RESOLUTION
+        broad = self._field(2, nx, ny)
+        detail = self._field(3, nx, ny)
+        ridge = np.zeros(x.shape, np.float64)
+        wx = x+100e3*self._field(0, nx, ny)
+        wy = y+100e3*self._field(1, nx, ny)
+        for ax, ay, bx, by, width, peak in self.chain_segments:
+            # Distance to finite chain, with rounded ends and no global stripes.
+            d = -self.capsule_distance(wx, wy, (ax, ay, bx, by, 0, 0))
+            envelope = np.exp(-(d/width)**2)
+            # Rust Noise::ridged's squared inverted absolute-noise motif, with
+            # existing Perlin rather than Rust's RNG/simplex permutation.
+            crest = (1-np.abs(detail))**2
+            ridge = np.maximum(ridge, peak*envelope*(.55+.45*crest))
+        basin = self._object_field(x, y, self.basin_objects)
+        plateau = 1050*_smooth(-.05, .4, broad)
+        inland = np.maximum(65, 310+850*np.maximum(broad+.15, 0)+plateau+
+                            220*detail+ridge-360*basin)
+        return inland, broad, detail
+
+    @staticmethod
+    def soft_land_cap(inland, limit):
+        """C1 shoulder retains varying crest heights below source support."""
+        knee = .70*limit
+        excess = np.maximum(np.asarray(inland)-knee, 0)
+        return np.where(inland <= knee, inland,
+                        knee+(limit-knee)*(-np.expm1(-excess/(limit-knee))))
+
+    @staticmethod
+    def shore_elevation(distance, inland, broad, detail):
+        """Nonzero shoreline gradient at the 7.68 km conditioning scale.
+
+        The v1 cubic smoothstep shore was a faithful regional Rust algebra
+        port, but its zero derivative creates a flat shelf at planetary scale.
+        V2 uses an ease-out datum on both sides; it is a planetary adaptation.
+        """
+        cliff = _smooth(.05, .35, broad)
+        ramp = (70e3+75e3*_smooth(-.35, .35, detail))*(1-.85*cliff)
+        ramp = np.clip(np.minimum(ramp, 2*inland/.015), 10.5e3, 145e3)
+        def ease(t):
+            t = np.clip(t, 0, 1)
+            return t*(2-t)
+        land = inland*ease(distance/ramp)
+        offshore = np.maximum(-distance, 0)
+        shelf = -750*ease(offshore/100e3)
+        deep = -(3070+850*broad)*_smooth(100e3, 1000e3, offshore)
+        return np.where(distance > 0, land, shelf+deep)
+
+    def _elevation(self, x, y, regional=True):
+        distance = self._signed_distance(x, y)-self.sea_offset_m
+        inland, broad, detail = self._relief_fields(x, y)
+        table = np.asarray(self.natural.stats["data_quantile_tables"][0])
+        inland = self.soft_land_cap(inland, float(table[-1]))
+        elev = self.shore_elevation(distance, inland, broad, detail)
+        return np.clip(elev, table[0], table[-1]).astype(np.float32)
+
+
+@lru_cache(maxsize=12)
+def make_macro_factory(seed: int, ablation: str = "A3"):
+    if ablation == "A0":
+        return NaturalConditioning(seed)
+    if ablation == "A4":
+        return ContinentalBootstrap(seed)
+    return MacroConditioning(seed, ablation)
+
+
+def sample_conditioning_preview(seed: int, profile: str, xs_m, ys_m) -> dict:
+    """Sparse global preview in five physical fields; no neural stage is implied."""
+    if profile in ("natural", "A0"):
+        fields = make_macro_factory(seed, "A0").sample(xs_m, ys_m)
+        name = "natural"
+    elif profile in ("A1", "A2", "A3", "A4"):
+        fields = make_macro_factory(seed, profile).sample(xs_m, ys_m)
+        version = BOOTSTRAP_VERSION if profile == "A4" else MACRO_VERSION
+        name = f"macro-{version}-{profile}"
+    else:
+        raise ValueError("Unknown conditioning preview profile")
+    return {"fields": fields, "elev": fields[0],
+            "climate": np.concatenate((fields[1:], lapse_rate(fields[3])[None]), axis=0),
+            "stage": "conditioning", "world_profile": name}
+
+
+def climate_diagnostics(seed: int, ablation: str = "A3", *,
+                        checkpoint_source=None) -> dict:
+    """Fixed-lattice climate support and checkpoint z-score diagnostics."""
+    if ablation not in ("A2", "A3", "A4"):
+        raise ValueError("Climate diagnostics apply to A2/A3/A4")
+    factory = make_macro_factory(seed, ablation)
+    xs = np.linspace(WORLD_BOUNDS[0], WORLD_BOUNDS[2], 256, endpoint=False)+78125
+    ys = np.linspace(WORLD_BOUNDS[1], WORLD_BOUNDS[3], 128, endpoint=False)+78125
+    xx, yy = np.meshgrid(xs, ys)
+    elev = factory.sample(xs, ys)[0]
+    raw = factory._climate(xx, yy, elev, clip=False)
+    final = factory._climate(xx, yy, elev, clip=True)
+    # The climate channels occupy indices 2–5 in the six-channel coarse model.
+    # The installed checkpoint config is read directly to avoid stale constants.
+    from terrain_manifest import MODEL_ROOT
+    checkpoint = json.loads((Path(checkpoint_source or MODEL_ROOT) / "config.json").read_text(encoding="utf-8"))
+    means = np.asarray(checkpoint["coarse_means"])[2:6]
+    stds = np.asarray(checkpoint["coarse_stds"])[2:6]
+    channels = {}
+    for i, name in enumerate(CHANNELS[1:]):
+        lower, upper = factory.climate_support[i]
+        z = (final[i]-means[i])/stds[i]
+        channels[name] = {"natural_lattice_support": [float(lower), float(upper)],
+                          "preclip_outside_fraction": float(np.mean((raw[i] < lower) |
+                                                                    (raw[i] > upper))),
+                          "postclip_outside_fraction": float(np.mean((final[i] < lower) |
+                                                                     (final[i] > upper))),
+                          "checkpoint_z_abs_p99": float(np.quantile(np.abs(z), .99)),
+                          "checkpoint_z_abs_max": float(np.max(np.abs(z)))}
+        if ablation == "A4":
+            outside = (raw[i] < lower) | (raw[i] > upper)
+            absolute_latitude = np.abs(latitude(yy))
+            def split(masks):
+                return {label: {"sample_count": int(mask.sum()),
+                    "outside_fraction_within_band": float(outside[mask].mean()) if mask.any() else 0.}
+                    for label, mask in masks.items()}
+            channels[name]["preclip_by_abs_latitude_deg"] = split({
+                "0_30": absolute_latitude < 30,
+                "30_60": (absolute_latitude >= 30) & (absolute_latitude < 60),
+                "60_90": absolute_latitude >= 60})
+            channels[name]["preclip_by_elevation_m"] = split({
+                "ocean": elev < 0, "0_1500": (elev >= 0) & (elev < 1500),
+                "above_1500": elev >= 1500})
+    return {"seed_u64": str(int(seed)), "ablation": ablation,
+            "lattice_shape": [128, 256], "channels": channels}

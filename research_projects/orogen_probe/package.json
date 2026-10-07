@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "delaunator": "^5.0.1"
+  }
+}

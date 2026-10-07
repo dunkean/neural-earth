@@ -1,0 +1,16 @@
+.venv/
+generated/
+*.log
+__pycache__/
+node_modules/
+.pytest_cache/
+.ruff_cache/
+*.py[cod]
+.env
+.env.*
+!.env.example
+*_token
+
+# Reproducible outputs from the Orogen research probe.
+research_projects/orogen_probe/*.npy
+research_projects/orogen_probe/*.f32
