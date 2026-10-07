@@ -592,6 +592,11 @@ def generation_controls_script():
     return send_from_directory(ROOT,'terrain_generation_controls.js')
 
 
+@app.get('/terrain_map_tools.js')
+def map_tools_script():
+    return send_from_directory(ROOT, 'terrain_map_tools.js')
+
+
 @app.get('/api/generation/schema')
 def generation_schema():
     return jsonify(generator_schema())

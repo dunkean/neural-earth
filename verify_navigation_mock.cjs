@@ -29,6 +29,7 @@ async function settled(page,after=-1){
       if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:html});
       if(u.pathname==='/terrain_renderer.js')return route.fulfill({contentType:'application/javascript',body:gpuStub});
       if(u.pathname==='/terrain_lod.js')return route.fulfill({contentType:'application/javascript',body:lodScript});
+      if(u.pathname==='/terrain_map_tools.js')return route.fulfill({contentType:'application/javascript',body:fs.readFileSync('terrain_map_tools.js','utf8')});
       if(u.pathname==='/terrain_generation_controls.js')return route.fulfill({contentType:'application/javascript',body:controlsScript});
       if(u.pathname==='/api/world'){
         if(rejectNextWorld){rejectNextWorld=false;return route.fulfill({status:400,json:{error:'Settings rejected for this test'}});}
