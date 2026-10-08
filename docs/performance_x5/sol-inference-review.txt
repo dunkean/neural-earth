@@ -1,0 +1,44 @@
+SOL XHIGH — REVUES PAR BLOCS, SYNTHÈSE DES MESSAGES DE L'AGENT
+8 octobre 2026. Ce texte est une synthèse du coordinateur, pas un reçu CLI.
+
+Chunk1 NVRTC/DriverAPI : corrections demandées sur contexte/thread, ordinal GPU
+avant garde capture, DLL failures et ABI cuLaunchKernel. Après corrections et
+six tests CUDA réels : APPROVE pour intégration opt-in. Égalité finie BF16 prouvée
+sur3090, microbench opérateur distinct des gains modèle/terrain.
+
+Chunks2/3 intégration/configuration : P1 signalé sur le monde graphsOFF/exactOFF
+après un modèle partagé exactON, puis sur le commit de configuration avant
+rejet torch_compile/mutation monde. Corrigés par validation de tous les chemins
+après tous les rejets, avant toute mutation et earlyreturn. Tests dédiés des
+deux régressions. Backend SDPA base possède les bons axes, K déjà divisé BF16,
+scale1, admission expérimentale et seulement Flash/cuDNN. APPROVE opt-in ;
+aucune approbation de gain SDPA, rejet numérique24,226m conservé OFF.
+
+Chunk4 préparation offline : resolve_model_source plutôt que constante de
+repo, contrôle canonique artifact_identity du builder, chemin poids effectifs
+calculés sur CUDA, aucun faux benchmark QDQ->BF16. Corrigés et APPROVE offline.
+Lecture ultérieure : indices de calibration int64 bornés et resampling statique
+dans la copie d'export, test plusieurs résolutions ;91Conv préparées dans le
+vrai export, module_sha correspond au code relu, flags integerGPU/physique false.
+
+Revue activation défaut exacte : admission SiLU exhaustive avant publication
+du pack approuvée. Demande de probes somme/concat parGPU et statut parordinal,
+corrigée. Dernier verdict : APPROVE exact-default pour GPUs admis, avec limites
+corpus3090/16 sortiesLOD3/2, gains conservateurs1,08x/1,12x, aucune revendicationx5.
+Le reviewer n'a modifié aucun fichier ni lancé de GPU.
+
+Passes finales : APPROVE interpolation monotone LOD4 (5 tests CPU), métadonnées
+quant/TensorRT strongly typed et kernel_status par GPU. Harness AB/BA : deux
+lacunes corrigées (fallback admissibilité / mêmes SHA enfants), 3 tests CPU.
+UI : snapshot initial moteur et caméra rollback corrigés, télémétrie stale
+ignorée. Proxy : APPROVE, preuve GPU réelle ensuite ; 12 tests CPU dont PID
+réel Windows et Job Object. Backend LOD4 : 41 tests navigation PASS, choix/caches
+séparés. Harness expérimentation quant : relations d'identité renforcées,
+APPROVE protocole avant GPU, aucune approbation automatique de gain/fidélité.
+
+Rerun quant admitted relu : sourceSHA courant, profils exact/cached/graphs/
+reference effectifs surGPU0,520replays/0fallback,40revisites physiques
+byte-exactes et erreurs DEM inchangées. Relations SHA moteur/export/capture
+et matched renforcées puis vérifiées par Sol. UI : garde aussi après attente
+JSON et catch de préparation ; test de réponse JSON retardée après bascule NN
+passe. Aucun backend quantifié activé, aucune nouvelle invocation Opus.

@@ -1,0 +1,92 @@
+Analyse en lecture seule — groupes spatiaux latents 4 × 4
+8 octobre 2026
+
+Décision : ne pas implémenter ni activer cette piste maintenant. Elle pourrait
+fixer les partitions BF16, mais ne constitue pas une optimisation démontrée des
+petites demandes natives. La matérialisation des groupes entiers amplifie les
+dépendances de la deuxième passe. Aucun code produit ni test GPU n'a été lancé
+pour cette analyse.
+
+Ce que fait réellement InfiniteTensor
+
+Dans infinite_tensor/infinite_tensor.py:390, _ensure_processed filtre chaque
+fenêtre déjà présente, déduplique les autres, matérialise récursivement toutes
+leurs dépendances, puis appelle _process_windows. Celui-ci découpe simplement
+la liste restante à batch_size, y compris sa dernière tranche incomplète
+(:452–492). Développer une requête vers seize coordonnées, puis déléguer à cet
+original, ne garantit donc pas un batch de seize : trois fenêtres déjà présentes
+produisent treize fenêtres manquantes.
+
+MemoryTileStore, tilestore/__init__.py:190–302, évince des fenêtres individuelles
+dans un LRU partagé entre stages. begin_access/end_access diffère les évictions
+jusqu'à la fin de l'accès externe, mais n'offre aucune atomicité persistante de
+groupe. Un groupe complet peut devenir partiel immédiatement après cet accès.
+La publication des résultats par _process_windows vérifie puis enregistre chaque
+sortie successivement : un échec à la validation de la quatrième sortie peut
+laisser les trois premières enregistrées. Une annulation avant f est sûre, mais
+ne transforme pas cette publication en transaction.
+
+Ce qu'exigerait une version correcte
+
+Définir une identité de groupe (stage, floor(i/4), floor(j/4)), avec division
+plancher pour les indices négatifs. Énumérer ses seize positions en ordre fixe.
+Un groupe partiellement présent doit être entièrement recalculé dans un seul
+forward seize, ou récupéré depuis un stockage véritablement atomique par groupe.
+Ne jamais passer uniquement ses manquants au filtre upstream.
+
+Les dépendances de chacune des seize positions doivent être complètes et épinglées
+avant le forward. Conserver les anciennes valeurs jusqu'à validation de toutes
+les nouvelles sorties, puis publier les seize sous la protection de l'accès et
+du verrou GPU. Un stockage par groupe serait plus propre, mais changerait le
+LRU ; un adaptateur local peut recalculer le groupe entier après toute éviction
+partielle, au prix de travail supplémentaire. Un marqueur « groupe complet »
+ne suffit pas si les seize membres ne sont plus effectivement présents.
+
+N'appliquer la politique qu'aux stages init_latent_map et step_latent_map_0,
+en conservant coarse/decoder scalaires, taper et ordre de somme des contributeurs
+dans read_pixels. Les compteurs actuels d'observation ne comptent que les indices
+initialement demandés : ajouter explicitement batches canoniques, fenêtres
+réellement exécutées, régénérations de groupes et travail excédentaire. Une
+nouvelle identité numérique est nécessaire ; aucun ancien cache n'est compatible
+par simple présomption.
+
+Coût géométrique déduit, sans mesure GPU
+
+Le latent a taille 64 et stride 32. Une fenêtre finale fusionnée requiert trois
+contributeurs init par axe. Pour seize fenêtres finales contiguës 4 × 4, l'union
+initiale minimale fait 6 × 6. Avec les mêmes groupes canoniques 4 × 4, ses bornes
+débordent d'une cellule des deux côtés : neuf groupes init doivent être calculés,
+soit 144 fenêtres initiales, puis seize finales. Cela représente dix forwards
+batch seize pour le premier groupe final froid, pas seulement un forward.
+
+L'exemple historique 11 × 11 fenêtres finales et 13 × 13 initiales, total 290,
+devient trois ou quatre groupes finaux par axe selon l'alignement. Après ajout
+de deux groupes init de marge par axe, les cas carrés extrêmes donnent
+144 + 400 = 544 ou 256 + 576 = 832 fenêtres. Ce sont des décomptes géométriques,
+pas des latences prédites. Les visites voisines peuvent amortir ces calculs, mais
+les miss froids et les caches de preview bornés peuvent subir une forte régression.
+Chaque groupe de seize sorties 6×64×64 FP32 occupe 1,5 Mio, hors activations.
+
+Fidélité et gates si cette piste est reprise ultérieurement
+
+Exiger des traces prouvant des batches strictement seize après chevauchements,
+annulations, évictions partielles et reconstruccions de stores. Comparer les mêmes
+fenêtres, puis les mêmes crops DEM et cinq climats après des historiques de
+demandes différents ; inclure seeds u64, coordonnées négatives, signes de zéro,
+styles terrestres, natural et pression mémoire. Distinguer invariance d'un crop
+fixe et égalité entre reconstructions de dimensions différentes.
+
+Le reçu historique canonical-latent-fidelity.json en batch scalaire contient déjà
+un écart baseline/canonical de 2,0418 m sur seed 0 et environ 0,09616 m dans ses
+comparaisons de permutations, avec de petits écarts climatiques. Il ne certifie
+donc pas à lui seul une invariance globale aux découpages. Garder la porte historique
+de 1 m pour une adoption compatible, et viser l'égalité octet par octet à historique
+variable dans la nouvelle identité ; une réussite ne s'étend pas automatiquement
+à un autre backend.
+
+Le padding à seize sans génération des voisins réduirait cette amplification,
+mais resterait une autre expérience : slots, préparation et sorties de kernels
+doivent être validés, et les lanes inutiles peuvent dégrader les petites requêtes.
+Cette alternative n'est pas implémentée non plus. À ce stade, les captures de
+formes terminales et leur éviction constituent une piste plus directement reliée
+aux ralentissements observés par le coordinateur.

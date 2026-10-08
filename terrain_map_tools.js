@@ -45,9 +45,12 @@
       try {
         const params = new URLSearchParams({session:s.session, epoch:String(s.publishedEpoch), profile:s.world.cache_profile,
           world_profile:s.generationProfile, mode:s.mode, coarse_revision:String(s.coarseRevision)});
+        if (tile.lod===4) params.set('coarse_interpolation',s.coarseInterpolation||'monotone');
+        if (tile.source_lod) params.set('source_lod',String(tile.source_lod));
         if (s.world.world_identity) params.set('world_identity', s.world.world_identity);
-        const response = await fetch(`/height/${s.world.version}/${tile.path}.bin?${params}`, {signal:controller.signal});
+        const response = await fetch(`${s.backendPrefix||''}/height/${s.world.version}/${tile.path}.bin?${params}`, {signal:controller.signal});
         if (!response.ok) throw Error('Elevation unavailable');
+        if(tile.source_lod&&Number(response.headers.get('X-Terrain-Source-Resolution'))!==30*2**tile.source_lod)throw Error('Unexpected elevation source');
         const bytes = await response.arrayBuffer(), width = Number(response.headers.get('X-Terrain-Width') || 304);
         const halo = Number(response.headers.get('X-Terrain-Halo') ?? 24);
         if (!Number.isInteger(width) || width <= 0 || halo < 0 || width <= 2*halo || bytes.byteLength < width*width*4) throw Error('Invalid elevation tile');
@@ -69,7 +72,7 @@
         clearTimeout(fetchTimer); fetchTimer = null;
         samples.clear(); clearMeasurement();
       }
-      const km = metres => (metres / 1000).toLocaleString(undefined, {minimumFractionDigits:2,maximumFractionDigits:5});
+      const km = metres => (metres / 1000).toLocaleString(undefined, {minimumFractionDigits:2,maximumFractionDigits:metres < 1000 ? 5 : 2});
       extent.textContent = s.world ? `Visible area: ${km(s.W*s.mpp)} × ${km(s.H*s.mpp)} km · ${s.W} × ${s.H} px (width × height)` : 'Visible area: —';
       distance.textContent = segment ? `Distance on map: ${distanceLabel(Math.hypot(segment.end.x-segment.start.x, segment.end.y-segment.start.y))}`
         : armed ? 'Distance: click and drag · Esc to cancel' : 'Distance: —';
@@ -79,7 +82,11 @@
       const point = worldPoint(pointer, s);
       if (!inside(point, s.worldBounds)) { altitude.textContent = 'Cursor elevation: outside world'; return; }
       const entry = s.visiblePlan.find(entry => inside(point, entry.bounds));
-      const tile = entry?.tile, data = tile?.heights ? tile : samples.get(tile);
+      // The saved initial image protects its rectangle from the draw plan, but
+      // the ordinary scheduler still loads its native physical tiles.
+      const tile = entry?.tile || (s.initialImage && s.currentLod === 0
+        ? [...s.tiles].find(tile => tile.lod === 0 && inside(point, tile.b)) : null);
+      const data = tile?.heights ? tile : samples.get(tile);
       const value = data ? sampleHeight(data, point) : null;
       const preview = tile?.stage === 'conditioning-preview' ? ' · input preview' : '';
       altitude.textContent = value === null ? 'Cursor elevation: waiting for terrain…' : `Cursor elevation: ${value.toFixed(1)} m${preview}`;

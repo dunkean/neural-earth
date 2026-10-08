@@ -31,6 +31,9 @@ def _defaults(base):
                 continental_strength=.8, macro_scale_km=600.,
                 frequency_mult=[1.] * 5, octaves=[4, 2, 4, 4, 4],
                 cond_snr=[.5] * 5 if natural else [.05, .5, .5, .5, .5],
+                snr_altitude_gain=[1.] * 5, snr_altitude_range_m=[500., 3000.],
+                snr_driver_channel='temperature', snr_driver_gain=[1.] * 5,
+                snr_driver_range=[5., -10.], snr_bins=16,
                 drop_water_pct=.5)
 
 
@@ -46,6 +49,12 @@ def generator_schema():
                 "frequency_mult": {"length": 5},
                 "octaves": {"length": 5, "minimum": 1, "integer": True},
                 "cond_snr": {"length": 5, "exclusiveMinimum": 0., "description": "Noise/signal amplitude; larger permits more learned correction"},
+                "snr_altitude_gain": {"length": 5, "minimum": .03125, "maximum": 32., "description": "Per-channel multiplier at the high altitude threshold; 1 disables"},
+                "snr_altitude_range_m": {"length": 2, "description": "Increasing land altitude thresholds in metres"},
+                "snr_driver_channel": {"enum": ["temperature", "temperature_variation", "precipitation", "precipitation_variation"]},
+                "snr_driver_gain": {"length": 5, "minimum": .03125, "maximum": 32., "description": "Per-channel multiplier at the second driver threshold; 1 disables"},
+                "snr_driver_range": {"length": 2, "description": "Driver thresholds; decreasing values allow stronger noise in cold climates"},
+                "snr_bins": {"minimum": 2, "maximum": 32, "integer": True},
                 "drop_water_pct": {"minimum": 0., "maximum": 1., "description": "Natural height distribution: removed ocean weight; 1 means land only"}}}
 
 
@@ -87,10 +96,14 @@ def _normalize(base, overrides):
             settings[key] = value
         elif "length" in spec:
             if not isinstance(value, (list, tuple)) or len(value) != spec["length"]:
-                raise ValueError(f"{key} must contain five values")
+                raise ValueError(f"{key} must contain {spec['length']} values")
             settings[key] = [_number(v, key, spec) for v in value]
         else:
             settings[key] = _number(value, key, spec)
+    if settings['snr_altitude_range_m'][0] >= settings['snr_altitude_range_m'][1]:
+        raise ValueError('snr_altitude_range_m must be increasing')
+    if settings['snr_driver_range'][0] == settings['snr_driver_range'][1]:
+        raise ValueError('snr_driver_range thresholds must differ')
     return settings
 
 
@@ -150,7 +163,14 @@ def resolve_generation(profile):
         if not isinstance(payload, dict) or set(payload) != {"version", "base_profile", "settings"}:
             raise ValueError("Invalid generation receipt schema")
         settings = _normalize(base, payload["settings"])
-        if payload != _payload(base, settings) or set(payload["settings"]) != set(settings) or _token(base, settings) != profile:
+        # Existing v1 links contain the complete original key set. Verify
+        # their original canonical token, then supply neutral new controls.
+        old_keys = set(settings) - {'snr_altitude_gain', 'snr_altitude_range_m', 'snr_driver_channel',
+                                    'snr_driver_gain', 'snr_driver_range', 'snr_bins'}
+        saved = payload['settings']
+        normalized_saved = {k: settings[k] for k in saved}
+        if (set(saved) not in (set(settings), old_keys) or payload != _payload(base, normalized_saved)
+                or _token(base, normalized_saved) != profile):
             raise ValueError("Generation receipt does not match its canonical token")
     except (OSError, json.JSONDecodeError, TypeError, KeyError) as exc:
         raise ValueError(f"Cannot resolve generation profile: {profile}") from exc

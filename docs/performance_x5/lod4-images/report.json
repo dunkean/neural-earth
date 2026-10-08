@@ -1,0 +1,631 @@
+{
+  "status": "complete",
+  "sources": {
+    "validate_coarse_interpolation.py": "054b27ad00cad0355203cc473a4e3cf2ada10dc989e09659333f6644bd7fed2e",
+    "terrain_interpolation.py": "ddd35210803c785cc50cabc7b589e2194810d63ec78c5dba44e94bc7bdda8524",
+    "terrain_server.py": "0e31004e7a413229409c2676bf68d8f30b8e7f744da6fdf8098d5abfa74ecf21",
+    "render_inference_comparisons.py": "2b43a6d0089aed312a5a9f63b2a1f82fb404dca465a1d1680749f7f9b3d0069b"
+  },
+  "source": {
+    "kind": "learned-coarse",
+    "seed": 42,
+    "profile": "natural",
+    "row": 0,
+    "col": -192,
+    "size": 160,
+    "capture_seconds": 2.1258338000043295,
+    "gpu_calls_before": {
+      "coarse": 0,
+      "base": 0,
+      "decoder": 0
+    },
+    "gpu_calls_after": {
+      "coarse": 500,
+      "base": 0,
+      "decoder": 0
+    },
+    "gpu_calls_delta": {
+      "coarse": 500,
+      "base": 0,
+      "decoder": 0
+    },
+    "inference": {
+      "version": "cuda-resident-window-v2",
+      "device": "cuda:0",
+      "device_selection": {
+        "requested": "auto",
+        "selected": {
+          "index": 0,
+          "name": "NVIDIA GeForce RTX 3090",
+          "uuid": "ba6b1922-7198-23f4-d020-8cc67e7f5800",
+          "memory_bytes": 25769279488,
+          "compute_capability": "8.6",
+          "sm_count": 82,
+          "clock_khz": 1695000,
+          "hardware_score": 138990000
+        },
+        "visible_devices": [
+          {
+            "index": 0,
+            "name": "NVIDIA GeForce RTX 3090",
+            "uuid": "ba6b1922-7198-23f4-d020-8cc67e7f5800",
+            "memory_bytes": 25769279488,
+            "compute_capability": "8.6",
+            "sm_count": 82,
+            "clock_khz": 1695000,
+            "hardware_score": 138990000
+          }
+        ],
+        "selection_method": "unbenchmarked SM-count \u00d7 clock hardware heuristic",
+        "driver": "610.60",
+        "multi_gpu_workers": false
+      },
+      "world_profile": "natural",
+      "conditioning_noise": [
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5
+      ],
+      "regional_snr": {
+        "enabled": false,
+        "cached_policies": 0
+      },
+      "climate_projection": null,
+      "profile": {
+        "name": "cuda-8-22g",
+        "coarse_batch": 1,
+        "latent_batch": 16,
+        "decoder_batch": 1,
+        "cached_weights": true,
+        "cached_coarse_embeddings": true,
+        "scalar_sync_removed": true,
+        "batched_latent_transfer": true,
+        "gpu_windows": true,
+        "cuda_graphs": true,
+        "graph_max_base_batch": 16,
+        "decoder_graphs": true,
+        "coarse_solver_graphs": true,
+        "canonical_latents": false,
+        "exact_kernels": true,
+        "attention_backend": "reference"
+      },
+      "cached_weight_layers": 32,
+      "cached_weight_bytes": 5595648,
+      "solver_steps": 20,
+      "latent_fusion_steps": 2,
+      "precision": "torch.bfloat16",
+      "compile": false,
+      "pointwise_kernels": {
+        "requested": true,
+        "preparation_errors": {},
+        "effective_by_device": {
+          "0": true
+        },
+        "runtime": {
+          "source_sha256": "57d7712eef38c63d93597390091014d4252afe24bb3c992131722cfd2d43b5f1",
+          "wrapper_sha256": "e532ccf0c79bbf844c84bdfd6257f0a530d76db51b8a0987a5903c044a8ee3b9",
+          "devices": [
+            0
+          ],
+          "compiler": "nvrtc",
+          "intermediate_precision": "explicit-bf16",
+          "fma": false,
+          "finite_bf16_silu_admitted_devices": [
+            0
+          ],
+          "sum_concat_probe_admitted_devices": [
+            0
+          ]
+        }
+      },
+      "window_cache_bytes": 2867200,
+      "cuda_graphs": {
+        "coarse": {
+          "buckets": 0,
+          "replay_calls": 0,
+          "pool_bytes": 0,
+          "max_bytes": 2147483648,
+          "memory_fallbacks": 0,
+          "capture_calls": 0,
+          "fallback_calls": 0,
+          "capture_errors": []
+        },
+        "base": {
+          "buckets": 0,
+          "replay_calls": 0,
+          "pool_bytes": 0,
+          "max_bytes": 2147483648,
+          "memory_fallbacks": 0,
+          "capture_calls": 0,
+          "fallback_calls": 0,
+          "capture_errors": []
+        },
+        "decoder": {
+          "buckets": 0,
+          "replay_calls": 0,
+          "pool_bytes": 0,
+          "max_bytes": 2147483648,
+          "memory_fallbacks": 0,
+          "capture_calls": 0,
+          "fallback_calls": 0,
+          "capture_errors": []
+        },
+        "coarse_solver": {
+          "buckets": 1,
+          "replay_calls": 25,
+          "pool_bytes": 14201344,
+          "max_bytes": 2147483648,
+          "memory_fallbacks": 0,
+          "capture_calls": 1,
+          "fallback_calls": 0,
+          "capture_errors": []
+        }
+      },
+      "coarse_persistence": null,
+      "windows": {
+        "base_coarse_map": {
+          "requests": 25,
+          "cache_hits": 0,
+          "generated": 25,
+          "regenerated_estimate": 0,
+          "unique_windows_estimate": 25,
+          "metadata_history_bytes": 1048576,
+          "request_scope": "internal_dependencies_and_external_reads",
+          "generated_scope": "store_materializations_including_disk_replay",
+          "seconds_inclusive": 2.12241
+        }
+      }
+    },
+    "gpu": "NVIDIA GeForce RTX 3090",
+    "torch": "2.11.0+cu128",
+    "cuda": "12.8",
+    "generation_settings": {
+      "climate_source": "natural",
+      "cond_snr": [
+        0.5,
+        0.5,
+        0.5,
+        0.5,
+        0.5
+      ],
+      "continental_strength": 0.8,
+      "continental_style": "earthlike",
+      "drop_water_pct": 0.5,
+      "frequency_mult": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "height_source": "natural",
+      "macro_scale_km": 600.0,
+      "octaves": [
+        4,
+        2,
+        4,
+        4,
+        4
+      ],
+      "snr_altitude_gain": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "snr_altitude_range_m": [
+        500.0,
+        3000.0
+      ],
+      "snr_bins": 16,
+      "snr_driver_channel": "temperature",
+      "snr_driver_gain": [
+        1.0,
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "snr_driver_range": [
+        5.0,
+        -10.0
+      ]
+    },
+    "source_sha256": "ac8948ef3aa19161aa8d7d46a46e7b45d44560a626c72c41d99bae11f5c72108",
+    "sources": {
+      "terrain_diffusion.inference.world_pipeline": {
+        "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain-diffusion\\terrain_diffusion\\inference\\world_pipeline.py",
+        "sha256": "9bcb496cd61a7a1aa2d1e75c4279be2b387db860ff6eec1f27fa12eebaf977f0"
+      },
+      "terrain_inference": {
+        "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_inference.py",
+        "sha256": "c7f70713994809f86ed55c83964e2cbf16d92c1d419fdabf5c249e0d93a95f75"
+      },
+      "terrain_app": {
+        "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_app.py",
+        "sha256": "51e50badf9cf36517d25f0392f89619955f83ab384738547b4dbce4ef5745e83"
+      },
+      "terrain_window_scheduler": {
+        "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_window_scheduler.py",
+        "sha256": "dbb420902247815ec097c5464e798aa7621a59c427eccaf5d644629549106daa"
+      },
+      "terrain_nn_constants": {
+        "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_nn_constants.py",
+        "sha256": "53301ec825bf7de6b1d8d9e132e9e88e22b887aa9422d69671373d9c5547f082"
+      },
+      "terrain_cuda_kernels": {
+        "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_cuda_kernels.py",
+        "sha256": "e532ccf0c79bbf844c84bdfd6257f0a530d76db51b8a0987a5903c044a8ee3b9"
+      },
+      "terrain_coarse_graph": {
+        "path": "D:\\Workspace\\Self\\RPG\\infinite_map\\terrain_coarse_graph.py",
+        "sha256": "ef07cdbca136ce7618301e165d02d9b5669624adf2aaff4e6388dac365458efb"
+      }
+    }
+  },
+  "peak_coarse_height_m": 4942.93896484375,
+  "peak_coarse_index": [
+    71,
+    -95
+  ],
+  "mosaic_origin_tile": [
+    -7,
+    3
+  ],
+  "lod": 4,
+  "resolution_m": 480,
+  "source_resolution_m": 7680,
+  "coarse_cell_width_display_pixels": 16,
+  "tiles": [
+    {
+      "tx": -7,
+      "ty": 3,
+      "dx": 0,
+      "dy": 0,
+      "source_reads": [
+        [
+          "coarse",
+          -115,
+          45,
+          -93,
+          67
+        ]
+      ]
+    },
+    {
+      "tx": -6,
+      "ty": 3,
+      "dx": 1,
+      "dy": 0,
+      "source_reads": [
+        [
+          "coarse",
+          -99,
+          45,
+          -77,
+          67
+        ]
+      ]
+    },
+    {
+      "tx": -7,
+      "ty": 4,
+      "dx": 0,
+      "dy": 1,
+      "source_reads": [
+        [
+          "coarse",
+          -115,
+          61,
+          -93,
+          83
+        ]
+      ]
+    },
+    {
+      "tx": -6,
+      "ty": 4,
+      "dx": 1,
+      "dy": 1,
+      "source_reads": [
+        [
+          "coarse",
+          -99,
+          61,
+          -77,
+          83
+        ]
+      ]
+    }
+  ],
+  "same_source_halos": true,
+  "seams": [
+    {
+      "mode": "bilinear",
+      "stage": "raw",
+      "axis": "x",
+      "pair": 0,
+      "trim": 0,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "bilinear",
+      "stage": "raw",
+      "axis": "x",
+      "pair": 1,
+      "trim": 0,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "bilinear",
+      "stage": "raw",
+      "axis": "y",
+      "pair": 0,
+      "trim": 0,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "bilinear",
+      "stage": "raw",
+      "axis": "y",
+      "pair": 1,
+      "trim": 0,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "bilinear",
+      "stage": "filtered",
+      "axis": "x",
+      "pair": 0,
+      "trim": 3,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "bilinear",
+      "stage": "filtered",
+      "axis": "x",
+      "pair": 1,
+      "trim": 3,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "bilinear",
+      "stage": "filtered",
+      "axis": "y",
+      "pair": 0,
+      "trim": 3,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "bilinear",
+      "stage": "filtered",
+      "axis": "y",
+      "pair": 1,
+      "trim": 3,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "smooth",
+      "stage": "raw",
+      "axis": "x",
+      "pair": 0,
+      "trim": 0,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "smooth",
+      "stage": "raw",
+      "axis": "x",
+      "pair": 1,
+      "trim": 0,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "smooth",
+      "stage": "raw",
+      "axis": "y",
+      "pair": 0,
+      "trim": 0,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "smooth",
+      "stage": "raw",
+      "axis": "y",
+      "pair": 1,
+      "trim": 0,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "smooth",
+      "stage": "filtered",
+      "axis": "x",
+      "pair": 0,
+      "trim": 3,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "smooth",
+      "stage": "filtered",
+      "axis": "x",
+      "pair": 1,
+      "trim": 3,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "smooth",
+      "stage": "filtered",
+      "axis": "y",
+      "pair": 0,
+      "trim": 3,
+      "max_abs_m": 0.0
+    },
+    {
+      "mode": "smooth",
+      "stage": "filtered",
+      "axis": "y",
+      "pair": 1,
+      "trim": 3,
+      "max_abs_m": 0.0
+    }
+  ],
+  "max_seam_error_m": 0.0,
+  "display_change": {
+    "max_abs_m": 728.93701171875,
+    "mae_m": 39.829429626464844,
+    "rmse_m": 67.32027400281663
+  },
+  "interpolation_timings": {
+    "bilinear_interpolation_ms": {
+      "median_ms": 4.067100002430379,
+      "maximum_ms": 7.741699984762818,
+      "samples_ms": [
+        4.0487999795004725,
+        6.312499986961484,
+        7.741699984762818,
+        3.888599982019514,
+        5.707699980121106,
+        3.922900010365993,
+        4.098799952771515,
+        4.223100026138127,
+        4.113800008781254,
+        3.9554000250063837,
+        4.079199978150427,
+        3.9015000220388174,
+        4.052300006151199,
+        4.0210000006482005,
+        3.8505999837070704,
+        3.8734000409021974,
+        4.036700003780425,
+        4.253999970387667,
+        4.104199993889779,
+        3.8758000009693205,
+        4.144400008954108,
+        3.839300014078617,
+        4.1517000063322484,
+        4.055000026710331,
+        4.307199968025088,
+        4.380099999252707,
+        4.374799958895892,
+        3.9555999683216214,
+        5.357299989555031,
+        3.8112999754957855
+      ]
+    },
+    "smooth_interpolation_ms": {
+      "median_ms": 7.719550019828603,
+      "maximum_ms": 10.281900002155453,
+      "samples_ms": [
+        9.214699966832995,
+        10.281900002155453,
+        8.120500016957521,
+        8.164300001226366,
+        8.537299989257008,
+        8.116600045468658,
+        6.746599974576384,
+        6.995700008701533,
+        7.743099995423108,
+        7.354300003498793,
+        7.463200017809868,
+        8.366300025954843,
+        7.696000044234097,
+        7.448500022292137,
+        7.816599973011762,
+        8.237400033976883,
+        7.076299982145429,
+        6.617899984121323,
+        8.929500007070601,
+        7.23019998986274,
+        7.098899979609996,
+        8.997900004033,
+        7.280199963133782,
+        7.2908999864012,
+        8.717000018805265,
+        7.62269995175302,
+        8.728599990718067,
+        7.918999996036291,
+        7.441300025675446,
+        7.539000012911856
+      ]
+    },
+    "bilinear_gaussian_ms": {
+      "median_ms": 1.0271500214003026,
+      "maximum_ms": 1.6352999955415726,
+      "samples_ms": [
+        0.8895999635569751,
+        1.4458000077866018,
+        1.3606000575236976,
+        0.9604999795556068,
+        1.6352999955415726,
+        0.9726000134833157,
+        1.0260000126436353,
+        1.0138999787159264,
+        1.02830003015697,
+        0.9872000082395971,
+        1.0364999761804938,
+        0.9877000120468438,
+        1.0127999703399837,
+        1.0067999828606844,
+        1.0891000274568796,
+        0.970900000538677,
+        1.0410999529995024,
+        1.0751999798230827,
+        1.0338000138290226,
+        1.1162000009790063,
+        1.0415000142529607,
+        0.9671999723650515,
+        1.0154999908991158,
+        1.0986999841406941,
+        1.0064999805763364,
+        1.1056999792344868,
+        1.0228999890387058,
+        1.038899994455278,
+        1.0429999674670398,
+        0.9516000282019377
+      ]
+    },
+    "smooth_gaussian_ms": {
+      "median_ms": 0.8436000207439065,
+      "maximum_ms": 1.4541000127792358,
+      "samples_ms": [
+        0.8450000314041972,
+        1.4541000127792358,
+        1.044799981173128,
+        0.8428000146523118,
+        0.8308000396937132,
+        0.8241000468842685,
+        0.7919000345282257,
+        0.8290999685414135,
+        0.9050000226125121,
+        0.8313999860547483,
+        1.3681999989785254,
+        0.8307000389322639,
+        0.8444000268355012,
+        0.8809000137262046,
+        0.8777999901212752,
+        0.8278999594040215,
+        0.7888000109232962,
+        0.9024000028148293,
+        1.4175999676808715,
+        0.8750999695621431,
+        0.7951000006869435,
+        0.7902000215835869,
+        0.8087999885901809,
+        0.9108000085689127,
+        1.1880999663844705,
+        0.8114000083878636,
+        1.2974999845027924,
+        0.824799994006753,
+        0.9157000458799303,
+        0.8067999733611941
+      ]
+    }
+  },
+  "comparison_neural_calls": 0,
+  "comparison_source": "sealed CPU views of one saved coarse crop",
+  "caveat": "Deliberate preview interpolation change, not a new neural prediction or global seam proof",
+  "arrays_sha256": "79043f82b1c7ca96513ba43378b4293d53b6ad80adcb871d852ba72a8a0fd455"
+}

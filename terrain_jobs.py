@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 import threading
 import time
+from terrain_profiling import instant, span, trace
 
 
 class JobCancelled(Exception):
@@ -35,6 +36,10 @@ class Job:
     error: object = None
     started: float = 0
     compute_seconds: float = 0
+    lane: str = 'gpu'
+    admitted: float = 0
+    slot_wait_seconds: float = 0
+    queue_seconds: float = 0
 
     def wait(self, timeout=300):
         if not self.event.wait(timeout):
@@ -55,9 +60,12 @@ class TerrainJobs:
         self.current = threading.local()
         self.closed = False
         self.worker = None
+        self.preview_workers = []
         self.cpu = ThreadPoolExecutor(max_workers=cpu_workers, thread_name_prefix='terrain-encode')
+        self.preview_cpu = ThreadPoolExecutor(max_workers=cpu_workers, thread_name_prefix='terrain-preview-encode')
         # Avoid unbounded detached elevation arrays if rendering is slower than CUDA.
         self.cpu_slots = threading.Semaphore(cpu_workers + 1)
+        self.preview_slots = threading.Semaphore(cpu_workers + 1)
         self.metrics = dict(submitted=0, deduplicated=0, cancelled_queued=0,
                             cancelled_computing=0,
                             completed=0, failed=0, obsolete_completed=0,
@@ -120,7 +128,9 @@ class TerrainJobs:
             self.metrics['cancelled_queued'] += 1
 
     def submit(self, key, compute, finalize=lambda value: value,
-               session=None, epoch=0, priority=2000):
+               session=None, epoch=0, priority=2000, lane='gpu'):
+        if lane not in ('gpu', 'cpu'):
+            raise ValueError('Unknown terrain compute lane')
         with self.condition:
             self._expire_locked()
             if self.closed:
@@ -132,6 +142,7 @@ class TerrainJobs:
                 view['touched'] = time.monotonic()
                 priority = view['wants'][key]
             job = self.jobs.get(key)
+            deduplicated = job is not None
             if job:
                 self.metrics['deduplicated'] += 1
             else:
@@ -139,6 +150,7 @@ class TerrainJobs:
                     raise QueueFull('File de terrain pleine')
                 self.sequence += 1
                 job = Job(key, compute, finalize, priority, self.sequence)
+                job.lane = lane
                 self.jobs[key] = job
                 self.metrics['submitted'] += 1
             if session:
@@ -146,17 +158,25 @@ class TerrainJobs:
             else:
                 job.legacy = True
             self._priority_locked(job)
-            if self.worker is None:
+            instant('job.deduplicated' if deduplicated else 'job.admitted', key=key, sequence=job.sequence, lane=job.lane)
+            if job.lane == 'gpu' and self.worker is None:
                 self.worker = threading.Thread(target=self._run, name='terrain-compute', daemon=True)
                 self.worker.start()
+            if job.lane == 'cpu' and not self.preview_workers:
+                for index in range(2):
+                    worker = threading.Thread(target=self._run, args=('cpu',), name=f'terrain-preview-{index}', daemon=True)
+                    self.preview_workers.append(worker)
+                    worker.start()
             self.condition.notify_all()
             return job
 
-    def _run(self):
+    def _run(self, lane='gpu'):
+        slots = self.cpu_slots if lane == 'gpu' else self.preview_slots
+        encoder = self.cpu if lane == 'gpu' else self.preview_cpu
         while True:
             with self.condition:
                 self._expire_locked()
-                ready = [j for j in self.jobs.values() if j.state == 'queued']
+                ready = [j for j in self.jobs.values() if j.state == 'queued' and j.lane == lane]
                 if not ready:
                     if self.closed:
                         return
@@ -168,19 +188,26 @@ class TerrainJobs:
                 job = min(ready, key=lambda j: (int(j.priority // 1000),
                           j.priority % 1000 - min(50, now-j.created), j.sequence))
                 job.state = 'computing'
-                job.started = now
-                self.metrics['last_queue_seconds'] = now-job.created
-            self.cpu_slots.acquire()
+                job.admitted = now
+                job.queue_seconds = now-job.created
+                self.metrics['last_queue_seconds'] = job.queue_seconds
+            slot_started = time.monotonic()
+            with trace(job.sequence), span('job.finalizer_backpressure', lane=lane):
+                slots.acquire()
             try:
                 self.current.job = job
-                value = job.compute()
+                job.slot_wait_seconds = time.monotonic()-slot_started
+                self.check_current_interest()
+                job.started = time.monotonic()
+                with trace(job.sequence), span('job.compute', key=job.key, lane=lane):
+                    value = job.compute()
                 job.compute_seconds = time.monotonic()-job.started
                 with self.condition:
                     job.state = 'encoding'
                     self.metrics['compute_seconds'] += job.compute_seconds
-                self.cpu.submit(self._finish, job, value)
+                encoder.submit(self._finish, job, value)
             except BaseException as error:
-                self.cpu_slots.release()
+                slots.release()
                 self._complete(job, error=error)
             finally:
                 self.current.job = None
@@ -198,12 +225,17 @@ class TerrainJobs:
     def _finish(self, job, value):
         started = time.monotonic()
         try:
-            result = job.finalize(value)
+            self.current.job = job
+            if job.lane == 'cpu':
+                self.check_current_interest()
+            with trace(job.sequence), span('job.finalize', key=job.key, lane=job.lane):
+                result = job.finalize(value)
             self._complete(job, result=result, encode_seconds=time.monotonic()-started)
         except BaseException as error:
             self._complete(job, error=error, encode_seconds=time.monotonic()-started)
         finally:
-            self.cpu_slots.release()
+            self.current.job = None
+            (self.cpu_slots if job.lane == 'gpu' else self.preview_slots).release()
 
     def _complete(self, job, result=None, error=None, encode_seconds=0):
         with self.condition:
@@ -225,7 +257,9 @@ class TerrainJobs:
                         queued=sum(j.state == 'queued' for j in self.jobs.values()),
                         computing=sum(j.state == 'computing' for j in self.jobs.values()),
                         encoding=sum(j.state == 'encoding' for j in self.jobs.values()),
-                        jobs=[dict(key=j.key, state=j.state, priority=j.priority)
+                        jobs=[dict(key=j.key, state=j.state, priority=j.priority, lane=j.lane,
+                                   queue_seconds=j.queue_seconds, slot_wait_seconds=j.slot_wait_seconds,
+                                   compute_seconds=j.compute_seconds)
                               for j in self.jobs.values()])
 
     def protected_keys(self):
@@ -244,4 +278,7 @@ class TerrainJobs:
             self.condition.notify_all()
         if self.worker:
             self.worker.join(timeout=10)
+        for worker in self.preview_workers:
+            worker.join(timeout=10)
         self.cpu.shutdown(wait=True)
+        self.preview_cpu.shutdown(wait=True)

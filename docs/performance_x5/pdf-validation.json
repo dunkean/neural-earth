@@ -1,0 +1,41 @@
+[
+  {
+    "model": "Opus 5.5 - high",
+    "pdf": "D:\\Workspace\\Self\\RPG\\infinite_map\\output\\pdf\\terrain-x5-opus-5.5.pdf",
+    "pages": 4,
+    "font_size": 10.5,
+    "words_per_source_page": [
+      649,
+      595,
+      624,
+      672
+    ],
+    "renderer": "PyMuPDF (Poppler unavailable)"
+  },
+  {
+    "model": "Astra - high",
+    "pdf": "D:\\Workspace\\Self\\RPG\\infinite_map\\output\\pdf\\terrain-x5-astra.pdf",
+    "pages": 4,
+    "font_size": 10.5,
+    "words_per_source_page": [
+      465,
+      496,
+      500,
+      496
+    ],
+    "renderer": "PyMuPDF (Poppler unavailable)"
+  },
+  {
+    "model": "Sol - xhigh",
+    "pdf": "D:\\Workspace\\Self\\RPG\\infinite_map\\output\\pdf\\terrain-x5-sol-xhigh.pdf",
+    "pages": 4,
+    "font_size": 10.5,
+    "words_per_source_page": [
+      442,
+      487,
+      494,
+      464
+    ],
+    "renderer": "PyMuPDF (Poppler unavailable)"
+  }
+]

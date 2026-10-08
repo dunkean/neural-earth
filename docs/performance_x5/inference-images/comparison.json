@@ -1,0 +1,255 @@
+{
+  "reference": {
+    "path": "E:\\TerrainDiffusionRuntime\\inference-engine-20261008\\engine-reference.npz",
+    "sha256": "9cab612078c9fef4ca0ec1e35c11cddda76e4faeff31df8418d94929eade90d6",
+    "label": "engine-reference",
+    "status": "complete",
+    "receipt_sha": "60017d7da6a568457e069ba9183da154622597a18f684db7c827954717fe44a8"
+  },
+  "altitude_scale_m": [
+    -4425.9990234375,
+    2026.190185546875
+  ],
+  "candidates": [
+    {
+      "path": "E:\\TerrainDiffusionRuntime\\inference-engine-20261008\\engine-exact.npz",
+      "sha256": "9cab612078c9fef4ca0ec1e35c11cddda76e4faeff31df8418d94929eade90d6",
+      "label": "engine-exact",
+      "status": "complete",
+      "receipt_sha": "0f19b922e2b7e3b024440602e4816dab80e6873a1b27b6a183262c65d5bf401a",
+      "cases": [
+        {
+          "key": "lod2_case0",
+          "lod": 2,
+          "resolution_m": 120.0,
+          "shape": [
+            304,
+            304
+          ],
+          "metrics": {
+            "mae_m": 0.0,
+            "rmse_m": 0.0,
+            "max_abs_m": 0.0,
+            "bias_m": 0.0,
+            "nonfinite_pairs": 0,
+            "numeric_exact": true
+          },
+          "metadata": {
+            "seed": 42,
+            "tx": -14,
+            "ty": 10,
+            "stage": "decoder"
+          },
+          "images": [
+            "lod2_case0-overview.png",
+            "lod2_case0-zooms.png",
+            "lod2_case0-profiles.png"
+          ]
+        },
+        {
+          "key": "lod2_case1",
+          "lod": 2,
+          "resolution_m": 120.0,
+          "shape": [
+            304,
+            304
+          ],
+          "metrics": {
+            "mae_m": 0.0,
+            "rmse_m": 0.0,
+            "max_abs_m": 0.0,
+            "bias_m": 0.0,
+            "nonfinite_pairs": 0,
+            "numeric_exact": true
+          },
+          "metadata": {
+            "seed": 0,
+            "tx": -1,
+            "ty": -1,
+            "stage": "decoder"
+          },
+          "images": [
+            "lod2_case1-overview.png",
+            "lod2_case1-zooms.png",
+            "lod2_case1-profiles.png"
+          ]
+        },
+        {
+          "key": "lod2_case2",
+          "lod": 2,
+          "resolution_m": 120.0,
+          "shape": [
+            304,
+            304
+          ],
+          "metrics": {
+            "mae_m": 0.0,
+            "rmse_m": 0.0,
+            "max_abs_m": 0.0,
+            "bias_m": 0.0,
+            "nonfinite_pairs": 0,
+            "numeric_exact": true
+          },
+          "metadata": {
+            "seed": 43,
+            "tx": 2,
+            "ty": 1,
+            "stage": "decoder"
+          },
+          "images": [
+            "lod2_case2-overview.png",
+            "lod2_case2-zooms.png",
+            "lod2_case2-profiles.png"
+          ]
+        },
+        {
+          "key": "lod2_case3",
+          "lod": 2,
+          "resolution_m": 120.0,
+          "shape": [
+            304,
+            304
+          ],
+          "metrics": {
+            "mae_m": 0.0,
+            "rmse_m": 0.0,
+            "max_abs_m": 0.0,
+            "bias_m": 0.0,
+            "nonfinite_pairs": 0,
+            "numeric_exact": true
+          },
+          "metadata": {
+            "seed": 42,
+            "tx": -14,
+            "ty": 10,
+            "stage": "decoder"
+          },
+          "images": [
+            "lod2_case3-overview.png",
+            "lod2_case3-zooms.png",
+            "lod2_case3-profiles.png"
+          ]
+        },
+        {
+          "key": "lod3_case0",
+          "lod": 3,
+          "resolution_m": 240.0,
+          "shape": [
+            304,
+            304
+          ],
+          "metrics": {
+            "mae_m": 0.0,
+            "rmse_m": 0.0,
+            "max_abs_m": 0.0,
+            "bias_m": 0.0,
+            "nonfinite_pairs": 0,
+            "numeric_exact": true
+          },
+          "metadata": {
+            "seed": 42,
+            "tx": -14,
+            "ty": 10,
+            "stage": "latent"
+          },
+          "images": [
+            "lod3_case0-overview.png",
+            "lod3_case0-zooms.png",
+            "lod3_case0-profiles.png"
+          ]
+        },
+        {
+          "key": "lod3_case1",
+          "lod": 3,
+          "resolution_m": 240.0,
+          "shape": [
+            304,
+            304
+          ],
+          "metrics": {
+            "mae_m": 0.0,
+            "rmse_m": 0.0,
+            "max_abs_m": 0.0,
+            "bias_m": 0.0,
+            "nonfinite_pairs": 0,
+            "numeric_exact": true
+          },
+          "metadata": {
+            "seed": 0,
+            "tx": -1,
+            "ty": -1,
+            "stage": "latent"
+          },
+          "images": [
+            "lod3_case1-overview.png",
+            "lod3_case1-zooms.png",
+            "lod3_case1-profiles.png"
+          ]
+        },
+        {
+          "key": "lod3_case2",
+          "lod": 3,
+          "resolution_m": 240.0,
+          "shape": [
+            304,
+            304
+          ],
+          "metrics": {
+            "mae_m": 0.0,
+            "rmse_m": 0.0,
+            "max_abs_m": 0.0,
+            "bias_m": 0.0,
+            "nonfinite_pairs": 0,
+            "numeric_exact": true
+          },
+          "metadata": {
+            "seed": 43,
+            "tx": 2,
+            "ty": 1,
+            "stage": "latent"
+          },
+          "images": [
+            "lod3_case2-overview.png",
+            "lod3_case2-zooms.png",
+            "lod3_case2-profiles.png"
+          ]
+        },
+        {
+          "key": "lod3_case3",
+          "lod": 3,
+          "resolution_m": 240.0,
+          "shape": [
+            304,
+            304
+          ],
+          "metrics": {
+            "mae_m": 0.0,
+            "rmse_m": 0.0,
+            "max_abs_m": 0.0,
+            "bias_m": 0.0,
+            "nonfinite_pairs": 0,
+            "numeric_exact": true
+          },
+          "metadata": {
+            "seed": 42,
+            "tx": -14,
+            "ty": 10,
+            "stage": "latent"
+          },
+          "images": [
+            "lod3_case3-overview.png",
+            "lod3_case3-zooms.png",
+            "lod3_case3-profiles.png"
+          ]
+        }
+      ],
+      "error_scale_m": [
+        -1.0,
+        1.0
+      ],
+      "missing_reference_keys": []
+    }
+  ],
+  "cpu_only": true,
+  "warning": "Local arrays including benchmark halo; not proof of global tile seams. No screenshot or GPU timing."
+}

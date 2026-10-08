@@ -205,9 +205,23 @@ class ProtocolTests(unittest.TestCase):
         cls.server.app.testing=True
     @classmethod
     def tearDownClass(cls):
-        cls.server.jobs.close();cls.server.disk_cache.close();cls.temporary.cleanup()
+        cls.server.jobs.close();cls.server.physical_delivery.close();cls.server.disk_cache.close();cls.temporary.cleanup()
     def setUp(self):
+        self.server.physical_delivery.flush()
         self.client=self.server.app.test_client()
+
+    def test_busy_gpu_is_unknown_not_a_fresh_cpu_preview_admission(self):
+        entered,release=threading.Event(),threading.Event()
+        def hold():
+            with self.server.gpu_lock:
+                entered.set();release.wait(2)
+        thread=threading.Thread(target=hold)
+        thread.start()
+        try:
+            self.assertTrue(entered.wait(1))
+            self.assertIsNone(self.server.learned_tile_state(42,'natural',11,0,0))
+        finally:
+            release.set();thread.join(2)
     def test_seed_manifest_matches_actual_export(self):
         (self.output/'terrain.json').write_text(json.dumps(dict(seed='17',resolution=30,x=-2,y=3,width=4,height=5)))
         (self.output/'terrain.png').write_bytes(b'placeholder')
@@ -273,6 +287,82 @@ class ProtocolTests(unittest.TestCase):
             'world_profile':b,'world_identity':self.server.world_manifest(9797,a)['world_hash']})
         self.assertEqual(stale.status_code,400)
 
+    def test_lod4_interpolation_separates_interest_physical_and_png_caches(self):
+        from flask import has_request_context
+        server=self.server
+        seed=9798
+        monotone_key=server.request_tile_key(seed,4,0,0,'natural',coarse_interpolation='monotone')
+        bilinear_key=server.request_tile_key(seed,4,0,0,'natural',coarse_interpolation='bilinear')
+        self.assertNotEqual(monotone_key,bilinear_key)
+        self.assertEqual(server.request_tile_key(seed,3,0,0,'natural',coarse_interpolation='monotone'),
+                         server.request_tile_key(seed,3,0,0,'natural',coarse_interpolation='bilinear'))
+        physical_paths={option:server._physical_paths(seed,4,0,0,'natural',option)
+                        for option in ('monotone','bilinear')}
+        self.assertNotEqual(physical_paths['monotone'],physical_paths['bilinear'])
+        for option,key in (('monotone',monotone_key),('bilinear',bilinear_key)):
+            self.assertEqual(server.disk_cache._key(physical_paths[option][0]),key)
+
+        calls=[]
+        def sample(world,actual_seed,profile,lod,tx,ty,*,coarse_interpolation):
+            self.assertFalse(has_request_context())
+            self.assertEqual((actual_seed,lod,tx,ty),(seed,4,0,0))
+            calls.append(coarse_interpolation)
+            value=1. if coarse_interpolation=='monotone' else 2.
+            return (np.full((304,304),value,np.float32),
+                    np.zeros((5,33,33),np.float32),'coarse')
+        def render(elevation,*args,**kwargs):
+            return np.full((2,2,3),int(elevation[0,0]),np.uint8)
+        with patch.object(server,'get_world',return_value=object()),\
+             patch.object(server,'sample_physical',side_effect=sample),\
+             patch.object(server,'render_elevation',side_effect=render):
+            for epoch,option in enumerate(('monotone','bilinear'),start=1):
+                view=self.client.post('/api/view',json=dict(session='interpolation_view',epoch=epoch,
+                    seed=str(seed),world_profile='natural',coarse_interpolation=option,
+                    tiles=[dict(lod=4,tx=0,ty=0,priority=2000)]))
+                self.assertEqual(view.status_code,200)
+                self.assertIn(server.request_tile_key(seed,4,0,0,'natural',coarse_interpolation=option),
+                              server.jobs.views['interpolation_view']['wants'])
+                height=self.client.get(f'/height/natural-v1/{seed}/4/0/0.bin',
+                    query_string={'coarse_interpolation':option})
+                self.assertEqual(height.status_code,200)
+                self.assertEqual(height.headers['X-Terrain-Coarse-Interpolation'],option)
+                self.assertTrue(np.all(np.frombuffer(height.data,dtype='<f4')==float(epoch)))
+                png=self.client.get(f'/tiles/natural-v1/{seed}/4/0/0.png',
+                    query_string={'coarse_interpolation':option})
+                self.assertEqual(png.status_code,200)
+                self.assertEqual(png.headers['X-Terrain-Coarse-Interpolation'],option)
+                if option=='monotone':
+                    monotone_png=png.data
+                else:
+                    self.assertNotEqual(png.data,monotone_png)
+                png.close()
+            for option,value in (('monotone',1.),('bilinear',2.)):
+                repeat=self.client.get(f'/height/natural-v1/{seed}/4/0/0.bin',
+                    query_string={'coarse_interpolation':option})
+                self.assertEqual(repeat.status_code,200)
+                self.assertEqual(repeat.headers['X-Terrain-Cache'],'hit')
+                self.assertTrue(np.all(np.frombuffer(repeat.data,dtype='<f4')==value))
+        self.assertEqual(calls,['monotone','bilinear'])
+        invalid=self.client.get(f'/height/natural-v1/{seed}/4/0/0.bin',
+            query_string={'coarse_interpolation':'bicubic'})
+        self.assertEqual(invalid.status_code,400)
+        invalid_view=self.client.post('/api/view',json=dict(session='interpolation_view',epoch=3,
+            seed=str(seed),coarse_interpolation='bicubic',tiles=[]))
+        self.assertEqual(invalid_view.status_code,400)
+
+    def test_lod4_interpolation_selects_only_coarse_sampling_filter(self):
+        def field(world,xs,ys,source,*,smooth_coarse):
+            self.assertEqual(source,'coarse')
+            return np.full((len(ys),len(xs)),2. if smooth_coarse else 1.,np.float32)
+        with patch.object(self.server,'sample_field',side_effect=field):
+            monotone,stage=self.server.sample_elevation(None,4,0,0,
+                                                          coarse_interpolation='monotone')
+            bilinear,_=self.server.sample_elevation(None,4,0,0,
+                                                     coarse_interpolation='bilinear')
+        self.assertEqual(stage,'coarse')
+        self.assertTrue(np.all(monotone==2.))
+        self.assertTrue(np.all(bilinear==1.))
+
     def test_world_manifest_keeps_startup_file_snapshot_for_new_seed(self):
         import terrain_manifest
         with patch.object(terrain_manifest,'_files',side_effect=AssertionError('rehash after startup')):
@@ -335,6 +425,116 @@ class ProtocolTests(unittest.TestCase):
             cached=self.client.get('/api/overview/natural-v1/9393.png?mode=biomes')
             cached.close()
             self.assertEqual(compute.call_count,4)
+    def test_latent_preview_has_distinct_subscription_cache_and_sampling_grid(self):
+        h=np.full((176,176),7.,np.float32);c=np.zeros((5,33,33),np.float32)
+        preview=object();native=object()
+        with patch.object(self.server,'get_preview_world',return_value=preview) as get_preview, \
+             patch.object(self.server,'get_world',return_value=native) as get_native, \
+             patch.object(self.server,'sample_latent_preview',return_value=(h,c,'latent')) as sample_preview, \
+             patch.object(self.server,'sample_physical',return_value=(np.ones((304,304),np.float32),c,'decoder')) as sample_native:
+            view=dict(session='patch_camera',epoch=1,seed='88112',tiles=[dict(lod=2,tx=-1,ty=-1,source_lod=3,priority=2000)])
+            self.assertEqual(self.client.post('/api/view',json=view).status_code,200)
+            url='/height/natural-v1/88112/2/-1/-1.bin?source_lod=3&session=patch_camera&epoch=1&climate=1'
+            first=self.client.get(url)
+            self.assertEqual(first.status_code,200,first.data[:200])
+            self.assertEqual(first.headers['X-Terrain-Width'],'176')
+            self.assertEqual(first.headers['X-Terrain-Resolution'],'240')
+            self.assertEqual(first.headers['X-Terrain-Stage'],'latent')
+            self.assertEqual(len(first.data),(176**2+5*33**2)*4)
+            self.assertEqual(self.client.get(url).headers['X-Terrain-Cache-Source'],'ram')
+            self.server.physical_delivery.flush()
+            key='natural-v1/natural/88112/2/-1/-1/source3'
+            paths=list(self.server.CACHE.rglob('*-source3/*.npy'))
+            self.assertTrue(paths)
+            self.assertEqual(self.server.disk_cache._key(paths[0]),key)
+            # The same geometric address without source3 is a separate job.
+            rejected=self.client.get('/height/natural-v1/88112/2/-1/-1.bin?session=patch_camera&epoch=1')
+            self.assertEqual(rejected.status_code,409)
+            final=self.client.get('/height/natural-v1/88112/2/-1/-1.bin')
+            self.assertEqual(final.status_code,200)
+            self.assertEqual(final.headers['X-Terrain-Stage'],'decoder')
+            self.assertEqual(sample_preview.call_count,1);self.assertEqual(sample_native.call_count,1)
+            self.assertEqual(get_preview.call_count,1);self.assertEqual(get_native.call_count,1)
+        for lod,source in ((0,3),(2,2),(3,3),(1,'bogus')):
+            self.assertEqual(self.client.get(f'/height/natural-v1/88112/{lod}/0/0.bin?source_lod={source}').status_code,400)
+
+    def test_latent_preview_png_reuses_disk_physical_data_with_source_shading(self):
+        height=np.ones((176,176),np.float32);climate=np.zeros((5,33,33),np.float32)
+        with patch.object(self.server,'get_preview_world',return_value=object()), \
+             patch.object(self.server,'sample_latent_preview',return_value=(height,climate,'latent')) as sample, \
+             patch.object(self.server,'render_elevation',return_value=np.zeros((128,128,3),np.uint8)) as render:
+            url='/height/natural-v1/88113/2/-1/-1.bin?source_lod=3'
+            self.assertEqual(self.client.get(url).status_code,200)
+            self.server.physical_delivery.flush()
+            # Simulate a restarted RAM delivery cache while retaining disk.
+            with self.server.physical_delivery.lock:
+                self.server.physical_delivery.entries.clear();self.server.physical_delivery.bytes=0
+            result=self.client.get('/tiles/natural-v1/88113/2/-1/-1.png?source_lod=3')
+            self.assertEqual(result.status_code,200,result.data[:200]);result.close()
+            self.assertEqual(result.headers['X-Terrain-Source-LOD'],'3')
+            self.assertEqual(result.headers['X-Terrain-Cache-Source'],'disk')
+            self.assertEqual(render.call_args.args[1],3,'CPU shader must use source sample spacing, not geometric LOD2')
+            self.assertEqual(sample.call_count,1)
+
+    def test_preview_view_read_batches_only_adjacent_interested_source3_tiles(self):
+        import terrain_window_scheduler
+        session='batch_camera';prefix='natural-v1/natural/42/2/'
+        wants={prefix+address:2000 for address in ('-4/2/source3','-3/2/source3','200/100/source3','-4/3')}
+        self.server.jobs.update_view(session,1,wants)
+        with patch.object(terrain_window_scheduler,'ensure_rect') as ensure:
+            self.assertEqual(self.server.prepare_preview_view(object(),42,'natural',2,-4,2,session),2)
+            _,stage,y0,x0,y1,x1=ensure.call_args.args
+            self.assertEqual(stage,'latent')
+            self.assertEqual((x0,x1),(-537,-231));self.assertEqual((y0,y1),(231,409))
+            self.assertLess((x1-x0)*(y1-y0),384**2)
+            self.assertEqual(ensure.call_args.kwargs['check'],self.server.jobs.check_current_interest)
+        self.server.jobs.update_view(session,2,{prefix+'-4/2/source3':2000})
+        with patch.object(terrain_window_scheduler,'ensure_rect') as ensure:
+            self.assertEqual(self.server.prepare_preview_view(object(),42,'natural',2,-4,2,session),1)
+            ensure.assert_not_called()
+
+    def test_latent_preview_grid_matches_parent_crop_including_negative_coordinates(self):
+        def field(world,xs,ys,source):
+            self.assertEqual(source,'latent')
+            return (xs[None,:]*.01+ys[:,None]*.02).astype(np.float32)
+        with patch.object(self.server,'sample_field',side_effect=field), \
+             patch.object(self.server,'sample_coarse_climate',return_value=np.zeros((5,33,33),np.float32)):
+            full=self.server.sample_elevation(object(),3,-1,-1)[0]
+            full=self.server.gaussian_filter(full,.65,mode='reflect').astype(np.float32)
+            for lod in (1,2):
+                count=2**(3-lod);inner=256//count
+                for x,y in ((0,0),(count-1,count-1)):
+                    patch_height,_,_=self.server.sample_latent_preview(object(),lod,-count+x,-count+y)
+                    np.testing.assert_array_equal(patch_height[24:-24,24:-24],full[24+y*inner:24+(y+1)*inner,24+x*inner:24+(x+1)*inner])
+
+    def test_optional_base_prewarm_failure_is_reported_without_discarding_model(self):
+        from terrain_cuda_graphs import CudaGraphModel
+        world=SimpleNamespace(base_model=object(),_terrain_profile=SimpleNamespace(latent_batch=16))
+        with patch('terrain_cuda_graphs.prewarm_base_forms',side_effect=RuntimeError('injected allocation failure')):
+            result=self.server.warm_base_forms(world)
+        self.assertEqual(result['state'],'failed')
+        self.assertFalse(result['fully_warmed'])
+        self.assertIn('injected allocation failure',result['error'])
+        self.assertEqual(result['warmup_cuda_forward_calls'],dict.fromkeys(self.server.gpu_calls,0))
+
+    def test_preview_worlds_have_isolated_bounded_stores_and_close_before_eviction(self):
+        made=[]
+        class World:
+            def __init__(self):
+                self.tile_store=object();self.closed=False
+                self._terrain_coarse_preparation=SimpleNamespace(close=lambda:made.append('drained'))
+            def empty_cache(self):pass
+            def close(self):self.closed=True;made.append('closed')
+        def create(seed,profile,limit):
+            self.assertEqual(limit,128*1024*1024);world=World();made.append(world);return world
+        with patch.object(self.server,'preview_worlds',OrderedDict()),patch.object(self.server,'_create_world',side_effect=create):
+            a=self.server.get_preview_world(1,'natural');b=self.server.get_preview_world(2,'natural')
+            self.assertIsNot(a.tile_store,b.tile_store)
+            self.assertIs(self.server.get_preview_world(1,'natural'),a)
+            self.server.get_preview_world(3,'natural')
+            self.assertTrue(b.closed);self.assertFalse(a.closed)
+            self.assertEqual(made[-2:],['drained','closed'])
+
     def test_height_png_share_compute_and_cache_profile(self):
         height=np.arange(304*304,dtype=np.float32).reshape(304,304)
         climate=np.zeros((5,33,33),dtype=np.float32)
@@ -574,10 +774,39 @@ class ProtocolTests(unittest.TestCase):
                 elapsed=time.monotonic()-started
             self.assertEqual(response.status_code,200)
             self.assertEqual(response.headers['X-Terrain-Stage'],'conditioning-preview')
+            self.assertEqual(response.headers['X-Terrain-Provisional'],'true')
+            self.assertEqual(response.headers['X-Terrain-Cache-Source'],'disk')
+            self.assertEqual(response.cache_control.max_age,0)
             self.assertLess(elapsed,.25)
         finally:
             release.set()
             thread.join(2)
+
+    def test_disk_reader_cannot_mix_height_climate_and_receipt_during_replacement(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root=Path(temporary);height=root/'height.npy';climate=root/'climate.npy';receipt=root/'receipt.json'
+            np.save(height,np.ones((2,2),np.float32));np.save(climate,np.full((5,2,2),10,np.float32))
+            receipt.write_text(json.dumps({'stage':'old'}))
+            key='coherent-replacement';entered,release,read=threading.Event(),threading.Event(),threading.Event()
+            result=[]
+            def writer():
+                with self.server.physical_locks[hash(key)%len(self.server.physical_locks)]:
+                    np.save(height,np.full((2,2),2,np.float32))
+                    entered.set();release.wait(2)
+                    np.save(climate,np.full((5,2,2),20,np.float32))
+                    receipt.write_text(json.dumps({'stage':'new'}))
+            def reader():
+                result.append(self.server.read_physical_disk(key,height,receipt,climate));read.set()
+            writing=threading.Thread(target=writer);reading=threading.Thread(target=reader)
+            writing.start()
+            try:
+                self.assertTrue(entered.wait(1));reading.start()
+                self.assertFalse(read.wait(.05))
+                release.set();self.assertTrue(read.wait(1))
+                self.assertEqual(result[0][0]['stage'],'new')
+                self.assertTrue(np.all(result[0][1][0]==2));self.assertTrue(np.all(result[0][1][1]==20))
+            finally:
+                release.set();writing.join(2);reading.join(2)
 
     def test_empty_existing_final_mip_is_a_cache_miss(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -81,6 +81,11 @@ def load_pipeline(seed):
             return hook
         for name, model in zip(gpu_calls, (pipeline.coarse_model, pipeline.base_model, pipeline.decoder_model)):
             model.register_forward_pre_hook(check_cuda(name))
+            def note_graph_forwards(x,count,name=name):
+                if not x.is_cuda:
+                    raise RuntimeError(f'Inference {name} ran outside CUDA')
+                gpu_calls[name] += count
+            model._terrain_note_graph_forwards=note_graph_forwards
     elif pipeline.seed != seed:
         pipeline.change_seed(seed)
     for model in (pipeline.coarse_model, pipeline.base_model, pipeline.decoder_model):

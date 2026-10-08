@@ -11,6 +11,9 @@ node_modules/
 !.env.example
 *_token
 
+# Local scratch files from benchmarks, reviews and document rendering.
+/tmp/
+
 # Reproducible outputs from the Orogen research probe.
 research_projects/orogen_probe/*.npy
 research_projects/orogen_probe/*.f32

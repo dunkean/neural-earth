@@ -1,0 +1,251 @@
+Préparation offline de quantification — base latent uniquement
+8 octobre 2026 — chunk4, désactivé en production
+
+Portée livrée
+
+terrain_quantization.py, prepare_terrain_quantization.py et leurs tests ne sont
+importés ni par terrain_inference, ni par le serveur. Aucun flag d’activation
+INT8 n’existe dans ce chunk. Aucun cache, modèle partagé, checkpoint ou module
+produit n’est modifié. Coarse/decoder et rôle natif sont refusés. Le seul rôle
+accepté est offline-base-preview ; la configuration attend cinq canaux et la
+condition58 du base. Les LOD natifs/refinement, dont MIN_LOD=-3, restent hors périmètre.
+
+Capture réelle à exécuter dans un créneau GPU exclusif
+
+Exemple de sites.json (coordonnées du lattice latent, non coordonnées de tuiles
+HTTP ; un crop64x64 représente64*240m par axe) :
+[
+  {"seed":42,"profile":"natural","row":-64,"col":32,"size":64},
+  {"seed":0,"profile":"terrestrial-earthlike","row":128,"col":-96,"size":64}
+]
+
+Commande depuis le dépôt, serveur arrêté :
+.venv/Scripts/python.exe prepare_terrain_quantization.py capture --sites E:/TerrainDiffusionRuntime/quant-sites.json --output E:/TerrainDiffusionRuntime/quant-capture-001 --max-calls 128
+
+Le collecteur lit réellement world.latents dans des mondes offline neufs. Les
+graphs sont désactivés pour que chaque hook voie les vrais appels, sans changer
+les batches16 ou les dépendances upstream. Il enregistre sample BF16, labels,
+condition58, seed/profil/coordonnées et paramètres de génération résolus. Les
+statistiques concernent les entrées réelles de chaque MPConv, les deux passes
+latentes comprises. Un site privé d’une des deux passes par le plafond max-calls
+fait échouer la capture ; les sites tardifs ne sont pas silencieusement certifiés.
+Les premières observations ne constituent pas un échantillonnage statistique
+équilibré : fournir un corpus de sites équilibré et un budget suffisant.
+
+Chaque couche conserve maximum absolu et somme carrée sur TOUS les éléments
+observés, nombre de calls/éléments et échantillon diagnostique borné32768valeurs.
+Le quantile de cet échantillon est descriptif ; il ne détermine pas les scales.
+La méthode initiale est minmax symétrique, sans clipping volontaire. Non-finis
+refusés. Les copies CPU et synchronisations des statistiques sont volontaires
+pour la calibration offline ; leurs temps ne sont pas des mesures de production.
+
+Une copie privée du base fige les poids MP après vector_norm, gain complet puis
+arrondi du dtype source, calculés sur le device source. Les gains out_gain et
+emb_gain sont intégrés ; FrozenMP conserve le type MPConv attendu par la branche
+conditionnelle de compute_embeddings. Recalculer ces normalisations sur CPU est
+interdit comme substitut présumé identique à CUDA. La capture compare chaque
+batch enregistré entre base original et copie figée, octet par octet, avant de
+publier l’archive. Le checkpoint source n’est jamais réécrit.
+
+Budget défaut : copie de poids source<=1024Mio ; packets d’entrées<=256Mio ;
+128forwards. Ce plafond de poids n’est pas un plafond du pic total : modèle
+original, deepcopy, buffers préparés, activations et modèles coarse/decoder
+coexistent. Prévoir environ500Mo supplémentaires pour des poids BF16 de cette
+taille, à mesurer réellement ; FP32 et sérialisation/export peuvent approcher
+ou dépasser1Go. Aucun quota VRAM global n’est prétendu. Échec explicite si un
+budget configuré est dépassé ; répertoire neuf requis pour chaque expérience.
+
+Identités et état
+
+capture.json porte running/complete/failed, SHA du checkpoint base/config,
+poids effectifs et gains, archive figée, chaque packet, sites/paramètres/scales,
+runtime Torch/CUDA et hash du préparateur. Les fichiers complets sont vérifiés
+avant export ; le manifeste est lié par SHA canonique. Les SHA sont une preuve
+de contenu, pas une signature d’origine. Les échecs restent conservés et ne
+peuvent pas être exportés comme succès. Les flags physical_holdout_passed et
+integer_gpu_execution_proven restent false.
+
+Export CPU
+
+.venv/Scripts/python.exe prepare_terrain_quantization.py export --capture E:/TerrainDiffusionRuntime/quant-capture-001 --output E:/TerrainDiffusionRuntime/quant-export-001
+
+Export legacy TorchScript ONNX opset19, dynamo=False : ne nécessite pas
+onnxscript. Deux fichiers : base-fp32-conversion.onnx puis base-int8-qdq.onnx.
+L’archive BF16 est promue en FP32 et les opérations exportées sont FP32. Il faut
+mesurer cette conversion séparément avant d’attribuer une erreur à l’INT8 ; ce
+graphe n’est pas annoncé comme équivalent BF16.
+
+Les Conv admissibles reçoivent des poids INT8 symétriques par canal de sortie,
+échelles FP32 et zéro INT8, DequantizeLinear axis0. Les activations reçoivent
+QuantizeLinear/DequantizeLinear à échelle statique issue de leur couche. Les
+Linear, normalisations, attention et convolutions sensibles restent FP32 dans
+cet export initial. Exclusions défaut : première convolution base dérivée du
+image_size réel, out_conv, attn_, emb_linear, conditional_layers, noise_, logvar_
+(seuls les motifs présents dans l’architecture sont retenus). --exclude répété
+remplace les autres motifs, mais conserve obligatoirement la protection de la
+première couche. Un motif personnalisé absent des couches figées est refusé.
+Toute modification change l’identité. Ce réglage est offline seulement.
+Toutes les Conv et ConvTranspose sont comptées : couches sans calibration,
+poids non initializer, exclusions sensibles et ConvTranspose conservées portent
+un motif distinct. Les couches sans calibration restent flottantes ; aucune
+convolution convertie entraîne un refus. L’inspection expose la couverture.
+
+ONNX Q/DQ décrit la quantification. Son interprétation CPU ou une déquantification
+vers une convolution FP32/BF16 ne prouve aucun gain GPU. La préparation n’exécute
+aucun moteur INT8 et ne contient aucun faux benchmark quant-dequant BF16.
+
+Builder TensorRT optionnel, GPU exclusif
+
+TensorRT n’est pas installé dans l’environnement au moment de ce chunk. Aucune
+installation n’a été faite. Une version Windows compatible driver/CUDA/Python
+devra être épinglée dans un environnement expérimental avant cette commande :
+.venv/Scripts/python.exe prepare_terrain_quantization.py build --onnx E:/TerrainDiffusionRuntime/quant-export-001/base-int8-qdq.onnx --output E:/TerrainDiffusionRuntime/quant-engine-001 --workspace-mib 512 --max-batch 16
+
+Le builder vérifie l’identité d’un export Q/DQ, refuse un fichier arbitraire,
+cible explicitement TensorRT10.x avec réseau STRONGLY_TYPED, utilise batch
+dynamique1..16 sans padding, et borne le workspace à512Mio par
+défaut (maximum autorisé2048Mio). Il publie plan, layers.json issu de l’inspecteur
+détaillé et build.json. Le workspace ne borne pas le pic total du builder.
+Le résultat est built-not-executed, runtime_enabled=false. Les fusions Q/DQ
+doivent produire des kernels INT8 réels pour prétendre accélérer ; vérifier
+precision/tactic de chaque couche dans l’inspecteur puis profiler les kernels.
+Pas de runner ni de connexion au serveur dans ce chunk. Unsupported op/API ou
+absence TensorRT fait échouer explicitement la commande, sans fallback maquillé.
+La sélection d’un paquet10.x Windows compatible avec le driver/CUDA/Python
+reste à faire avant installation ; le contrôle de version du code ne certifie
+pas cette compatibilité. Les autres majors sont refusés avant création du builder.
+
+Vérification documentaire des flags : NVIDIA indique que les réseaux Q/DQ
+emploient la quantification explicite. Pour TensorRT10.x STRONGLY_TYPED, les
+flags de précision dont BuilderFlag.INT8 ne sont ni nécessaires ni autorisés.
+Le code n’ajoute donc pas INT8 et ne pose aucune contrainte de précision de
+couche. TensorRT11 impose déjà le typage fort et change plusieurs APIs ; son
+support n’est pas revendiqué par cet outil10.x non exécuté. Références primaires :
+https://docs.nvidia.com/deeplearning/tensorrt/10.x.x/inference-library/precision-control.html
+https://docs.nvidia.com/deeplearning/tensorrt/archives/tensorrt-1030/pdf/TensorRT-Developer-Guide.pdf
+https://docs.nvidia.com/deeplearning/tensorrt/latest/inference-library/quantized-types-explicit-quantization.html
+
+Validation encore requise avant toute activation
+
+1. Exécuter une capture CUDA sur le vrai base et vérifier la copie figée.
+2. Comparer le graphe FP32 converti au BF16 sur inputs indépendants ; comparer
+   séparément le Q/DQ et le futur moteur entier, les deux passes bouclées.
+3. Corpus holdout par seeds ET régions distinctes (pas fenêtres voisines de la
+   calibration), côtes/intérieurs/montagnes/océan, natural et terrestre, incluant
+   paramètres utilisateur autorisés. La calibration actuelle minmax commune
+   aux deux passes peut être trop conservatrice ; split par temps éventuel est
+   une nouvelle identité/expérience, pas implémenté ici.
+4. Gate physique DEM max1m et climats limites existantes
+   0,02/0,05/0,1/0,02/0,00001, MAE/RMSE/p99, côtes/pentes/raccords, température
+   reconstruite et filtres visuels. Si échec, rester OFF. Aucune tolérance
+   rehaussée après observation. Les artefacts de ce chunk ne certifient rien
+   sur les erreurs du terrain.
+5. Prouver des instructions/kernels GPU INT8, rapporter couverture réelle,
+   conversions, mémoire totale hors allocateur Torch et latence opérateur,
+   réseau, footprint physique puis navigateur, AB/BA et stores neufs.
+6. Intégration future : backend privé immuable, rôle preview explicite, identité
+   séparée, aucune promotion de latents approximatifs au final. Le LOD3 standard
+   prépare actuellement le natif ; un simple test lod>=3 serait incorrect.
+   Tester final byte-identique après preview/annulation/seed/fallback/restart.
+
+Tests CPU de ce chunk
+
+.venv/Scripts/python.exe -m unittest test_terrain_quantization -v
+
+Petits vrais EDMUnet2D, gains non nuls, sorties non triviales, copies exactes
+FP32/BF16, sérialisation/rechargement, source inchangée, collecte bornée/cleanup,
+rejet NaN/vide/rôles/budgets, axes/échelles INT8 et ONNX checker. Exécution ONNX
+référence CPU sur inputs holdout/batches1 et3 différents du tracing2 : conversion
+FP32 proche du modèle et Q/DQ fini, explicitement différent. Ces tests sont
+gardés contre l’initialisation CUDA. Ils ne remplacent pas les gates ci-dessus.
+
+Sources officielles
+https://docs.nvidia.com/deeplearning/tensorrt/latest/inference-library/work-with-quantized-types.html
+https://docs.nvidia.com/deeplearning/tensorrt/latest/getting-started/support-matrix.html
+https://onnx.ai/onnx/operators/onnx__QuantizeLinear.html
+https://onnx.ai/onnx/operators/onnx__DequantizeLinear.html
+
+Mise à jour : capture et export réels, 8 octobre 2026
+
+Le coordinateur a exécuté quant-capture-b : six packets, les deux passes sur
+trois seeds, 133 couches MP figées ; les comparaisons de forwards figés ont
+passé octet par octet. Une première capture échouée est conservée : les indices
+diagnostiques linspace float32 pouvaient dépasser la longueur au-delà de2**24.
+Le helper actuel calcule ces indices entièrement en int64, avec garde contre
+le débordement ; tests jusqu’à2**40 sans allouer de telles activations.
+
+L’export complet a révélé une limite du legacy exporter non couverte par le
+petit modèle initial : les filtres torch.ones du resampling, construits depuis
+x.shape[1], devenaient des convolutions à taille de kernel inconnue lorsque le
+batch était dynamique. ExportResample remplace uniquement les helpers de la
+copie privée FP32 par les MÊMES conv/conv_transpose groupées, stride2, avec
+filtres unitaires en buffers de taille fixe. Il ne modifie ni checkpoint ni
+source upstream. Le test ONNX exécutable comporte désormais deux résolutions,
+down/up et midblock attention, avec batches holdout1 et3. Dix tests CPU passent.
+
+Export réel réussi, aucun GPU utilisé pour cette opération :
+E:/TerrainDiffusionRuntime/inference-engine-20261008/quant-export-debug-2/
+  base-fp32-conversion.onnx : 1 015 077 238 octets
+  base-int8-qdq.onnx : 303 125 446 octets
+  export.json : prepared-not-validated, runtime_enabled=false
+Le checker ONNX standard du graphe Q/DQ complet passe. Un contrôle CPU séparé
+avec onnx.checker.check_model(path, full_check=True) passe également pour LES
+DEUX artefacts FP32 et Q/DQ, y compris les vérifications de types/formes.
+Le reçu validation-full-check.json, dans quant-export-debug-2, porte les SHA
+des deux modèles, du manifeste export.json inchangé, des trois sources Python,
+la version ONNX/Python/plateforme et les statuts individuels complete.
+Ni TensorRT ni une exécution intégrale du réseau exporté n’ont été validés.
+Les journaux d’erreurs et premiers répertoires quant-export/debug-1 restent
+conservés. La réduction de taille du fichier n’est pas un gain GPU.
+
+Après la review Opus, treize tests CPU passent. Les nouveaux tests vérifient
+les exclusions dérivées des configurations8/16/512, les motifs invalides,
+l’inventaire exhaustif Conv/ConvTranspose y compris poids non initializer,
+la version ONNX du reçu d’export et la politique d’API fortement typée10.x
+via un objet factice, sans installer ou exécuter TensorRT.
+Les FUTURES captures hashent aussi terrain_cuda_kernels lorsqu’il est importé ;
+un import et son hash ne prouvent pas son exécution. Les futurs exports portent
+onnx.__version__. Les reçus déjà produits, notamment quant-capture-b et
+quant-export-debug-2, ne sont pas réécrits pour leur ajouter rétroactivement ces
+champs : leurs identités et preuves historiques restent inchangées.
+
+
+Mise à jour : moteurs et essais réels terminés, 8 octobre 2026
+
+La campagne séparée quantization-experiments a maintenant construit ET exécuté
+TensorRT10.15.1.29 INT8QDQ et FP32 fortement typés, TF32 OFF. Les reçus historiques
+ci-dessus ne sont pas réécrits : leurs états prepared-not-validated et leurs
+flags false décrivent toujours la phase qui les a produits. La preuve ultérieure
+est distincte : plans SHA, inspection91 convolutions INT8/101 couches de famille
+convolution, trace147 noms CUDA dont11 kernels i8 TensorCore tensor16x8x32.
+
+Dernières mesures admises : BF16 actuel cached weights+CUDA graphs+pointwise
+exact effectifs GPU0, attention référence, même stream créé nondefault sur le
+device sélectionné, cinq AB/BA par input et20 paires physiques à stores NN neufs.
+Gain base1,448–1,598× ; LOD3 par site1,333–1,350×, médiane1,347×. Baseline moteur
+TRTFP32 également exécutée :0,522–0,615× face au BF16 actuel. Pas de gain×5.
+Les520 replays référence n’ont aucun fallback ;40 revisits physiques hauteur et
+climat sont byte-exacts et finis. Anciennes premières mesures restent conservées.
+
+Tous les candidats échouent au gate DEM1m inchangé : chaîneFP32/export63–117m,
+TRTINT8192–330m, W8 conservantBF1647–94m, varianteBF16 protégeantconv_res1142–201m.
+Climate coarse transporté exact mais température reconstruite driftjusqu’à1,288°C
+pourTRTINT8 (même formule palette existante). Quantification garde OFF. Aucun
+latent approximatif promu ou stocké dans le natif partagé ; pipeline production
+reste PyTorchBF16CUDA. Aucune validation native/decoder/browser de quant n’est
+revendiquée puisque le gateLOD3 est déjà rejeté.
+
+Seeds101/202/303/404 ont été capturés distincts de42/0/43. Après lecture des
+résultats, ils qualifient validation/tuning et non une acceptation finale sur
+holdout intact. Toute future politique passante exigera de nouvelles données.
+
+Rapport complet : docs/performance_x5/quantization-experiments.txt et.json.
+Images des vrais DEM/pentes/profils et températures/biomes :
+docs/performance_x5/quantization-images/index.html.
+Plans, inputs, logs, traces, premiers échecs conservés :
+E:/TerrainDiffusionRuntime/inference-engine-20261008/quant-experiments/.
+Les phases utilisent plusieurs révisions du harness attestées par leurs propres
+source_sha ; les correctifs de contrôle ultérieurs ne relancent pas les anciennes
+mesures. Les derniers deux matched-admitted utilisent la même révision, conservée
+aussi dans harness-admitted-producer.py. La synthèse vérifie les relations entre
+capture/export/holdout/plans et fige aussi les SHA des logs de mémoire horsTorch.

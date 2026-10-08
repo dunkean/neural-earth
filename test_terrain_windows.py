@@ -31,6 +31,12 @@ def _manifest(seed):
     return payload
 
 
+def _preparation(*args, **kwargs):
+    # These tests inspect committed files immediately; async contracts have
+    # dedicated concurrency tests in test_terrain_coarse_async.py.
+    return CoarsePreparation(*args, async_persistence=False, **kwargs)
+
+
 def _world(cache_bytes=2000, *, base_batch=2, batch_sensitive=False):
     store = MemoryTileStore(cache_size_bytes=cache_bytes)
     calls = {'coarse': [], 'base0': [], 'base1': [], 'decoder': []}
@@ -178,8 +184,8 @@ class CoarsePreparationTests(unittest.TestCase):
         manifest=_manifest(31)
         with tempfile.TemporaryDirectory() as temporary:
             foreground,background=_world(),_world()
-            a=CoarsePreparation(temporary,manifest,bounds=bounds).install(foreground)
-            b=CoarsePreparation(temporary,manifest,bounds=bounds).install(background)
+            a=_preparation(temporary,manifest,bounds=bounds).install(foreground)
+            b=_preparation(temporary,manifest,bounds=bounds).install(background)
             self.assertIs(a._persisted_indices,b._persisted_indices)
             self.assertEqual(a.status()['complete_windows'],0)
             a.step(foreground,budget_windows=a.status()['total_windows'])
@@ -201,9 +207,9 @@ class CoarsePreparationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             foreground,background=_world(),_world()
             budget=2*576  # Two 7x4x4 float32 .npy payloads.
-            a=CoarsePreparation(temporary,manifest,bounds=bounds,
+            a=_preparation(temporary,manifest,bounds=bounds,
                                 budget_bytes=budget).install(foreground)
-            b=CoarsePreparation(temporary,manifest,bounds=bounds,
+            b=_preparation(temporary,manifest,bounds=bounds,
                                 budget_bytes=budget).install(background)
             a.step(foreground,budget_windows=2)
             self.assertEqual(a.status()['disk_bytes'],budget)
@@ -226,7 +232,7 @@ class CoarsePreparationTests(unittest.TestCase):
         world = SimpleNamespace(coarse=coarse, latents=coarse, residual=coarse)
         world._terrain_window_scheduler = WorldWindowScheduler(world)
         with tempfile.TemporaryDirectory() as temporary:
-            prep = CoarsePreparation(temporary, _manifest(12),
+            prep = _preparation(temporary, _manifest(12),
                                      bounds=(0,0,7680,7680)).install(world)
             prep.step(world, budget_windows=1)
             index = next(iter(prep._persisted_indices))
@@ -239,7 +245,7 @@ class CoarsePreparationTests(unittest.TestCase):
         bounds = (0, 0, 6 * 7680, 6 * 7680)
         with tempfile.TemporaryDirectory() as temporary:
             world = _world()
-            prep = CoarsePreparation(temporary, manifest, bounds=bounds).install(world)
+            prep = _preparation(temporary, manifest, bounds=bounds).install(world)
             first = prep.step(world, budget_windows=1)
             self.assertEqual(first['network_windows'], 1)
             self.assertEqual(first['complete_windows'], 1)
@@ -265,7 +271,7 @@ class CoarsePreparationTests(unittest.TestCase):
             # A new pipeline and RAM store rehydrate the same weighted windows
             # without calling the network.
             reopened = _world()
-            again = CoarsePreparation(temporary, manifest, bounds=bounds).install(reopened)
+            again = _preparation(temporary, manifest, bounds=bounds).install(reopened)
             replay = again.read_mip(reopened, 1, 0, 0, 3, 3)
             np.testing.assert_array_equal(replay['data'], mip['data'])
             self.assertEqual(again.network_windows, 0)
@@ -285,7 +291,7 @@ class CoarsePreparationTests(unittest.TestCase):
         bounds = (0, 0, 6 * 7680, 6 * 7680)
         with tempfile.TemporaryDirectory() as temporary:
             world = _world()
-            prep = CoarsePreparation(temporary, manifest, bounds=bounds).install(world)
+            prep = _preparation(temporary, manifest, bounds=bounds).install(world)
             prep.read_mip(world, 0, 0, 0, 2, 2, generate=True)
             index = next(iter(prep._required_indices(0, 0, 2, 2)))
             path = prep._window_path(index)
@@ -315,24 +321,24 @@ class CoarsePreparationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             world = _world()
             manifest = _manifest(1)
-            CoarsePreparation(temporary, manifest, bounds=bounds).install(world)
+            _preparation(temporary, manifest, bounds=bounds).install(world)
             with self.assertRaisesRegex(ValueError, 'geometry'):
-                CoarsePreparation(temporary, manifest,
+                _preparation(temporary, manifest,
                                   bounds=(0, 0, 3 * 7680, 3 * 7680)).install(_world())
             wrong_seed = _world()
             wrong_seed.seed = 2
             with self.assertRaisesRegex(ValueError, 'seed'):
-                CoarsePreparation(temporary, manifest, bounds=bounds).install(wrong_seed)
+                _preparation(temporary, manifest, bounds=bounds).install(wrong_seed)
             wrong_snr = _world()
             wrong_snr.seed = 1
             wrong_snr.kwargs = {'cond_snr': [.1]*5}
             with self.assertRaisesRegex(ValueError, 'SNR'):
-                CoarsePreparation(temporary, manifest, bounds=bounds).install(wrong_snr)
+                _preparation(temporary, manifest, bounds=bounds).install(wrong_snr)
 
     def test_disk_budget_stops_background_without_breaking_demand(self):
         with tempfile.TemporaryDirectory() as temporary:
             world = _world()
-            prep = CoarsePreparation(temporary, _manifest(8),
+            prep = _preparation(temporary, _manifest(8),
                                      bounds=(0, 0, 2*7680, 2*7680),
                                      budget_bytes=1).install(world)
             output = read_rect(world, 'coarse', 0, 0, 2, 2)
@@ -349,7 +355,7 @@ class CoarsePreparationTests(unittest.TestCase):
             # Simulate a read before persistence was installed.
             window_index = (0, -4, -4)
             world._terrain_window_scheduler.ensure_window(world.coarse, window_index)
-            prep = CoarsePreparation(temporary, _manifest(9),
+            prep = _preparation(temporary, _manifest(9),
                                      bounds=(0, 0, 2*7680, 2*7680)).install(world)
             self.assertIn(window_index, prep._planned_indices)
             prep._cursor = prep._indices.index(window_index)

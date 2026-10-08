@@ -32,12 +32,24 @@ assert.equal(distanceLabel(1500),'1.50 km');
       if(u.pathname==='/api/world')return route.fulfill({json:{version:'natural-v1',cache_profile:'mock',world_profile:'natural',generation_profile:'natural',seed:u.searchParams.get('seed'),world_bounds:[-500000,-250000,500000,250000],overview_bounds:[-500000,-250000,500000,250000],overview:'/overview.png',gpu:'Mock GPU'}});
       if(u.pathname==='/api/status')return route.fulfill({json:{scheduler:{}}});
       if(u.pathname==='/api/view')return route.fulfill({json:{accepted:true}});
-      if(u.pathname.startsWith('/height/'))return route.fulfill({contentType:'application/octet-stream',body:Buffer.from(physical.buffer),headers:{'X-Terrain-Width':'304','X-Terrain-Halo':'24','X-Terrain-Climate-Width':u.searchParams.has('climate')?'33':'0','X-Terrain-Climate-Height':u.searchParams.has('climate')?'33':'0','X-Terrain-Stage':'decoder'}});
-      return route.fulfill({contentType:'image/png',body:png});
+      if(u.pathname.startsWith('/height/')){
+        const source=u.searchParams.get('source_lod'),lod=Number(u.pathname.split('/')[4]),width=source?256/2**(3-lod)+48:304;
+        const values=new Float32Array(width*width+(u.searchParams.has('climate')?5*33*33:0));values.fill(-125.5,0,width*width);
+        return route.fulfill({contentType:'application/octet-stream',body:Buffer.from(values.buffer),headers:{'X-Terrain-Width':String(width),'X-Terrain-Halo':'24','X-Terrain-Climate-Width':u.searchParams.has('climate')?'33':'0','X-Terrain-Climate-Height':u.searchParams.has('climate')?'33':'0','X-Terrain-Stage':source?'latent':'decoder','X-Terrain-Source-LOD':source||String(lod),'X-Terrain-Source-Resolution':source?'240':'30'}});
+      }
+      return route.fulfill({contentType:'image/png',body:png,headers:u.pathname.startsWith('/tiles/')?{'X-Terrain-Source-LOD':u.searchParams.get('source_lod')||u.pathname.split('/')[4],'X-Terrain-Stage':u.searchParams.has('source_lod')?'latent':'decoder'}:{}});
     });
     await page.goto('https://map-tools.test/?seed=42&profile=natural');
     const settle = () => page.waitForFunction(()=>terrainDebug.snapshot().visible.ready>0 && terrainDebug.snapshot().visible.pending===0);
     await settle();
+    await page.locator('#generationPanel summary').click();
+    await page.locator('#generationPreset').selectOption('mountains');
+    assert.deepEqual(await page.evaluate(()=>generationControls.read().snr_altitude_gain),[4,1,1,1,1]);
+    await page.locator('#generationPreset').selectOption('glacial');
+    assert.deepEqual(await page.evaluate(()=>generationControls.read().snr_driver_gain),[3,1,1,1,1]);
+    assert.deepEqual(await page.evaluate(()=>generationControls.read().snr_driver_range),[5,-10]);
+    await page.locator('#generationPreset').selectOption('current');
+    await page.locator('#generationPanel summary').click();
     await page.locator('#plus').click(); await page.locator('#plus').click(); await settle();
     const box = await page.locator('#viewport').boundingBox(), x=box.x+box.width/2, y=box.y+box.height/2;
     await page.mouse.move(x,y);

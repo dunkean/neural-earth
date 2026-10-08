@@ -60,10 +60,12 @@ def _files(model_root: Path, world_profile: str = 'natural'):
     upstream_sources = sorted(p for p in upstream_root.rglob("*.py") if p.is_file())
     implementation_names = (
         "terrain_manifest.py", "terrain_generation.py", "terrain_bootstrap.py", "terrain_conditioning.py", "terrain_world.py", "terrain_inference.py",
-        "terrain_server.py", "terrain_app.py", "terrain_final_mips.py",
+        # Request ordering determines BF16 batch composition and physical bytes.
+        "index.html", "terrain_lod.js",
+        "terrain_server.py", "terrain_app.py", "terrain_final_mips.py", "terrain_refinement.py",
         "terrain_background.py", "terrain_climate.py", "terrain_window_scheduler.py",
-        "terrain_coarse.py", "terrain_device.py", "terrain_jobs.py",
-        "terrain_disk_cache.py", "terrain_nn_constants.py", "terrain_cuda_graphs.py")
+        "terrain_coarse.py", "terrain_coarse_graph.py", "terrain_device.py", "terrain_jobs.py",
+        "terrain_disk_cache.py", "terrain_nn_constants.py", "terrain_cuda_graphs.py", "terrain_cuda_kernels.py", "terrain_interpolation.py", "terrain_profiling.py", "terrain_snr.py", "terrain_delivery.py")
     implementation = {name: _digest(ROOT / name) for name in implementation_names
                       if name != 'terrain_bootstrap.py' or needs_bootstrap}
     # Hash the entire vendored package: model blocks, utilities and package
@@ -146,7 +148,11 @@ def build_manifest(seed: int, ablation: str = "A0", *, model_root: Path = MODEL_
                        "coarse_solver_steps": 20, "coarse_window": 64, "coarse_stride": 48,
                        "base_window": 64, "base_stride": 32,
                        "decoder_window": 512, "decoder_stride": 384,
-                       "base_cell_m": 240, "decoder_cell_m": 30},
+                       "base_cell_m": 240, "decoder_cell_m": 30,
+                       "experimental_refinement": {"cell_m": [30 / 2**level for level in range(1,4)],
+                           "min_lod": -3,
+                           "method": "same-decoder-parent-mean-preserving-cascade",
+                           "amplitude_scale": [0.5, 0.25]}},
         "files": _files(Path(checkpoint_source or model_root), world_profile) if file_hashes else None,
         "complete": bool(file_hashes),
     }

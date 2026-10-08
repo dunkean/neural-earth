@@ -11,6 +11,7 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 import os
 from types import MethodType
+from collections import OrderedDict
 
 import numpy as np
 import torch
@@ -39,8 +40,12 @@ class InferenceProfile:
     batched_latent_transfer: bool = True
     gpu_windows: bool = True
     cuda_graphs: bool = True
-    graph_max_base_batch: int = 4
+    graph_max_base_batch: int = 16
+    decoder_graphs: bool = True
+    coarse_solver_graphs: bool = True
     canonical_latents: bool = False
+    exact_kernels: bool = True
+    attention_backend: str = 'reference'
 
 
 def choose_profile(device=None) -> InferenceProfile:
@@ -58,6 +63,11 @@ def choose_profile(device=None) -> InferenceProfile:
         if not 1 <= value <= maximum:
             raise ValueError(f'{name} must be between 1 and {maximum}')
         return value
+    def flag(name, default):
+        value = os.environ.get(name, '1' if default else '0')
+        if value not in ('0', '1'):
+            raise ValueError(f'{name} must be 0 or 1')
+        return value == '1'
     graph_flag = os.environ.get('TERRAIN_CUDA_GRAPHS', '1')
     if graph_flag not in ('0', '1'):
         raise ValueError('TERRAIN_CUDA_GRAPHS must be 0 or 1')
@@ -75,7 +85,12 @@ def choose_profile(device=None) -> InferenceProfile:
         latent_batch=latent_batch,
         decoder_batch=batch('TERRAIN_DECODER_BATCH', 1, 1),
         cuda_graphs=graph_flag == '1',
+        graph_max_base_batch=batch('TERRAIN_GRAPH_MAX_BASE_BATCH', 16, 32),
+        decoder_graphs=flag('TERRAIN_DECODER_GRAPHS', True),
+        coarse_solver_graphs=flag('TERRAIN_COARSE_SOLVER_GRAPHS', True),
         canonical_latents=canonical_latents,
+        exact_kernels=flag('TERRAIN_EXACT_KERNELS', True),
+        attention_backend=os.environ.get('TERRAIN_ATTENTION_BACKEND', 'reference'),
     )
 
 
@@ -144,14 +159,40 @@ def _coarse_batch(world, ctxs, scheduler, weight_window, t_cond, cond_inputs, po
     means = torch.tensor(world.kwargs['coarse_means'])
     stds = torch.tensor(world.kwargs['coarse_stds'])
     synthetic, cond_noises, sample_noises = [], [], []
+    regional = None
+    embed_key = tuple((id(p), p._version) for p in world.coarse_model.parameters())
+    if world.__dict__.get('_terrain_coarse_embed_key') != embed_key:
+        world.__dict__.pop('_terrain_coarse_embeds', None)
+        world.__dict__.pop('_terrain_snr_cache', None)
+        world.__dict__['_terrain_coarse_embed_key'] = embed_key
     for _, i, j in ctxs:
         i1, j1 = i * (48 // pool_size) * pool_size, j * (48 // pool_size) * pool_size
         value = world._conditioning_model_input(i1, i1 + 64, j1, j1 + 64)
+        if world._terrain_snr_active:
+            from terrain_snr import window_snr
+            regional = window_snr(world._terrain_generation_settings, world.kwargs['cond_snr'], value)
         synthetic.append((value - means[[0, 2, 3, 4, 5], None, None]) / stds[[0, 2, 3, 4, 5], None, None])
         cond_noises.append(gaussian_noise_patch(world.seed, i1, j1, 64, 64, channels=5, tile_h=64, tile_w=64))
         sample_noises.append(gaussian_noise_patch(world.seed + 1, i1, j1, 64, 64, channels=6, tile_h=64, tile_w=64))
     synthetic = torch.stack(synthetic).to(world.device, dtype=dtype)
     cond_noise = torch.from_numpy(np.stack(cond_noises)).to(world.device, dtype=dtype)
+    if regional is not None:
+        # Production coarse batches remain scalar. Cache all conditioning and
+        # timestep embeddings per quantized regional policy, bounded per world.
+        if len(ctxs) != 1:
+            raise ValueError('Regional SNR currently requires scalar coarse batches')
+        cache = world.__dict__.setdefault('_terrain_snr_cache', OrderedDict())
+        policy = regional[0]
+        cached = cache.get(policy)
+        if cached is None:
+            regional_t = torch.atan(torch.tensor(policy)).to(world.device, dtype=dtype)
+            regional_inputs = [v.detach().view(-1) for v in torch.log(torch.tan(regional_t)/8)]
+            cached = [regional_t, regional_inputs, None]
+            cache[policy] = cached
+            while len(cache) > 64:
+                cache.popitem(last=False)
+        cache.move_to_end(policy)
+        t_cond, cond_inputs = cached[:2]
     t_view = t_cond.view(1, -1, 1, 1)
     cond_img = torch.cos(t_view) * synthetic + torch.sin(t_view) * cond_noise
     scheduler.set_timesteps(20)
@@ -164,27 +205,30 @@ def _coarse_batch(world, ctxs, scheduler, weight_window, t_cond, cond_inputs, po
         scalar_labels = [scheduler.trigflow_precondition_noise(sigma.to(world.device).view(-1)).to(dtype)
                          for sigma in scheduler.sigmas[:-1]]
         world.__dict__['_terrain_coarse_labels'] = scalar_labels
-    embed_key = tuple((id(p), p._version) for p in world.coarse_model.parameters())
-    if world.__dict__.get('_terrain_coarse_embed_key') != embed_key:
-        world.__dict__.pop('_terrain_coarse_embeds', None)
-        world.__dict__['_terrain_coarse_embed_key'] = embed_key
-    embeds = world.__dict__.get('_terrain_coarse_embeds')
+    embeds = cached[2] if regional is not None else world.__dict__.get('_terrain_coarse_embeds')
     if embeds is None and world._terrain_profile.cached_coarse_embeddings:
         embeds = [world.coarse_model.compute_embeddings(label, cond_inputs) for label in scalar_labels]
-        world.__dict__['_terrain_coarse_embeds'] = embeds
+        if regional is not None:
+            cached[2] = embeds
+        else:
+            world.__dict__['_terrain_coarse_embeds'] = embeds
     n = len(ctxs)
     conditions = [value.expand(n) for value in cond_inputs]
-    for idx, (t, sigma) in enumerate(zip(scheduler.timesteps, scheduler.sigmas)):
-        sigma = sigma.to(world.device)
-        scaled = scheduler.precondition_inputs(sample, sigma)
-        model_in = torch.cat([scaled, cond_img], dim=1).to(dtype)
-        model_out = world.coarse_model(
-            model_in, noise_labels=scalar_labels[idx].expand(n), conditional_inputs=conditions,
-            precomputed_embeds=embeds[idx].expand(n, -1) if embeds is not None else None,
-        )
-        # CPU t is sufficient for the scheduler's step index and avoids its
-        # initial CUDA->CPU scalar transfer. All sample arithmetic remains CUDA.
-        sample = scheduler.step(model_out, t, sample).prev_sample
+    if world._terrain_profile.cuda_graphs and world._terrain_profile.coarse_solver_graphs:
+        from terrain_coarse_graph import run_coarse_solver
+        sample = run_coarse_solver(world, scheduler, sample, cond_img, scalar_labels, conditions, embeds)
+    else:
+        for idx, (t, sigma) in enumerate(zip(scheduler.timesteps, scheduler.sigmas)):
+            sigma = sigma.to(world.device)
+            scaled = scheduler.precondition_inputs(sample, sigma)
+            model_in = torch.cat([scaled, cond_img], dim=1).to(dtype)
+            model_out = world.coarse_model(
+                model_in, noise_labels=scalar_labels[idx].expand(n), conditional_inputs=conditions,
+                precomputed_embeds=embeds[idx].expand(n, -1) if embeds is not None else None,
+            )
+            # CPU t is sufficient for the scheduler's step index and avoids its
+            # initial CUDA->CPU scalar transfer. All sample arithmetic remains CUDA.
+            sample = scheduler.step(model_out, t, sample).prev_sample
     sample = (sample if world._terrain_profile.gpu_windows else sample.cpu()).float() / scheduler.config.sigma_data
     stds, means = stds.to(sample.device), means.to(sample.device)
     sample = sample * stds.view(1, -1, 1, 1) + means.view(1, -1, 1, 1)
@@ -198,6 +242,8 @@ def _coarse_batch(world, ctxs, scheduler, weight_window, t_cond, cond_inputs, po
 
 
 def _build_coarse(self):
+    from terrain_coarse_graph import clear_coarse_solver
+    clear_coarse_solver(self)
     pool = self.kwargs['coarse_pooling']
     scheduler = EDMDPMSolverMultistepScheduler(sigma_min=0.002, sigma_max=80, sigma_data=0.5)
     cache_device = self.device if self._terrain_profile.gpu_windows else 'cpu'
@@ -207,6 +253,7 @@ def _build_coarse(self):
     # Rebuild invalidates embeddings when generation conditioning changes.
     self.__dict__.pop('_terrain_coarse_embeds', None)
     self.__dict__.pop('_terrain_coarse_labels', None)
+    self.__dict__.pop('_terrain_snr_cache', None)
     return InfiniteTensor(
         shape=(7, None, None),
         f=lambda ctxs: _coarse_batch(self, ctxs, scheduler, weight, t_cond, cond_inputs, pool),
@@ -325,7 +372,7 @@ def _build_latent(self):
     return tensor
 
 
-def _decoder_batch(world, ctxs, latents, scheduler, weight, t_list, size, stride):
+def _decoder_batch(world, ctxs, latents, scheduler, weight, t_list, size, stride, *, noise_seed=None):
     dtype = world._dtype or torch.float32
     lc = world.latent_compression
     normalised = [(value[:-1] / value[-1:])[:4].view(1, 4, size // lc, size // lc) for value in latents]
@@ -335,7 +382,7 @@ def _decoder_batch(world, ctxs, latents, scheduler, weight, t_list, size, stride
     n = len(ctxs)
     sample = torch.zeros((n, 1, size, size), device=world.device, dtype=dtype)
     for idx, t in enumerate(t_list):
-        noises = [gaussian_noise_patch(world.seed + 5819 + idx, ctx[1] * stride, ctx[2] * stride,
+        noises = [gaussian_noise_patch((world.seed if noise_seed is None else noise_seed) + 5819 + idx, ctx[1] * stride, ctx[2] * stride,
                                      size, size, channels=1, tile_h=size, tile_w=size) for ctx in ctxs]
         noise = torch.from_numpy(np.stack(noises)).to(world.device, dtype=dtype)
         t = t.view(1, 1, 1, 1).to(world.device, dtype=dtype)
@@ -388,6 +435,7 @@ def _build_hierarchy(self):
     # A previous persistence wrapper belongs to the discarded coarse tensor.
     # Reinstallation with the current manifest is explicit after a rebuild.
     self.__dict__.pop('_terrain_coarse_preparation', None)
+    self.__dict__.pop('_terrain_refinement_fields', None)
     from terrain_window_scheduler import WorldWindowScheduler
     self._terrain_window_scheduler = WorldWindowScheduler(self)
 
@@ -402,28 +450,45 @@ def configure_world(world, profile=None, *, allow_experimental=False, world_prof
     world_profile = world_profile or getattr(world, '_terrain_world_profile', 'natural')
     from terrain_generation import resolve_generation
     descriptor = resolve_generation(world_profile)
+    from terrain_snr import active as snr_active
     if profile.coarse_batch != 1 and not allow_experimental:
         raise ValueError('Coarse batches >1 rejected: BF16 solver drift changes terrain. Offline experiments only.')
     if profile.decoder_batch != 1 and not allow_experimental:
         raise ValueError('Decoder batches >1 rejected by the 1m numerical gate. Offline experiments only.')
     if profile.canonical_latents and profile.latent_batch != 1:
         raise ValueError('Canonical latent mode requires scalar base batches')
+    if profile.attention_backend != 'reference' and not allow_experimental:
+        if os.environ.get('TERRAIN_EXPERIMENTAL_INFERENCE') != '1':
+            raise ValueError('Approximate attention requires explicit offline experimental admission')
+    if world.torch_compile:
+        raise ValueError('Realtime profile currently requires the validated eager CUDA path')
+    from terrain_nn_constants import validate_engine_config
+    # Even graph-disabled worlds share patched model aliases in this process.
+    validate_engine_config(exact_kernels=profile.exact_kernels, attention_backend=profile.attention_backend)
     if (getattr(world, '_terrain_profile', None) == profile and
             getattr(world, '_terrain_world_profile', 'natural') == world_profile):
         return world
-    if world.torch_compile:
-        raise ValueError('Realtime profile currently requires the validated eager CUDA path')
+    world._terrain_generation_settings = descriptor.settings
+    world._terrain_snr_active = snr_active(descriptor.settings)
     if profile.cached_weights:
         prepare_models(world)
-    if profile.cuda_graphs:
+    if profile.cuda_graphs or profile.exact_kernels or profile.attention_backend != 'reference':
         from terrain_nn_constants import prepare_constants
+        prepare_constants(world, exact_kernels=profile.exact_kernels, attention_backend=profile.attention_backend)
+    if profile.cuda_graphs:
         from terrain_cuda_graphs import CudaGraphModel
-        prepare_constants(world)
         if not isinstance(world.coarse_model, CudaGraphModel):
             world.coarse_model = CudaGraphModel(world.coarse_model, max_buckets=1)
+        if (isinstance(world.base_model, CudaGraphModel) and
+                world.base_model.max_batch != profile.graph_max_base_batch):
+            world.base_model = world.base_model.model
         if not isinstance(world.base_model, CudaGraphModel):
-            world.base_model = CudaGraphModel(world.base_model, max_buckets=4,
+            world.base_model = CudaGraphModel(world.base_model, max_buckets=max(8,profile.graph_max_base_batch),
                                               max_batch=profile.graph_max_base_batch)
+        if profile.decoder_graphs and not isinstance(world.decoder_model, CudaGraphModel):
+            world.decoder_model = CudaGraphModel(world.decoder_model, max_buckets=1, max_batch=1)
+        elif not profile.decoder_graphs and isinstance(world.decoder_model, CudaGraphModel):
+            world.decoder_model = world.decoder_model.model
     else:
         from terrain_cuda_graphs import CudaGraphModel
         # A seed-specific world may borrow models from a graph-enabled loader.
@@ -474,13 +539,18 @@ def inference_status(world):
                 weight_bytes += cached[1].numel() * cached[1].element_size()
     graph_stats = {name: model.stats() for name, model in (
         ('coarse', world.coarse_model), ('base', world.base_model), ('decoder', world.decoder_model)) if hasattr(model, 'stats')}
+    if '_terrain_coarse_solver_graph' in world.__dict__:
+        graph_stats['coarse_solver'] = world._terrain_coarse_solver_graph.stats()
     from terrain_device import select_cuda_device
     return {'version': VERSION, 'device': str(world.device), 'device_selection': select_cuda_device(),
             'world_profile': getattr(world, '_terrain_world_profile', 'natural'),
             'conditioning_noise': list(world.kwargs['cond_snr']),
+            'regional_snr': {'enabled': world._terrain_snr_active, 'cached_policies': len(world.__dict__.get('_terrain_snr_cache', {}))},
             'climate_projection': None,
             'profile': asdict(profile) if profile else None, 'cached_weight_layers': cached_layers,
             'cached_weight_bytes': weight_bytes, 'solver_steps': 20, 'latent_fusion_steps': world.T,
             'precision': str(world._dtype), 'compile': world.torch_compile,
+            'pointwise_kernels': __import__('terrain_nn_constants').kernel_status(),
             'window_cache_bytes': getattr(world.tile_store, '_bytes', 0), 'cuda_graphs': graph_stats,
+            'coarse_persistence': getattr(world,'_terrain_coarse_preparation').status() if hasattr(world,'_terrain_coarse_preparation') else None,
             'windows': __import__('terrain_window_scheduler').scheduler_status(world)}

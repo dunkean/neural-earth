@@ -1,0 +1,103 @@
+{
+  "duration_api_ms": 636321,
+  "stop_reason": "end_turn",
+  "session_id": "82f196b0-7230-4ed8-902d-a7997fcac57a",
+  "total_cost_usd": 5.1286098,
+  "usage": {
+    "input_tokens": 78,
+    "cache_creation_input_tokens": 314229,
+    "cache_read_input_tokens": 6693529,
+    "output_tokens": 63788,
+    "output_tokens_details": {
+      "thinking_tokens": 49336
+    },
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 314229,
+      "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "not_available",
+    "iterations": [
+      {
+        "input_tokens": 2,
+        "output_tokens": 10521,
+        "cache_read_input_tokens": 293551,
+        "cache_creation_input_tokens": 20678,
+        "cache_creation": {
+          "ephemeral_5m_input_tokens": 0,
+          "ephemeral_1h_input_tokens": 20678
+        },
+        "type": "message"
+      }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+  },
+  "modelUsage": {
+    "claude-opus-5-5": {
+      "inputTokens": 78,
+      "outputTokens": 63788,
+      "cacheReadInputTokens": 6693529,
+      "cacheCreationInputTokens": 314229,
+      "webSearchRequests": 0,
+      "costUSD": 5.1286098,
+      "contextWindow": 1000000,
+      "maxOutputTokens": 128000,
+      "thinkingTokens": 49336,
+      "canonicalModel": "claude-opus-5-5",
+      "provider": "firstParty",
+      "costBasis": "list"
+    }
+  },
+  "permission_denials": [],
+  "terminal_reason": "completed",
+  "fast_mode_state": "off",
+  "fast_mode_disabled_reason": "sdk_opt_in_required",
+  "subagent_stats": {
+    "spawned": 0,
+    "requested": {
+      "background": 0,
+      "foreground": 0,
+      "unset": 0
+    },
+    "started_in_background": 0,
+    "max_depth": 0,
+    "spawned_by_subagents": 0,
+    "completed": 0,
+    "failed": 0,
+    "killed": {
+      "parent": 0,
+      "user": 0,
+      "system": 0
+    },
+    "refused": {
+      "depth_limit": 0,
+      "concurrency_limit": 0,
+      "budget": 0
+    },
+    "by_type": {}
+  },
+  "is_error": false,
+  "num_turns": 66,
+  "subtype": "success",
+  "api_error_status": null,
+  "result": "=== PAGE 1 ===\n## Diagnostic : où part le temps\n\n**Périmètre.** Le chemin de production passe par quatre couches :\n- le navigateur (index.html, terrain_lod.js) ;\n- Flask avec une voie de calcul unique (terrain_server.py, terrain_jobs.py) ;\n- InfiniteTensor ;\n- trois UNet EDM PyTorch CUDA BF16 (terrain_inference.py).\n\nLe probe webgpu/ (ONNX/WASM) est hors périmètre. Les reçus portent sur une RTX 3090 avec PyTorch 2.11 et CUDA 12.8, sous une charge de bureau non contrôlée. Je n'ai exécuté aucune mesure nouvelle.\n\n### Faits mesurés (reçus existants)\n- **LOD 4**, seed 0 (progression-final.json) : 0,284 s. 80 forwards coarse en batch 1, soit 0,141 s d'événements CUDA.\n- **LOD 3** : 1,923 s. 290 fenêtres base en 19 appels, soit 1,783 s CUDA (93 %).\n- **LOD 2** : 2,193 s. 25 decoder 512² en batch 1 = 1,834 s, plus 38 fenêtres base = 0,259 s (≈95 %).\n- **benchmark_runtime_lod final** : LOD 3 médiane 2,117 s. LOD 2 varie de 3,69 à 5,66 s selon le run.\n- **Navigateur « natural »**, poids résidents :\n  - jalons : LOD 4 à 1,11 s, LOD 3 à 3,09 s, LOD 2 à 5,39 s, natif à 7,57 s ;\n  - compteurs du monde : 374 fenêtres base, 40 decoder, 4 coarse.\n- **Terrestre froid**, seed 42 : couverture native à 12,44 s. 512 fenêtres base et 40 decoder. Des tuiles d'aperçu CPU attendent 1,47 à 1,65 s en file.\n- **Coûts ponctuels** :\n  - bootstrap Rust : 1,18 à 2,34 s au premier accès, 0,04 s en relecture ;\n  - chargement des modèles : 2,5 à 3,6 s ;\n  - revisite de 25 tuiles en cache : 0,54 s.\n\n### Déductions\n- **Coûts unitaires** : ≈6,1 ms par fenêtre base (batch 16), ≈73 ms par fenêtre decoder, ≈1,8 ms par pas coarse.\n- **Part du NN** : sur le parcours natural, le NN prend ≈5,5 s sur 7,57 s (≈72 %). Il reste ≈2,1 s hors NN : file, CPU par tuile, écritures, barrières.\n- **FLOP** (calculés d'après les configs des checkpoints, non mesurés) :\n  - base : ≈96 GMAC par fenêtre 64² (192 canaux, multiplicateurs 1-2-3-4, 3 blocs) ;\n  - decoder : ≈690 GMAC par tuile 512² (64 canaux) ;\n  - les convolutions 3×3 font plus de 90 % des FLOP.\n- **Débit effectif** : ≈31 TFLOPS pour le base, ≈19 TFLOPS pour le decoder. Le pic BF16 dense est de l'ordre de 71 TFLOPS, chiffre constructeur à confirmer par mesure.\n\n### Amdahl\n- **Ce qu'exige un x5 à travail constant** :\n  - LOD 3 : le hors-NN fait 0,14 s, donc le NN doit être 7,3× plus rapide ;\n  - LOD 2 : le hors-NN fait 0,10 s, donc il faut 6,2×.\n- **Planchers théoriques à 100 % du pic** :\n  - LOD 3 : ≈0,78 s, au-dessus de la cible x5 de 0,385 s ;\n  - LOD 2 : ≈0,59 s, au-dessus de la cible de 0,44 s.\n- **Conclusion : un x5 par empreinte, à travail et matériel constants, est exclu**, même avec des noyaux parfaits.\n- **Bout en bout** : doubler seulement la vitesse du NN ne donne qu'environ 1,55×.\n\n### Limites des preuves\n- **Échantillons** : seulement trois sites et cinq répétitions. Les p95 sont interpolés.\n- **GPU** : partagé, déjà actif à 26–35 % avant les runs.\n- **Événements CUDA** : imbriqués, ils peuvent inclure des trous.\n- **Timeline** : aucune timeline serveur par tuile n'existe. Les FLOP et le pic sont non mesurés.\n- Les temps des profils Macro A4 historiques ne sont pas attribués au bootstrap terrestre.\n\n=== PAGE 2 ===\n## Moteur spécialisé aux poids ou compilation ?\n\n### Opérations dominantes (déductions depuis edm_unet.py et unet_block.py)\n- **Convolutions 3×3** en NCHW BF16, avec accumulation FP32 par cuDNN : l'essentiel des FLOP. Dans le decoder, les niveaux 512² et 256² côté décodage (blocs `up` à 128 et 192 canaux, unet_block.py:116-156) pèsent ≈55 %. Les convolutions à 64 canaux exploitent mal les tensor cores.\n- **Opérations limitées par la mémoire** :\n  - `normalize` (mp_layers.py:9-12) ;\n  - `mp_silu` et la modulation par embedding ;\n  - `mp_sum`, qui matérialise un `torch.stack` (terrain_nn_constants.py:49) ;\n  - `clip` et `mp_concat`.\n\n  Estimation : 15 à 25 % du temps base, davantage au decoder.\n- **Rééchantillonnage** : des convolutions groupées à poids unitaires (terrain_nn_constants.py:71-81) qui cachent un simple découpage ou une répétition.\n- **Attention** : seulement au midblock base, sur 8×8 jetons. Avec `image_size` 512, `attn_resolutions` [8,16] ne correspond à aucun niveau. C'est négligeable ; FlashAttention n'apporterait rien.\n- **Coarse** : 64², batch 1, 20 pas, ≈11 TFLOPS effectifs. Il est limité par les lancements de noyaux et par Python.\n\n### Trois voies (gains = hypothèses)\n1. **PyTorch outillé** (quelques jours).\n   - Contenu : channels_last, CUDA graphs pour le decoder et le base en batch 16, capture de toute la boucle coarse, Inductor pour fusionner les épilogues.\n   - VRAM : le pic alloué est de 1,85 Go sur 24, donc la place existe.\n   - Contrainte : torch.compile est refusé par la politique actuelle (terrain_inference.py:414-415), pas par impossibilité technique.\n   - Gain attendu : 1,2 à 1,6× sur le NN.\n2. **TensorRT BF16** (1 à 3 semaines).\n   - Les formes statiques s'y prêtent bien.\n   - Gain attendu : decoder 1,5 à 2,5×, base 1,3 à 1,8×.\n   - Risques : la sélection de tactiques varie d'un build à l'autre ; il faudra figer le plan dans l'identité du monde et valider les motifs MP.\n3. **Moteur dédié CUTLASS/Triton** (2 à 4 mois-personne).\n   - Contenu : poids pré-normalisés en NHWC, SiLU et upsample fusionnés en prologue, `mp_sum` et `clip` fusionnés en épilogue, mégakernel pour le coarse.\n   - Gain probable : seulement +10 à 30 % au-delà de TensorRT. Plafond NN ≈2 à 2,5×.\n\n### L'apport propre d'un moteur dédié\nL'atout n'est pas la vitesse brute mais l'**invariance au batch**.\n\n- **Aujourd'hui** : la composition d'un batch change les mètres (terrain_window_scheduler.py:64-66). C'est pourquoi coarse et decoder restent imposés en batch 1 (terrain_inference.py:405-408).\n- **Avec des réductions à ordre fixe** : une même fenêtre donnerait les mêmes octets quels que soient son batch et l'ordre de navigation. Cela rendrait sûrs :\n  - le batching coarse, alors que la préparation planétaire représente ≈6 160 fenêtres × 20 pas, soit ≈3–4 min GPU déduites ;\n  - le batching entre tuiles ;\n  - un mode canonique sans surcoût.\n\n### Coûts et limites\n- **Pas de raccourci de précision sûr** : Ampere n'a pas de FP8. Doubler le pic passe par FP16 à accumulation FP16, INT8 ou la parcimonie 2:4. Ce sont des approximations, à garder en options séparées.\n- **Fin de l'égalité octet par octet** : tout changement de noyau la rompt. Elle n'était déjà attestée que pour une carte, un pilote et un build Torch.\n- **Mesures avant de construire** :\n  - profil nsys/ncu d'une empreinte LOD 3 et d'une LOD 2 ;\n  - compteur de FLOP ;\n  - microbenchmark des convolutions aux formes exactes ;\n  - prototype TensorRT du decoder seul.\n- **Seuil de décision** : si le base atteint déjà plus de 60 % du débit atteignable, un moteur dédié ne se justifie que pour le déterminisme.\n\n=== PAGE 3 ===\n## Optimisations ciblées\n\nTous les gains ci-dessous sont des hypothèses. Ils ne se multiplient pas : chaque levier retire sa part d'un même budget.\n\n### Travail généré\n- **Surcalcul des étapes intermédiaires.**\n  - Cause : index.html:91 demande la tuile parente entière au niveau de raffinement (terrain_lod.js:48-57). Une tuile LOD 2 couvre 31 km et une LOD 3 61 km, pour une vue native d'environ 27 × 20 km.\n  - Mesure : les 40 fenêtres decoder couvrent ≈61 × 61 km.\n  - Besoin réel déduit : 12 à 20 fenêtres decoder et ≈150 à 200 fenêtres base, au lieu de 374.\n  - Options : limiter LOD 3 aux latents dont le decoder visible a besoin, produire LOD 2 et LOD 1 comme mips du natif visible (terrain_final_mips.py), et sauter l'étape LOD 1, qui ne fait aucun forward mais coûte un aller-retour.\n  - Gain attendu : NN du temps-au-natif ≈5,5 → 2,2–2,6 s.\n  - Risques : il faut un protocole de tuiles découpées, et la composition des batches change, ce qui reste dans la tolérance actuelle.\n- **Boucle coarse** (terrain_inference.py:177-187) : 20 pas Python par fenêtre. Capturer le solveur entier, avec validation `torch.equal` comme dans terrain_cuda_graphs.py:84. Gain : LOD 4 0,28 → 0,12–0,18 s, résultat exact.\n- **Graph decoder** : aujourd'hui seuls coarse et base sont enveloppés (terrain_inference.py:422-426). Gain exact de 0 à 10 %, car le decoder est déjà limité par le GPU (1,18 s de CPU contre 1,83 s CUDA).\n\n### Maths exactes\n- **Rééchantillonnage** : remplacer les convolutions unitaires (terrain_nn_constants.py:71-81) par `[::2, ::2]` et une répétition nearest. Multiplier un terme unique par 1 ne change aucun bit. Gain : 2 à 5 %.\n- **`mp_sum`** (terrain_nn_constants.py:49) : supprimer le `stack` en conservant l'ordre FP32 puis l'arrondi. L'exactitude reste à prouver. Gain : 3 à 8 %.\n- **Bruit portable** (terrain_inference.py:302-304, 338-340) : le préparer sur CPU pendant le forward précédent. Gain ≤5 %. Pas de RNG GPU sans preuve bit à bit.\n\n### Pipeline et transport\n- **Aperçus CPU dans la voie GPU** : terrain_server.py:774-786 prend `gpu_lock` même au LOD ≥7, sans NN. L'aperçu mondial (terrain_server.py:949-958, priorité 0) occupe la voie ≈1,4 s, d'après l'écart entre réponses. Créer une voie CPU séparée. Gain exact : 1 à 2 s sur un monde froid.\n- **Finalisation** : trois écritures atomiques puis une relecture `np.load` (terrain_server.py:804-836). Le sémaphore `cpu_slots` (terrain_jobs.py:60, 173) peut bloquer la voie de calcul ; les compteurs donnent ≈60 ms d'encodage par job en moyenne. Servir depuis la mémoire et persister en différé. Gain : 0,5 à 1,5 s sur la phase native.\n- **Client** : quatre transferts au plus (index.html:103), une requête par tuile, temporisations de 50 et 250 ms (index.html:80, 109). Un endpoint par vue ou par lot gagnerait 0,3 à 1 s.\n- **Démarrage** : précharger les modèles, aujourd'hui chargés au premier accès (terrain_server.py:175-178, 2,5 à 3,6 s).\n- **Petits coûts par requête, à mettre en cache** :\n  - `world_identity` recalcule le SHA du manifest (terrain_manifest.py:157-166, appelé depuis terrain_server.py:677 et 509) ;\n  - `existing_final_mip` relit jusqu'à ≈36 fichiers (terrain_server.py:462-481) ;\n  - le climat recalcule sa base de 15 cellules à chaque tuile (terrain_climate.py:38-41).\n- **Latence perçue** : préparer les voisins quand le GPU est inactif rend les revisites rapides (≈0,5 s). Ce n'est pas un gain du générateur.\n\n### Hors goulot\n- **Rendu WebGPU** : 0,4 ms mesuré par soumission (terrain_renderer.js:180-206).\n- **Transport localhost** : 391 Ko par tuile.\n- **Bootstrap** : unique par seed. On peut gagner 0,3 à 0,6 s sur la copie et le SHA du binaire, `savez_compressed` et fsync (terrain_bootstrap.py:148-157, 298-308).\n- **Cache coarse** : SHA complet à chaque chargement (terrain_coarse.py:384-402). Acceptable.\n\n=== PAGE 4 ===\n## Plan d'expériences et décision\n\n### Fixer la métrique x5\n- **Métrique** : le temps froid jusqu'à la couverture native d'une vue de 900 × 650 px, avec poids résidents, sans préparation ni préchargement.\n- **Base et cible** : 7,57 s aujourd'hui, donc une cible ≤1,5 s.\n- **Mesures séparées** : premier aperçu utile, débit NN en km² par seconde, empreinte LOD 3 et LOD 2.\n- Le x5 par empreinte est physiquement exclu (page 1) : ne pas le viser.\n\n### Expériences priorisées\n1. **E0 — Instrumentation** (2 à 3 jours).\n   - Contenu : timeline serveur par job (file, verrou, CPU, forwards par modèle, encodage, écriture) et timeline client. nsys et ncu sur une LOD 3 et une LOD 2, plus compteur de FLOP et microbenchmark des convolutions.\n   - Go si le hors-NN dépasse 1,5 s, ou si le decoder reste sous 40 % du débit atteignable.\n2. **E1 — Pipeline exact** (3 à 5 jours).\n   - Contenu : voie CPU séparée, écriture différée, saut de LOD 1, préchargement des modèles, caches d'identité.\n   - Validation : `--require-exact`.\n   - Attendu : 7,57 → 5,5–6,5 s.\n3. **E2 — Politique d'étapes** (1 semaine).\n   - Contenu : intermédiaires limités à la vue, LOD 2 produit comme mip du natif.\n   - Go si le nombre de fenêtres decoder baisse au moins de moitié.\n4. **E3 — Exact côté NN** (1 semaine).\n   - Contenu : capture du solveur coarse, rééchantillonnage exact, graph decoder, préparation du bruit.\n   - Validation : égalité octet par octet.\n5. **E4 — Decoder non exact** (1 à 2 semaines).\n   - Contenu : channels_last avec compile, puis TensorRT BF16.\n   - Go si le gain atteint au moins 1,5× sous la porte de tolérance.\n6. **E5 — Moteur dédié** (2 à 4 mois).\n   - Seulement si E0 et E4 laissent une marge, ou si l'invariance au batch devient un objectif produit.\n\n### Budget composé, sans multiplier les gains\n- **Après E2–E4** : base ≈0,65–0,8 s, decoder ≈0,5–0,8 s, coarse ≈0,15 s. NN ≈1,2–1,8 s.\n- **Après E1** : hors-NN ≈0,4–1,0 s, en partie recouvrable par le calcul GPU.\n- **Total** : ≈1,6–2,8 s, soit ≈2,7 à 4,7×.\n- **x5** : atteint seulement avec un recouvrement CPU/GPU, le haut de chaque fourchette, ou E5.\n- **Protocole de décision** : 5 seeds × 3 sites, au moins 10 répétitions, horloges et charge GPU journalisées.\n- **Critère final** : médiane ≤1,5 s et p90 ≤2 s, sans dégrader le premier aperçu.\n\n### Fidélité et reproductibilité\n- **Niveau 1, changements exacts** : égalité octet par octet de la hauteur et des cinq climats, zéros signés compris (benchmark_runtime_lod.py:126-148).\n- **Niveau 2, changements de noyaux** :\n  - porte ≤1 m et limites climatiques (benchmark_inference.py:128-132) ;\n  - plus histogrammes de pente, part de côtes, spectre et raccords, sur un corpus élargi ;\n  - nouvelle identité runtime, déjà prévue par terrain_server.py:58-72 ;\n  - plan TensorRT et timing cache figés ;\n  - anciens caches jamais réutilisés, PyTorch conservé comme référence.\n- **Niveau 3, approximations** : options nommées, jamais par défaut. Candidates :\n  - `onestep_latent`, ≈−45 % de travail base ;\n  - moins de pas coarse ;\n  - accumulation FP16 ou INT8 ;\n  - distillation.\n\n  Les évaluer avec terrain_diffusion/evaluation/.\n- **Test d'invariance au batch** : même fenêtre en batch 1 et en batch 16. Aujourd'hui, l'ordre de navigation peut déjà changer les octets dans la tolérance ; `canonical_latents` existe pour l'éviter.\n\n### Coûts\n- E0 à E3 : 2 à 3 semaines-personne.\n- E4 : 1 à 2 semaines.\n- E5 : 2 à 4 mois, plus la maintenance par GPU et par pilote.\n\n### Avis\n- **Générateur seul** : x5 sans approximation est impossible sur cette RTX 3090. Le plafond réaliste est ≈2×.\n- **x5 perçu, du froid jusqu'au natif** : plausible mais non garanti. Il viendra d'abord du fait de calculer moins et du pipeline, ensuite d'un compilateur.\n- **Moteur complet** : ne rien construire avant les mesures d'E0 et d'E4.",
+  "ttft_ms": 2403,
+  "type": "result",
+  "duration_ms": 650913,
+  "uuid": "9a2561ca-56f0-4bf6-9c4e-49ad0950a6df",
+  "ttft_stream_ms": 1454,
+  "time_to_request_ms": 64,
+  "first_content_frame_ms": 1454,
+  "queued_turn_count": 0,
+  "result_index": 0,
+  "cli_returncode": 0,
+  "elapsed_seconds": 653.7450587749481,
+  "requested_model": "claude-opus-5-5",
+  "requested_effort": "high",
+  "stderr": ""
+}

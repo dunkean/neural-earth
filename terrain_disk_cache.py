@@ -102,10 +102,12 @@ class TerrainDiskCache:
             parts=parts[1:]
         if parts and parts[0] == 'physical-v1':
             parts = parts[1:]
-        if len(parts) == 3 and parts[0].isdigit() and parts[1].isdigit():
+        if len(parts) == 3 and parts[0].isdigit() and re.fullmatch(r'-?\d+(?:-source3)?', parts[1]):
             match = re.fullmatch(r'(-?\d+)_(-?\d+)\.(?:(?:climate|relief|biomes|temperature|precipitation)\.)?(npy|json|png)', parts[2])
             if match:
-                return f'{self.version}/{world_profile}{int(parts[0])}/{int(parts[1])}/{int(match[1])}/{int(match[2])}'
+                level=parts[1].split('-source3')[0]
+                suffix='/source3' if parts[1].endswith('-source3') else ''
+                return f'{self.version}/{world_profile}{int(parts[0])}/{int(level)}/{int(match[1])}/{int(match[2])}{suffix}'
         if len(parts)==2 and parts[0].isdigit() and (parts[1]=='world.json' or re.fullmatch(r'overview(?:\.(relief|biomes|temperature|precipitation))?\.(png|json)',parts[1])):
             return f'{self.version}/{world_profile}{int(parts[0])}/overview'
         return None

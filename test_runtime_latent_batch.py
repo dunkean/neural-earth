@@ -68,15 +68,16 @@ class LatentBatchCpuTests(unittest.TestCase):
     def test_terrestrial_noise_switch_preserves_reference_configuration(self):
         from terrain_conditioning import CONDITIONING_SNR
         profile=terrain_inference.InferenceProfile(name='cpu-contract',
-            cached_weights=False,cuda_graphs=False,gpu_windows=False)
+            cached_weights=False,cuda_graphs=False,gpu_windows=False,exact_kernels=False)
         baseline=[.5]*5
         world=SimpleNamespace(device='cpu',kwargs={'cond_snr':baseline.copy(),
             'frequency_mult':[1.]*5,'drop_water_pct':.5},
             torch_compile=False,tile_store=None,coarse_model=object(),base_model=object(),
             decoder_model=object())
-        terrain_inference.configure_world(world,profile,world_profile='terrestrial-earthlike')
-        self.assertEqual(world.kwargs['cond_snr'],list(CONDITIONING_SNR))
-        terrain_inference.configure_world(world,profile,world_profile='natural')
+        with patch('terrain_nn_constants._runtime_config',None):
+            terrain_inference.configure_world(world,profile,world_profile='terrestrial-earthlike')
+            self.assertEqual(world.kwargs['cond_snr'],list(CONDITIONING_SNR))
+            terrain_inference.configure_world(world,profile,world_profile='natural')
         self.assertEqual(world.kwargs['cond_snr'],baseline)
         self.assertEqual(world.kwargs['frequency_mult'],[1.]*5)
         self.assertEqual(world.kwargs['drop_water_pct'],.5)

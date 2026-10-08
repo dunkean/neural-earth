@@ -38,11 +38,21 @@ function response(stage){return {ok:true,status:200,headers:{get:name=>({'X-Terr
   const a=taskFor(10,0,0,3000),b=taskFor(10,1,0,3001),missing=taskFor(10,2,0,2000);
   for(const t of [a,b])tiles.set(t.key,{expiresAt:0});
   for(const t of [a,b,missing]){interests.set(t.key,t);wanted.add(t.key)}
-  dispatched=[];fetchTile=t=>{dispatched.push(t.key);inflight.set(t.key,{validation:needsValidation(tiles.get(t.key))})};
-  inflight.set('existing-validation',{validation:true});queue=[a,b,missing];pump();
+  dispatched=[];fetchTile=t=>{dispatched.push(t.key);inflight.set(t.key,{task:t,validation:needsValidation(tiles.get(t.key))})};
+  inflight.set('existing-validation',{task:a,validation:true});queue=[a,b,missing];pump();
   if(dispatched.length!==1||dispatched[0]!==missing.key)throw Error('validation must not block missing coverage');
   inflight.clear();dispatched=[];pump();
   if(dispatched.length!==1||queue.length!==1)throw Error('only one cached validation may occupy the HTTP lane');
  `,context);
- console.log('Preview race, retained display, parent/GPU replacement and serialized promotion with parallel missing coverage: OK');
+ // A response body can finish after the selected NN process has changed.
+ let resolveStatusBody;
+ context.fetch=async()=>({ok:true,json:()=>new Promise(resolve=>{resolveStatusBody=resolve})});
+ const previousStatus=vm.runInContext('serverStatus',context);
+ const oldPoll=callbacks[0]();
+ await new Promise(resolve=>setImmediate(resolve));
+ vm.runInContext("nnEngine='reference';epoch++",context);
+ resolveStatusBody({coarse_preparation:{seed:'42',world_profile:'natural',progress:{complete_windows:999}}});
+ await oldPoll;
+ assert.equal(vm.runInContext('serverStatus',context),previousStatus,'old NN telemetry must not replace new-engine state');
+ console.log('Preview races, replacement, parallel coverage and stale NN telemetry: OK');
 })().catch(e=>{console.error(e);process.exitCode=1});

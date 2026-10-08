@@ -28,7 +28,7 @@ const tiny=[-7600,-7600,-100,-100],levels=[];
 assert.equal(refinementLod(levels,0,tiny),4);
 for(let lod=4;lod>=1;lod--){
   levels.push({lod,tx:-1,ty:-1});
-  assert.equal(refinementLod(levels,0,tiny),lod-1);
+  assert.equal(refinementLod(levels,0,tiny),lod===4?3:0);
 }
 levels.push({lod:0,tx:-1,ty:-1});
 assert.equal(refinementLod([levels.at(-1)],0,tiny),0);
@@ -45,3 +45,16 @@ const protectedPlan=plan([parent],0,tiny,{protectedBounds});
 assert(protectedPlan.every(p=>p.bounds[2]<=protectedBounds[0]||p.bounds[0]>=protectedBounds[2]||p.bounds[3]<=protectedBounds[1]||p.bounds[1]>=protectedBounds[3]));
 assert(plan([fine],0,tiny,{protectedBounds}).some(p=>p.tile===fine),'new native tiles must replace the protected image');
 console.log('LOD uniforme, substitution parent et coordonnées négatives : OK');
+
+const latentPatch={lod:1,source_lod:3,tx:-1,ty:-1,presented:true};
+const decoderParent={lod:2,tx:-1,ty:-1,presented:true};
+assert.equal(plan([latentPatch,decoderParent],0,tiny)[0].tile,decoderParent,'better source wins over finer display geometry');
+assert.equal(refinementLod([latentPatch],1,tiny),1,'source3 satisfies intermediate barrier, never final cache');
+assert(plan([latentPatch],1,tiny)[0].fallback);
+assert.equal(refinementLod([{...latentPatch,presented:false}],1,tiny),4);
+assert.equal(plan([latentPatch],2,tiny).length,0,'fine historical geometry cannot leak when zooming out');
+assert(plan([latentPatch],1,tiny,{protectedBounds}).every(p=>p.bounds[2]<=protectedBounds[0]||p.bounds[0]>=protectedBounds[2]||p.bounds[3]<=protectedBounds[1]||p.bounds[1]>=protectedBounds[3]));
+
+assert.equal(refinementLod([{lod:4,tx:-1,ty:-1,presented:true}],0,tiny,{latentPreview:false}),0,'default coarse coverage schedules native without duplicate latent inference');
+assert.equal(refinementLod([],0,tiny,{latentPreview:false}),4);
+assert.equal(refinementLod([{lod:4,tx:-1,ty:-1,presented:false}],0,tiny,{latentPreview:false}),4);

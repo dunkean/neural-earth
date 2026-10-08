@@ -108,6 +108,14 @@
     }
     @fragment fn fragment(input:Vertex) -> @location(0) vec4<f32> { return textureSample(color,filtering,input.uv); }`;
 
+  // Opt-in timeline compatible with Chrome/Perfetto. Queue completion latency
+  // includes preceding submissions; it is deliberately not a GPU kernel timer.
+  const timingEnabled=new URLSearchParams(location.search).get('profiling')==='1';
+  const timingEvents=new Array(4096);let timingCount=0,queueObservers=0,omittedQueueObservers=0;
+  window.TerrainTiming={enabled:timingEnabled,
+    record(name,start,args={}){if(!timingEnabled)return;const end=performance.now();timingEvents[timingCount++%4096]={name,ph:'X',pid:2,tid:'browser',ts:(performance.timeOrigin+start)*1000,dur:(end-start)*1000,args};},
+    queue(queue,name){if(!timingEnabled)return;if(queueObservers>=3){omittedQueueObservers++;return;}const start=performance.now();queueObservers++;queue.onSubmittedWorkDone().then(()=>this.record(name+'.queue_completion',start,{includes_previous_submissions:true}),()=>{}).finally(()=>queueObservers--);},
+    snapshot(){const first=Math.max(0,timingCount-4096);return{enabled:timingEnabled,dropped_events:first,omitted_queue_observers:omittedQueueObservers,capacity:4096,notes:'Queue completion is latency, not isolated GPU execution or display presentation.',traceEvents:Array.from({length:timingCount-first},(_,i)=>timingEvents[(first+i)%4096])};}};
   class TerrainGpuRenderer {
     constructor(canvas, options) {
       this.canvas=canvas; this.options=options; this.tiles=new Map(); this.bytes=0;
@@ -202,6 +210,8 @@
       this.device.queue.submit([encoder.finish()]); params.destroy();
       const bytes=width*height*4+innerWidth*innerHeight*4+climateWidth*climateHeight*5*4;
       this.tiles.set(key,{elevation,color,climate:climateTexture,bytes,lastUsed:++this.serial});this.bytes+=bytes;this.uploads++;this.lastUploadSubmitMs=performance.now()-started;
+      window.TerrainTiming.record('render.upload_and_shade_submit',started,{key,bytes});
+      window.TerrainTiming.queue(this.device.queue,'render.shade');
       this.evict();return this.hasTile(key);
     }
     hasTile(key) { return this.available&&this.tiles.has(key); }
@@ -219,6 +229,7 @@
     clear() { for(const key of this.tiles.keys())this.deleteTile(key); }
     draw(rects, {width,height,dpr=window.devicePixelRatio||1}) {
       if(!this.available)return false;
+      const started=timingEnabled?performance.now():0;
       if(!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0)return false;
       const max=this.device.limits.maxTextureDimension2D;
       dpr=Math.min(dpr,max/width,max/height);
@@ -242,7 +253,9 @@
         tile.group??=this.device.createBindGroup({layout:this.renderLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:48}},{binding:1,resource:tile.color.createView()},{binding:2,resource:this.sampler}]});
         pass.setBindGroup(0,tile.group,[i*stride]);pass.draw(6);
       });
-      pass.end();this.device.queue.submit([encoder.finish()]);this.frames++;this.canvas.style.visibility='visible';return true;
+      pass.end();this.device.queue.submit([encoder.finish()]);this.frames++;this.canvas.style.visibility='visible';
+      window.TerrainTiming.record('render.draw_submit',started,{quads:visible.length});
+      window.TerrainTiming.queue(this.device.queue,'render.draw');return true;
     }
     getStats() { const scratchBytes=(this.scratchWidth||0)*(this.scratchHeight||0)*16,uniformBytes=this.capacity*(this.device?.limits.minUniformBufferOffsetAlignment||0);return {status:this.status,tiles:this.tiles.size,bytes:this.bytes,scratchBytes,uniformBytes,totalBytes:this.bytes+scratchBytes+uniformBytes,maxBytes:this.maxBytes,frames:this.frames,uploads:this.uploads,lastUploadSubmitMs:this.lastUploadSubmitMs||0}; }
     dispose() {

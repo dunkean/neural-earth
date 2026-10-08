@@ -25,10 +25,12 @@ def main():
         prep = CoarsePreparation(temporary, manifest).install(world)
         first_step = prep.step(world, budget_windows=1)
         before = read_rect(world, 'coarse', -2, -2, 2, 2).cpu().numpy()
+        prep.flush()
         first = prep.status()
         world.rebuild()
         replay_prep = CoarsePreparation(temporary, manifest).install(world)
         after = read_rect(world, 'coarse', -2, -2, 2, 2).cpu().numpy()
+        replay_prep.flush()
         finite = bool(np.isfinite(before).all() and np.isfinite(after).all())
         error = float(np.max(np.abs(before - after)))
         positive_denominator = bool(np.all(after[-1] > 0))
@@ -48,6 +50,8 @@ def main():
                                  replay_prep.network_windows == 0 and
                                  replay_prep.disk_hits > 0 and
                                  first_step['network_windows'] == 1)}
+        replay_prep.close()
+        prep.close()
     path = RUNTIME / 'coarse-persistence-fidelity.json'
     path.write_text(json.dumps(report, indent=2), encoding='utf-8')
     print(json.dumps(report), flush=True)

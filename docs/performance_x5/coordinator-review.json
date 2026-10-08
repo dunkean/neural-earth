@@ -1,0 +1,76 @@
+{
+  "scope": "Factual qualifications and source attribution; no new performance measurements",
+  "opus_original": "opus-5.5-original.txt and opus-5.5-provenance.json:result",
+  "opus_changes": [
+    {
+      "original": "Le probe webgpu/ (ONNX/WASM) est hors périmètre.",
+      "reviewed": "Relecture du coordinateur : estimations et scénarios ci-dessous restent à mesurer ; les reçus historiques ne constituent pas une baseline actuelle. L'original et la provenance CLI sont conservés. Le probe webgpu/ (ONNX/WASM) est hors périmètre."
+    },
+    {
+      "original": "bootstrap Rust : 1,18 à 2,34 s au premier accès",
+      "reviewed": "création complète du bootstrap : 1,18 à 2,34 s au premier accès (pas le Rust seul)"
+    },
+    {
+      "original": "**Part du NN** : sur le parcours natural, le NN prend",
+      "reviewed": "**Part du NN estimée** : reconstruction depuis compteurs et coûts unitaires, sans timeline commune ; sur le parcours natural, le NN prend"
+    },
+    {
+      "original": "chiffre constructeur à confirmer par mesure.",
+      "reviewed": "pic constructeur, pas un débit soutenu : [NVIDIA, tableau 7](https://www.nvidia.com/content/dam/en-zz/Solutions/geforce/ampere/pdf/NVIDIA-ampere-GA102-GPU-Architecture-Whitepaper-V1.pdf)."
+    },
+    {
+      "original": "**Conclusion : un x5 par empreinte, à travail et matériel constants, est exclu**, même avec des noyaux parfaits.",
+      "reviewed": "**Avis : x5 par empreinte paraît peu plausible sous ces hypothèses.** Les GMAC sont non audités ; ces plafonds ne constituent pas une preuve d’impossibilité."
+    },
+    {
+      "original": "C’est négligeable ; FlashAttention n’apporterait rien.",
+      "reviewed": "C'est une priorité secondaire ; le gain éventuel reste à profiler."
+    },
+    {
+      "original": "VRAM : le pic alloué est de 1,85 Go sur 24, donc la place existe.",
+      "reviewed": "VRAM : le pic PyTorch alloué historique est de 1,85 Go ; vérifier mémoire libre, réservée et contention avant toute capture."
+    },
+    {
+      "original": "**Avec des réductions à ordre fixe** : une même fenêtre donnerait les mêmes octets quels que soient son batch et l’ordre de navigation. Cela rendrait sûrs :",
+      "reviewed": "**Avec des réductions à ordre fixe** : une invariance au batch serait à vérifier sur toutes les opérations et kernels. Si démontrée, elle faciliterait :"
+    },
+    {
+      "original": "**Fin de l’égalité octet par octet** : tout changement de noyau la rompt.",
+      "reviewed": "**Égalité octet par octet** : un changement de noyau peut la rompre ; il doit être validé."
+    },
+    {
+      "original": "ce qui reste dans la tolérance actuelle.",
+      "reviewed": "dont la fidélité et le déterminisme devront être revalidés, sans présumer la tolérance."
+    },
+    {
+      "original": "Gain : LOD 4 0,28 → 0,12–0,18 s, résultat exact.",
+      "reviewed": "Hypothèse : LOD 4 0,28 → 0,12–0,18 s, exactitude à valider."
+    },
+    {
+      "original": "Gain exact de 0 à 10 %",
+      "reviewed": "Hypothèse de gain de 0 à 10 %, exactitude à valider"
+    },
+    {
+      "original": "Gain exact : 1 à 2 s sur un monde froid.",
+      "reviewed": "Hypothèse de gain : 1 à 2 s sur un monde froid ; pas d’attribution causale mesurée."
+    },
+    {
+      "original": "**Rendu WebGPU** : 0,4 ms mesuré par soumission",
+      "reviewed": "**Rendu WebGPU** : 0,4 ms historique par soumission CPU, sans chronométrage GPU ni présentation"
+    },
+    {
+      "original": "**Base et cible** : 7,57 s aujourd’hui, donc une cible ≤1,5 s.",
+      "reviewed": "**Repère historique natural** : 7,57 s, donc cible illustrative ≤1,5 s. Pour le repère terrestre de 12,44 s : ≤2,49 s. Refaire la baseline actuelle."
+    },
+    {
+      "original": "Le x5 par empreinte est physiquement exclu (page 1) : ne pas le viser.",
+      "reviewed": "Le x5 par empreinte n’est pas étayé (page 1) : valider le coût réel avant de conclure."
+    },
+    {
+      "original": "**Générateur seul** : x5 sans approximation est impossible sur cette RTX 3090. Le plafond réaliste est ≈2×.",
+      "reviewed": "**Générateur seul** : x5 sans approximation paraît peu plausible selon ces estimations. ≈2× est une hypothèse de gain, pas un plafond démontré."
+    }
+  ],
+  "astra_change": "Clarify attention only in base midblock; source edm_unet.py:111-138.",
+  "sol_changes": "Applied by Sol: correct attention and qualify historical source hashes."
+}

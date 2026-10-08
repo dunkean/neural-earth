@@ -78,13 +78,13 @@ class ServerWorldConstructionTests(unittest.TestCase):
             CoarsePreparation=CoarsePreparation, worlds=OrderedDict(), active_seed=None,
             app=self.app, jsonify=jsonify, Response=Response, request=request,
             has_request_context=has_request_context, subprocess=subprocess,
-            pin_cache_io=lambda key:lambda function:function, TILE=256, NATIVE=30,
+            pin_cache_io=lambda key:lambda function:function, TILE=256, NATIVE=30, MIN_LOD=-2,
             JobCancelled=JobCancelled, QueueFull=QueueFull)
-        self.namespace['physical_tile'] = lambda seed,lod,tx,ty:self.namespace['get_world'](
+        self.namespace['physical_tile'] = lambda seed,lod,tx,ty,**options:self.namespace['get_world'](
             seed, request.args.get('world_profile', 'natural'))
         tree = ast.parse((ROOT / 'terrain_server.py').read_text(encoding='utf-8'))
         names = {'generation_failure', 'world_manifest', '_create_world', 'get_world',
-                 '_tile_coordinates', 'height_tile'}
+                 '_tile_coordinates', 'height_tile', 'close_world'}
         nodes = [node for node in tree.body if getattr(node, 'name', None) in names]
         self.assertEqual({node.name for node in nodes}, names)
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(ROOT / 'terrain_server.py'), 'exec'),

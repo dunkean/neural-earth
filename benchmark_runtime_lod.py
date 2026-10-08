@@ -44,6 +44,10 @@ def imported_source_evidence():
                terrain_conditioning, terrain_world, terrain_manifest, world_pipeline,
                mp_layers, sys.modules[__name__])
     paths = {Path(module.__file__).name: str(Path(module.__file__).resolve()) for module in modules}
+    for name in ('terrain_cuda_kernels.py', 'terrain_interpolation.py'):
+        extra_source = Path(terrain_nn_constants.__file__).with_name(name)
+        if extra_source.exists():
+            paths[name] = str(extra_source.resolve())
     return dict(source_paths=paths,
                 source_sha256={name: hashlib.sha256(Path(path).read_bytes()).hexdigest() for name, path in paths.items()})
 
@@ -182,6 +186,7 @@ def main():
     parser.add_argument('--require-exact', action='store_true')
     parser.add_argument('--repeats', type=int, default=5)
     parser.add_argument('--source-dir')
+    parser.add_argument('--prewarm-base',action='store_true')
     parser.add_argument('--lods',type=int,nargs='+',default=[3,2])
     args = parser.parse_args()
     if args.require_exact and not args.reference:
@@ -214,6 +219,8 @@ def run_lod(args,report,output):
     loaded = load_pipeline(42)
     torch.cuda.synchronize()
     report['model_initialization_seconds'] = time.perf_counter()-started
+    if args.prewarm_base:
+        report['base_prewarm']=server.warm_base_forms(loaded)
     report['gpu'] = torch.cuda.get_device_name()
     config = {k:v for k,v in dict(loaded.config).items() if not k.startswith('_')}
     reference = np.load(args.reference) if args.reference else None
@@ -250,6 +257,8 @@ def run_lod(args,report,output):
                 torch.cuda.synchronize()
                 seconds = time.perf_counter()-started
                 arrays[key+'_elev'], arrays[key+'_climate'] = elevation,climate
+                # Preserve rejected approximate outputs too, for error/visual review.
+                np.savez_compressed(output/(args.label+'.npz'), **arrays)
                 item.update(world_bind_seconds=report_setup,seconds=seconds,stage=stage,
                       peak_allocated_bytes=torch.cuda.max_memory_allocated(),peak_reserved_bytes=torch.cuda.max_memory_reserved(),
                       measurements=measure.snapshot(),before_graphs=before['cuda_graphs'],after_inference=inference_status(world))

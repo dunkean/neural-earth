@@ -1,0 +1,907 @@
+{
+  "source": "E:\\TerrainDiffusionRuntime\\inference-engine-20261008\\quant-experiments\\physical-validation",
+  "source_npz_sha": "2a72901c61f8a9c50e5a742c990e6d81b4a6ca02b848d17160133fe378657653",
+  "source_receipt_sha": "3aaffe210aaf43a723adddd35cb090d1365e873fd318e1bb3b6dc0aa0ba32542",
+  "entries": [
+    {
+      "variant": "fp32",
+      "index": 0,
+      "site": {
+        "profile": "natural",
+        "seed": 101,
+        "tx": 17,
+        "ty": -23
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 5.246084262182357,
+        "max_abs": 117.37203979492188,
+        "p99": 31.68670043945315,
+        "rmse": 8.676751968337333
+      },
+      "case": {
+        "key": "lod3_case0",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 5.246084262182357,
+          "rmse_m": 8.676751968337333,
+          "max_abs_m": 117.37203979492188,
+          "bias_m": -2.184844068161882,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 101,
+          "tx": 17,
+          "ty": -23
+        },
+        "images": [
+          "lod3_case0-overview.png",
+          "lod3_case0-zooms.png",
+          "lod3_case0-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "fp32",
+      "index": 1,
+      "site": {
+        "profile": "terrestrial-earthlike",
+        "seed": 202,
+        "tx": -30,
+        "ty": 11
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 10.000361228583593,
+        "max_abs": 63.50537109375,
+        "p99": 33.2445556640625,
+        "rmse": 12.710919790230607
+      },
+      "case": {
+        "key": "lod3_case1",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 10.000361228583593,
+          "rmse_m": 12.710919790230607,
+          "max_abs_m": 63.50537109375,
+          "bias_m": -7.340833991518311,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 202,
+          "tx": -30,
+          "ty": 11
+        },
+        "images": [
+          "lod3_case1-overview.png",
+          "lod3_case1-zooms.png",
+          "lod3_case1-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "fp32",
+      "index": 2,
+      "site": {
+        "profile": "natural",
+        "seed": 303,
+        "tx": 2,
+        "ty": -6
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 8.290981510692472,
+        "max_abs": 89.15188598632812,
+        "p99": 27.488659667968754,
+        "rmse": 10.948075486553122
+      },
+      "case": {
+        "key": "lod3_case2",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 8.290981510692472,
+          "rmse_m": 10.948075486553122,
+          "max_abs_m": 89.15188598632812,
+          "bias_m": -6.656992658720193,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 303,
+          "tx": 2,
+          "ty": -6
+        },
+        "images": [
+          "lod3_case2-overview.png",
+          "lod3_case2-zooms.png",
+          "lod3_case2-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "fp32",
+      "index": 3,
+      "site": {
+        "profile": "terrestrial-archipelago",
+        "seed": 404,
+        "tx": -7,
+        "ty": 24
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 12.067535727968506,
+        "max_abs": 86.62841796875,
+        "p99": 37.05224609375,
+        "rmse": 14.964335511316383
+      },
+      "case": {
+        "key": "lod3_case3",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 12.067535727968506,
+          "rmse_m": 14.964335511316383,
+          "max_abs_m": 86.62841796875,
+          "bias_m": -10.260787456649823,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 404,
+          "tx": -7,
+          "ty": 24
+        },
+        "images": [
+          "lod3_case3-overview.png",
+          "lod3_case3-zooms.png",
+          "lod3_case3-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "qdq",
+      "index": 0,
+      "site": {
+        "profile": "natural",
+        "seed": 101,
+        "tx": 17,
+        "ty": -23
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 16.054535976649934,
+        "max_abs": 223.35107421875,
+        "p99": 79.56013183593751,
+        "rmse": 24.638758371140096
+      },
+      "case": {
+        "key": "lod3_case0",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 16.054535976649934,
+          "rmse_m": 24.638758371140096,
+          "max_abs_m": 223.35107421875,
+          "bias_m": -6.087102294776082,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 101,
+          "tx": 17,
+          "ty": -23
+        },
+        "images": [
+          "lod3_case0-overview.png",
+          "lod3_case0-zooms.png",
+          "lod3_case0-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "qdq",
+      "index": 1,
+      "site": {
+        "profile": "terrestrial-earthlike",
+        "seed": 202,
+        "tx": -30,
+        "ty": 11
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 87.3517180889267,
+        "max_abs": 338.3017578125,
+        "p99": 211.53583984375013,
+        "rmse": 100.3765550329771
+      },
+      "case": {
+        "key": "lod3_case1",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 87.3517180889267,
+          "rmse_m": 100.3765550329771,
+          "max_abs_m": 338.3017578125,
+          "bias_m": 84.80163070171494,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 202,
+          "tx": -30,
+          "ty": 11
+        },
+        "images": [
+          "lod3_case1-overview.png",
+          "lod3_case1-zooms.png",
+          "lod3_case1-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "qdq",
+      "index": 2,
+      "site": {
+        "profile": "natural",
+        "seed": 303,
+        "tx": 2,
+        "ty": -6
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 29.05683586311948,
+        "max_abs": 204.51820373535156,
+        "p99": 105.78497314453128,
+        "rmse": 37.931945607306
+      },
+      "case": {
+        "key": "lod3_case2",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 29.05683586311948,
+          "rmse_m": 37.931945607306,
+          "max_abs_m": 204.51820373535156,
+          "bias_m": -7.39196354447942,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 303,
+          "tx": 2,
+          "ty": -6
+        },
+        "images": [
+          "lod3_case2-overview.png",
+          "lod3_case2-zooms.png",
+          "lod3_case2-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "qdq",
+      "index": 3,
+      "site": {
+        "profile": "terrestrial-archipelago",
+        "seed": 404,
+        "tx": -7,
+        "ty": 24
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 71.71814509045714,
+        "max_abs": 300.11474609375,
+        "p99": 194.20085449218772,
+        "rmse": 85.56002694958279
+      },
+      "case": {
+        "key": "lod3_case3",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 71.71814509045714,
+          "rmse_m": 85.56002694958279,
+          "max_abs_m": 300.11474609375,
+          "bias_m": 65.53478426946498,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 404,
+          "tx": -7,
+          "ty": 24
+        },
+        "images": [
+          "lod3_case3-overview.png",
+          "lod3_case3-zooms.png",
+          "lod3_case3-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "qdq-bf16-protect-res1",
+      "index": 0,
+      "site": {
+        "profile": "natural",
+        "seed": 101,
+        "tx": 17,
+        "ty": -23
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 11.529457712660985,
+        "max_abs": 141.723876953125,
+        "p99": 56.776776123046915,
+        "rmse": 17.428823238098907
+      },
+      "case": {
+        "key": "lod3_case0",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 11.529457712660985,
+          "rmse_m": 17.428823238098907,
+          "max_abs_m": 141.723876953125,
+          "bias_m": -8.93104707663407,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 101,
+          "tx": 17,
+          "ty": -23
+        },
+        "images": [
+          "lod3_case0-overview.png",
+          "lod3_case0-zooms.png",
+          "lod3_case0-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "qdq-bf16-protect-res1",
+      "index": 1,
+      "site": {
+        "profile": "terrestrial-earthlike",
+        "seed": 202,
+        "tx": -30,
+        "ty": 11
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 35.73364288985234,
+        "max_abs": 200.69677734375,
+        "p99": 114.26396484375016,
+        "rmse": 44.70301810601474
+      },
+      "case": {
+        "key": "lod3_case1",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 35.73364288985234,
+          "rmse_m": 44.70301810601474,
+          "max_abs_m": 200.69677734375,
+          "bias_m": -18.564367505652093,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 202,
+          "tx": -30,
+          "ty": 11
+        },
+        "images": [
+          "lod3_case1-overview.png",
+          "lod3_case1-zooms.png",
+          "lod3_case1-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "qdq-bf16-protect-res1",
+      "index": 2,
+      "site": {
+        "profile": "natural",
+        "seed": 303,
+        "tx": 2,
+        "ty": -6
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 26.56543649869123,
+        "max_abs": 177.454833984375,
+        "p99": 88.94633789062502,
+        "rmse": 33.91823789342211
+      },
+      "case": {
+        "key": "lod3_case2",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 26.56543649869123,
+          "rmse_m": 33.91823789342211,
+          "max_abs_m": 177.454833984375,
+          "bias_m": -21.853840382768396,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 303,
+          "tx": 2,
+          "ty": -6
+        },
+        "images": [
+          "lod3_case2-overview.png",
+          "lod3_case2-zooms.png",
+          "lod3_case2-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "qdq-bf16-protect-res1",
+      "index": 3,
+      "site": {
+        "profile": "terrestrial-archipelago",
+        "seed": 404,
+        "tx": -7,
+        "ty": 24
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 35.51241742606969,
+        "max_abs": 186.5595703125,
+        "p99": 113.589208984375,
+        "rmse": 44.41938591389876
+      },
+      "case": {
+        "key": "lod3_case3",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 35.51241742606969,
+          "rmse_m": 44.41938591389876,
+          "max_abs_m": 186.5595703125,
+          "bias_m": -18.645776484481516,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 404,
+          "tx": -7,
+          "ty": 24
+        },
+        "images": [
+          "lod3_case3-overview.png",
+          "lod3_case3-zooms.png",
+          "lod3_case3-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "trt",
+      "index": 0,
+      "site": {
+        "profile": "natural",
+        "seed": 101,
+        "tx": 17,
+        "ty": -23
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 16.223259804183375,
+        "max_abs": 217.89605712890625,
+        "p99": 81.4577270507813,
+        "rmse": 24.948467171008527
+      },
+      "case": {
+        "key": "lod3_case0",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 16.223259804183375,
+          "rmse_m": 24.948467171008527,
+          "max_abs_m": 217.89605712890625,
+          "bias_m": -6.1353999990743695,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 101,
+          "tx": 17,
+          "ty": -23
+        },
+        "images": [
+          "lod3_case0-overview.png",
+          "lod3_case0-zooms.png",
+          "lod3_case0-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "trt",
+      "index": 1,
+      "site": {
+        "profile": "terrestrial-earthlike",
+        "seed": 202,
+        "tx": -30,
+        "ty": 11
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 87.43501141725154,
+        "max_abs": 329.62939453125,
+        "p99": 211.8263671875,
+        "rmse": 100.49248619868615
+      },
+      "case": {
+        "key": "lod3_case1",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 87.43501141725154,
+          "rmse_m": 100.49248619868615,
+          "max_abs_m": 329.62939453125,
+          "bias_m": 84.68277729383136,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 202,
+          "tx": -30,
+          "ty": 11
+        },
+        "images": [
+          "lod3_case1-overview.png",
+          "lod3_case1-zooms.png",
+          "lod3_case1-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "trt",
+      "index": 2,
+      "site": {
+        "profile": "natural",
+        "seed": 303,
+        "tx": 2,
+        "ty": -6
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 29.06388169938292,
+        "max_abs": 192.449951171875,
+        "p99": 105.48498535156251,
+        "rmse": 37.894292674521225
+      },
+      "case": {
+        "key": "lod3_case2",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 29.06388169938292,
+          "rmse_m": 37.894292674521225,
+          "max_abs_m": 192.449951171875,
+          "bias_m": -6.943230564444702,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 303,
+          "tx": 2,
+          "ty": -6
+        },
+        "images": [
+          "lod3_case2-overview.png",
+          "lod3_case2-zooms.png",
+          "lod3_case2-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "trt",
+      "index": 3,
+      "site": {
+        "profile": "terrestrial-archipelago",
+        "seed": 404,
+        "tx": -7,
+        "ty": 24
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 72.08229585895909,
+        "max_abs": 313.19091796875,
+        "p99": 193.66015625,
+        "rmse": 85.82162510224815
+      },
+      "case": {
+        "key": "lod3_case3",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 72.08229585895909,
+          "rmse_m": 85.82162510224815,
+          "max_abs_m": 313.19091796875,
+          "bias_m": 66.19795318983928,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 404,
+          "tx": -7,
+          "ty": 24
+        },
+        "images": [
+          "lod3_case3-overview.png",
+          "lod3_case3-zooms.png",
+          "lod3_case3-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "weight-only-bf16",
+      "index": 0,
+      "site": {
+        "profile": "natural",
+        "seed": 101,
+        "tx": 17,
+        "ty": -23
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 8.712838541002812,
+        "max_abs": 47.171630859375,
+        "p99": 31.77473754882813,
+        "rmse": 11.88261396051205
+      },
+      "case": {
+        "key": "lod3_case0",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 8.712838541002812,
+          "rmse_m": 11.88261396051205,
+          "max_abs_m": 47.171630859375,
+          "bias_m": -8.581637422076902,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 101,
+          "tx": 17,
+          "ty": -23
+        },
+        "images": [
+          "lod3_case0-overview.png",
+          "lod3_case0-zooms.png",
+          "lod3_case0-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "weight-only-bf16",
+      "index": 1,
+      "site": {
+        "profile": "terrestrial-earthlike",
+        "seed": 202,
+        "tx": -30,
+        "ty": 11
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 44.96970201529294,
+        "max_abs": 91.587890625,
+        "p99": 70.37863769531255,
+        "rmse": 46.2850302204977
+      },
+      "case": {
+        "key": "lod3_case1",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 44.96970201529294,
+          "rmse_m": 46.2850302204977,
+          "max_abs_m": 91.587890625,
+          "bias_m": -44.96918257187608,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 202,
+          "tx": -30,
+          "ty": 11
+        },
+        "images": [
+          "lod3_case1-overview.png",
+          "lod3_case1-zooms.png",
+          "lod3_case1-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "weight-only-bf16",
+      "index": 2,
+      "site": {
+        "profile": "natural",
+        "seed": 303,
+        "tx": 2,
+        "ty": -6
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 27.549457618750264,
+        "max_abs": 80.985595703125,
+        "p99": 54.63623046875003,
+        "rmse": 30.465201803143852
+      },
+      "case": {
+        "key": "lod3_case2",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 27.549457618750264,
+          "rmse_m": 30.465201803143852,
+          "max_abs_m": 80.985595703125,
+          "bias_m": -27.53601934287887,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 303,
+          "tx": 2,
+          "ty": -6
+        },
+        "images": [
+          "lod3_case2-overview.png",
+          "lod3_case2-zooms.png",
+          "lod3_case2-profiles.png"
+        ]
+      }
+    },
+    {
+      "variant": "weight-only-bf16",
+      "index": 3,
+      "site": {
+        "profile": "terrestrial-archipelago",
+        "seed": 404,
+        "tx": -7,
+        "ty": 24
+      },
+      "gate_passed": false,
+      "metrics": {
+        "byte_exact": false,
+        "mae": 44.39796276039694,
+        "max_abs": 93.53076171875,
+        "p99": 69.71635742187502,
+        "rmse": 45.71059034920367
+      },
+      "case": {
+        "key": "lod3_case3",
+        "lod": 3,
+        "resolution_m": 240.0,
+        "shape": [
+          304,
+          304
+        ],
+        "metrics": {
+          "mae_m": 44.39796276039694,
+          "rmse_m": 45.71059034920367,
+          "max_abs_m": 93.53076171875,
+          "bias_m": -44.39764009618363,
+          "nonfinite_pairs": 0,
+          "numeric_exact": false
+        },
+        "metadata": {
+          "seed": 404,
+          "tx": -7,
+          "ty": 24
+        },
+        "images": [
+          "lod3_case3-overview.png",
+          "lod3_case3-zooms.png",
+          "lod3_case3-profiles.png"
+        ]
+      }
+    }
+  ]
+}

@@ -8,7 +8,8 @@ process restart without accepting an incomplete weighted average.
 from __future__ import annotations
 
 from collections import OrderedDict
-from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
 from hashlib import sha256
 from io import BytesIO
 import json
@@ -23,6 +24,7 @@ from weakref import WeakValueDictionary
 
 import numpy as np
 import torch
+from terrain_profiling import span
 
 from terrain_window_scheduler import read_rect
 from terrain_manifest import world_identity
@@ -46,10 +48,48 @@ class _NamespaceState:
     verified_stamps: OrderedDict
     disk_bytes: int = 0
     disk_budget_exhausted: bool = False
+    max_pending: int = 8
+    condition: threading.Condition = field(default_factory=threading.Condition)
+    io_lock: threading.RLock = field(default_factory=threading.RLock)
+    pending: OrderedDict = field(default_factory=OrderedDict)
+    reserved_bytes: int = 0
+    future: object = None
+    error: str | None = None
+    submitted: int = 0
+    committed: int = 0
+    errors: int = 0
+    pending_hits: int = 0
+    high_water: int = 0
+    backpressure_count: int = 0
+    backpressure_seconds: float = 0.0
+    transfer_wait_seconds: float = 0.0
+    write_seconds: float = 0.0
+
+
+@dataclass
+class _PendingWrite:
+    owner: object
+    index: tuple[int, ...]
+    cpu: torch.Tensor
+    source: torch.Tensor | None
+    event: object
+    reserved_bytes: int
+
+    def wait(self):
+        # Wait for this D2H only, never synchronize all work on the device.
+        if self.event is not None:
+            self.event.synchronize()
+
+
+class CoarsePersistenceError(RuntimeError):
+    pass
 
 
 _NAMESPACE_STATES: WeakValueDictionary[Path, _NamespaceState] = WeakValueDictionary()
 _NAMESPACE_LOCK = threading.Lock()
+# Executor shutdown drains accepted writes before Python/CUDA teardown. A
+# namespace has only one active drain; two worlds may persist independently.
+_PERSIST_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix='terrain-coarse-save')
 
 
 def _atomic(path: Path, payload: bytes) -> None:
@@ -93,7 +133,8 @@ class CoarsePreparation:
     """
 
     def __init__(self, root: str | Path, manifest: dict, *, bounds=DEFAULT_BOUNDS,
-                 budget_bytes: int = 2 * 1024**3):
+                 budget_bytes: int = 2 * 1024**3, max_pending: int = 8,
+                 async_persistence: bool = True):
         if (not isinstance(manifest, dict) or
                 not re.fullmatch(r'[0-9a-f]{16,64}', str(manifest.get('world_hash', '')))):
             raise ValueError('Coarse cache requires a world manifest with world_hash')
@@ -102,6 +143,11 @@ class CoarsePreparation:
             raise ValueError('Persistent coarse requires seed, ablation, conditioning and generation identity')
         if budget_bytes <= 0:
             raise ValueError('budget_bytes must be positive')
+        if not isinstance(max_pending, int) or max_pending < 1:
+            raise ValueError('max_pending must be a positive integer')
+        self.max_pending = max_pending
+        self.async_persistence = async_persistence
+        self._closed = False
         self.manifest = dict(manifest)
         self.world_hash = manifest['world_hash']
         self.bounds = tuple(bounds)
@@ -126,6 +172,7 @@ class CoarsePreparation:
         self.disk_hits = 0
         self.network_windows = 0
         self.model_synchronized_seconds = 0.0
+        self.model_submission_seconds = 0.0
         self.persistence_seconds = 0.0
         self.disk_budget_exhausted = False
         self._model_f = None
@@ -215,6 +262,10 @@ class CoarsePreparation:
         self._expected_weight = linear_weight_window(
             tensor.output_window.size[1], 'cpu', torch.float32).numpy()
         self._weight_digest = sha256(self._expected_weight.tobytes()).hexdigest()
+        header = BytesIO()
+        np.lib.format.write_array_header_1_0(header, dict(
+            descr='<f4', fortran_order=False, shape=tuple(tensor.output_window.size)))
+        self._payload_bytes = header.tell() + int(np.prod(tensor.output_window.size)) * 4
         manifest_path = self._manifest_path
         if manifest_path.exists():
             stored = json.loads(manifest_path.read_text(encoding='utf-8'))
@@ -250,7 +301,7 @@ class CoarsePreparation:
             key = self.root.resolve()
             state = _NAMESPACE_STATES.get(key)
             if state is None:
-                state = _NamespaceState(self.budget_bytes, set(), OrderedDict())
+                state = _NamespaceState(self.budget_bytes, set(), OrderedDict(), max_pending=self.max_pending)
                 self._namespace = state
                 self._persisted_indices = state.persisted_indices
                 self._verified_stamps = state.verified_stamps
@@ -262,6 +313,8 @@ class CoarsePreparation:
             else:
                 if state.budget_bytes != self.budget_bytes:
                     raise ValueError('Coarse namespace already uses a different disk budget')
+                if state.max_pending != self.max_pending:
+                    raise ValueError('Coarse namespace already uses a different pending budget')
                 self._namespace = state
                 self._persisted_indices = state.persisted_indices
                 self._verified_stamps = state.verified_stamps
@@ -277,6 +330,7 @@ class CoarsePreparation:
         preparation = self
 
         def persisted(ctxs, *args):
+            preparation._check_error()
             outputs = [None] * len(ctxs)
             missing = []
             missing_positions = []
@@ -287,13 +341,10 @@ class CoarsePreparation:
                     missing_positions.append(position)
                 else:
                     outputs[position] = cached.to(tensor.device)
-                    preparation.disk_hits += 1
             if missing:
                 start = perf_counter()
                 computed = original(missing, *args)
-                if tensor.device.type == 'cuda':
-                    torch.cuda.synchronize(tensor.device)
-                preparation.model_synchronized_seconds += perf_counter() - start
+                preparation.model_submission_seconds += perf_counter() - start
                 if len(computed) != len(missing):
                     raise RuntimeError('Coarse model returned an incomplete batch')
                 persistence_start = perf_counter()
@@ -329,6 +380,17 @@ class CoarsePreparation:
                 self.disk_budget_exhausted = False
 
     def _valid_metadata(self, index) -> bool:
+        state = self._namespace
+        with state.condition:
+            if index in state.pending:
+                return False  # Readable in RAM, but not yet durable.
+        with state.io_lock:
+            with state.condition:
+                if index in state.pending:
+                    return False
+            return self._valid_metadata_locked(index)
+
+    def _valid_metadata_locked(self, index) -> bool:
         """Cheap readiness: identity, header, size, and canonical weight bytes.
 
         The full file digest is checked on load. Stable file/sidecar stamps let
@@ -382,8 +444,31 @@ class CoarsePreparation:
             return False
 
     def _load_window(self, index):
+        self._check_error()
+        state = self._namespace
+        with state.condition:
+            pending = state.pending.get(index)
+        if pending is not None:
+            return self._read_pending(pending)
+        with state.io_lock:
+            with state.condition:
+                pending = state.pending.get(index)
+            if pending is None:
+                return self._load_disk_window(index)
+        return self._read_pending(pending)
+
+    def _read_pending(self, pending):
+        with span('coarse.persistence.pending_read', world=self.world_hash):
+            pending.wait()
+            result = pending.cpu.clone()
+            self._validate_array(result.numpy())
+        with self._namespace.condition:
+            self._namespace.pending_hits += 1
+        return result
+
+    def _load_disk_window(self, index):
         path = self._window_path(index)
-        if not self._valid_metadata(index):
+        if not self._valid_metadata_locked(index):
             return None
         try:
             payload = path.read_bytes()
@@ -396,25 +481,142 @@ class CoarsePreparation:
                     not np.isfinite(value).all() or
                     not np.array_equal(value[-1], self._expected_weight)):
                 raise ValueError('Invalid learned coarse output')
+            self.disk_hits += 1
             return torch.from_numpy(np.array(value, copy=True))
         except (OSError, ValueError, EOFError, KeyError, TypeError):
             self._invalidate(index)
             return None
 
     def _save_window(self, index, value) -> bool:
-        array = value.detach().to('cpu', dtype=torch.float32).numpy()
+        """Accept a bounded immutable snapshot; True means accepted, not durable.
+
+        Pending snapshots are shared across live worlds and included in quota
+        reservations. Full queues block admission, never discard a learned
+        window or accumulate unbounded detached GPU outputs.
+        """
+        state = self._namespace
+        index = tuple(index)
+        with state.condition:
+            if self._closed:
+                raise CoarsePersistenceError('Coarse preparation is closed')
+            self._check_error()
+            if index in state.pending:
+                return True
+            if len(state.pending) >= state.max_pending:
+                start = perf_counter()
+                state.backpressure_count += 1
+                state.condition.notify_all()
+                with span('coarse.persistence.backpressure', world=self.world_hash):
+                    while len(state.pending) >= state.max_pending and not state.error and not self._closed:
+                        state.condition.wait()
+                state.backpressure_seconds += perf_counter() - start
+                self._check_error()
+                if self._closed:
+                    raise CoarsePersistenceError('Coarse preparation is closed')
+                if index in state.pending:
+                    return True
+            path = self._window_path(index)
+            previous = path.stat().st_size if path.exists() else 0
+            reservation = max(0, self._payload_bytes - previous)
+            if state.disk_bytes + state.reserved_bytes + reservation > state.budget_bytes:
+                state.disk_budget_exhausted = True
+                return False
+            with span('coarse.persistence.snapshot', world=self.world_hash, index=list(index)):
+                if tuple(value.shape) != tuple(self._tensor.output_window.size):
+                    raise RuntimeError('Invalid learned coarse window shape')
+                if value.is_cuda:
+                    # copy_ is submitted on the producer stream after all model
+                    # work. Hold source storage until the transfer event fires.
+                    cpu = torch.empty(tuple(value.shape), dtype=torch.float32,
+                                      device='cpu', pin_memory=True)
+                    source = value.detach()
+                    cpu.copy_(source, non_blocking=True)
+                    event = torch.cuda.Event()
+                    event.record(torch.cuda.current_stream(value.device))
+                else:
+                    cpu = value.detach().to('cpu', dtype=torch.float32).clone()
+                    source = event = None
+                    self._validate_array(cpu.numpy())
+            state.pending[index] = _PendingWrite(self, index, cpu, source, event, reservation)
+            state.reserved_bytes += reservation
+            state.submitted += 1
+            state.high_water = max(state.high_water, len(state.pending))
+            if state.future is None:
+                try:
+                    state.future = _PERSIST_EXECUTOR.submit(self._drain, state)
+                except BaseException:
+                    pending = state.pending.pop(index)
+                    state.reserved_bytes -= reservation
+                    pending.wait()
+                    state.condition.notify_all()
+                    raise
+        if not self.async_persistence:
+            self.flush()
+        return True
+
+    def _validate_array(self, array):
         if (tuple(array.shape) != tuple(self._tensor.output_window.size) or
+                array.dtype != np.float32 or
                 not np.isfinite(array).all() or
                 not np.array_equal(array[-1], self._expected_weight)):
             raise RuntimeError('Invalid learned coarse window')
+
+    @staticmethod
+    def _drain(state):
+        while True:
+            with state.condition:
+                if not state.pending:
+                    state.future = None
+                    state.condition.notify_all()
+                    return
+                index, pending = next(iter(state.pending.items()))
+            started = perf_counter()
+            succeeded = False
+            disk_delta = 0
+            try:
+                with span('coarse.persistence.transfer_wait', world=pending.owner.world_hash):
+                    pending.wait()
+                with state.condition:
+                    state.transfer_wait_seconds += perf_counter() - started
+                pending.source = None
+                started = perf_counter()
+                with span('coarse.persistence.commit', world=pending.owner.world_hash, index=list(index)):
+                    with state.io_lock:
+                        disk_delta = pending.owner._commit_window(index, pending.cpu.numpy())
+                succeeded = True
+            except BaseException as exc:
+                with state.condition:
+                    state.errors += 1
+                    state.error = f'{type(exc).__name__}: {exc}'[:1000]
+                # Accounting failures must not kill the drain with unrelated
+                # accepted writes still waiting forever in the queue.
+                try:
+                    with state.io_lock:
+                        pending.owner._invalidate(index)
+                        actual_bytes = sum(path.stat().st_size for path in pending.owner.windows_dir.glob('*.npy'))
+                        with state.condition:
+                            state.disk_bytes = actual_bytes
+                except OSError:
+                    pass
+            finally:
+                with state.condition:
+                    state.write_seconds += perf_counter() - started
+                    state.committed += int(succeeded)
+                    if succeeded:
+                        state.disk_bytes += disk_delta
+                    state.reserved_bytes -= pending.reserved_bytes
+                    state.pending.pop(index, None)
+                    state.condition.notify_all()
+
+    def _commit_window(self, index, array):
+        self._validate_array(array)
         buffer = BytesIO()
         np.save(buffer, array, allow_pickle=False)
         path = self._window_path(index)
         previous = path.stat().st_size if path.exists() else 0
         payload = buffer.getvalue()
-        if self._disk_bytes - previous + len(payload) > self.budget_bytes:
-            self.disk_budget_exhausted = True
-            return False
+        if len(payload) != self._payload_bytes:
+            raise RuntimeError('Coarse payload size differs from reserved bytes')
         _atomic(path, payload)
         file_stat = path.stat()
         sidecar = dict(schema=SCHEMA, world_hash=self.world_hash,
@@ -423,13 +625,43 @@ class CoarsePreparation:
                        bytes=len(payload), mtime_ns=file_stat.st_mtime_ns,
                        sha256=sha256(payload).hexdigest())
         _atomic(self._sidecar_path(index), _json_bytes(sidecar))
-        self._disk_bytes += len(payload) - previous
         self._verified_stamps.pop(index, None)
-        if not self._valid_metadata(index):
+        if not self._valid_metadata_locked(index):
             raise RuntimeError('Newly persisted coarse window failed verification')
         if index in self._planned_indices:
             self._persisted_indices.add(index)
-        return True
+        return len(payload) - previous
+
+    def _check_error(self):
+        state = self._namespace
+        if state is not None and state.error:
+            raise CoarsePersistenceError(f'Coarse persistence failed: {state.error}')
+
+    def flush(self, timeout=None):
+        """Wait for shared namespace commits; propagate asynchronous failures."""
+        state = self._namespace
+        if state is None:
+            return
+        deadline = None if timeout is None else perf_counter() + timeout
+        with state.condition:
+            while state.pending:
+                remaining = None if deadline is None else deadline - perf_counter()
+                if remaining is not None and remaining <= 0:
+                    raise TimeoutError('Timed out flushing coarse persistence')
+                state.condition.wait(remaining)
+        self._check_error()
+
+    def close(self, timeout=None):
+        """Reject this producer's new writes, drain shared writes, report errors.
+
+        Other preparations sharing this namespace remain usable. Repeated
+        close/flush calls are safe; close must precede world/CUDA teardown.
+        """
+        if self._namespace is not None:
+            with self._namespace.condition:
+                self._closed = True
+                self._namespace.condition.notify_all()
+        self.flush(timeout)
 
     def _save_cursor(self):
         _atomic(self._cursor_path, _json_bytes(dict(
@@ -446,6 +678,9 @@ class CoarsePreparation:
             raise ValueError('Preparation is not installed on this world')
         if budget_windows < 1:
             raise ValueError('budget_windows must be positive')
+        self._check_error()
+        if self._closed:
+            raise CoarsePersistenceError('Coarse preparation is closed')
         total = len(self._indices)
         if len(self._persisted_indices) >= total or self.disk_budget_exhausted:
             return self.status()
@@ -455,7 +690,9 @@ class CoarsePreparation:
             index = self._indices[self._cursor]
             self._cursor = (self._cursor + 1) % total
             examined += 1
-            if index in self._persisted_indices:
+            with self._namespace.condition:
+                pending = index in self._namespace.pending
+            if index in self._persisted_indices or pending:
                 continue
             if check is not None:
                 check()
@@ -470,7 +707,9 @@ class CoarsePreparation:
                     self._tensor._ensure_processed([index])
                 finally:
                     self._tensor._store.end_access(self._tensor.uuid)
-            if self._load_window(index) is None:
+            with self._namespace.condition:
+                pending = index in self._namespace.pending
+            if not pending and self._load_window(index) is None:
                 if self.disk_budget_exhausted:
                     break
                 # A window may have been materialized in RAM before install,
@@ -481,15 +720,20 @@ class CoarsePreparation:
                     check()
                 start = perf_counter()
                 output = self._model_f([index])[0]
-                if self._tensor.device.type == 'cuda':
-                    torch.cuda.synchronize(self._tensor.device)
-                self.model_synchronized_seconds += perf_counter() - start
+                self.model_submission_seconds += perf_counter() - start
                 persist_start = perf_counter()
                 self._save_window(index, output)
                 self.persistence_seconds += perf_counter() - persist_start
                 self.network_windows += 1
                 if self.disk_budget_exhausted:
                     break
+        with self._namespace.condition:
+            pending_plan = set(self._namespace.pending).intersection(self._planned_indices)
+            all_submitted = len(self._persisted_indices | pending_plan) >= total
+        if all_submitted:
+            # One final drain gives background completion its durable meaning;
+            # intermediate quanta leave disk work off the compute lane.
+            self.flush()
         self._save_cursor()
         return self.status()
 
@@ -605,13 +849,33 @@ class CoarsePreparation:
     def status(self) -> dict:
         complete = len(self._persisted_indices)
         total = len(self._indices)
+        persistence = {}
+        if self._namespace is not None:
+            state = self._namespace
+            with state.condition:
+                persistence = dict(
+                    async_enabled=self.async_persistence,
+                    pending_windows=len(state.pending), max_pending=state.max_pending,
+                    pending_bytes=sum(p.cpu.numel() * p.cpu.element_size() for p in state.pending.values()),
+                    reserved_disk_bytes=state.reserved_bytes,
+                    submitted=state.submitted, committed=state.committed,
+                    pending_hits=state.pending_hits, high_water=state.high_water,
+                    backpressure_count=state.backpressure_count,
+                    backpressure_seconds=round(state.backpressure_seconds, 6),
+                    transfer_wait_seconds=round(state.transfer_wait_seconds, 6),
+                    write_seconds=round(state.write_seconds, 6),
+                    errors=state.errors, last_error=state.error)
         return dict(world_hash=self.world_hash, source='learned-coarse',
                     source_resolution=COARSE_METRES, complete_windows=complete,
                     total_windows=total, coverage=complete/total if total else 1.0,
                     cursor=self._cursor, disk_hits=self.disk_hits,
                     network_windows=self.network_windows,
                     model_synchronized_seconds=round(self.model_synchronized_seconds, 6),
+                    model_submission_seconds=round(self.model_submission_seconds, 6),
+                    model_timing='host submission only; no device synchronization',
                     persistence_seconds=round(self.persistence_seconds, 6),
+                    persistence_timing='host enqueue/backpressure; worker transfer/write timings in persistence',
+                    persistence=persistence,
                     disk_bytes=self._disk_bytes, budget_bytes=self.budget_bytes,
                     disk_budget_exhausted=self.disk_budget_exhausted,
                     final_dem_mip=False)

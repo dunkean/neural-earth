@@ -1,0 +1,292 @@
+MOTEUR D'INFÉRENCE — CODE, ERREURS ET MESURES
+8 octobre 2026
+
+Résultat livré : kernels CUDA exacts activés par défaut, SDPA approximatif OFF,
+quantification du base latent préparée hors production. Le x5 n'est pas atteint.
+Planification Astra, reviews Sol xhigh après les blocs ; revue unique Opus 5.5
+effectuée après le code : ACCEPT WITH LIMITATIONS, aucun P0/P1. Provenance
+réelle claude-opus-5-5 dans opus-inference-provenance.json ; aucune seconde
+invocation. Les remarques P2 et leurs suites sont détaillées ci-dessous.
+
+KERNELS EXACTS
+
+terrain_cuda_kernels.py compile des kernels BF16 par NVRTC12.8 livré avec Torch,
+sans extension C++/MSVC, sur le stream Torch. Somme MP à deux entrées,
+concaténation pondérée et SiLU des UNetBlock conservent les arrondis BF16
+intermédiaires. Pas de contraction FMA. SiLU des embeddings EDM reste upstream.
+CPU, entraînement, autres dtypes/strides/signatures restent dans la voie Torch.
+Les modules CUDA sont conservés pour les graphes capturés, les allocations et
+leur durée de vie restent gérées par Torch. Aucun checkpoint n'est modifié.
+
+Avant publication du pack sur chaque GPU : tous les motifs BF16 finis pour
+SiLU, probes somme à poids multiples et zéros signés, concat à canaux différents.
+La compilation et ces contrôles se font avant la capture. Un échec de préparation
+garde la référence et son motif dans le statut. Un échec de capture du wrapper
+CudaGraphModel peut revenir à eager ; un échec persistant de lancement natif
+se propage aussi dans cette voie. Configuration immuable par processus pour protéger
+les modèles partagés et leurs graphes. TERRAIN_EXACT_KERNELS=0 désactive la voie
+dans un processus neuf. L'identité persistante inclut le code et les réglages.
+
+MESURES PHYSIQUES, RTX3090 / TORCH2.11.0+CU128
+
+Reçus E:/TerrainDiffusionRuntime/inference-engine-20261008/ :
+engine-reference, engine-exact, engine-reference-b, engine-exact-b (.json/.npz).
+Chaque run couvre huit empreintes LOD3/2, seeds42/0/43, coordonnées négatives,
+stores NN neufs et revisites. Les deux runs exacts : altitude et cinq climats
+byte-identiques à engine-reference.npz, maximum d'erreur zéro, revisites exactes.
+Première empreinte par LOD avec capture exclue des médianes, trois répétitions.
+Pas de disque physique, HTTP ou rendu dans ces mesures.
+
+Premier passage : LOD3 2,349->1,850s ; LOD2 4,259->3,019s (1,27x/1,41x).
+Second passage plus stable : LOD3 1,975->1,835s ; LOD2 3,451->3,068s
+(1,077x/1,125x, environ7,1%/11,1% de temps en moins). L'activité graphique du
+bureau n'est pas contrôlée ; ces observations ne constituent pas un essai en
+laboratoire. La série alternée finale ci-dessous remplace ces observations
+pour estimer le gain. Ces gains
+supplémentaires ne doivent pas être multipliés par ceux de blocs antérieurs.
+
+Microbench final kernels-final.json : neuf formes/opérations, événements CUDA
+dans graphes, références/candidats alternés, tous byte-exacts. Accélérations
+d'opérateurs uniquement, pas du modèle ni du navigateur.
+
+PROFILING RÉEL APRÈS OPTIMISATION
+
+profile-exact/operators.json, operators.txt, timeline.json, kernel-summary.json.
+LOD2 seed42 (-14,10), graphes préchauffés, store NN vidé, sampling physique.
+Temps instrumenté3,178s ; somme des durées kernel2,022s, pas une durée critique.
+Attribution partielle par noms : convolutions reconnues54,84%, conversions
+NCHW/NHWC14,77%, SiLU8,52%, somme4,01%, concat3,43%, autres14,43%.
+summarize_inference_profile.py permet de refaire ce classement, y compris les
+kernels internes aux CUDA Graphs. Ne pas additionner temps de modèles, étapes
+et wall time imbriqués. Les traces instrumentées ne servent pas à annoncer un
+gain de latence. Les convolutions/layout dominent : davantage de fusions
+élémentaires seules ne peut pas produire x5. L'essai channels-last antérieur
+avait changé le terrain et reste rejeté.
+
+SDPA BASE — EXPÉRIENCE REJETÉE
+
+TERRAIN_ATTENTION_BACKEND=sdpa-base avec admission explicite
+TERRAIN_EXPERIMENTAL_INFERENCE=1, processus neuf, expérience offline seulement.
+Base seul, axes [batch,heads,tokens,channels], K divisé dans le BF16 original,
+scale1 pour éviter une double normalisation. Force Flash/cuDNN, jamais MATH.
+Torch Windows local ne contient pas Flash : premier essai a échoué, reçu
+engine-sdpa-base.json conservé. cuDNN a exécuté le candidat :
+engine-sdpa-cudnn.json/.npz, premier cas LOD3 seed42 (-14,10), rejet seuil1m.
+Altitude max24,2263m, MAE2,0478m, RMSE3,10013m, p9910,6987m ; climats exacts.
+Le corpus s'arrête à cet échec ; les6,213s incluent première utilisation et ne
+prouvent aucun gain. Backend référence demeure le défaut. Les images SDPA ne
+sont pas des images du futur INT8.
+
+QUANTIFICATION LATENTE PRÉPARÉE, AUCUNE ACTIVATION
+
+terrain_quantization.py et prepare_terrain_quantization.py ne sont importés
+ni par le serveur ni par l'inférence. Rôle exclusif offline-base-preview :
+coarse/decoder/natif refusés. Le LOD3 standard alimentant aussi le final, il
+n'existe pas de commutation automatique lod>=3 sur les modèles partagés.
+
+quant-capture-b/capture.json : trois seeds natural42/0/43, crops latents32²,
+six vrais forwards (batch16 à label1,5625, batch4 à label0,609375 pour chaque
+site),133 couches calibrées. Minmax symétrique sur tous les éléments, échantillon
+diagnostique borné. Les six forwards de la copie aux poids MP/gains figés sur
+CUDA sont byte-exacts face au vrai modèle BF16. Ce corpus initial n'est pas
+un holdout physique indépendant ni une calibration exhaustive des biomes.
+Premier échec quant-capture conservé : indices linspace arrondis hors bornes
+sur gros tenseurs ; correction int64 avec tests jusqu'à2**40.
+
+Export complet quant-export-debug-2/ : base-fp32-conversion.onnx1 015 077 238
+octets, base-int8-qdq.onnx303 125 446octets.91Conv Q/DQ,7Conv conservées,
+ConvTranspose et autres couches sensibles flottantes. Les filtres unitaires
+de resampling sont des buffers statiques dans la copie d'export, après échec
+du legacy exporter sur kernelshape dynamique (artefacts conservés).
+Conversion BF16->FP32 des opérations explicitement nonéquivalente ; mesurer
+cette erreur avant celle de l'INT8. Checker ONNX structurel passé. Des petits
+vrais EDM à plusieurs résolutions/attention exécutent aussi les exports sur
+inputs indépendants de batch1/3 dans les tests CPU.
+
+Le builder TensorRT optionnel lie/checke les SHA et l'identité de l'export,
+profile batch1..16 sans padding, workspace512Mio par défaut, inspection détaillée
+des couches. TensorRT10.15.1.29 est installé séparément et les expériences
+offline ci-dessous ont construit/exécuté de vrais moteurs. Les exports Q/DQ
+seuls ne prouvaient aucun gain ; les traces GPU de l'agent apportent désormais
+une preuve d'exécution INT8 pour son moteur privé. Production runtime_enabled
+et physical_holdout_passed restent false ; tous les candidats échouent au gate
+physique. Les reçus de préparation historiques conservent leurs flags originaux. Avant une intégration preview isolée : engine privé, couverture INT8
+réelle, holdout physique1m/climats, replay/seams, tests absence de contamination
+du final, mesure réseau/footprint/navigation. Détails et commandes dans
+docs/inference-quantization-notes.txt. Aucun cache de précalcul ajouté.
+
+IMAGES ET VALIDATION
+
+docs/performance_x5/inference-images/index.html : huit comparaisons exactes,
+échelles et éclairage communs, altitude/pentes/zooms/écarts/profils locaux.
+sdpa-rejected/index.html : unique candidat SDPA rejeté. Un profil de bord local
+ne certifie pas un raccord entre deux tuiles générées séparément.
+render_inference_comparisons.py est réutilisable pour futurs candidats.
+
+124 tests pertinents exécutés dans la suite CPU (quatre cas exclusifs CUDA
+ignorés), sans échec. Le module kernels dédié passe séparément ses six tests,
+dont quatre vrais tests CUDA et deux tests CPU : lancements, captures, streams
+et contrôles d'arrondis. Douze tests proxy CPU passent également après les
+correctifs Windows, dont véritable processus venv/Job Object sans CUDA. Suites Node LOD,
+refinement, maptools passent ; freshness passe après mise à jour du mock
+inflight.task requis par les changements UI de refinement préexistants.
+git diff --check passe. Les changements utilisateur MIN_LOD=-3 sont conservés.
+
+PARCOURS RÉEL NAVIGATEUR, RÉGLAGES IDENTIQUES
+
+browser-reference.json et browser-exact.json : Chrome/WebGPU headless, seed
+20261008117 natural, centre(-103680,80640), viewport900x650, prepare/prefetch
+OFF, progression4->3->0 ; chaque run17 misses physiques, aucun hit physique.
+Serveur privé8766 redémarré entre les backends, sans travail NN concurrent.
+Fin de couverture caméra après deux animationframes :5,956->5,620s (1,060x,
+5,6% de temps en moins). Deux observations seulement, activité GPU bureau non
+contrôlée ; aucune prétention de GPU presentation timing ni laboratoire ABBA.
+Premier rendu soumis au LOD3 :3,004->2,916s ; native3,383->3,229s.
+browser-fidelity.json : quinze coordonnées natives appariées, hauteur et cinq
+climats byte-exacts, maximum d'erreur0m. Le corpus navigateur a une seed distincte
+de la calibration et des probes physiques directs. Ce résultat final étaye
+un gain global modeste, pas x5.
+
+GATES COMPLÉMENTAIRES
+
+snr-exact.json et snr-fidelity.json : profils régionaux montagne/froid,
+replay natif byte-exact et recouvrements0,3654/0,2233m, aucun forward coarse
+supplémentaire. SHA hauteur/climat identiques au reçu snr-gpu-final du bloc
+précédent. Les kernels conservent donc aussi ces variantes de SNR éprouvées.
+quant-export-debug-2/validation-full-check.json : les DEUX vrais graphes ONNX
+passent aussi full_check=True (types/formes). Ce contrôle n'est pas une
+exécution entière GPU ni une validation physique INT8.
+
+SERVEUR ET REVIEWS
+
+Serveur normal8765 rétabli après les expériences exclusives de quantification.
+Référence8766 arrêtée et relançable automatiquement par le sélecteur NN.
+Recharger la page pour voir les nouveaux sélecteurs.
+Reviews Sol après les blocs et corrections : synthèse dans
+sol-inference-review.txt ; plusieurs passes, dont approbation exact-default.
+Revue unique Opus5.5 terminée : ACCEPT WITH LIMITATIONS. Aucune seconde
+invocation. Reviews Sol supplémentaires sur sélecteurs UI, proxy et protocole
+d'expérimentation quantification ; Astra a aussi relu les caches LOD4.
+Aucun commit créé, aucune quantification active ni modification de checkpoint.
+
+MESURE FINALE APPARIÉE ET EMPREINTE DU WRAPPER
+
+paired-final-verified/paired-summary.json : cinq paires alternées AB/BA,
+dix processus neufs, une première empreinte exclue puis une empreinte warm
+avec nouveau store par LOD/processus. Tous les enfants comparent leurs sorties
+physiques à engine-reference.npz (--require-exact) et leur revisite ; les
+quarante empreintes de génération et les revisites sont byte-exactes.
+Le parent refuse un exact backend replié sur Torch, conserve chaque preuve
+effective_by_device et wrapper_sha256, et exige les mêmes SHA des sources
+et de la référence entre enfants. Dernier code serveur comprenant LOD4/registre
+proxy ; mêmes kernels SOURCE et wrapper finaux. benchmark_inference_engine.py
+permet de relancer la série ; ses trois tests rejettent fallback et provenance
+hétérogène. Une première série paired-final a précédé ce durcissement : garder
+son résultat comme observation historique, utiliser paired-final-verified.
+
+Médianes des ratios appariés : LOD3 1,086874x (environ8,0% de temps en moins),
+LOD2 1,116619x (environ10,4%). Médianes des durées : LOD3 référence1,928s /
+optimisé1,769s ; LOD2 référence3,297s / optimisé2,943s. La médiane d'un ratio
+n'est pas le ratio des médianes. Bureau GPU non contrôlé, un seul footprint
+warm par LOD par enfant ; mesure isolée d'inférence/génération, pas x5 global.
+
+COMPARAISON INTERACTIVE À SEED ET CAMÉRA ÉGALES
+
+Sélecteur NN : Optimisé / Référence. Référence = pipeline BF16 actuel, mêmes
+poids/solver/graphs et réglages, kernels CUDA custom exacts désactivés. Ce n'est
+pas une reconstitution de l'application antérieure à tous les travaux x5.
+Référence dans un processus indépendant à8766, lazily lancé via proxy local
+/reference. Configuration immuable, modèles/stores/namespace indépendants,
+jeton/identité de processus vérifiés ; Job Object ferme le worker avec le parent.
+Sélecteur LOD4 : Monotone / Bilinéaire, indépendant du moteur. Les requêtes,
+intérêts, caches RAM/disque/PNG et reçus séparent les variantes. Même seed,
+caméra et génération conservées ; URL partageable avec nn_engine et
+coarse_interpolation. Indication de temps de la tuile et calcul/cache ; ce
+compteur n'est pas un benchmark équitable froid contre chaud.
+
+ui-comparison-verified/report.json : vrai Chrome/WebGPU, seed42 natural,
+centre(-921600,614400),480m/pixel, quatre combinaisons puis retour optimisé.
+Dix tuiles LOD4 appariées par interpolation : tous les octets altitude et
+climat identiques entre moteurs. Choix d'interpolation a un effet réel.
+Camera/seed préservées, zéro erreur JS. Les contrôles physiques LOD3/2 de la
+série précédente couvrent aussi le modèle base, au-delà de ce parcours coarse.
+
+RELIEFS QUADRILLÉS LOD4
+
+La source coarse reste7680m/cellule et la sortie480m/pixel :16 pixels/cellule.
+L'interpolation bilinéaire du signed-sqrt-height raccorde les valeurs mais
+casse les pentes aux lignes de grille. Nouvelle interpolation Hermite monotone
+séparable, bornée dans la cellule centrale, même halo/lecture source, zéro
+appel NN supplémentaire. Modification des previews LOD4 seulement, données
+latentes/native intactes. Les motifs déjà inscrits dans la source peuvent rester.
+C'est un changement d'affichage avec changement des hauteurs interpolées,
+pas un nouveau modèle ou une garantie de fidélité à un DEM fin inconnu.
+
+lod4-interpolation-final/coarse-source.npz : véritable coarse seed42 natural.
+Le premier rendu a produit les images mais le reçu final a échoué sur NumPy
+int64 ; artefact conservé. Après correction du sérialiseur/coordonnées,
+lod4-interpolation-replay/report.json rejoue cette même source sur CPU.
+Pic4942,939m ; delta interpolation max728,937m, MAE39,829m, RMSE67,320m ;
+raccords locaux de halos testés0m. Ces deltas ne sont pas des erreurs NN.
+Médiane interpolation seule4,067ms bilinéaire /7,720ms monotone, pas un gain
+CPU. Galerie docs/performance_x5/lod4-images/index.html avec échelles communes.
+
+SUITES DES REMARQUES OPUS
+
+Statut natif inclut SHA du wrapper Python en plus du SOURCE CUDA et effectivité
+par GPU ; final gate exécuté sur ce wrapper. Gains désormais mesurés avec cinq
+paires et preuves d'effectivité/provenance. Métadonnées navigateur incluent les
+modules kernel/interpolation. Commentaire d'initialisation du contexte corrigé.
+Export quant : première Conv protégée dérivée de la configuration, exclusions
+inexistantes refusées, couverture Conv/ConvTranspose noninitializer reportée,
+version ONNX et source native capturée. Builder TensorRT10.x STRONGLY_TYPED ;
+Q/DQ explicite ne nécessite pas INT8 flag (documentation NVIDIA).
+Le microbench1x768x64² reste une forme synthétique, pas la forme réelle8² du
+base. Le patch alias resample ne remplace pas les partial(resample) stockés
+dans les UNetBlock à construction : ne pas créditer ces appels d'une optimisation.
+Ces limitations sont conservées dans l'analyse du profiling, sans annonce x5.
+
+QUANTIFICATION EXPÉRIMENTALE DÉLÉGUÉE
+
+Nouvelle autorisation utilisateur : essais de quantification intelligente dans
+un agent séparé. TensorRT10.15.1.29 CUDA12 installé dans un dossier isolé
+E:/TerrainDiffusionRuntime/inference-engine-20261008/tensorrt-python ; aucune
+substitution de dépendance du runtime produit. Harness offline
+experiment_terrain_quantization.py, calibrations/holdout/processus séparés,
+révisions Sol avant GPU ; production reste sans approximation.
+Résultats détaillés dans quantization-experiments.txt. Le moteur INT8 de base
+a été construit/exécuté :91Conv INT8 sur101Conv inspectées,11 noms de kernels
+i8 tensor16x8x32 dans la trace. Huit vrais packets de quatre nouvelles seeds
+et trois profils ; cinq paires AB/BA par packet, même stream nondefault,
+référence BF16 avec poids cachés et CUDA Graphs : environ1,45–1,60x sur les
+forwards. Vingt paires de nouveaux stores/footprints LOD3 :1,33–1,35x par site,
+médiane entre sites1,347x.
+Reçus matched-bf16-trt-admitted : admission explicite/réglages exacts et
+effectivité des kernels par GPU, poids cachés, graphes/référence attention,
+520 replays sans fallback, quarante revisites physiques byte-exactes. Les
+premières mesures sans ces admissions sont conservées comme diagnostics.
+Ces résultats ne sont ni un gain de navigateur ni x5, et ne se multiplient pas
+avec les autres chiffres de ce rapport. TensorRT FP32 sans INT8 a été construit
+et exécuté séparément :0,52–0,62x face au BF16 optimisé, donc plus lent.
+
+Toutes les politiques testées dépassent le gate DEM1m : conversion FP32
+63–117m maximum par site, W8 avec backbone BF1647–94m, protection BF16 de
+couches sensibles142–201m, moteur TensorRTINT8192–330m. Les cinq champs
+climatiques transportés restent byte-exacts, mais l'altitude corrige ensuite
+la température affichée : delta jusqu'à1,288°C pour INT8,0,365°C pour W8.
+Il ne faut donc pas présenter ces variants comme un climat affiché exact.
+Coarse/decoder/modèles natifs et stores produit jamais remplacés par ces
+variants ; moteur privé offline seulement, aucun candidat activé par défaut.
+Galerie de vingt cas réels et soixante PNG : quantization-images/index.html.
+Les métriques de côte/pente/température sont diagnostiques, distinctes du gate
+maxDEM/climats ; les données de validation déjà inspectées ne servent pas à
+revendiquer un nouveau holdout indépendant pour une politique ajustée ensuite.
+
+Revue finale quantification Sol : APPROVE pour maintenir les candidats OFF,
+aucun P0/P1 restant. Rapport quantization-sol-review.txt ; synthèse recomputée
+byte-for-byte, onze SHA de preuves conformes. Les deux matched-admitted sont
+liés au snapshot exact du harness producteur, qui est conservé ; aucune
+réécriture des reçus historiques. Revue Opus antérieure porte sur le bloc
+inférence exact/préparation quant, Sol couvre aussi les expériences GPU ajoutées.
+Serveur normal8765 : model_preload ready, profiling enabledfalse. Référence
+8766 idle, lancement automatique au choix utilisateur. Aucun commit créé.
