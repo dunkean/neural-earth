@@ -116,6 +116,85 @@ class GenerationRegistryTests(unittest.TestCase):
             generation.register_generation("natural", {"macro_scale_km": 700})
         self.assertEqual(list(self.root.iterdir()), [])
 
+    def test_orogen_climate_palette_and_thresholds_replay_and_route_to_generator(self):
+        overrides={'orogen_temperature_equator':33., 'orogen_biome_tropical_snow':4.25,
+                   'orogen_biome_color_af':[.125,.5,.875], 'orogen_precip_shadow_reach_km':3200.}
+        token=generation.register_generation('orogen',overrides)
+        descriptor=generation.resolve_generation(token)
+        for key,value in overrides.items():
+            self.assertEqual(descriptor.settings[key],value)
+            self.assertEqual(descriptor.bootstrap_options[key.removeprefix('orogen_')],value)
+        self.assertNotEqual(token,generation.register_generation('orogen',{'orogen_temperature_equator':32.}))
+        for invalid in ([.1,.2], [.1,.2,2.], [.1,float('nan'),.2]):
+            with self.assertRaises(ValueError):
+                generation.register_generation('orogen',{'orogen_biome_color_af':invalid})
+
+    def test_pre_climate_configuration_links_keep_their_original_identity(self):
+        saved=generation._defaults('orogen')
+        for key in generation.OROGEN_CLIMATE_PARAMETERS:
+            del saved[key]
+        saved['orogen_detail']=20000
+        token=generation._token('orogen',saved)
+        self.root.mkdir()
+        (self.root/(token+'.json')).write_bytes(generation._bytes(generation._payload('orogen',saved)))
+        descriptor=generation.resolve_generation(token)
+        self.assertEqual(descriptor.profile,token)
+        self.assertEqual(descriptor.settings['orogen_detail'],20000)
+        self.assertEqual(descriptor.settings['orogen_temperature_equator'],28.)
+        self.assertEqual(descriptor.settings['orogen_biome_tropical_snow'],5.5)
+
+    def test_city_erosion_routes_every_source_and_replays_own_parameters(self):
+        for source in ('orogen','natural','native','natural-continental'):
+            overrides=dict(height_source=source,climate_source='natural',relief_pipeline='city-gpu',
+                           city_erosion_strength=.75,city_erosion_iterations=8,
+                           city_erosion_talus=.4,city_erosion_motif_km=125.)
+            token=generation.register_generation('natural',overrides)
+            descriptor=generation.resolve_generation(token)
+            self.assertTrue(descriptor.needs_bootstrap)
+            self.assertEqual(descriptor.bootstrap_generator,'orogen')
+            for key,value in overrides.items():
+                self.assertEqual(descriptor.settings[key],value)
+            for key in generation.CITY_EROSION_PARAMETERS:
+                self.assertEqual(descriptor.bootstrap_options[key],overrides[key])
+        for overrides in ({'city_erosion_strength':-1},{'city_erosion_iterations':1.5},
+                          {'city_erosion_iterations':65},{'city_erosion_motif_km':0},
+                          {'city_erosion_talus':float('nan')}):
+            with self.assertRaises(ValueError):generation.register_generation('orogen',overrides)
+
+    def test_pre_city_links_keep_their_canonical_tokens(self):
+        saved=generation._defaults('orogen')
+        for key in generation.CITY_EROSION_PARAMETERS:del saved[key]
+        saved['orogen_detail']=20000
+        token=generation._token('orogen',saved)
+        self.root.mkdir()
+        (self.root/(token+'.json')).write_bytes(generation._bytes(generation._payload('orogen',saved)))
+        descriptor=generation.resolve_generation(token)
+        self.assertEqual(descriptor.profile,token)
+        self.assertEqual(descriptor.settings['relief_pipeline'],'orogen')
+        self.assertEqual(descriptor.settings['city_erosion_strength'],1.)
+        self.assertEqual(descriptor.settings['city_erosion_iterations'],12)
+
+    def test_gpu_stages_are_explicit_opt_in_and_old_links_remain_cpu(self):
+        for profile in generation.BASE_PROFILES:
+            defaults=generation.resolve_generation(profile).settings
+            self.assertTrue(all(defaults[key] is False for key in generation.OROGEN_GPU_PARAMETERS))
+        for key in generation.OROGEN_GPU_PARAMETERS:
+            token=generation.register_generation('orogen',{key:True})
+            descriptor=generation.resolve_generation(token)
+            self.assertTrue(descriptor.settings[key])
+            self.assertTrue(descriptor.bootstrap_options[key])
+            self.assertEqual(descriptor.settings['relief_pipeline'],'orogen')
+            with self.assertRaises(ValueError):generation.register_generation('orogen',{key:1})
+        saved=generation._defaults('orogen')
+        for key in generation.OROGEN_GPU_PARAMETERS:del saved[key]
+        saved['orogen_detail']=20000
+        token=generation._token('orogen',saved)
+        self.root.mkdir(exist_ok=True)
+        (self.root/(token+'.json')).write_bytes(generation._bytes(generation._payload('orogen',saved)))
+        restored=generation.resolve_generation(token)
+        self.assertEqual(restored.profile,token)
+        self.assertTrue(all(restored.settings[key] is False for key in generation.OROGEN_GPU_PARAMETERS))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -35,7 +35,7 @@ assert.equal(refinementLod([levels.at(-1)],0,tiny),0);
 assert.equal(refinementLod([{lod:3,tx:-1,ty:-1}],2,tiny),2);
 assert.equal(refinementLod([{lod:3,tx:0,ty:0}],2,tiny),4);
 assert.equal(refinementLod([],3,tiny),4);
-assert.equal(refinementLod([{lod:4,tx:-1,ty:-1,presented:false}],3,tiny),4);
+assert.equal(refinementLod([{lod:4,tx:-1,ty:-1,presented:false}],3,tiny),3);
 assert.equal(refinementLod([{lod:4,tx:-1,ty:-1,presented:true}],3,tiny),3);
 assert.equal(refinementLod([],5,tiny),5);
 assert.equal(refinementLod([],0,[20e6,0,21e6,7680],{worldBounds:[-20e6,-10e6,20e6,10e6]}),0);
@@ -51,10 +51,31 @@ const decoderParent={lod:2,tx:-1,ty:-1,presented:true};
 assert.equal(plan([latentPatch,decoderParent],0,tiny)[0].tile,decoderParent,'better source wins over finer display geometry');
 assert.equal(refinementLod([latentPatch],1,tiny),1,'source3 satisfies intermediate barrier, never final cache');
 assert(plan([latentPatch],1,tiny)[0].fallback);
-assert.equal(refinementLod([{...latentPatch,presented:false}],1,tiny),4);
+assert.equal(refinementLod([{...latentPatch,presented:false}],1,tiny),1);
 assert.equal(plan([latentPatch],2,tiny).length,0,'fine historical geometry cannot leak when zooming out');
 assert(plan([latentPatch],1,tiny,{protectedBounds}).every(p=>p.bounds[2]<=protectedBounds[0]||p.bounds[0]>=protectedBounds[2]||p.bounds[3]<=protectedBounds[1]||p.bounds[1]>=protectedBounds[3]));
 
 assert.equal(refinementLod([{lod:4,tx:-1,ty:-1,presented:true}],0,tiny,{latentPreview:false}),0,'default coarse coverage schedules native without duplicate latent inference');
 assert.equal(refinementLod([],0,tiny,{latentPreview:false}),4);
-assert.equal(refinementLod([{lod:4,tx:-1,ty:-1,presented:false}],0,tiny,{latentPreview:false}),4);
+assert.equal(refinementLod([{lod:4,tx:-1,ty:-1,presented:false}],0,tiny,{latentPreview:false}),0);
+
+// Continuous LOD displays each ready descendant while retaining parent coverage
+// in the unfinished regions. The patches must cover the area exactly once.
+const adaptiveParent={lod:2,tx:-1,ty:-1},child={lod:1,tx:-1,ty:-1},grandchild={lod:0,tx:-1,ty:-1};
+const adaptiveBounds=[-span,-span,0,0];
+const adaptive=plan([adaptiveParent,child,grandchild],2,adaptiveBounds,{minLod:0});
+assert(adaptive.some(p=>p.tile===adaptiveParent));
+assert(adaptive.some(p=>p.tile===child));
+assert(adaptive.some(p=>p.tile===grandchild));
+assert.equal(adaptive.reduce((area,p)=>area+(p.bounds[2]-p.bounds[0])*(p.bounds[3]-p.bounds[1]),0),span*span);
+for(let i=0;i<adaptive.length;i++)for(let j=i+1;j<adaptive.length;j++){
+  const a=adaptive[i].bounds,b=adaptive[j].bounds;
+  assert(!(a[0]<b[2]&&a[2]>b[0]&&a[1]<b[3]&&a[3]>b[1]),'adaptive patches must not overlap');
+}
+assert.deepEqual(adaptive.find(p=>p.tile===grandchild).uv,[0,0,1,1]);
+assert.deepEqual(adaptive.find(p=>p.tile===adaptiveParent).uv,[0,0,.5,.5]);
+assert(plan([adaptiveParent,child,grandchild],2,adaptiveBounds,{minLod:1}).every(p=>p.tile!==grandchild),'depth limits visible refinement');
+assert(plan([adaptiveParent,child,grandchild],2,adaptiveBounds).every(p=>p.tile===adaptiveParent),'disabling continuous LOD restores camera resolution');
+const adaptiveClipped=plan([adaptiveParent,child,grandchild],2,adaptiveBounds,{minLod:0,worldBounds:[-span,-span,-100,-100]});
+assert(adaptiveClipped.every(p=>p.bounds[2]<=-100&&p.bounds[3]<=-100));
+console.log('Continuous LOD displays mixed ready depths with complete non-overlapping coverage: OK');

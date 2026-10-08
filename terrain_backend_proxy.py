@@ -25,8 +25,9 @@ PARENT_ENV='TERRAIN_REFERENCE_PARENT_PID'
 STATUS_PATH='/api/inference-backends'
 MAX_BODY=4*1024**2
 READ_APIS={'api/status','api/world','api/generation/schema','api/profile','generated/terrain.png'}
-WRITE_APIS={'api/view','api/view/release','api/coarse/prepare'}
+WRITE_APIS={'api/view','api/view/release','api/coarse/prepare','api/terrain/suspend'}
 TILE_PATH=re.compile(r'(?:height/natural-v1/[0-9]+/-?[0-9]+/-?[0-9]+/-?[0-9]+\.bin|'
+                     r'coarse/natural-v1/[0-9]+/-?[0-9]+/-?[0-9]+\.bin|'
                      r'tiles/natural-v1/[0-9]+/-?[0-9]+/-?[0-9]+/-?[0-9]+\.png|'
                      r'api/overview/natural-v1/[0-9]+\.png)\Z')
 RESPONSE_HEADERS={'content-type','content-length','content-encoding','cache-control',
@@ -119,6 +120,7 @@ class ReferenceWorker:
         self.condition=threading.Condition()
         self.process=None;self.job=None;self.log=None
         self.actual_pid=None
+        self.suspended=False
         self.token=None;self.state='idle';self.last_error=None;self.failed_at=0.;self.closed=False
 
     def status(self):
@@ -266,7 +268,13 @@ class ReferenceWorker:
     def forward(self,path,method,query,body,headers):
         if not allowed_path(path,method):
             raise ValueError('Reference route not allowed')
+        with self.condition:
+            if self.suspended and path not in ('api/status','api/view/release','api/terrain/suspend'):
+                return 409,b'{"cancelled":true}',[('Content-Type','application/json')]
         self.ensure_ready()
+        with self.condition:
+            if self.suspended and path not in ('api/status','api/view/release','api/terrain/suspend'):
+                return 409,b'{"cancelled":true}',[('Content-Type','application/json')]
         url=self.base_url+'/'+path+('?' + query.decode('ascii') if query else '')
         selected={key:value for key,value in headers.items() if key.lower() in REQUEST_HEADERS}
         selected['Accept-Encoding']='identity'
@@ -280,6 +288,18 @@ class ReferenceWorker:
             headers=[(key,value) for key,value in response.headers.items()
                      if key.lower() in RESPONSE_HEADERS or key.lower().startswith('x-terrain-')]
             return response.code,data,headers
+
+    def suspend(self, paused):
+        """Do not start an unused worker just to pause it."""
+        with self.condition:
+            self.suspended=paused
+            ready=self.state=='ready' and self.process is not None and self.process.poll() is None
+        if ready:
+            req=http.Request(self.base_url+'/api/terrain/suspend',
+                data=json.dumps({'paused':paused}).encode(),
+                headers={'Content-Type':'application/json'},method='POST')
+            with opener().open(req,timeout=30) as response:
+                response.read()
 
 
 def register_backend_proxy(app,worker=None):

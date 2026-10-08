@@ -8,7 +8,7 @@ const fs=require('node:fs'),assert=require('node:assert/strict');
  page.on('pageerror',e=>errors.push(e.message));
  const start=Date.now();
  try {
-  await page.goto('http://127.0.0.1:8765/?seed=42&profile=natural&prepare=0');
+  await page.goto('http://127.0.0.1:8765/?seed=42&profile=natural&coarse_prepare=0');
   await page.waitForFunction(()=>typeof terrainDebug!=='undefined'&&terrainDebug.snapshot().overview,null,{timeout:120000});
   const statusBefore=await(await page.request.get('http://127.0.0.1:8765/api/status')).json();
   let snapshot;

@@ -21,7 +21,7 @@ const path = require('node:path');
     await page.goto('http://127.0.0.1:8765/?seed=42');
     await page.waitForFunction(() => Number(document.getElementById('viewport').dataset.loaded) > 0,
       {}, {timeout: 240000});
-    if (await page.locator('#prefetch').count()) await page.locator('#prefetch').uncheck();
+    if (await page.locator('#prefetch').count()) await page.locator('#runtimePanel').evaluate(el=>el.open=true);await page.locator('#prefetch').uncheck();
     const meta = await (await page.request.get('http://127.0.0.1:8765/api/world?seed=42')).json();
     assert.match(meta.version, /^natural-/);
     assert.equal(meta.native_resolution, 30);
@@ -51,13 +51,14 @@ const path = require('node:path');
     await page.waitForFunction(() => document.getElementById('viewport').dataset.pending === '0', {}, {timeout: 240000});
     await page.screenshot({path: path.join(output, 'navigation-desktop.png')});
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await page.locator('#runtimePanel').evaluate(el=>el.open=true);
     const gpuControl = page.locator('#gpuRender');
     if (await gpuControl.isEnabled()) {
       await gpuControl.uncheck();
       await page.waitForFunction(() => document.getElementById('viewport').dataset.render === 'png' &&
         document.getElementById('viewport').dataset.pending === '0', {}, {timeout: 240000});
       const requestsBefore = heights.length;
-      await gpuControl.check();
+      await page.locator('#runtimePanel').evaluate(el=>el.open=true);await gpuControl.check();
       await page.waitForFunction(() => document.getElementById('viewport').dataset.render === 'webgpu' &&
         document.getElementById('viewport').dataset.pending === '0', {}, {timeout: 240000});
       assert(heights.length > requestsBefore, 'Enabling WebGPU must fetch physical heights for existing PNG tiles');

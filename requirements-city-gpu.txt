@@ -1,0 +1,2 @@
+# Optional native WebGPU runtime for the City erosion engine.
+wgpu==0.32.0

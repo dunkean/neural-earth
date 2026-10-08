@@ -1,0 +1,6 @@
+{
+  "source": "city_generator/rust/bridge/terrainErosion.wgsl",
+  "sha256": "d2c61663f4fe56ffac232468f4ce4ecf4494a2abfd9b7b360bc4ce1c34c94085",
+  "snapshot_date": "2026-10-08",
+  "license": "GPL-3.0-only"
+}

@@ -14,8 +14,9 @@ import torch
 from terrain_bootstrap import (BOOTSTRAP_VERSION, implementation_identity,
                                verify_implementation_identity, bootstrap_metadata)
 from terrain_conditioning import (STATS_PATH, WORLD_PROFILES,
-                                  BOOTSTRAP_CONDITIONING_VERSION, CONDITIONING_SNR)
-from terrain_world import COARSE_RESOLUTION, SOURCE_FILES, DATA_ROOT, WORLD_BOUNDS
+                                  BOOTSTRAP_CONDITIONING_VERSION, CONDITIONING_SNR, OROGEN_CLIMATE_VERSION)
+from terrain_world import COARSE_RESOLUTION, SOURCE_FILES, DATA_ROOT
+from terrain_geometry import world_bounds
 from terrain_generation import resolve_generation
 
 ROOT = Path(__file__).resolve().parent
@@ -50,7 +51,8 @@ def _canonical(value: dict) -> bytes:
 
 
 def _files(model_root: Path, world_profile: str = 'natural'):
-    needs_bootstrap = resolve_generation(world_profile).needs_bootstrap
+    descriptor = resolve_generation(world_profile)
+    needs_bootstrap = descriptor.needs_bootstrap
     model_names = ["config.json"] + [f"{stage}/{name}" for stage in
         ("coarse_model", "base_model", "decoder_model") for name in
         ("config.json", "diffusion_pytorch_model.safetensors")]
@@ -59,12 +61,12 @@ def _files(model_root: Path, world_profile: str = 'natural'):
     upstream_root = ROOT / "terrain-diffusion" / "terrain_diffusion"
     upstream_sources = sorted(p for p in upstream_root.rglob("*.py") if p.is_file())
     implementation_names = (
-        "terrain_manifest.py", "terrain_generation.py", "terrain_bootstrap.py", "terrain_conditioning.py", "terrain_world.py", "terrain_inference.py",
+        "terrain_manifest.py", "terrain_geometry.py", "terrain_polar.py", "terrain_generation.py", "terrain_bootstrap.py", "terrain_conditioning.py", "terrain_world.py", "terrain_inference.py",
         # Request ordering determines BF16 batch composition and physical bytes.
-        "index.html", "terrain_lod.js",
+        "index.html", "terrain_lod.js", "terrain_generation_controls.js", "terrain_toolbar.js",
         "terrain_server.py", "terrain_app.py", "terrain_final_mips.py", "terrain_refinement.py",
-        "terrain_background.py", "terrain_climate.py", "terrain_window_scheduler.py",
-        "terrain_coarse.py", "terrain_coarse_graph.py", "terrain_device.py", "terrain_jobs.py",
+        "terrain_background.py", "terrain_generation_session.py", "terrain_climate.py", "terrain_window_scheduler.py",
+        "terrain_coarse.py", "terrain_native_coarse.py", "terrain_coarse_graph.py", "terrain_device.py", "terrain_jobs.py",
         "terrain_disk_cache.py", "terrain_nn_constants.py", "terrain_cuda_graphs.py", "terrain_cuda_kernels.py", "terrain_interpolation.py", "terrain_profiling.py", "terrain_snr.py", "terrain_delivery.py")
     implementation = {name: _digest(ROOT / name) for name in implementation_names
                       if name != 'terrain_bootstrap.py' or needs_bootstrap}
@@ -79,8 +81,19 @@ def _files(model_root: Path, world_profile: str = 'natural'):
         "infinite_tensor": {p.relative_to(package_root).as_posix(): _digest(p)
                             for p in package_sources},
         "implementation": implementation,
-        "bootstrap_native": deepcopy(implementation_identity()) if needs_bootstrap else None,
+        "bootstrap_native": (deepcopy(implementation_identity())
+                             if needs_bootstrap and (descriptor.bootstrap_generator == 'native' or settings_native_source(descriptor)) else None),
+        "bootstrap_orogen": (_orogen_identity() if descriptor.bootstrap_generator == 'orogen' else None),
     }
+
+
+def settings_native_source(descriptor):
+    return descriptor.settings['height_source'] in ('native','natural-continental')
+
+
+def _orogen_identity():
+    from terrain_orogen import implementation_identity as identity
+    return deepcopy(identity())
 
 
 def _runtime_versions() -> dict:
@@ -109,12 +122,20 @@ def build_manifest(seed: int, ablation: str = "A0", *, model_root: Path = MODEL_
         raise ValueError("Seed must be an unsigned 64-bit integer")
     bootstrap = None
     if descriptor.needs_bootstrap:
-        receipt = bootstrap_metadata(seed, descriptor.bootstrap_style)
+        if descriptor.bootstrap_generator == 'orogen':
+            from terrain_orogen import bootstrap_metadata as atlas_metadata
+            receipt = atlas_metadata(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options)
+        else:
+            atlas_metadata = bootstrap_metadata
+            receipt = atlas_metadata(seed, descriptor.bootstrap_style)
         # Runtime timings never participate in a reproducible world identity.
         bootstrap = {name: receipt[name] for name in (
             "requested_seed_u64", "selected_seed_u64", "selected_attempt", "style",
             "native_config", "attempts", "raster", "hypsometry",
             "raw_height_sha256", "height_sha256", "sign_preserved")}
+        if descriptor.bootstrap_generator == 'orogen':
+            bootstrap['layer_sha256'] = receipt.get('layer_sha256', {})
+            if 'stage_state' in receipt:bootstrap['stage_state']=receipt['stage_state']
     config_path = Path(checkpoint_source or model_root) / "config.json"
     model_config = json.loads(config_path.read_text(encoding="utf-8")) if file_hashes else None
     conditioning_snr = (inference_profile or {}).get('checkpoint_kwargs', {}).get(
@@ -128,10 +149,13 @@ def build_manifest(seed: int, ablation: str = "A0", *, model_root: Path = MODEL_
         "bootstrap": bootstrap,
         "checkpoint": {"repo": "xandergos/terrain-diffusion-30m", "revision": MODEL_REVISION,
                        "config": model_config},
-        "geography": {"bounds_m": list(WORLD_BOUNDS), "coordinate_system": "flat-metre, y-down",
+        "geography": {"bounds_m": list(world_bounds(settings)), "coordinate_system": "flat-metre, y-down",
+                      "topology": settings['world_topology'], "diameter_km": settings['world_diameter_km'],
                       "periodic_longitude": False,
-                      "bootstrap_periodic_longitude": settings['height_source']=='native', "coarse_cell_m": COARSE_RESOLUTION,
-                      "sea_level_m": 0, "bootstrap_version": BOOTSTRAP_VERSION if descriptor.needs_bootstrap else None},
+                      "bootstrap_periodic_longitude": settings['world_topology']=='sphere' and (settings['height_source'] in ('native', 'orogen') or settings['relief_pipeline'] in ('orogen','city-gpu')), "coarse_cell_m": COARSE_RESOLUTION,
+                      "polar_neural_chart": 'rotated-polar-chart-v1' if settings['world_topology']=='sphere' else None,
+                      "sea_level_m": 0, "bootstrap_version": (receipt['generator_version'] if descriptor.bootstrap_generator == 'orogen'
+                           else BOOTSTRAP_VERSION) if descriptor.needs_bootstrap else None},
         "conditioning": {"channels": ["elevation_m", "BIO1_c", "BIO4_c_x100",
                                       "BIO12_mm_year", "BIO15_percent"],
                          "elevation_transform": "sign(h)*sqrt(abs(h))",
@@ -140,7 +164,7 @@ def build_manifest(seed: int, ablation: str = "A0", *, model_root: Path = MODEL_
                          "frequency_mult": settings['frequency_mult'],
                          "drop_water_pct": settings['drop_water_pct'],
                          "generation_settings": settings,
-                         "physical_climate_version": BOOTSTRAP_CONDITIONING_VERSION if settings['climate_source']=='native' else None},
+                         "physical_climate_version": (OROGEN_CLIMATE_VERSION if settings['climate_source']=='orogen' else BOOTSTRAP_CONDITIONING_VERSION if settings['climate_source']=='native' else None)},
         "generation": {"backend": backend, "precision": precision,
                        "numerical_profile": numerical_profile,
                        "inference_profile": inference_profile or {},
@@ -177,6 +201,9 @@ def verify_manifest_files(manifest: dict, checkpoint_source: Path = MODEL_ROOT) 
     identity = world_identity(manifest)
     if manifest['files']['bootstrap_native'] is not None:
         verify_implementation_identity(manifest['files']['bootstrap_native'])
+    if manifest['files'].get('bootstrap_orogen') is not None:
+        from terrain_orogen import verify_implementation_identity as verify_orogen
+        verify_orogen(manifest['files']['bootstrap_orogen'])
     if _files(Path(checkpoint_source), manifest['world_profile']) != manifest["files"]:
         raise ValueError("Source, model, or runtime file changed since manifest creation")
     return identity

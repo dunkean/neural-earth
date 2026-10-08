@@ -11,7 +11,7 @@
     const dx = x - x0, dy = y - y0;
     const value = (heights[y0 * width + x0] * (1 - dx) + heights[y0 * width + x1] * dx) * (1 - dy)
       + (heights[y1 * width + x0] * (1 - dx) + heights[y1 * width + x1] * dx) * dy;
-    return Number.isFinite(value) ? value : null;
+    return Number.isFinite(value) ? (options.encoding==='signed-sqrt'?Math.sign(value)*value*value:value) : null;
   }
   const distanceLabel = metres => metres >= 1000 ? `${(metres / 1000).toFixed(2)} km` : `${metres.toFixed(1)} m`;
   function mount({view, mini, button, altitude, extent, distance, getState, redraw}) {
@@ -25,7 +25,9 @@
       armed = value;
       button.setAttribute('aria-pressed', String(value));
       view.classList.toggle('measuring', value);
-      button.textContent = value ? 'Cancel measurement' : 'Measure distance';
+      button.textContent = value ? '×' : '↔';
+      button.title = value ? 'Annuler la mesure' : 'Mesurer une distance';
+      button.setAttribute('aria-label', button.title);
     }
     function clearMeasurement() {
       segment = null;
@@ -39,7 +41,7 @@
       if (frame === null) frame = requestAnimationFrame(() => { frame = null; update(); });
     }
     async function loadHeight(tile, s) {
-      if (flight || samples.has(tile) || (failures.get(tile) || 0) > Date.now()) return;
+      if (s.mode?.startsWith('snr-') || flight || samples.has(tile) || (failures.get(tile) || 0) > Date.now()) return;
       const controller = new AbortController(), request = {controller, tile};
       flight = request;
       try {
@@ -65,6 +67,7 @@
       }
     }
     function update() {
+      if(getState().sceneView==='globe')return;
       const s = getState();
       if (generation !== s.epoch) {
         generation = s.epoch;
@@ -76,6 +79,10 @@
       extent.textContent = s.world ? `Visible area: ${km(s.W*s.mpp)} × ${km(s.H*s.mpp)} km · ${s.W} × ${s.H} px (width × height)` : 'Visible area: —';
       distance.textContent = segment ? `Distance on map: ${distanceLabel(Math.hypot(segment.end.x-segment.start.x, segment.end.y-segment.start.y))}`
         : armed ? 'Distance: click and drag · Esc to cancel' : 'Distance: —';
+      // A noise-policy view has no elevation payload. Avoid launching terrain
+      // inference merely because the pointer crosses this diagnostic layer.
+      altitude.hidden = !!s.mode?.startsWith('snr-');
+      if (altitude.hidden) {flight?.controller.abort();flight=null;clearTimeout(fetchTimer);fetchTimer=null;return;}
       if (!s.world || !pointer || pointer.x < 0 || pointer.y < 0 || pointer.x >= s.W || pointer.y >= s.H) {
         altitude.textContent = 'Cursor elevation: —'; return;
       }
@@ -88,19 +95,20 @@
         ? [...s.tiles].find(tile => tile.lod === 0 && inside(point, tile.b)) : null);
       const data = tile?.heights ? tile : samples.get(tile);
       const value = data ? sampleHeight(data, point) : null;
-      const preview = tile?.stage === 'conditioning-preview' ? ' · input preview' : '';
+      const preview = ['conditioning-preview','orogen-diagnostic'].includes(tile?.stage) ? ' · input preview' : '';
       altitude.textContent = value === null ? 'Cursor elevation: waiting for terrain…' : `Cursor elevation: ${value.toFixed(1)} m${preview}`;
       if (tile && !data && !flight && fetchTimer === null && s.publishedEpoch === s.cameraEpoch && (failures.get(tile) || 0) <= Date.now()) {
         fetchTimer = setTimeout(() => {
           fetchTimer = null;
           const latest = getState();
-          if (latest.epoch !== s.epoch || !pointer || latest.publishedEpoch !== latest.cameraEpoch) return;
+          if (latest.epoch !== s.epoch || latest.mode !== s.mode || !pointer || latest.publishedEpoch !== latest.cameraEpoch) return;
           const current = latest.visiblePlan.find(entry => inside(worldPoint(pointer, latest), entry.bounds));
           if (current?.tile === tile) loadHeight(tile, latest);
         }, 100);
       }
     }
     function draw(context) {
+      if(getState().sceneView==='globe')return;
       update();
       if (!segment) return;
       const s = getState(), screen = p => ({x:(p.x-s.cx)/s.mpp+s.W/2, y:(p.y-s.cy)/s.mpp+s.H/2});
@@ -122,7 +130,7 @@
     }
     button.addEventListener('click', () => { const next = !armed; clearMeasurement(); setArmed(next); view.focus(); queueUpdate(); });
     view.addEventListener('pointerdown', event => {
-      if (!armed || event.button !== 0 || event.target === mini || !getState().world) return;
+      if (getState().sceneView==='globe' || !armed || event.button !== 0 || event.target === mini || event.target.closest?.('#hud') || !getState().world) return;
       event.preventDefault(); event.stopImmediatePropagation();
       pointer = screenPoint(event);
       const point = worldPoint(pointer,getState());
@@ -130,6 +138,7 @@
       view.setPointerCapture(event.pointerId); view.focus(); redraw();
     }, true);
     view.addEventListener('pointermove', event => {
+      if(getState().sceneView==='globe'){pointer=null;return;}
       pointer = event.target === mini ? null : screenPoint(event);
       if (measuringId === event.pointerId) {
         event.preventDefault(); event.stopImmediatePropagation();
@@ -152,7 +161,7 @@
       else if (measuringId !== null) {event.preventDefault(); event.stopImmediatePropagation();}
     }, true);
     view.addEventListener('wheel', event => {if (measuringId !== null) {event.preventDefault(); event.stopImmediatePropagation();}}, {capture:true,passive:false});
-    return {draw};
+    return {draw,cancel(){pointer=null;clearMeasurement();flight?.controller?.abort();}};
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = {sampleHeight, distanceLabel};
   if (typeof window !== 'undefined') window.TerrainMapTools = {mount};

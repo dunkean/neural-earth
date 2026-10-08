@@ -17,9 +17,9 @@ fs.mkdirSync(out,{recursive:true});
    fs.writeFileSync(path.join(out,label+'-'+key.replace('/','_')+'.bin'),bytes);
   })());}});
  try{
-  await page.goto(base+'/?seed=42&profile=natural&prepare=0&nn_engine=exact&coarse_interpolation=bilinear');
+  await page.goto(base+'/?seed=42&profile=natural&coarse_prepare=0&nn_engine=exact&coarse_interpolation=bilinear');
   await page.waitForFunction(()=>terrainDebug.snapshot().overview&&terrainDebug.snapshot().rendererReady,{},{timeout:120000});
-  await page.locator('#prefetch').uncheck();
+  await page.locator('#runtimePanel').evaluate(el=>el.open=true);await page.locator('#prefetch').uncheck();
   phase='exact-bilinear';
   await page.evaluate(()=>{cx=-921600;cy=614400;mpp=480;draw();schedule()});
   async function settled(engine,method){
@@ -32,9 +32,9 @@ fs.mkdirSync(out,{recursive:true});
    await page.screenshot({path:path.join(out,phase+'.png')});
   }
   await settled('exact','bilinear');
-  phase='exact-monotone';await page.selectOption('#coarseInterpolation','monotone');await settled('exact','monotone');
-  phase='reference-monotone';await page.selectOption('#nnEngine','reference');await settled('reference','monotone');
-  phase='reference-bilinear';await page.selectOption('#coarseInterpolation','bilinear');await settled('reference','bilinear');
+  phase='exact-monotone';await page.locator('#runtimePanel').evaluate(el=>el.open=true);await page.selectOption('#coarseInterpolation','monotone');await settled('exact','monotone');
+  phase='reference-monotone';await page.locator('#runtimePanel').evaluate(el=>el.open=true);await page.selectOption('#nnEngine','reference');await settled('reference','monotone');
+  phase='reference-bilinear';await page.locator('#runtimePanel').evaluate(el=>el.open=true);await page.selectOption('#coarseInterpolation','bilinear');await settled('reference','bilinear');
   report.fidelity={};
   for(const method of ['bilinear','monotone']){
    const a=payloads['exact-'+method],b=payloads['reference-'+method],keys=Object.keys(a||{}).filter(k=>b?.[k]);assert(keys.length>0,'No matched actual LOD4 payload');
@@ -43,7 +43,7 @@ fs.mkdirSync(out,{recursive:true});
   }
   report.methodsDiffer=Object.keys(payloads['exact-bilinear']).some(k=>payloads['exact-monotone']?.[k]&&!payloads['exact-bilinear'][k].bytes.equals(payloads['exact-monotone'][k].bytes));
   assert(report.methodsDiffer,'Interpolation choice had no effect');
-  phase='restored-exact';await page.selectOption('#nnEngine','exact');await settled('exact','bilinear');
+  phase='restored-exact';await page.locator('#runtimePanel').evaluate(el=>el.open=true);await page.selectOption('#nnEngine','exact');await settled('exact','bilinear');
   report.backends=await (await fetch(base+'/api/inference-backends')).json();report.status='complete';
  }catch(e){report.status='failed';report.error=String(e.stack||e);await page.screenshot({path:path.join(out,'failed.png')}).catch(()=>{});throw e;}
  finally{save();await browser.close();}

@@ -13,9 +13,9 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),crypto=require(
   const snap=()=>page.evaluate(()=>terrainDebug.snapshot());
   const settled=()=>page.waitForFunction(()=>{const s=terrainDebug.snapshot();return !!s.world&&s.visible.wanted>0&&s.visible.pending===0;},null,{timeout:120000});
   await page.goto('http://127.0.0.1:8765/?seed=42&profile=natural');await settled();
-  await page.locator('#generationPanel summary').click();await page.waitForTimeout(300);
+  await page.locator('#generationPanel > summary').click();await page.waitForTimeout(300);
   const before=await snap(),worldCount=worldResponses.length;
-  await page.locator('#snr0').fill('0.2');await page.waitForTimeout(300);
+  await page.locator('#generationPanel').evaluate(el=>el.open=true);await page.locator('#generationChannel').selectOption('0');await page.locator('#snr0').fill('0.2');await page.waitForTimeout(300);
   assert.equal(worldResponses.length,worldCount);
   await page.locator('#applyGeneration').click();
   await page.waitForFunction(()=>terrainDebug.snapshot().generationSettings?.cond_snr[0]===.2);await settled();
@@ -27,7 +27,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),crypto=require(
   await page.waitForFunction(()=>terrainDebug.snapshot().generationSettings?.height_source==='natural-continental');await settled();
   const continental=await snap();assert.notEqual(continental.generationProfile,noise.generationProfile);
   assert.deepEqual(continental.camera,before.camera);
-  assert(!(await page.locator('#info').innerText()).includes('Original natural profile'));
+  assert(!(await page.locator('#info').textContent()).includes('Original natural profile'));
   assert((await page.locator('#worldDescription').innerText()).includes('experimental'));
   assert.equal(await page.locator('#macroScale').isDisabled(),false);
   const shareURL=page.url();
@@ -39,7 +39,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),crypto=require(
   await page.reload();
   await page.waitForFunction(token=>terrainDebug.snapshot().generationProfile===token,continental.generationProfile);await settled();
   assert.deepEqual((await snap()).generationSettings,continental.generationSettings);
-  await page.locator('#generationPanel summary').click();
+  await page.locator('#generationPanel > summary').click();
   await page.locator('#resetGeneration').click();
   await page.waitForFunction(()=>terrainDebug.snapshot().generationProfile==='natural');await settled();
   assert.deepEqual(errors,[]);assert(worldResponses.every(row=>row.status===200));

@@ -170,7 +170,12 @@ def _coarse_batch(world, ctxs, scheduler, weight_window, t_cond, cond_inputs, po
         value = world._conditioning_model_input(i1, i1 + 64, j1, j1 + 64)
         if world._terrain_snr_active:
             from terrain_snr import window_snr
-            regional = window_snr(world._terrain_generation_settings, world.kwargs['cond_snr'], value)
+            from terrain_geometry import world_latitude
+            chart_latitude = getattr(world.synthetic_map_factory, 'latitude', None)
+            lat = (chart_latitude((j1 + 32) * 7680, (i1 + 32) * 7680) if chart_latitude else
+                   float(world_latitude((i1 + 32) * 7680, world._terrain_generation_settings)))
+            regional = window_snr(world._terrain_generation_settings, world.kwargs['cond_snr'], value,
+                                  latitude=lat)
         synthetic.append((value - means[[0, 2, 3, 4, 5], None, None]) / stds[[0, 2, 3, 4, 5], None, None])
         cond_noises.append(gaussian_noise_patch(world.seed, i1, j1, 64, 64, channels=5, tile_h=64, tile_w=64))
         sample_noises.append(gaussian_noise_patch(world.seed + 1, i1, j1, 64, 64, channels=6, tile_h=64, tile_w=64))
@@ -413,6 +418,9 @@ def _build_decoder(self):
 
 
 def _init_conditioning(self):
+    if getattr(self, '_terrain_polar_conditioning', None) is not None:
+        self.synthetic_map_factory = self._terrain_polar_conditioning
+        return
     world_profile = getattr(self, '_terrain_world_profile', 'natural')
     if world_profile != 'natural':
         from terrain_conditioning import make_conditioning_factory

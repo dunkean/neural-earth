@@ -35,7 +35,7 @@
       textureStore(destination,p,vec4<f32>(a,b,0,0));
     }`;
   const shadeShader = `
-    struct Params { resolution:f32, halo:f32, width:f32, height:f32, mode:f32, pad0:f32, pad1:f32, pad2:f32 }
+    struct Params { resolution:f32, halo:f32, width:f32, height:f32, mode:f32, pad0:f32, pad1:f32, pad2:f32, lighting:vec4<f32>, sunlight:vec4<f32> }
     @group(0) @binding(0) var elevation: texture_2d<f32>;
     @group(0) @binding(1) var blurred: texture_2d<f32>;
     @group(0) @binding(2) var color: texture_storage_2d<rgba8unorm,write>;
@@ -50,8 +50,8 @@
     }
     fn shade(d:vec2<f32>) -> f32 {
       // Same directional light/vertical exaggeration as upstream relief_map.py.
-      let normal=normalize(vec3<f32>(d.x,d.y,1.));
-      return clamp(dot(normal,vec3<f32>(-.5,-.5,.7071067812)),0.,1.);
+      let normal=normalize(vec3<f32>(d.x*params.lighting.w,d.y*params.lighting.w,1.));
+      return clamp(dot(normal,params.sunlight.xyz),0.,1.);
     }
     fn terrain(t:f32) -> vec3<f32> {
       if (t<.5) { return mix(vec3<f32>(0.,.8,.4),vec3<f32>(1.,1.,.6),(t-.25)*4.); }
@@ -71,8 +71,8 @@
       } else {
         let dx=(textureLoad(blurred,p+vec2<i32>(1,0),0).rg-textureLoad(blurred,p-vec2<i32>(1,0),0).rg)*3./params.resolution;
         let dy=(textureLoad(blurred,p+vec2<i32>(0,1),0).rg-textureLoad(blurred,p-vec2<i32>(0,1),0).rg)*3./params.resolution;
-        let hs=pow(clamp(.75*shade(vec2<f32>(dx.r,dy.r))+.25*shade(vec2<f32>(dx.g,dy.g)),0.,1.),.85);
-        rgb=terrain(.25+.75*pow(clamp(height/4500.,0.,1.),.7))*(.35+.65*hs);
+        let hs=pow(clamp(.75*shade(vec2<f32>(dx.r,dy.r))+.25*shade(vec2<f32>(dx.g,dy.g)),0.,1.),.85*params.lighting.z);
+        rgb=terrain(.25+.75*pow(clamp(height/4500.,0.,1.),.7))*mix(1.,params.lighting.y+(1.-params.lighting.y)*hs,params.lighting.x);
       }
       if (params.mode==2.) {
         rgb=mix(vec3<f32>(.18,.38,.88),vec3<f32>(.95,.22,.08),clamp((temp+35.)/70.,0.,1.));
@@ -86,7 +86,7 @@
         biome=mix(biome,vec3<f32>(.82,.69,.42),dry);
         biome=mix(biome,vec3<f32>(.52,.48,.43),clamp((height-2300.)/2200.,0.,1.));
         biome=mix(biome,vec3<f32>(.93,.97,.99),clamp((1.5-temp)/7.,0.,1.));
-        let light=clamp(dot(rgb,vec3<f32>(.333333333))*1.8,.55,1.);
+        let light=mix(1.,clamp(dot(rgb,vec3<f32>(.333333333))*1.8,.55,1.),params.lighting.x);
         rgb=biome*light;
         if(height<0.) {
           let ocean=vec3<f32>(.10,.30,.50)+clamp(1.+height/6000.,0.,1.)*vec3<f32>(.18,.24,.20);
@@ -107,6 +107,70 @@
       var result:Vertex; result.position=vec4<f32>(xy.x/params.viewport.x*2.-1.,1.-xy.y/params.viewport.y*2.,0.,1.); result.uv=params.crop.xy+uv*params.crop.zw; return result;
     }
     @fragment fn fragment(input:Vertex) -> @location(0) vec4<f32> { return textureSample(color,filtering,input.uv); }`;
+
+  // Coarse stays in its native signed-sqrt representation. Mips average
+  // physical metres, then encode again; averaging signed roots is incorrect.
+  const coarseMipShader=`
+    @group(0) @binding(0) var source:texture_2d<f32>;
+    @group(0) @binding(1) var dest:texture_storage_2d<r32float,write>;
+    fn metres(v:f32)->f32{return sign(v)*v*v;}
+    @compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3<u32>){
+      if(any(id.xy>=textureDimensions(dest))){return;}
+      let p=vec2<i32>(id.xy)*2;let hi=vec2<i32>(textureDimensions(source))-1;
+      let h=(metres(textureLoad(source,p,0).r)+metres(textureLoad(source,min(p+vec2<i32>(1,0),hi),0).r)+metres(textureLoad(source,min(p+vec2<i32>(0,1),hi),0).r)+metres(textureLoad(source,min(p+vec2<i32>(1,1),hi),0).r))*.25;
+      textureStore(dest,vec2<i32>(id.xy),vec4<f32>(sign(h)*sqrt(abs(h)),0,0,0));
+    }`;
+  const coarsePalette=shadeShader.slice(shadeShader.indexOf('    fn shade('),shadeShader.indexOf('    @compute'));
+  const coarseColor=shadeShader.slice(shadeShader.indexOf('      let temp='),shadeShader.indexOf('      textureStore(color'))
+    .replaceAll('params.mode','params.field.z')
+    .replace('let dx=(textureLoad(blurred,p+vec2<i32>(1,0),0).rg-textureLoad(blurred,p-vec2<i32>(1,0),0).rg)*3./params.resolution;',
+      'let dx=(heightAt(p+vec2<f32>(1,0),level)-heightAt(p-vec2<f32>(1,0),level))*3./params.viewport.w;')
+    .replace('let dy=(textureLoad(blurred,p+vec2<i32>(0,1),0).rg-textureLoad(blurred,p-vec2<i32>(0,1),0).rg)*3./params.resolution;',
+      'let dy=(heightAt(p+vec2<f32>(0,1),level)-heightAt(p-vec2<f32>(0,1),level))*3./params.viewport.w;')
+    .replace('let hs=pow(clamp(.75*shade(vec2<f32>(dx.r,dy.r))+.25*shade(vec2<f32>(dx.g,dy.g)),0.,1.),.85*params.lighting.z);',
+      'let hs=pow(shade(vec2<f32>(dx,dy)),.85*params.lighting.z);');
+  const coarseShader=`
+    struct Params {rect:vec4<f32>,viewport:vec4<f32>,crop:vec4<f32>,field:vec4<f32>,lighting:vec4<f32>,sunlight:vec4<f32>}
+    struct Vertex {@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>}
+    @group(0) @binding(0) var<uniform> params:Params;
+    @group(0) @binding(1) var elevation:texture_2d<f32>;
+    @group(0) @binding(2) var climate:texture_2d_array<f32>;
+    @vertex fn vertex(@builtin(vertex_index) id:u32)->Vertex{
+      let corners=array<vec2<f32>,6>(vec2<f32>(0,0),vec2<f32>(1,0),vec2<f32>(0,1),vec2<f32>(0,1),vec2<f32>(1,0),vec2<f32>(1,1));
+      let uv=corners[id];let xy=params.rect.xy+uv*params.rect.zw;
+      var out:Vertex;out.position=vec4<f32>(xy.x/params.viewport.x*2.-1.,1.-xy.y/params.viewport.y*2.,0.,1.);out.uv=params.crop.xy+uv*params.crop.zw;return out;
+    }
+    fn load(p:vec2<i32>,level:i32)->f32{return textureLoad(elevation,clamp(p,vec2<i32>(0),vec2<i32>(textureDimensions(elevation,level))-1),level).r;}
+    fn slope(a:f32,b:f32)->f32{if(a*b<=0.){return 0.;}return 2.*a*b/(a+b);}
+    fn cubic(a:f32,b:f32,c:f32,d:f32,t:f32)->f32{
+      let m=slope(b-a,c-b);let n=slope(c-b,d-c);let t2=t*t;let t3=t2*t;
+      return clamp((2.*t3-3.*t2+1.)*b+(t3-2.*t2+t)*m+(-2.*t3+3.*t2)*c+(t3-t2)*n,min(b,c),max(b,c));
+    }
+    fn rootAt(p:vec2<f32>,level:i32)->f32{
+      let q=(p+.5)/exp2(f32(level))-.5;let lo=vec2<i32>(floor(q));let f=fract(q);
+      if(params.field.w==1.&&level==0){
+        var rows:array<f32,4>;
+        for(var j=0;j<4;j++){let y=lo.y+j-1;rows[j]=cubic(load(vec2<i32>(lo.x-1,y),level),load(vec2<i32>(lo.x,y),level),load(vec2<i32>(lo.x+1,y),level),load(vec2<i32>(lo.x+2,y),level),f.x);}
+        return cubic(rows[0],rows[1],rows[2],rows[3],f.y);
+      }
+      return mix(mix(load(lo,level),load(lo+vec2<i32>(1,0),level),f.x),mix(load(lo+vec2<i32>(0,1),level),load(lo+vec2<i32>(1,1),level),f.x),f.y);
+    }
+    fn physicalAt(p:vec2<f32>,level:i32)->f32{let v=rootAt(p,level);return sign(v)*v*v;}
+    fn heightAt(p:vec2<f32>,level:f32)->f32{let lo=i32(floor(level));return mix(physicalAt(p,lo),physicalAt(p,min(lo+1,3)),fract(level));}
+    fn clim(p:vec2<f32>,layer:i32)->f32{
+      let size=vec2<i32>(textureDimensions(climate));let q=clamp(p/params.field.xy,vec2<f32>(0.),vec2<f32>(1.))*vec2<f32>(size-1);
+      let lo=vec2<i32>(floor(q));let hi=min(lo+1,size-1);let f=fract(q);
+      return mix(mix(textureLoad(climate,lo,layer,0).r,textureLoad(climate,vec2<i32>(hi.x,lo.y),layer,0).r,f.x),mix(textureLoad(climate,vec2<i32>(lo.x,hi.y),layer,0).r,textureLoad(climate,hi,layer,0).r,f.x),f.y);
+    }
+    ${coarsePalette}
+    @fragment fn fragment(input:Vertex)->@location(0) vec4<f32>{
+      let p=input.uv*(params.field.xy-2.*params.viewport.z)+params.viewport.z-.5;
+      let footprint=max(length(dpdx(p)),length(dpdy(p)));
+      let level=clamp(log2(max(footprint,1.)),0.,3.);
+      let height=heightAt(p,level);
+      ${coarseColor}
+      return vec4<f32>(rgb,1.);
+    }`;
 
   // Opt-in timeline compatible with Chrome/Perfetto. Queue completion latency
   // includes preceding submissions; it is deliberately not a GPU kernel timer.
@@ -142,7 +206,7 @@
         if(errors.length)throw Error(errors.map(x=>`${label}:${x.lineNum} ${x.message}`).join('\n'));
         return result;
       };
-      const [blur,shade,render]=await Promise.all([module(blurShader,'terrain Gaussian'),module(shadeShader,'terrain relief'),module(renderShader,'terrain quads')]);
+      const [blur,shade,render,coarse,mip]=await Promise.all([module(blurShader,'terrain Gaussian'),module(shadeShader,'terrain relief'),module(renderShader,'terrain quads'),module(coarseShader,'native coarse relief'),module(coarseMipShader,'native coarse mips')]);
       this.blurLayout=device.createBindGroupLayout({entries:[
         {binding:0,visibility:GPUShaderStage.COMPUTE,texture:{sampleType:'unfilterable-float'}},
         {binding:1,visibility:GPUShaderStage.COMPUTE,storageTexture:{access:'write-only',format:'rg32float'}},
@@ -160,6 +224,13 @@
         {binding:1,visibility:GPUShaderStage.FRAGMENT,texture:{}},
         {binding:2,visibility:GPUShaderStage.FRAGMENT,sampler:{type:'filtering'}},
       ]});
+      this.coarseLayout=device.createBindGroupLayout({entries:[
+        {binding:0,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:96}},
+        {binding:1,visibility:GPUShaderStage.FRAGMENT,texture:{sampleType:'unfilterable-float'}},
+        {binding:2,visibility:GPUShaderStage.FRAGMENT,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},
+      ]});
+      this.coarsePipeline=await device.createRenderPipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[this.coarseLayout]}),vertex:{module:coarse,entryPoint:'vertex'},fragment:{module:coarse,entryPoint:'fragment',targets:[{format:this.format}]},primitive:{topology:'triangle-list'}});
+      this.coarseMipPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:mip,entryPoint:'main'}});
       [this.horizontal,this.vertical,this.shade,this.pipeline]=await Promise.all([
         device.createComputePipelineAsync({layout:blurLayout,compute:{module:blur,entryPoint:'horizontal'}}),
         device.createComputePipelineAsync({layout:blurLayout,compute:{module:blur,entryPoint:'vertical'}}),
@@ -185,7 +256,7 @@
       this.scratchB=this.makeTexture(width,height,'rg32float',GPUTextureUsage.STORAGE_BINDING);
       this.verticalGroup=this.device.createBindGroup({layout:this.blurLayout,entries:[{binding:0,resource:this.scratchA.createView()},{binding:1,resource:this.scratchB.createView()}]});
     }
-    uploadTile(key, heights, {width=304,height=304,halo=24,metresPerSample=30,climate=null,climateWidth=33,climateHeight=33,mode='relief'}={}) {
+    uploadTile(key, heights, {width=304,height=304,halo=24,metresPerSample=30,climate=null,climateWidth=33,climateHeight=33,mode='relief',lod=0}={}) {
       if(!this.available)return false;
       if(!(heights instanceof Float32Array)||heights.length!==width*height||![width,height,halo].every(Number.isInteger)||halo<1||width<=2*halo||height<=2*halo||!Number.isFinite(metresPerSample)||metresPerSample<=0)throw Error('Invalid physical tile');
       if(Math.max(width,height)>this.device.limits.maxTextureDimension2D)throw Error('Tile exceeds GPU limits');
@@ -197,9 +268,9 @@
       const climateTexture=this.device.createTexture({size:[climateWidth,climateHeight,5],format:'r32float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
       const climateValues=climate||new Float32Array(climateWidth*climateHeight*5);
       this.device.queue.writeTexture({texture:climateTexture},climateValues,{bytesPerRow:climateWidth*4,rowsPerImage:climateHeight},[climateWidth,climateHeight,5]);
-      const params=this.device.createBuffer({size:32,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+      const params=this.device.createBuffer({size:64,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
       const modeNumber=climate?({relief:0,biomes:1,temperature:2,precipitation:3}[mode]??0):0;
-      this.device.queue.writeBuffer(params,0,new Float32Array([metresPerSample,halo,innerWidth,innerHeight,modeNumber,0,0,0]));
+      this.device.queue.writeBuffer(params,0,new Float32Array([metresPerSample,halo,innerWidth,innerHeight,modeNumber,0,0,0,...(window.TerrainLighting?.vectors(lod)||[1,.35,1,1,-.5,-.5,.70710678,0])]));
       this.device.queue.writeTexture({texture:elevation},heights,{bytesPerRow:width*4,rowsPerImage:height},[width,height]);
       const horizontalGroup=this.device.createBindGroup({layout:this.blurLayout,entries:[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchA.createView()}]});
       const shadeGroup=this.device.createBindGroup({layout:this.shadeLayout,entries:[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchB.createView()},{binding:2,resource:color.createView()},{binding:3,resource:{buffer:params}},{binding:4,resource:climateTexture.createView({dimension:'2d-array'})}]});
@@ -214,10 +285,29 @@
       window.TerrainTiming.queue(this.device.queue,'render.shade');
       this.evict();return this.hasTile(key);
     }
+    uploadCoarse(key, roots, {width=160,height=160,halo=16,metresPerSample=7680,climate,climateWidth=41,climateHeight=41,mode='relief',interpolation='monotone'}={}) {
+      if(!this.available)return false;
+      if(!(roots instanceof Float32Array)||roots.length!==width*height||width%8||height%8||halo<8||!(climate instanceof Float32Array)||climate.length!==5*climateWidth*climateHeight)throw Error('Invalid native coarse block');
+      this.deleteTile(key);
+      const elevation=this.device.createTexture({size:[width,height],format:'r32float',mipLevelCount:4,usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.STORAGE_BINDING});
+      const climateTexture=this.device.createTexture({size:[climateWidth,climateHeight,5],format:'r32float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
+      this.device.queue.writeTexture({texture:elevation},roots,{bytesPerRow:width*4,rowsPerImage:height},[width,height]);
+      this.device.queue.writeTexture({texture:climateTexture},climate,{bytesPerRow:climateWidth*4,rowsPerImage:climateHeight},[climateWidth,climateHeight,5]);
+      const encoder=this.device.createCommandEncoder({label:'native coarse physical mips'});
+      let bytes=climate.byteLength;
+      for(let level=0;level<4;level++){
+        const w=width>>level,h=height>>level;bytes+=w*h*4;if(!level)continue;
+        const group=this.device.createBindGroup({layout:this.coarseMipPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:elevation.createView({baseMipLevel:level-1,mipLevelCount:1})},{binding:1,resource:elevation.createView({baseMipLevel:level,mipLevelCount:1})}]});
+        const pass=encoder.beginComputePass();pass.setPipeline(this.coarseMipPipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(w/8),Math.ceil(h/8));pass.end();
+      }
+      this.device.queue.submit([encoder.finish()]);
+      this.tiles.set(key,{native:true,elevation,climate:climateTexture,bytes,lastUsed:++this.serial,params:[width,height,{relief:0,biomes:1,temperature:2,precipitation:3}[mode]??0,interpolation==='monotone'?1:0],halo,resolution:metresPerSample});
+      this.bytes+=bytes;this.uploads++;this.evict();return this.hasTile(key);
+    }
     hasTile(key) { return this.available&&this.tiles.has(key); }
     deleteTile(key) {
       const tile=this.tiles.get(key); if(!tile)return;
-      tile.elevation.destroy();tile.color.destroy();tile.climate.destroy();this.bytes-=tile.bytes;this.tiles.delete(key);
+      tile.elevation.destroy();tile.color?.destroy();tile.climate.destroy();this.bytes-=tile.bytes;this.tiles.delete(key);
     }
     evict() {
       const overhead=(this.scratchWidth||0)*(this.scratchHeight||0)*16+this.capacity*this.device.limits.minUniformBufferOffsetAlignment;
@@ -228,6 +318,7 @@
     }
     clear() { for(const key of this.tiles.keys())this.deleteTile(key); }
     draw(rects, {width,height,dpr=window.devicePixelRatio||1}) {
+      this.lastDrawnRects=[];
       if(!this.available)return false;
       const started=timingEnabled?performance.now():0;
       if(!Number.isFinite(width)||!Number.isFinite(height)||width<=0||height<=0)return false;
@@ -244,16 +335,17 @@
         for(const tile of this.tiles.values())tile.group=null;
         this.evict();visible=visible.filter(r=>this.tiles.has(r.key));
       }
-      visible.forEach((r,i)=>this.uniformData.set([r.x,r.y,r.width,r.height,width,height,0,0,...(r.uv||[0,0,1,1])],i*stride/4));
+      visible.forEach((r,i)=>{const tile=this.tiles.get(r.key);this.uniformData.set([r.x,r.y,r.width,r.height,width,height,tile.halo||0,tile.resolution||0,...(r.uv||[0,0,1,1]),...(tile.params||[0,0,0,0]),...(window.TerrainLighting?.vectors(r.lod)||[1,.35,1,1,-.5,-.5,.70710678,0])],i*stride/4)});
       if(visible.length)this.device.queue.writeBuffer(this.uniform,0,this.uniformData,0,visible.length*stride/4);
       const encoder=this.device.createCommandEncoder();const pass=encoder.beginRenderPass({colorAttachments:[{view:this.context.getCurrentTexture().createView(),clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}]});
       pass.setPipeline(this.pipeline);
       visible.forEach((r,i)=>{
         const tile=this.tiles.get(r.key);tile.lastUsed=++this.serial;
-        tile.group??=this.device.createBindGroup({layout:this.renderLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:48}},{binding:1,resource:tile.color.createView()},{binding:2,resource:this.sampler}]});
+        pass.setPipeline(tile.native?this.coarsePipeline:this.pipeline);
+        tile.group??=this.device.createBindGroup(tile.native?{layout:this.coarseLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:96}},{binding:1,resource:tile.elevation.createView()},{binding:2,resource:tile.climate.createView({dimension:'2d-array'})}]}:{layout:this.renderLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:48}},{binding:1,resource:tile.color.createView()},{binding:2,resource:this.sampler}]});
         pass.setBindGroup(0,tile.group,[i*stride]);pass.draw(6);
       });
-      pass.end();this.device.queue.submit([encoder.finish()]);this.frames++;this.canvas.style.visibility='visible';
+      pass.end();this.device.queue.submit([encoder.finish()]);this.lastDrawnRects=visible;this.frames++;this.canvas.style.visibility='visible';
       window.TerrainTiming.record('render.draw_submit',started,{quads:visible.length});
       window.TerrainTiming.queue(this.device.queue,'render.draw');return true;
     }

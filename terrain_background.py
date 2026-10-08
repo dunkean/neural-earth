@@ -1,6 +1,7 @@
 """One-window background quanta through the shared, priority-aware compute lane."""
 import threading
 import time
+from collections import OrderedDict
 
 
 class CoarseBackground:
@@ -10,11 +11,16 @@ class CoarseBackground:
         self.generation = 0
         self.task = None
         self.closed = False
+        self.focuses = OrderedDict()
 
-    def start(self, seed, profile, max_windows=64):
-        if not 1 <= max_windows <= 8192:
+    def start(self, seed, profile, max_windows=None):
+        if max_windows is not None and not 1 <= max_windows <= 8192:
             raise ValueError('Budget coarse must be between 1 and 8192 windows')
         with self.lock:
+            if (self.task and self.task['state'] == 'running' and
+                    self.task['seed'] == str(seed) and self.task['world_profile'] == profile and
+                    self.task['budget'] == max_windows):
+                return dict(self.task)
             self.generation += 1
             token = self.generation
             self.task = dict(seed=str(seed), world_profile=profile, budget=max_windows,
@@ -23,6 +29,18 @@ class CoarseBackground:
         threading.Thread(target=self._run, args=(token,task),
                          name='coarse-background', daemon=True).start()
         return self.status()
+
+    def set_focus(self, seed, profile, bounds):
+        with self.lock:
+            key = (int(seed), profile)
+            self.focuses[key] = tuple(bounds)
+            self.focuses.move_to_end(key)
+            while len(self.focuses) > 32:
+                self.focuses.popitem(last=False)
+
+    def focus(self, seed, profile):
+        with self.lock:
+            return self.focuses.get((int(seed), profile))
 
     def stop(self):
         with self.lock:
@@ -37,7 +55,8 @@ class CoarseBackground:
 
     def _run(self, token, task):
         try:
-            for quantum in range(task['budget']):
+            quantum = 0
+            while task['budget'] is None or quantum < task['budget']:
                 if not self._active(token):
                     return
                 # Stopping a task cancels the next safe quantum. The currently
@@ -47,12 +66,15 @@ class CoarseBackground:
                         return None
                     return self.compute(int(task['seed']),task['world_profile'])
                 key=f"coarse-preparation/{token}/{quantum}"
-                result=self.jobs.submit(key,compute,priority=4000).wait()
+                # Every visible priority is <5000, including explicitly
+                # requested sea. Background only consumes the idle GPU lane.
+                result=self.jobs.submit(key,compute,priority=5000).wait()
                 if not self._active(token):
                     return
                 with self.lock:
                     task['quanta']+=1
                     task['progress']=result
+                quantum += 1
                 if result and result.get('disk_budget_exhausted'):
                     with self.lock:
                         if self.generation==token:
@@ -62,7 +84,7 @@ class CoarseBackground:
                     break
             with self.lock:
                 if self.generation==token:
-                    task['state']='budget-complete'
+                    task['state']='complete' if task['budget'] is None else 'budget-complete'
         except Exception as exc:
             with self.lock:
                 if self.generation==token:
@@ -70,7 +92,10 @@ class CoarseBackground:
 
     def status(self):
         with self.lock:
-            return dict(self.task) if self.task else {'state':'idle'}
+            if not self.task:
+                return {'state':'idle'}
+            return dict(self.task, focus_bounds=self.focuses.get(
+                (int(self.task['seed']),self.task['world_profile'])))
 
     def close(self):
         self.stop()

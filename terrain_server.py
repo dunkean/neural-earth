@@ -26,16 +26,22 @@ from terrain_diffusion.inference.relief_map import get_relief_map
 from terrain_diffusion.inference.world_pipeline import WorldPipeline
 from terrain_jobs import TerrainJobs, JobCancelled, QueueFull
 from terrain_delivery import PhysicalDelivery
+from terrain_priority import land_mask, tile_relief_stats
 from terrain_disk_cache import TerrainDiskCache
 from terrain_climate import CLIMATE_SIZE, MODES, sample_coarse_climate, colorize
+from terrain_orogen_layers import MODES as OROGEN_MODES, LEGENDS as OROGEN_LEGENDS, render as render_orogen_layer
+from terrain_snr_layer import MODES as SNR_MODES, render as render_snr_layer
+MODES = MODES + OROGEN_MODES + SNR_MODES
 from terrain_conditioning import sample_conditioning_preview, WORLD_PROFILES
 from terrain_generation import resolve_generation, register_generation, generator_schema
 from terrain_bootstrap import RASTER_WIDTH, RASTER_HEIGHT
 from terrain_manifest import build_manifest, world_identity, _digest
 from terrain_coarse import CoarsePreparation
 from terrain_background import CoarseBackground
+from terrain_generation_session import GenerationCoordinator, GenerationCancelled, generation_scope, check_generation
 from terrain_final_mips import plan_mip, read_mip
 from terrain_refinement import MIN_LOD, VERSION as REFINEMENT_VERSION, sample_refined
+import terrain_native_coarse as native_coarse
 from terrain_profiling import span, trace, measured_lock, snapshot as profiling_snapshot
 from functools import lru_cache
 
@@ -69,7 +75,9 @@ if GPU_SELECTION:
     profile_data.update(gpu_name=GPU_SELECTION['selected']['name'],gpu_uuid=GPU_SELECTION['selected']['uuid'])
 profile_data.update(physical_lod_version='bandlimit-climate-v3')
 profile_data.update(refinement_version=REFINEMENT_VERSION, refinement_min_lod=MIN_LOD)
-from terrain_world import WORLD_VERSION, WORLD_BOUNDS, profile_metadata
+from terrain_world import WORLD_VERSION, profile_metadata
+from terrain_geometry import profile_bounds, geometry_heightmap
+from terrain_lighting import parse_lighting, lighting_suffix, render_relief
 profile_data.update(world_version=WORLD_VERSION, world_sources=profile_metadata()['source_digest'])
 PROFILE = hashlib.sha256(json.dumps(profile_data, sort_keys=True).encode()).hexdigest()[:16]
 # The persistent namespace includes the actual generator and source contents,
@@ -94,6 +102,8 @@ disk_cache = TerrainDiskCache(CACHE, VERSION,
     budget_bytes=int(float(os.environ.get('TERRAIN_DISK_CACHE_GIB', '16'))*1024**3),
     protected_keys=jobs.protected_keys)
 metrics = {'generated_tiles': 0, 'cache_hits': 0, 'stage': 'Ready', 'last_seconds': 0}
+native_coarse_cache = OrderedDict()
+native_coarse_cache_lock = threading.Lock()
 
 
 @app.errorhandler(RuntimeError)
@@ -135,6 +145,8 @@ def display_mode():
     mode=request.args.get('mode','biomes')
     if mode not in MODES:
         raise ValueError('Invalid map mode')
+    if mode in OROGEN_MODES and resolve_generation(generation_profile()).bootstrap_generator != 'orogen':
+        raise ValueError('Orogen diagnostic layers require an Orogen pipeline')
     return mode
 
 
@@ -149,7 +161,10 @@ def world_manifest(seed, world_profile='natural'):
     manifest=build_manifest(seed, ablation, numerical_profile=profile_data['version'],
                             inference_profile=runtime,file_hashes=False)
     manifest['files']=deepcopy(_reference_manifest['files'] if not descriptor.needs_bootstrap else
-                               terrestrial_file_snapshot())
+                               terrestrial_file_snapshot(descriptor.bootstrap_generator))
+    if descriptor.bootstrap_generator=='orogen' and descriptor.settings['height_source'] in ('native','natural-continental'):
+        from terrain_bootstrap import implementation_identity as native_identity
+        manifest['files']['bootstrap_native']=deepcopy(native_identity())
     manifest['checkpoint']['config']=deepcopy(_reference_manifest['checkpoint']['config'])
     manifest['generation']['runtime_versions']=deepcopy(
         _reference_manifest['generation']['runtime_versions'])
@@ -159,11 +174,16 @@ def world_manifest(seed, world_profile='natural'):
     return manifest
 
 
-@lru_cache(maxsize=1)
-def terrestrial_file_snapshot():
+@lru_cache(maxsize=2)
+def terrestrial_file_snapshot(generator='native'):
     """Load native prerequisites only when a terrestrial profile is requested."""
     from terrain_bootstrap import implementation_identity
     files = deepcopy(_reference_manifest['files'])
+    if generator == 'orogen':
+        from terrain_orogen import implementation_identity as orogen_identity
+        files['implementation']['terrain_bootstrap.py'] = _digest(ROOT/'terrain_bootstrap.py')
+        files['bootstrap_orogen'] = deepcopy(orogen_identity())
+        return files
     native_identity=deepcopy(implementation_identity())
     source_digest=_digest(ROOT/'terrain_bootstrap.py')
     if source_digest['sha256'] != native_identity['python_source_sha256']:
@@ -173,8 +193,14 @@ def terrestrial_file_snapshot():
     return files
 
 
-def conditioning_preview(seed, world_profile, xs_metres, ys_metres):
-    data = sample_conditioning_preview(seed, world_profile, xs_metres, ys_metres)
+def conditioning_preview(seed, world_profile, xs_metres, ys_metres, *, polar=False):
+    if polar:
+        from terrain_polar import conditioning
+        from terrain_world import lapse_rate
+        fields=conditioning(seed,world_profile).sample(xs_metres,ys_metres)
+        data=dict(elev=fields[0],climate=np.concatenate((fields[1:],lapse_rate(fields[3])[None]),axis=0))
+    else:
+        data = sample_conditioning_preview(seed, world_profile, xs_metres, ys_metres)
     # The transport/shader stores sea-level BIO1, not temperature at terrain
     # height. The factory returns physical BIO1, so undo its lapse exactly once.
     data = dict(data, climate=np.asarray(data['climate'],np.float32).copy())
@@ -182,7 +208,12 @@ def conditioning_preview(seed, world_profile, xs_metres, ys_metres):
     return data
 
 
-def _create_world(seed, world_profile, cache_limit):
+def clip_world_axes(xs, ys, profile):
+    x0, y0, x1, y1 = profile_bounds(profile)
+    return np.clip(xs, x0/NATIVE, x1/NATIVE), np.clip(ys, y0/NATIVE, y1/NATIVE)
+
+
+def _create_world(seed, world_profile, cache_limit, *, polar=False):
     global shared_pipeline
     if shared_pipeline is None:
         shared_pipeline = load_pipeline(seed)
@@ -196,10 +227,16 @@ def _create_world(seed, world_profile, cache_limit):
     world.decoder_model = shared_pipeline.decoder_model
     try:
         from terrain_inference import configure_world
+        if polar:
+            from terrain_polar import conditioning
+            world._terrain_polar_conditioning = conditioning(seed,world_profile)
         configure_world(world, runtime_profile, world_profile=world_profile)
         world.bind()
         world._terrain_manifest = world_manifest(seed,world_profile)
-        CoarsePreparation(OUTPUT/'coarse-worlds',world._terrain_manifest,bounds=WORLD_BOUNDS).install(world)
+        if polar:
+            from terrain_polar import chart_manifest
+            world._terrain_manifest = chart_manifest(world._terrain_manifest)
+        CoarsePreparation(OUTPUT/'coarse-worlds',world._terrain_manifest,bounds=profile_bounds(world_profile)).install(world)
     except ValueError as exc:
         world.close()
         raise RuntimeError(f'Coarse world admission failed: {exc}') from exc
@@ -207,6 +244,7 @@ def _create_world(seed, world_profile, cache_limit):
 
 
 preview_worlds=OrderedDict()
+polar_worlds=OrderedDict()
 
 
 def close_world(world):
@@ -227,6 +265,18 @@ def get_preview_world(seed,profile):
             close_world(expired)
     preview_worlds.move_to_end(key)
     return preview_worlds[key]
+
+
+def get_polar_world(seed,profile,*,preview=False):
+    # Approximate latent batching remains isolated from the final chart store.
+    key=(profile,seed,preview)
+    if key not in polar_worlds:
+        polar_worlds[key]=_create_world(seed,profile,128*1024*1024,polar=True)
+        while len(polar_worlds)>2:
+            _,expired=polar_worlds.popitem(last=False)
+            close_world(expired)
+    polar_worlds.move_to_end(key)
+    return polar_worlds[key]
 
 
 def warm_base_forms(world):
@@ -259,9 +309,10 @@ def get_world(seed, world_profile='natural'):
 
 def prepare_coarse_quantum(seed, profile):
     global background_world, background_world_key
-    # Native CPU initialization happens before the GPU critical section.
-    world_manifest(seed, profile)
     with gpu_lock, torch.inference_mode():
+        jobs.check_current_interest()
+        world_manifest(seed, profile)
+        mask = scheduling_land_mask(seed, profile)
         key=(profile,seed)
         if background_world_key != key:
             if background_world is not None:
@@ -273,6 +324,7 @@ def prepare_coarse_quantum(seed, profile):
             background_world = _create_world(seed,profile,64*1024*1024)
             background_world_key = key
         world=background_world
+        world._terrain_coarse_preparation.prioritize(mask, coarse_background.focus(seed, profile))
         return world._terrain_coarse_preparation.step(world,budget_windows=1)
 
 
@@ -286,13 +338,43 @@ def _available_world(seed, profile):
     # After a background world is replaced or a server restart, persisted
     # windows must still be discoverable by a foreground high-LOD request.
     probe=CoarsePreparation(OUTPUT/'coarse-worlds',world_manifest(seed,profile),
-                            bounds=WORLD_BOUNDS)
+                            bounds=profile_bounds(profile))
     if any(probe.windows_dir.glob('*.npy')):
         return get_world(seed,profile)
     return None
 
 
 coarse_background=CoarseBackground(jobs,prepare_coarse_quantum,None)
+generation_coordinator=GenerationCoordinator(jobs,coarse_background)
+
+
+@app.before_request
+def suspend_terrain_admission():
+    if jobs.paused and (request.path.startswith(('/height/','/tiles/','/coarse/','/api/overview/')) or request.path=='/api/view'):
+        return jsonify(error='Une carte est en génération',cancelled=True),409
+
+
+def finish_generation(token):
+    with generation_coordinator.lock:
+        if generation_coordinator.current is token:
+            worker=app.extensions.get('terrain_reference_worker')
+            try:
+                if worker is not None:
+                    worker.suspend(False)
+            finally:
+                generation_coordinator.finish(token)
+
+
+@app.post('/api/terrain/suspend')
+def terrain_suspend():
+    """Drain a reference worker before the parent uses the shared GPU."""
+    if (request.get_json() or {}).get('paused',True):
+        generation_coordinator.suspend(True)
+        with gpu_lock:
+            torch.cuda.synchronize(SELECTED_DEVICE)
+    else:
+        generation_coordinator.suspend(False)
+    return jsonify(paused=jobs.paused)
 
 
 @app.post('/api/coarse/prepare')
@@ -307,8 +389,18 @@ def coarse_prepare():
         if not 0<=seed<2**64:
             raise ValueError('Invalid seed')
         profile=generation_profile(data.get('world_profile','natural'))
-        world_manifest(seed, profile)
-        return jsonify(coarse_background.start(seed,profile,int(data.get('max_windows',8192)))),202
+        budget = None if data.get('full_world') or 'max_windows' not in data else int(data['max_windows'])
+        with generation_coordinator.lock:
+            if generation_coordinator.current is not None or jobs.paused:
+                return jsonify(error='Une carte est en génération',state='paused'),409
+        with gpu_lock:
+            if jobs.paused:
+                return jsonify(error='Une carte est en génération',state='paused'),409
+            world_manifest(seed, profile)
+        with generation_coordinator.lock:
+            if generation_coordinator.current is not None or jobs.paused:
+                return jsonify(error='Une carte est en génération',state='paused'),409
+            return jsonify(coarse_background.start(seed,profile,budget)),202
     except (ValueError,TypeError) as exc:
         return jsonify(error=str(exc)),400
 
@@ -440,8 +532,7 @@ def sample_elevation(world, lod, tx, ty, halo=HALO, *, xs=None, ys=None,
     if ys is None:
         ys = y0 + (np.arange(-halo, TILE+halo)+.5)*step
     if lod>=7:
-        xs=np.clip(xs,WORLD_BOUNDS[0]/NATIVE,WORLD_BOUNDS[2]/NATIVE)
-        ys=np.clip(ys,WORLD_BOUNDS[1]/NATIVE,WORLD_BOUNDS[3]/NATIVE)
+        xs, ys = clip_world_axes(xs, ys, world._terrain_world_profile)
     if lod >= 9:
         elevation,stage=sample_coarse_area(world,lod,tx,ty,halo),'coarse-area-mean'
     elif lod >= 4:
@@ -518,6 +609,8 @@ def sample_latent_preview(world,lod,tx,ty):
     xs=tx*TILE*2**lod+(np.arange(-HALO,inner+HALO)+.5)*8
     ys=ty*TILE*2**lod+(np.arange(-HALO,inner+HALO)+.5)*8
     elevation=gaussian_filter(sample_field(world,xs,ys,'latent'),sigma=.65,mode='reflect').astype(np.float32)
+    from terrain_snr import lod_relief
+    elevation=lod_relief(world._terrain_generation_settings,elevation,lod)
     cx=np.linspace(xs[0],xs[-1],CLIMATE_SIZE);cy=np.linspace(ys[0],ys[-1],CLIMATE_SIZE)
     climate=sample_coarse_climate(world,cx,cy,check=jobs.check_current_interest)
     if not np.isfinite(elevation).all() or not np.isfinite(climate).all():
@@ -526,24 +619,23 @@ def sample_latent_preview(world,lod,tx,ty):
 
 
 def sample_physical(world, seed, world_profile, lod, tx, ty, *, preview_only=False,
-                    coarse_interpolation='monotone'):
+                    coarse_interpolation='monotone', polar=False):
     step=2**lod
     xs=(tx*TILE*step+(np.arange(-HALO,TILE+HALO)+.5)*step)
     ys=(ty*TILE*step+(np.arange(-HALO,TILE+HALO)+.5)*step)
     if lod>=7:
         # Only the finite rectangle is displayed. Extend its edge constantly
         # for shading halo samples instead of requiring a planet beyond it.
-        xs=np.clip(xs,WORLD_BOUNDS[0]/NATIVE,WORLD_BOUNDS[2]/NATIVE)
-        ys=np.clip(ys,WORLD_BOUNDS[1]/NATIVE,WORLD_BOUNDS[3]/NATIVE)
-    if world is None and not preview_only:
+        xs, ys = clip_world_axes(xs, ys, world_profile)
+    if world is None and not preview_only and not polar:
         world=_available_world(seed,world_profile)
     preparation=getattr(world,'_terrain_coarse_preparation',None)
     learned_ready=not preview_only and lod>=7 and _learned_ready(preparation,xs,ys,lod,tx,ty)
-    final_mip=existing_final_mip(seed,world_profile,lod,tx,ty)
+    final_mip=None if polar else existing_final_mip(seed,world_profile,lod,tx,ty)
     if final_mip is not None:
         elevation,stage=final_mip,'final-dem-mip'
     elif lod>=7 and not learned_ready:
-        macro=conditioning_preview(seed,world_profile,xs*NATIVE,ys*NATIVE)
+        macro=conditioning_preview(seed,world_profile,xs*NATIVE,ys*NATIVE,**({'polar':True} if polar else {}))
         elevation=np.asarray(macro['elev'],dtype=np.float32)
         stage='conditioning-preview'
     else:
@@ -556,10 +648,12 @@ def sample_physical(world, seed, world_profile, lod, tx, ty, *, preview_only=Fal
     # halo and globally aligned sample centres prevent tile-edge discontinuity.
     if lod>=3:
         elevation=gaussian_filter(elevation,sigma=.65,mode='reflect').astype(np.float32)
+    from terrain_snr import lod_relief
+    elevation=lod_relief(resolve_generation(world_profile).settings,elevation,lod)
     cx=np.linspace(xs[0],xs[-1],CLIMATE_SIZE)
     cy=np.linspace(ys[0],ys[-1],CLIMATE_SIZE)
     if stage=='conditioning-preview':
-        macro=conditioning_preview(seed,world_profile,cx*NATIVE,cy*NATIVE)
+        macro=conditioning_preview(seed,world_profile,cx*NATIVE,cy*NATIVE,**({'polar':True} if polar else {}))
         climate=np.asarray(macro['climate'],dtype=np.float32).copy()
     else:
         climate=sample_coarse_climate(world,cx,cy,check=jobs.check_current_interest)
@@ -617,8 +711,7 @@ def learned_tile_state(seed, profile, lod, tx, ty):
         step=2**lod
         xs=tx*TILE*step+(np.arange(-HALO,TILE+HALO)+.5)*step
         ys=ty*TILE*step+(np.arange(-HALO,TILE+HALO)+.5)*step
-        xs=np.clip(xs,WORLD_BOUNDS[0]/NATIVE,WORLD_BOUNDS[2]/NATIVE)
-        ys=np.clip(ys,WORLD_BOUNDS[1]/NATIVE,WORLD_BOUNDS[3]/NATIVE)
+        xs, ys = clip_world_axes(xs, ys, profile)
         return _learned_ready(preparation,xs,ys,lod,tx,ty)
     finally:
         gpu_lock.release()
@@ -635,10 +728,10 @@ def valid_physical_report(report,seed,profile,lod,tx,ty,source_lod=None,coarse_i
         return False
     if report.get('source_lod') != (source_lod if source_lod is not None else latent_preview_source(lod)):
         return False
-    if (report.get('source_lod') is None and 1<=lod<=2 and report.get('stage')!='final-dem-mip' and
+    if (not report.get('neural_chart') and report.get('source_lod') is None and 1<=lod<=2 and report.get('stage')!='final-dem-mip' and
             existing_final_mip(seed,profile,lod,tx,ty) is not None):
         return False
-    return report.get('stage')!='conditioning-preview' or not learned_tile_ready(seed,profile,lod,tx,ty)
+    return report.get('stage')!='conditioning-preview' or bool(report.get('neural_chart')) or not learned_tile_ready(seed,profile,lod,tx,ty)
 
 
 def response_report(report,seed,profile,lod,tx,ty,source):
@@ -649,13 +742,15 @@ def response_report(report,seed,profile,lod,tx,ty,source):
     return dict(report,cache_source=source,provisional=provisional)
 
 
-def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief'):
-    rgb = get_relief_map(elevation, None, None, None, resolution=NATIVE*2**lod, vmin=0, vmax=4500)
+def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief', lighting=None):
+    rgb = (get_relief_map(elevation, None, None, None, resolution=NATIVE*2**lod, vmin=0, vmax=4500)
+           if lighting is None else render_relief(elevation, NATIVE*2**lod, lighting))
     if mode!='relief' and climate is not None:
         palette=colorize(elevation,climate,mode)
         if mode=='biomes':
             # Preserve relief shading, using luminance rather than its height palette.
             light=np.clip(np.mean(rgb,axis=-1)*1.8,.55,1.)
+            if lighting is not None:light=1-lighting['strength']+lighting['strength']*light
             palette*=np.where(elevation<0,1,light)[...,None]
         rgb=palette
     return (np.clip(rgb[halo:-halo, halo:-halo], 0, 1)*255).astype(np.uint8)
@@ -667,9 +762,19 @@ def sample_tile(world, seed, lod, tx, ty, halo=HALO):
     return render_elevation(elevation, lod, halo), stage
 
 
+@lru_cache(maxsize=8)
+def scheduling_land_mask(seed, world_profile):
+    x0,y0,x1,y1=profile_bounds(world_profile)
+    xs=x0+(np.arange(512)+.5)*(x1-x0)/512
+    ys=y0+(np.arange(256)+.5)*(y1-y0)/256
+    elevation=sample_conditioning_preview(seed,world_profile,xs,ys)['elev']
+    return land_mask(elevation,profile_bounds(world_profile))
+
+
 def metadata(seed, world_profile=None):
     world_profile=generation_profile(world_profile)
     descriptor=resolve_generation(world_profile)
+    extent=profile_bounds(world_profile)
     bounds = [-107520, 76800, 15360, 138240]
     initial_image = None
     # A saved export belongs to its actual seed, never blindly to seed 42.
@@ -684,14 +789,19 @@ def metadata(seed, world_profile=None):
     except (OSError, ValueError, KeyError, TypeError):
         pass
     if world_profile!='natural':
-        bounds=list(WORLD_BOUNDS)
+        bounds=list(extent)
         initial_image=None
-    overview_bounds=list(WORLD_BOUNDS)
+    overview_bounds=list(extent)
     manifest=world_manifest(seed,world_profile)
     return {'version':VERSION, 'cache_profile':PROFILE, 'generation_profile':world_profile,
             'world_profile':descriptor.base_profile,'generation_settings':descriptor.settings,
             'generation_schema':generator_schema(),
+            'conditioning_noise':manifest['conditioning']['cond_snr'],
+            'orogen_layers': dict(OROGEN_LEGENDS) if descriptor.bootstrap_generator == 'orogen' else {},
             'world_identity':world_identity(manifest),'world_manifest':manifest,
+            'generation_stages':manifest.get('bootstrap',{}).get('stage_state',{}) if manifest.get('bootstrap') else {},
+            'scheduling_land_mask':scheduling_land_mask(seed,world_profile),
+            'world_topology':descriptor.settings['world_topology'], 'world_diameter_km':descriptor.settings['world_diameter_km'],
             'world_version':manifest['world_profile'], 'world_bounds':overview_bounds,'seed':str(seed), 'model':MODEL, 'tile_size':TILE,
             'native_resolution':NATIVE, 'halo':HALO,
             'min_lod':MIN_LOD, 'refinement_resolutions':[NATIVE*2**(-level) for level in range(1,-MIN_LOD+1)],
@@ -702,8 +812,8 @@ def metadata(seed, world_profile=None):
             'climate_format':'baseline-BIO4-BIO12-BIO15-beta-f32','climate_width':CLIMATE_SIZE,
             'preview_min_lod':7,'preview_label':'Preview of the five network inputs (without NN)',
             'bootstrap_raster_spacing_m': None if not descriptor.needs_bootstrap else
-                [(WORLD_BOUNDS[2]-WORLD_BOUNDS[0])/RASTER_WIDTH,
-                 (WORLD_BOUNDS[3]-WORLD_BOUNDS[1])/RASTER_HEIGHT],
+                [(extent[2]-extent[0])/manifest['bootstrap']['raster']['width'],
+                 (extent[3]-extent[1])/manifest['bootstrap']['raster']['height']],
              'conditioning_sample_spacing_m':7680,
              'coarse_interpolation_default':'monotone',
              'coarse_interpolation_options':list(COARSE_INTERPOLATIONS),
@@ -714,6 +824,16 @@ def metadata(seed, world_profile=None):
 @app.get('/')
 def index():
     return send_from_directory(ROOT, 'index.html')
+
+
+@app.get('/terrain_globe.js')
+def globe_script():
+    return send_from_directory(ROOT, 'terrain_globe.js')
+
+
+@app.get('/terrain_lighting.js')
+def lighting_script():
+    return send_from_directory(ROOT, 'terrain_lighting.js')
 
 
 @app.get('/terrain_renderer.js')
@@ -729,6 +849,11 @@ def lod_script():
 @app.get('/terrain_generation_controls.js')
 def generation_controls_script():
     return send_from_directory(ROOT,'terrain_generation_controls.js')
+
+
+@app.get('/terrain_toolbar.js')
+def toolbar_script():
+    return send_from_directory(ROOT,'terrain_toolbar.js')
 
 
 @app.get('/terrain_map_tools.js')
@@ -789,6 +914,7 @@ def saved_generation(name):
 
 @app.get('/api/world')
 def world_info():
+    token=None
     try:
         seed = int(request.args.get('seed', 42))
         if not 0 <= seed < 2**64:
@@ -796,7 +922,7 @@ def world_info():
         profile=generation_profile()
         encoded=request.args.get('generation')
         if encoded is not None:
-            if len(encoded)>8192:
+            if len(encoded)>65536:
                 raise ValueError('Generation settings are too large')
             try:
                 settings=json.loads(encoded)
@@ -805,11 +931,78 @@ def world_info():
             if not isinstance(settings,dict):
                 raise ValueError('Generation settings must be a JSON object')
             profile=register_generation(resolve_generation(profile).base_profile,settings)
+        if request.args.get('session') and request.args.get('generation_epoch'):
+            token=generation_coordinator.begin(request.args['session'],int(request.args['generation_epoch']))
+            with generation_scope(token):
+                with generation_coordinator.lock:
+                    token.check()
+                    worker=app.extensions.get('terrain_reference_worker')
+                    if worker is not None:
+                        worker.suspend(True)
+                with gpu_lock:
+                    token.check()
+                    torch.cuda.synchronize(SELECTED_DEVICE)
+                    result=metadata(seed,profile)
+            return jsonify(result)
+        if jobs.paused:
+            return jsonify(error='Une carte est en génération',cancelled=True),409
         return jsonify(metadata(seed,profile))
+    except GenerationCancelled as exc:
+        return jsonify(error=str(exc),cancelled=True),409
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
     except (RuntimeError, OSError, subprocess.SubprocessError) as exc:
         return jsonify(error=str(exc), stage='bootstrap-initialization'), 503
+    finally:
+        if token is not None:
+            finish_generation(token)
+
+
+@app.post('/api/generation/run')
+def generation_run():
+    token=None
+    try:
+        data=request.get_json()
+        if not isinstance(data,dict):raise ValueError('Generation request must be an object')
+        seed=int(data.get('seed',42))
+        if not 0<=seed<2**64:raise ValueError('Invalid seed')
+        stage=data.get('stage','all')
+        if stage not in ('all','relief','erosion','climate','settings','restore'):
+            raise ValueError('Unknown generation stage')
+        base=resolve_generation(data.get('profile','orogen')).base_profile
+        source=data.get('source_profile')
+        if stage not in ('all','relief','restore') and source:base=resolve_generation(source).base_profile
+        from terrain_orogen_stages import run_generation
+        token=generation_coordinator.begin(data.get('session'),int(data.get('generation_epoch',0)))
+        with generation_scope(token):
+            with generation_coordinator.lock:
+                token.check()
+                worker=app.extensions.get('terrain_reference_worker')
+                if worker is not None:
+                    worker.suspend(True)
+            with gpu_lock:
+                token.check()
+                # Drain the NN's asynchronous transfers/streams before Orogen.
+                torch.cuda.synchronize(SELECTED_DEVICE)
+                if stage=='restore':
+                    settings,execution=data.get('settings'),{}
+                else:
+                    settings,execution=run_generation(seed,base,data.get('settings'),stage,source)
+                token.check()
+                profile=register_generation(base,settings)
+                result=metadata(seed,profile)
+                result['generation_execution']=execution
+                token.check()
+        return jsonify(result)
+    except GenerationCancelled as exc:
+        return jsonify(error=str(exc),cancelled=True),409
+    except (ValueError,TypeError) as exc:
+        return jsonify(error=str(exc)),400
+    except (RuntimeError,OSError,subprocess.SubprocessError) as exc:
+        return jsonify(error=str(exc),stage='generation-stage'),503
+    finally:
+        if token is not None:
+            finish_generation(token)
 
 
 def _session(value):
@@ -818,7 +1011,7 @@ def _session(value):
     return value
 
 
-def _tile_coordinates(seed, lod, tx, ty):
+def _tile_coordinates(seed, lod, tx, ty, profile=None):
     seed, lod, tx, ty = int(seed), int(lod), int(tx), int(ty)
     if not 0 <= seed < 2**64 or not MIN_LOD <= lod <= 11 or abs(tx) > 10**7 or abs(ty) > 10**7:
         raise ValueError('Invalid coordinates')
@@ -827,8 +1020,8 @@ def _tile_coordinates(seed, lod, tx, ty):
         if request.args['world_identity'] != expected:
             raise ValueError('Outdated world identity: reload the page')
     span=TILE*NATIVE*2**lod
-    if (tx*span>=WORLD_BOUNDS[2] or (tx+1)*span<=WORLD_BOUNDS[0] or
-            ty*span>=WORLD_BOUNDS[3] or (ty+1)*span<=WORLD_BOUNDS[1]):
+    x0,y0,x1,y1=profile_bounds(profile or generation_profile())
+    if (tx*span>=x1 or (tx+1)*span<=x0 or ty*span>=y1 or (ty+1)*span<=y0):
         raise ValueError('Tile outside the world')
     return seed, lod, tx, ty
 
@@ -858,7 +1051,19 @@ def selected_coarse_interpolation(lod, value=None):
 
 def _coarse_cache_level(lod, coarse_interpolation=None):
     selected = selected_coarse_interpolation(lod, coarse_interpolation)
-    return COARSE_BILINEAR_CACHE_LEVEL if lod == 4 and selected == 'bilinear' else lod
+    level=COARSE_BILINEAR_CACHE_LEVEL if lod == 4 and selected == 'bilinear' else lod
+    return level+2000 if selected_neural_chart() else level
+
+
+def selected_neural_chart():
+    if not has_request_context():
+        return None
+    value=request.args.get('neural_chart')
+    if value is None and request.is_json:
+        value=(request.get_json(silent=True) or {}).get('neural_chart')
+    if value not in (None,'polar'):
+        raise ValueError('Unknown neural chart')
+    return value
 
 
 def request_tile_key(seed,lod,tx,ty,world_profile=None,source_lod=None,coarse_interpolation=None):
@@ -889,16 +1094,36 @@ def update_view():
             raise ValueError('View budget exceeded (512 tiles)')
         wants = {}
         for tile in tiles:
-            _, lod, tx, ty = _tile_coordinates(seed, tile['lod'], tile['tx'], tile['ty'])
+            _, lod, tx, ty = _tile_coordinates(seed, tile['lod'], tile['tx'], tile['ty'], world_profile)
             priority = float(tile.get('priority', 2000))
             if not math.isfinite(priority) or not 0 <= priority < 5000:
                 raise ValueError('Invalid priority')
-            source=latent_preview_source(lod,tile.get('source_lod'))
-            wants[request_tile_key(seed,lod,tx,ty,world_profile,source,coarse_interpolation)] = priority
+            if tile.get('native_coarse'):
+                if lod != native_coarse.GEOMETRY_LOD:
+                    raise ValueError('Native coarse geometry must be LOD 7')
+                wants[native_coarse_key(seed, tx, ty, world_profile, bool(tile.get('learned')))] = priority
+            else:
+                source=latent_preview_source(lod,tile.get('source_lod'))
+                wants[request_tile_key(seed,lod,tx,ty,world_profile,source,coarse_interpolation)] = priority
         if data.get('overview'):
+            light=parse_lighting(json.dumps(data['overview_lighting'])) if data.get('overview_lighting') is not None else None
             for mode in MODES:
-                wants[f'{VERSION}/{world_profile}/{seed}/overview/{mode}'] = 0
+                suffix=lighting_suffix(light) if mode in ('relief','biomes') else ''
+                wants[f'{VERSION}/{world_profile}/{seed}/overview/{mode}{suffix}'] = 0
+        focus = data.get('bounds')
+        if focus is not None:
+            if not isinstance(focus,list) or len(focus)!=4:
+                raise ValueError('Invalid view bounds')
+            focus = [float(value) for value in focus]
+            if not all(math.isfinite(value) for value in focus) or focus[2]<=focus[0] or focus[3]<=focus[1]:
+                raise ValueError('Invalid view bounds')
+            x0,y0,x1,y1=profile_bounds(world_profile)
+            focus = [max(focus[0],x0),max(focus[1],y0),min(focus[2],x1),min(focus[3],y1)]
+            if focus[2]<=focus[0] or focus[3]<=focus[1]:
+                raise ValueError('View outside the world')
         accepted = jobs.update_view(session, epoch, wants)
+        if accepted and focus is not None and not selected_neural_chart():
+            coarse_background.set_focus(seed,world_profile,focus)
         return jsonify(accepted=accepted, epoch=epoch, wanted=len(wants))
     except (ValueError, KeyError, TypeError) as exc:
         return jsonify(error=str(exc)), 400
@@ -963,6 +1188,9 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
     if lod<0 and not return_arrays:
         raise ValueError('Refined terrain is memory-only; request arrays')
     wp=generation_profile()
+    polar=selected_neural_chart()=='polar'
+    if polar and resolve_generation(wp).settings['world_topology']!='sphere':
+        raise ValueError('Polar neural chart requires a spherical world')
     requested_profile = request.args.get('profile', PROFILE)
     if requested_profile != PROFILE:
         raise ValueError('Outdated cache profile: reload the page')
@@ -995,7 +1223,7 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
     world_manifest(seed, wp)
     # Only conditioning previews are admitted to the CPU lane. An already
     # learned distant tile still follows the single CUDA lane and lock.
-    preview_only = lod >= 7 and learned_tile_state(seed, wp, lod, tx, ty) is False
+    preview_only = lod >= 7 and (polar or learned_tile_state(seed, wp, lod, tx, ty) is False)
     queued_at = time.perf_counter()
     def compute():
         waiting = time.perf_counter()
@@ -1013,15 +1241,18 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
             before = dict(gpu_calls)
             view_batch_tiles=1
             metrics['stage'] = f'LOD {lod} · {tx}, {ty}'
-            world = None if lod>=7 else get_preview_world(seed,wp) if source_lod else get_world(seed,wp)
+            world = (None if lod>=7 else get_polar_world(seed,wp,preview=bool(source_lod)) if polar else
+                     get_preview_world(seed,wp) if source_lod else get_world(seed,wp))
             try:
                 with span('tile.sample', gpu=not preview_only, lod=lod, tx=tx, ty=ty):
                     if preview_only:
-                        elevation,climate,stage=sample_physical(None,seed,wp,lod,tx,ty,preview_only=True)
+                        elevation,climate,stage=sample_physical(None,seed,wp,lod,tx,ty,preview_only=True,**({'polar':True} if polar else {}))
                     else:
                         if source_lod:
                             view_batch_tiles=prepare_preview_view(world,seed,wp,lod,tx,ty,session)
                             elevation,climate,stage=sample_latent_preview(world,lod,tx,ty)
+                        elif polar:
+                            elevation,climate,stage=sample_physical(world,seed,wp,lod,tx,ty,polar=True,coarse_interpolation=coarse_interpolation)
                         elif lod==4:
                             elevation,climate,stage=sample_physical(
                                 world,seed,wp,lod,tx,ty,coarse_interpolation=coarse_interpolation)
@@ -1031,8 +1262,8 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
                 metrics['stage'] = 'Ready'
             jobs.check_current_interest()
             report = {'stage':stage, 'resolution':NATIVE*2**(source_lod if source_lod else lod),
-                      'source_resolution': ((WORLD_BOUNDS[2]-WORLD_BOUNDS[0])/RASTER_WIDTH
-                          if stage=='conditioning-preview' and resolve_generation(wp).settings['height_source']=='native' else
+                      'source_resolution': ((profile_bounds(wp)[2]-profile_bounds(wp)[0])/world_manifest(seed,wp)['bootstrap']['raster']['width']
+                          if stage=='conditioning-preview' and (resolve_generation(wp).settings['height_source'] in ('native','orogen') or resolve_generation(wp).settings['relief_pipeline'] in ('orogen','city-gpu')) else
                           {'conditioning-preview':7680,'coarse':7680,'coarse-area-mean':7680,'latent':240,'decoder':30,'final-dem-mip':30}.get(stage,NATIVE*2**lod)),
                       'width':(TILE//2**(3-lod) if source_lod else TILE)+2*HALO, 'halo':HALO,
                       'source_lod':source_lod, 'geometry_lod':lod, 'view_batch_tiles':view_batch_tiles,
@@ -1042,7 +1273,8 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
                       'gpu_lock_wait_seconds':round(lock_wait,4),
                       'cuda_calls':{k:0 if preview_only else gpu_calls[k]-before[k] for k in gpu_calls}}
             metrics['stage'] = 'Ready'
-            report.update(generation_profile=wp,climate_width=CLIMATE_SIZE,climate_height=CLIMATE_SIZE)
+            report.update(tile_relief_stats(elevation, HALO))
+            report.update(generation_profile=wp,neural_chart='polar' if polar else None,climate_width=CLIMATE_SIZE,climate_height=CLIMATE_SIZE)
             report.update(world_identity=world_identity(world_manifest(seed,wp)),
                           source_kind='experimental-neural-refinement' if stage=='decoder-refinement' else 'conditioning-input' if stage=='conditioning-preview' else 'learned-approximation' if stage in ('coarse','coarse-area-mean','latent') else 'native-dem-reduction',
                            exact_final_mip=stage=='final-dem-mip',height_filter='parent-mean-preserving-decoder-cascade' if stage=='decoder-refinement' else 'block-mean-native' if stage=='final-dem-mip' else 'coarse-physical-area-mean+gaussian-sigma-0.65px' if stage=='coarse-area-mean' else f'coarse-{"monotone-cubic" if coarse_interpolation=="monotone" else "bilinear"}+gaussian-sigma-0.65px' if stage=='coarse' and lod==4 else 'conditioning-preview+gaussian-sigma-0.65px' if stage=='conditioning-preview' else 'source-approximation+gaussian-sigma-0.65px' if stage in ('coarse','latent') else 'native')
@@ -1053,7 +1285,7 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
             return elevation,climate,report
     def finalize(value):
         elevation, climate, report = value
-        if preview_only:
+        if preview_only and not polar:
             jobs.check_current_interest()
             if learned_tile_state(seed,wp,lod,tx,ty) is True:
                 raise JobCancelled('Le coarse appris est prêt ; actualiser cet aperçu')
@@ -1103,11 +1335,177 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
     return (result_path, report, report.get('cache_source')=='disk', arrays) if return_arrays else (result_path, report, False)
 
 
+def snr_diagnostic_tile(seed, lod, tx, ty, wp, mode):
+    if request.args.get('profile', PROFILE) != PROFILE:
+        raise ValueError('Outdated cache profile: reload the page')
+    manifest = world_manifest(seed, wp)
+    identity = world_identity(manifest)
+    if request.args.get('world_identity') and request.args['world_identity'] != identity:
+        raise ValueError('Outdated world identity: reload the page')
+    resolution = NATIVE * 2**lod
+    xs = (tx*TILE + np.arange(TILE) + .5) * resolution
+    ys = (ty*TILE + np.arange(TILE) + .5) * resolution
+    started = time.perf_counter()
+    rgb = render_snr_layer(seed, wp, manifest['conditioning']['cond_snr'], mode, xs, ys)
+    buffer = io.BytesIO()
+    Image.fromarray((np.clip(rgb, 0, 1)*255).astype(np.uint8)).save(buffer, format='PNG')
+    response = Response(buffer.getvalue(), mimetype='image/png')
+    response.cache_control.max_age = 31536000
+    return _tile_headers(response, dict(stage='snr-diagnostic', resolution=resolution,
+        source_resolution=48*7680, world_identity=identity,
+        seconds=round(time.perf_counter()-started, 4), geometry_lod=lod), False)
+
+
+def orogen_diagnostic_tile(seed, lod, tx, ty, wp, mode, *, binary=False):
+    if request.args.get('profile', PROFILE) != PROFILE:
+        raise ValueError('Outdated cache profile: reload the page')
+    manifest = world_manifest(seed, wp)
+    identity = world_identity(manifest)
+    if request.args.get('world_identity') and request.args['world_identity'] != identity:
+        raise ValueError('Outdated world identity: reload the page')
+    from terrain_orogen import get_heightmap
+    descriptor = resolve_generation(wp)
+    atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options), descriptor.settings)
+    resolution = NATIVE*2**lod
+    xs = (tx*TILE+np.arange(-HALO,TILE+HALO)+.5)*resolution
+    ys = (ty*TILE+np.arange(-HALO,TILE+HALO)+.5)*resolution
+    started = time.perf_counter()
+    if binary:
+        response = Response(atlas.sample_height_m(xs, ys).astype('<f4').tobytes(),
+                            mimetype='application/octet-stream')
+    else:
+        rgb = render_orogen_layer(atlas, mode, xs, ys)
+        # PNGs cover the tile interior, just like render_elevation; the halo
+        # belongs only to physical samples and shading, not the displayed bounds.
+        rgb = rgb[HALO:HALO+TILE, HALO:HALO+TILE]
+        buffer = io.BytesIO()
+        Image.fromarray((np.clip(rgb,0,1)*255).astype(np.uint8)).save(buffer, format='PNG')
+        response = Response(buffer.getvalue(), mimetype='image/png')
+    report = dict(stage='orogen-diagnostic', resolution=resolution,
+        source_resolution=(profile_bounds(wp)[2]-profile_bounds(wp)[0])/atlas.width,
+        world_identity=identity, seconds=round(time.perf_counter()-started,4), geometry_lod=lod)
+    report.update(tile_relief_stats(atlas.sample_height_m(xs, ys), HALO))
+    response.cache_control.max_age=31536000
+    return _tile_headers(response, report, False)
+
+
+def native_coarse_key(seed, tx, ty, profile, learned):
+    return f'{VERSION}/{profile}/{seed}/native-coarse-v1/{tx}/{ty}/{"learned" if learned else "available"}'
+
+
+def native_coarse_ready(seed, profile, xs, ys):
+    # A macro preview never waits behind CUDA or generates neural windows.
+    # Persisted contributors remain discoverable after a server restart.
+    if not gpu_lock.acquire(blocking=False):
+        return False
+    try:
+        world = _available_world(seed, profile)
+        preparation = getattr(world, '_terrain_coarse_preparation', None)
+        return preparation is not None and preparation.ready_for_samples(xs, ys, climate_halo=8)
+    finally:
+        gpu_lock.release()
+
+
+@app.get('/coarse/natural-v1/<int:seed>/<tx>/<ty>.bin')
+def native_coarse_tile(seed, tx, ty):
+    """Transmit source cells once; browser zoom has no server-side LOD."""
+    try:
+        seed, _, tx, ty = _tile_coordinates(seed, native_coarse.GEOMETRY_LOD, tx, ty)
+        wp = generation_profile()
+        if request.args.get('profile', PROFILE) != PROFILE:
+            raise ValueError('Outdated cache profile: reload the page')
+        manifest = world_manifest(seed, wp)
+        identity = world_identity(manifest)
+        if request.args.get('world_identity', identity) != identity:
+            raise ValueError('Outdated world identity: reload the page')
+        learned = request.args.get('learned', '0') == '1'
+        key = native_coarse_key(seed, tx, ty, wp, learned)
+        cache_key = (wp, seed, tx, ty, identity)
+        xs, ys = native_coarse.sample_axes(tx, ty, profile_bounds(wp))
+        ready = native_coarse_ready(seed, wp, xs, ys)
+        with native_coarse_cache_lock:
+            cached = native_coarse_cache.get(cache_key)
+            if cached is not None:
+                native_coarse_cache.move_to_end(cache_key)
+        hit = cached is not None and (cached[2]['stage'] == 'coarse' or
+            (not learned and not ready and time.monotonic() - cached[3] < 30))
+        if hit:
+            root, climate, report, _ = cached
+        else:
+            preview_only = not learned and not ready
+            def compute():
+                with (nullcontext() if preview_only else measured_lock(gpu_lock, 'coarse.gpu_lock_wait')), torch.inference_mode():
+                    started = time.perf_counter()
+                    jobs.check_current_interest()
+                    cx, cy = native_coarse.climate_axes(tx, ty, profile_bounds(wp))
+                    if preview_only:
+                        root = native_coarse.encode_height(conditioning_preview(seed, wp, xs*NATIVE, ys*NATIVE)['elev'])
+                        climate = conditioning_preview(seed, wp, cx*NATIVE, cy*NATIVE)['climate']
+                        stage = 'conditioning-preview'
+                    else:
+                        from terrain_window_scheduler import read_rect
+                        world = get_world(seed, wp)
+                        root = native_coarse.read_native(world, xs, ys, read_rect, jobs.check_current_interest)
+                        climate = sample_coarse_climate(world, cx, cy, check=jobs.check_current_interest)
+                        stage = 'coarse'
+                    jobs.check_current_interest()
+                    climate = np.ascontiguousarray(climate, dtype=np.float32)
+                    if not np.isfinite(root).all() or not np.isfinite(climate).all():
+                        raise RuntimeError('Non-finite native coarse')
+                    seconds = round(time.perf_counter()-started, 4)
+                    raster = (manifest.get('bootstrap') or {}).get('raster') or {}
+                    source_resolution = ((profile_bounds(wp)[2]-profile_bounds(wp)[0])/raster['width']
+                        if stage == 'conditioning-preview' and raster.get('width') else native_coarse.RESOLUTION)
+                    report = dict(stage=stage, resolution=native_coarse.RESOLUTION,
+                        source_resolution=source_resolution, geometry_lod=7,
+                        source_lod=4 if stage == 'coarse' else 7,
+                        width=native_coarse.WIDTH, halo=native_coarse.HALO,
+                        seconds=seconds, world_identity=identity, height_filter='native-signed-sqrt-cells')
+                    report.update(tile_relief_stats(np.sign(root)*root**2, native_coarse.HALO))
+                    return root, climate, report
+            def finalize(value):
+                jobs.check_current_interest()
+                with native_coarse_cache_lock:
+                    previous = native_coarse_cache.get(cache_key)
+                    if previous is not None and previous[2]['stage'] == 'coarse' and value[2]['stage'] != 'coarse':
+                        return previous[:3]
+                    native_coarse_cache[cache_key] = (*value, time.monotonic())
+                    native_coarse_cache.move_to_end(cache_key)
+                    # Bounded host transport cache, independent of neural caches.
+                    while sum(v[0].nbytes+v[1].nbytes for v in native_coarse_cache.values()) > 64*1024**2:
+                        native_coarse_cache.popitem(last=False)
+                return value
+            session = request.args.get('session')
+            job = jobs.submit(key, compute, finalize, session=_session(session) if session else None,
+                epoch=int(request.args.get('epoch', 0)), lane='cpu' if preview_only else 'gpu')
+            root, climate, report = job.wait()
+        payload = root.astype('<f4', copy=False).tobytes() + climate.astype('<f4', copy=False).tobytes()
+        response = Response(payload, mimetype='application/octet-stream')
+        response.headers['X-Terrain-Encoding'] = 'signed-sqrt'
+        response.headers['X-Terrain-Climate-Width'] = str(native_coarse.CLIMATE_SIZE)
+        response.headers['X-Terrain-Climate-Height'] = str(native_coarse.CLIMATE_SIZE)
+        response.cache_control.max_age = 30 if report['stage'] == 'conditioning-preview' else 31536000
+        return _tile_headers(response, report, hit)
+    except (ValueError, TypeError) as exc:
+        return jsonify(error=str(exc)), 400
+    except JobCancelled as exc:
+        return jsonify(error=str(exc)), 409
+    except QueueFull as exc:
+        return jsonify(error=str(exc)), 429
+    except TimeoutError as exc:
+        return jsonify(error=str(exc)), 504
+
+
 @app.get('/height/natural-v1/<int:seed>/<int(signed=True):lod>/<tx>/<ty>.bin')
 @pin_cache_io(lambda seed, lod, tx, ty: request_tile_key(seed, lod, int(tx), int(ty)))
 def height_tile(seed, lod, tx, ty):
     try:
         seed, lod, tx, ty = _tile_coordinates(seed, lod, tx, ty)
+        mode = display_mode()
+        if mode in SNR_MODES:
+            raise ValueError('SNR layers use the PNG tile endpoint')
+        if mode in OROGEN_MODES:
+            return orogen_diagnostic_tile(seed, lod, tx, ty, generation_profile(), mode, binary=True)
         path, report, cached, arrays = physical_tile(seed, lod, tx, ty, return_arrays=True)
         with span('tile.binary_response', cache_hit=cached, from_memory=arrays is not None):
             elevation = arrays[0] if arrays is not None else np.load(path, allow_pickle=False)
@@ -1115,6 +1513,7 @@ def height_tile(seed, lod, tx, ty):
             if request.args.get('climate')=='1':
                 climate=arrays[1] if arrays is not None else np.load(path.with_suffix('.climate.npy'),allow_pickle=False)
                 payload+=climate.astype('<f4',copy=False).tobytes()
+        report = dict(report, **tile_relief_stats(elevation, HALO))
         response = Response(payload, mimetype='application/octet-stream')
         if request.args.get('climate')=='1':
             response.headers['X-Terrain-Climate-Width']=str(CLIMATE_SIZE)
@@ -1138,11 +1537,28 @@ def tile(seed, lod, tx, ty):
     try:
         seed, lod, tx, ty = _tile_coordinates(seed, lod, tx, ty)
         wp,mode=generation_profile(),display_mode()
+        if mode in SNR_MODES:
+            return snr_diagnostic_tile(seed, lod, tx, ty, wp, mode)
+        if mode in OROGEN_MODES:
+            return orogen_diagnostic_tile(seed, lod, tx, ty, wp, mode)
         if request.args.get('profile', PROFILE) != PROFILE:
             raise ValueError('Outdated cache profile: reload the page')
         coarse_interpolation=selected_coarse_interpolation(lod)
+        lighting = parse_lighting(request.args.get('lighting'))
+        if lighting is not None:
+            # Reuse physical caches, without accumulating PNGs for slider values.
+            physical_path, report, cached, arrays = physical_tile(seed,lod,tx,ty,return_arrays=True)
+            with image_slots:
+                started=time.perf_counter()
+                elevation=arrays[0] if arrays is not None else np.load(physical_path,allow_pickle=False)
+                climate=arrays[1] if arrays is not None else np.load(physical_path.with_suffix('.climate.npy'),allow_pickle=False)
+                rgb=render_elevation(elevation,latent_preview_source(lod) or lod,climate=climate,mode=mode,lighting=lighting)
+                buffer=io.BytesIO();Image.fromarray(rgb).save(buffer,format='PNG')
+                report=dict(report,**tile_relief_stats(elevation,HALO),render_seconds=round(time.perf_counter()-started,4))
+            return _tile_headers(Response(buffer.getvalue(),mimetype='image/png'),report,cached)
         if lod<0:
             _,report,cached,arrays=physical_tile(seed,lod,tx,ty,return_arrays=True)
+            report = dict(report, **tile_relief_stats(arrays[0], HALO))
             with image_slots, span('tile.render_refinement', lod=lod):
                 started=time.perf_counter()
                 rgb=render_elevation(arrays[0],lod,climate=arrays[1],mode=mode)
@@ -1159,6 +1575,11 @@ def tile(seed, lod, tx, ty):
         if path.exists() and report_path.exists():
             report=json.loads(report_path.read_text())
             if valid_physical_report(report,seed,wp,lod,tx,ty,source_lod,coarse_interpolation):
+                if 'elevation_max' not in report:
+                    physical_path, _, _, arrays = physical_tile(seed,lod,tx,ty,return_arrays=True)
+                    elevation = arrays[0] if arrays is not None else np.load(physical_path,allow_pickle=False)
+                    report.update(tile_relief_stats(elevation, HALO))
+                    _atomic_bytes(report_path, json.dumps(report).encode())
                 metrics['cache_hits'] += 1
                 _record_tile_disk(seed, lod, tx, ty,wp,source_lod,coarse_interpolation)
                 return _tile_headers(send_file(path, mimetype='image/png', max_age=31536000),response_report(report,seed,wp,lod,tx,ty,'disk'), True)
@@ -1169,6 +1590,7 @@ def tile(seed, lod, tx, ty):
             if not path.exists() or not report_path.exists():
                 started = time.perf_counter()
                 elevation = arrays[0] if arrays is not None else np.load(physical_path, allow_pickle=False)
+                report = dict(report, **tile_relief_stats(elevation, HALO))
                 climate=arrays[1] if arrays is not None else np.load(physical_path.with_suffix('.climate.npy'),allow_pickle=False)
                 rgb = render_elevation(elevation,source_lod or lod,climate=climate,mode=mode)
                 buffer = io.BytesIO()
@@ -1201,6 +1623,8 @@ def _tile_headers(response, report, cache_hit):
                        'Coarse-Interpolation':report.get('coarse_interpolation') or '',
                        'Source-LOD':report.get('source_lod') if report.get('source_lod') is not None else report.get('geometry_lod',''),
                        'Geometry-LOD':report.get('geometry_lod',''),
+                       'Elevation-Min':report.get('elevation_min',''),
+                       'Elevation-Max':report.get('elevation_max',''),
                        'World-Identity':report.get('world_identity',''),
                        'Source-Kind':report.get('source_kind',report['stage']),
                        'Exact-Final-Mip':str(report.get('exact_final_mip',False)).lower(),
@@ -1225,19 +1649,21 @@ def overview(seed):
         return jsonify(error='Outdated cache profile: reload the page'), 400
     try:
         wp,mode=generation_profile(),display_mode()
+        lighting=parse_lighting(request.args.get("lighting"))
+        suffix=lighting_suffix(lighting)
     except ValueError as exc:
         return jsonify(error=str(exc)),400
     directory = CACHE/wp/str(seed)
     directory.mkdir(parents=True,exist_ok=True)
-    path = directory/f'overview.{mode}.png'
+    path = directory/f'overview.{mode}{suffix}.png'
     metadata_snapshot=metadata(seed,wp)
     cache_key=f'{VERSION}/{wp}/{seed}/overview'
-    receipt_path=directory/f'overview.{mode}.json'
+    receipt_path=directory/f'overview.{mode}{suffix}.json'
     identity=metadata_snapshot['world_identity']
     if request.args.get('world_identity') and request.args['world_identity'] != identity:
         return jsonify(error='Outdated world identity: reload the page'),400
     cache_paths=[directory/f'overview.{style}.{extension}' for style in MODES
-                 for extension in ('png','json')]+[directory/'world.json']
+                 for extension in ('png','json')]+[directory/'world.json',path,receipt_path]
     try:
         cached_identity=json.loads(receipt_path.read_text()).get('world_identity')
     except (OSError,ValueError):
@@ -1251,6 +1677,14 @@ def overview(seed):
         width,height=2048,1024
         xs=x0+(np.arange(width)+.5)*(x1-x0)/width
         ys=y0+(np.arange(height)+.5)*(y1-y0)/height
+        if mode in SNR_MODES:
+            manifest = world_manifest(seed, wp)
+            return render_snr_layer(seed, wp, manifest['conditioning']['cond_snr'], mode, xs, ys), None, (x1-x0)/width
+        if mode in OROGEN_MODES:
+            from terrain_orogen import get_heightmap
+            descriptor = resolve_generation(wp)
+            atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options), descriptor.settings)
+            return render_orogen_layer(atlas, mode, xs, ys), None, (x1-x0)/width
         # A worldwide preview cannot monopolize the compute lane with thousands
         # of learned windows. The incremental coarse worker replaces it later.
         macro=conditioning_preview(seed,wp,xs,ys)
@@ -1260,11 +1694,18 @@ def overview(seed):
     def finalize(value):
         jobs.check_current_interest()
         elevation, climate,resolution = value
-        rgb = get_relief_map(elevation, None, None, None, resolution=resolution, vmin=0, vmax=4500)
-        if mode!='relief':
+        if mode in OROGEN_MODES + SNR_MODES:
+            rgb=elevation
+        elif mode!='relief':
             rgb=colorize(elevation,climate,mode)
+        elif lighting is None:
+            rgb=get_relief_map(elevation,None,None,None,resolution=resolution,vmin=0,vmax=4500)
+        else:
+            x0,y0,x1,y1=metadata_snapshot['overview_bounds']
+            rgb=render_relief(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting)
         buffer = io.BytesIO()
         Image.fromarray((np.clip(rgb, 0, 1)*255).astype(np.uint8)).save(buffer, format='PNG')
+        if lighting is not None:return buffer.getvalue()
         _atomic_bytes(path, buffer.getvalue())
         _atomic_bytes(receipt_path,json.dumps({'world_identity':identity,'mode':mode}).encode())
         _atomic_bytes(directory/'world.json', json.dumps(metadata_snapshot, indent=2).encode())
@@ -1274,10 +1715,13 @@ def overview(seed):
         session = request.args.get('session')
         if session:
             session = _session(session)
-        key = f'{VERSION}/{wp}/{seed}/overview/{mode}'
+        key = f'{VERSION}/{wp}/{seed}/overview/{mode}{suffix}'
         # The client explicitly includes this interest while the overview is useful.
         path = jobs.submit(key, compute, finalize, session=session,
                            epoch=int(request.args.get('epoch', 0)), priority=0, lane='cpu').wait()
+        if isinstance(path,bytes):
+            response=Response(path,mimetype='image/png');response.cache_control.no_store=True
+            return response
         return send_file(path, mimetype='image/png', max_age=31536000)
     except (ValueError, TypeError) as exc:
         return jsonify(error=str(exc)), 400

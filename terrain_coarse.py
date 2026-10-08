@@ -169,6 +169,10 @@ class CoarsePreparation:
         self._expected_weight = None
         self._weight_digest = None
         self._cursor = 0
+        self._priority_order = None
+        self._priority_cursor = 0
+        self._priority_signature = None
+        self._priority_geometry = None
         self.disk_hits = 0
         self.network_windows = 0
         self.model_synchronized_seconds = 0.0
@@ -668,6 +672,45 @@ class CoarsePreparation:
             schema=SCHEMA, world_hash=self.world_hash, cursor=self._cursor,
             total_windows=len(self._indices))))
 
+    def prioritize(self, mask, focus=None):
+        """Reorder missing windows around the camera; keep all sea windows.
+
+        Classification uses the entire overlapping model footprint and one
+        conservative land-mask cell around it. Already committed/pending
+        windows still get skipped by step, with unchanged fusion and storage.
+        The caller owns the GPU lock; view updates only publish a new focus.
+        """
+        signature = (id(mask), tuple(focus) if focus is not None else None)
+        if signature == self._priority_signature:
+            return
+        if self._priority_geometry is None or self._priority_signature[0] != id(mask):
+            x0, y0, x1, y1 = mask['bounds']
+            dx, dy = (x1-x0)/mask['width'], (y1-y0)/mask['height']
+            window = self._tensor.output_window
+            geometry = []
+            for index in self._indices:
+                left = index[-1]*window.stride[-1]*COARSE_METRES
+                top = index[-2]*window.stride[-2]*COARSE_METRES
+                right = left+window.size[-1]*COARSE_METRES
+                bottom = top+window.size[-2]*COARSE_METRES
+                ix0 = max(0, min(mask['width']-1, math.floor((left-x0)/dx)-1))
+                ix1 = max(ix0+1, min(mask['width'], math.ceil((right-x0)/dx)+1))
+                iy0 = max(0, min(mask['height']-1, math.floor((top-y0)/dy)-1))
+                iy1 = max(iy0+1, min(mask['height'], math.ceil((bottom-y0)/dy)+1))
+                sea = not any('1' in mask['rows'][y][ix0:ix1] for y in range(iy0,iy1))
+                geometry.append((index, sea, left, top, right, bottom))
+            self._priority_geometry = geometry
+        bounds = focus if focus is not None else self.bounds
+        cx, cy = (bounds[0]+bounds[2])/2, (bounds[1]+bounds[3])/2
+        def rank(item):
+            index, sea, left, top, right, bottom = item
+            visible = left < bounds[2] and right > bounds[0] and top < bounds[3] and bottom > bounds[1]
+            distance = ((left+right)/2-cx)**2+((top+bottom)/2-cy)**2
+            return sea, not visible, distance, index
+        self._priority_order = tuple(item[0] for item in sorted(self._priority_geometry,key=rank))
+        self._priority_cursor = 0
+        self._priority_signature = signature
+
     def step(self, world, budget_windows: int = 1, *, check=None) -> dict:
         """Run at most ``budget_windows`` missing coarse model windows.
 
@@ -687,7 +730,11 @@ class CoarsePreparation:
         generated_before = self.network_windows
         examined = 0
         while examined < total and self.network_windows - generated_before < budget_windows:
-            index = self._indices[self._cursor]
+            if self._priority_order is None:
+                index = self._indices[self._cursor]
+            else:
+                index = self._priority_order[self._priority_cursor]
+                self._priority_cursor = (self._priority_cursor+1) % total
             self._cursor = (self._cursor + 1) % total
             examined += 1
             with self._namespace.condition:

@@ -1,0 +1,123 @@
+"""Coastal noise, parent means and tile seams in the sub-native cascade."""
+from pathlib import Path
+import sys
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+import torch
+import torch.nn.functional as F
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / 'terrain-diffusion'))
+from terrain_refinement import sample_refined
+
+
+class DetailField:
+    def __init__(self, device, *, smooth=False):
+        self.device = device
+        self.smooth = smooth
+
+    def __getitem__(self, key):
+        _, rows, cols = key
+        yy = torch.arange(rows.start, rows.stop, device=self.device)[:, None]
+        xx = torch.arange(cols.start, cols.stop, device=self.device)[None, :]
+        # Strong, globally anchored decoder residuals stress both signs.
+        detail = torch.where((xx + yy) % 2 == 0, 3., -3.)
+        if self.smooth:
+            detail = .6*detail + torch.sin(.71*xx + .37*yy) + .8*torch.cos(.29*xx - .53*yy)
+        return torch.stack((detail, torch.ones_like(detail)))
+
+
+class CoastalRefinementTests(unittest.TestCase):
+    def devices(self):
+        return ['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']
+
+    def world(self, device, heights):
+        def get(i1, j1, i2, j2, *, with_climate):
+            self.assertFalse(with_climate)
+            yy = torch.arange(i1, i2, device=device)[:, None]
+            xx = torch.arange(j1, j2, device=device)[None, :]
+            return {'elev': torch.broadcast_to(heights(yy, xx), (i2-i1, j2-j1)).float()}
+        return SimpleNamespace(device=device, get=get, kwargs={'residual_std': 1.1678})
+
+    def test_low_land_and_shallow_sea_do_not_fragment_at_any_level(self):
+        for device in self.devices():
+            with patch('terrain_refinement._detail_field', return_value=DetailField(device)):
+                for height in (-1., -.1, -.001, 0., .001, .1, 1.):
+                    world = self.world(device, lambda y, x: torch.tensor(height, device=device))
+                    for level in (1, 2, 3):
+                        with self.subTest(device=device, height=height, lod=-level):
+                            actual = sample_refined(world, level, -16, -16, 16, 16)
+                            self.assertTrue(torch.isfinite(actual).all())
+                            if height == 0:
+                                self.assertEqual(torch.count_nonzero(actual).item(), 0)
+                            else:
+                                self.assertTrue((actual * height > 0).all())
+                                self.assertGreater(actual.std().item(), 0, 'Keep fine detail above/below sea level')
+
+    def test_each_level_preserves_parent_means_including_a_crossing(self):
+        for device in self.devices():
+            world = self.world(device, lambda y, x: (x + .3) * .05 + y * .003)
+            with patch('terrain_refinement._detail_field', return_value=DetailField(device, smooth=True)):
+                for level in (1, 2, 3):
+                    with self.subTest(device=device, lod=-level):
+                        parent = sample_refined(world, level-1, -8, -8, 8, 8)
+                        child = sample_refined(world, level, -16, -16, 16, 16)
+                        means = F.avg_pool2d(child[None, None], 2)[0, 0]
+                        torch.testing.assert_close(means, parent, rtol=2e-6, atol=1e-7)
+                        self.assertTrue((child < 0).any())
+                        self.assertTrue((child > 0).any())
+
+    def test_adjacent_unaligned_reads_match_a_single_read(self):
+        for device in self.devices():
+            world = self.world(device, lambda y, x: (x + .3) * .05 + y * .003)
+            with patch('terrain_refinement._detail_field', return_value=DetailField(device, smooth=True)):
+                for level in (1, 2, 3):
+                    full = sample_refined(world, level, -15, -17, 17, 15)
+                    left = sample_refined(world, level, -15, -17, 17, -1)
+                    right = sample_refined(world, level, -15, -1, 17, 15)
+                    top = sample_refined(world, level, -15, -17, 1, 15)
+                    bottom = sample_refined(world, level, 1, -17, 17, 15)
+                    with self.subTest(device=device, lod=-level):
+                        torch.testing.assert_close(torch.cat((left, right), 1), full, rtol=0, atol=0)
+                        torch.testing.assert_close(torch.cat((top, bottom), 0), full, rtol=0, atol=0)
+
+    def test_low_cells_beside_higher_ground_stay_on_the_same_side_of_zero(self):
+        for device in self.devices():
+            with patch('terrain_refinement._detail_field', return_value=DetailField(device, smooth=True)):
+                for sign in (-1, 1):
+                    world = self.world(device, lambda y, x: sign * torch.where((x//2 + y//3) % 2 == 0, .001, 12.))
+                    for level in (1, 2, 3):
+                        with self.subTest(device=device, sign=sign, lod=-level):
+                            actual = sample_refined(world, level, -17, -15, 15, 17)
+                            self.assertTrue((actual * sign > 0).all())
+
+    def test_high_ground_keeps_decoder_detail_and_native_is_unchanged(self):
+        for device in self.devices():
+            height = 4000.
+            world = self.world(device, lambda y, x: torch.tensor(height, device=device))
+            with patch('terrain_refinement._detail_field', return_value=DetailField(device)) as detail:
+                native = sample_refined(world, 0, -16, -16, 16, 16)
+                detail.assert_not_called()
+                torch.testing.assert_close(native, torch.full_like(native, height), rtol=0, atol=0)
+                child = sample_refined(world, 1, -16, -16, 16, 16)
+                old_amplitude = 3 * height**.5 * world.kwargs['residual_std']
+                actual_amplitude = (child-height).abs().max().item()
+                self.assertGreater(actual_amplitude / old_amplitude, .99)
+                self.assertLessEqual(actual_amplitude, old_amplitude)
+
+    def test_mixed_neighbours_still_refine_the_coast_inside_a_parent_cell(self):
+        for device in self.devices():
+            world = self.world(device, lambda y, x: (x + .1) * .05)
+            with patch('terrain_refinement._detail_field', return_value=DetailField(device)):
+                # Parent column zero is positive; its west neighbour is sea.
+                parent = sample_refined(world, 0, 0, 0, 1, 1)
+                child = sample_refined(world, 1, 0, 0, 2, 2)
+                self.assertGreater(parent.item(), 0)
+                self.assertTrue((child[:, 0] < 0).all())
+                self.assertTrue((child[:, 1] > 0).all())
+                torch.testing.assert_close(child.mean(), parent.squeeze())
+
+
+if __name__ == '__main__':
+    unittest.main()

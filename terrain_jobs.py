@@ -40,6 +40,7 @@ class Job:
     admitted: float = 0
     slot_wait_seconds: float = 0
     queue_seconds: float = 0
+    cancel_requested: bool = False
 
     def wait(self, timeout=300):
         if not self.event.wait(timeout):
@@ -59,6 +60,7 @@ class TerrainJobs:
         self.sequence = 0
         self.current = threading.local()
         self.closed = False
+        self.paused = False
         self.worker = None
         self.preview_workers = []
         self.cpu = ThreadPoolExecutor(max_workers=cpu_workers, thread_name_prefix='terrain-encode')
@@ -75,6 +77,8 @@ class TerrainJobs:
     def update_view(self, session, epoch, wants):
         """wants is {job_key: priority}; old epochs cannot resurrect old work."""
         with self.condition:
+            if self.paused:
+                return False
             old = self.views.get(session)
             if old and epoch < old['epoch']:
                 return False
@@ -98,6 +102,27 @@ class TerrainJobs:
     def release_view(self, session):
         with self.condition:
             self._release_locked(session)
+            self.condition.notify_all()
+
+    def pause(self):
+        """Discard the old world, including legacy/background jobs."""
+        with self.condition:
+            self.paused = True
+            self.views.clear()
+            for job in list(self.jobs.values()):
+                job.cancel_requested = True
+                job.subscribers.clear()
+                if job.state == 'queued':
+                    job.state = 'cancelled'
+                    job.error = JobCancelled('Une nouvelle carte est en génération')
+                    job.event.set()
+                    self.jobs.pop(job.key, None)
+                    self.metrics['cancelled_queued'] += 1
+            self.condition.notify_all()
+
+    def resume(self):
+        with self.condition:
+            self.paused = False
             self.condition.notify_all()
 
     def _release_locked(self, session):
@@ -135,6 +160,8 @@ class TerrainJobs:
             self._expire_locked()
             if self.closed:
                 raise JobCancelled('Le moteur est arrêté')
+            if self.paused:
+                raise JobCancelled('Une nouvelle carte est en génération')
             if session:
                 view = self.views.get(session)
                 if not view or epoch > view['epoch'] or key not in view['wants']:
@@ -142,6 +169,8 @@ class TerrainJobs:
                 view['touched'] = time.monotonic()
                 priority = view['wants'][key]
             job = self.jobs.get(key)
+            if job is not None and job.cancel_requested:
+                job = None
             deduplicated = job is not None
             if job:
                 self.metrics['deduplicated'] += 1
@@ -215,9 +244,13 @@ class TerrainJobs:
     def check_current_interest(self):
         """Safe quantum boundary: never interrupt a CUDA kernel or half window."""
         job = getattr(self.current, 'job', None)
-        if job is None or job.legacy:
+        if job is None:
             return
         with self.condition:
+            if job.cancel_requested:
+                raise JobCancelled('Calcul annulé par une nouvelle génération')
+            if job.legacy:
+                return
             self._expire_locked()
             if not job.subscribers:
                 raise JobCancelled('La caméra a changé entre deux blocs de calcul')
@@ -226,7 +259,7 @@ class TerrainJobs:
         started = time.monotonic()
         try:
             self.current.job = job
-            if job.lane == 'cpu':
+            if job.cancel_requested or job.lane == 'cpu':
                 self.check_current_interest()
             with trace(job.sequence), span('job.finalize', key=job.key, lane=job.lane):
                 result = job.finalize(value)
@@ -246,14 +279,15 @@ class TerrainJobs:
             self.metrics['encode_seconds'] += encode_seconds
             if not job.subscribers and not job.legacy:
                 self.metrics['obsolete_completed'] += 1
-            self.jobs.pop(job.key, None)
+            if self.jobs.get(job.key) is job:
+                self.jobs.pop(job.key, None)
             job.event.set()
             self.condition.notify_all()
 
     def status(self):
         with self.condition:
             self._expire_locked()
-            return dict(self.metrics, sessions=len(self.views),
+            return dict(self.metrics, sessions=len(self.views), paused=self.paused,
                         queued=sum(j.state == 'queued' for j in self.jobs.values()),
                         computing=sum(j.state == 'computing' for j in self.jobs.values()),
                         encoding=sum(j.state == 'encoding' for j in self.jobs.values()),

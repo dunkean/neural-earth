@@ -1,0 +1,2 @@
+# Optional NVIDIA kernels. The historical Orogen path does not import CuPy.
+cupy-cuda12x==13.6.0

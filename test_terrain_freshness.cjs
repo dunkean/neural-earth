@@ -6,13 +6,16 @@ const prefix=script.slice(0,script.indexOf("view.addEventListener('wheel'"));
 const poll=script.slice(script.indexOf('setInterval(async()=>'),script.indexOf("addEventListener('pagehide'"));
 const elements=new Map(),callbacks=[],textures=new Map();let resolveResponse;
 const context=vm.createContext({console,URLSearchParams,AbortController,performance,Float32Array,Map,Set,Math,Date,
- location:{search:'?prepare=0'},crypto:require('node:crypto').webcrypto,
- document:{hidden:false,getElementById(id){if(!elements.has(id))elements.set(id,{checked:true,dataset:{},getContext:()=>({})});return elements.get(id)}},
+ location:{search:'?coarse_prepare=0'},crypto:require('node:crypto').webcrypto,
+ document:{hidden:false,getElementById(id){if(!elements.has(id))elements.set(id,{checked:true,dataset:{},options:[],getContext:()=>({}),setAttribute(){}});return elements.get(id)}},
  setTimeout:()=>1,clearTimeout:()=>{},requestAnimationFrame:()=>1,setInterval:f=>callbacks.push(f),
  fetch:()=>new Promise(resolve=>{resolveResponse=resolve}),window:{},devicePixelRatio:1});
 vm.runInContext(prefix,context);
 vm.runInContext(`world={seed:'42',version:'natural-v1',world_profile:'natural',cache_profile:'test',world_bounds:[-20e6,-10e6,20e6,10e6]};
  renderer={available:true,uploadTile:(k)=>textures.set(k,true),deleteTile:k=>textures.delete(k)};`,Object.assign(context,{textures}));
+vm.runInContext(`viewMode='biomes';world.generation_settings={climate_source:'orogen'};`,context);
+assert(vm.runInContext('gpuEnabled()',context),'Orogen climate biomes must shade current physical terrain on GPU');
+vm.runInContext(`viewMode='relief';delete world.generation_settings;`,context);
 vm.runInContext(poll,context);
 function response(stage){return {ok:true,status:200,headers:{get:name=>({'X-Terrain-Width':'1','X-Terrain-Halo':'0','X-Terrain-Stage':stage,'X-Terrain-Resolution':'15360','X-Terrain-Cache':'hit'}[name]||null)},arrayBuffer:async()=>new Float32Array([100]).buffer}}
 (async()=>{

@@ -190,7 +190,7 @@ const cacheCounts = responses => responses.reduce((counts, response) => {
       console.warn(`Benchmark has ${preflightStatus.scheduler.sessions} existing server sessions; no exclusive-run claim.`);
     }
     const started = Date.now();
-    await page.goto('http://127.0.0.1:8765/?seed=42&profile=natural&prepare=0');
+    await page.goto('http://127.0.0.1:8765/?seed=42&profile=natural&coarse_prepare=0');
     await page.waitForFunction(() => terrainDebug?.snapshot().overview && terrainDebug.snapshot().rendererReady,
       null, { timeout: 120000 });
     scenarios.push({ name: 'overview-and-renderer-ready', wall_ms: Date.now() - started,
@@ -198,7 +198,7 @@ const cacheCounts = responses => responses.reduce((counts, response) => {
     await settled();
     scenarios.push({ name: 'initial-world-settled', wall_ms: Date.now() - started,
       snapshot: await page.evaluate(() => terrainDebug.snapshot()) });
-    await page.locator('#prefetch').uncheck();
+    await page.locator('#runtimePanel').evaluate(el=>el.open=true);await page.locator('#prefetch').uncheck();
     const rendererAdapterInfo = await page.evaluate(() => {
       const info = renderer?.adapter?.info;
       return info ? { vendor: info.vendor, architecture: info.architecture,

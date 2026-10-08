@@ -28,9 +28,13 @@ from terrain_diffusion.inference.world_pipeline import WorldPipeline
 from terrain_coarse import CoarsePreparation
 from terrain_conditioning import CONDITIONING_SNR, WORLD_PROFILES
 from terrain_jobs import JobCancelled, QueueFull
+from terrain_generation_session import GenerationCancelled
 import terrain_inference
 import terrain_manifest
 from terrain_generation import resolve_generation, register_generation
+from terrain_climate import MODES
+from terrain_orogen_layers import MODES as OROGEN_MODES
+from terrain_snr_layer import MODES as SNR_MODES
 
 
 class NoForwardModel(torch.nn.Module):
@@ -42,11 +46,12 @@ class NoForwardModel(torch.nn.Module):
         raise AssertionError('Pipeline admission must not execute a network')
 
 
-def native_receipt(seed, style):
+def native_receipt(seed, style, **options):
     receipt = {name: None for name in ('native_config', 'attempts', 'raster', 'hypsometry')}
     receipt.update(requested_seed_u64=str(seed), selected_seed_u64=str(seed),
                    selected_attempt=0, style=style, raw_height_sha256='fixture-raw',
-                   height_sha256='fixture-height', sign_preserved=True)
+                   height_sha256='fixture-height', sign_preserved=True,
+                   generator_version='orogen-fixture', raster={'width':1024,'height':512})
     return receipt
 
 
@@ -69,28 +74,34 @@ class ServerWorldConstructionTests(unittest.TestCase):
         self.app.testing = True
         self.namespace = dict(build_manifest=terrain_manifest.build_manifest,
             resolve_generation=resolve_generation,
+            register_generation=register_generation,
+            metadata=lambda seed,profile:dict(seed=str(seed),generation_profile=profile),
+            generation_profile=lambda:request.args.get("world_profile","natural"),
             profile_data=profile_data, deepcopy=deepcopy, _reference_manifest=reference,
-            terrestrial_file_snapshot=lambda:deepcopy(reference['files']),
+            terrestrial_file_snapshot=lambda generator='native':deepcopy(reference['files']),
             lru_cache=lru_cache, hashlib=hashlib, json=json,
             shared_pipeline=None, load_pipeline=self.loader, WorldPipeline=WorldPipeline,
             runtime_profile=profile, OUTPUT=Path(self.temporary.name),
             WORLD_BOUNDS=(-20e6, -10e6, 20e6, 10e6),
             CoarsePreparation=CoarsePreparation, worlds=OrderedDict(), active_seed=None,
             app=self.app, jsonify=jsonify, Response=Response, request=request,
+            MODES=MODES+OROGEN_MODES+SNR_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=OROGEN_MODES,
             has_request_context=has_request_context, subprocess=subprocess,
+            GenerationCancelled=GenerationCancelled, jobs=SimpleNamespace(paused=False), finish_generation=lambda token:None,
             pin_cache_io=lambda key:lambda function:function, TILE=256, NATIVE=30, MIN_LOD=-2,
             JobCancelled=JobCancelled, QueueFull=QueueFull)
         self.namespace['physical_tile'] = lambda seed,lod,tx,ty,**options:self.namespace['get_world'](
             seed, request.args.get('world_profile', 'natural'))
         tree = ast.parse((ROOT / 'terrain_server.py').read_text(encoding='utf-8'))
         names = {'generation_failure', 'world_manifest', '_create_world', 'get_world',
-                 '_tile_coordinates', 'height_tile', 'close_world'}
+                 '_tile_coordinates', 'height_tile', 'close_world', 'display_mode', 'world_info'}
         nodes = [node for node in tree.body if getattr(node, 'name', None) in names]
         self.assertEqual({node.name for node in nodes}, names)
         exec(compile(ast.Module(body=nodes, type_ignores=[]), str(ROOT / 'terrain_server.py'), 'exec'),
              self.namespace)
         for target, kwargs in (
             ('terrain_manifest.bootstrap_metadata', {'side_effect': native_receipt}),
+            ('terrain_orogen.bootstrap_metadata', {'side_effect': native_receipt}),
             ('terrain_manifest._runtime_versions', {'return_value': {'cpu-fixture': True}}),
             ('terrain_conditioning.make_conditioning_factory', {'return_value': SimpleNamespace(
                 heightmap=SimpleNamespace(metadata={'height_sha256': 'fixture-height'}))}),
@@ -107,6 +118,19 @@ class ServerWorldConstructionTests(unittest.TestCase):
     def close_worlds(self):
         for world in self.namespace['worlds'].values():
             world.close()
+
+    def test_full_orogen_configuration_is_accepted_by_world_endpoint(self):
+        settings=resolve_generation('orogen').settings
+        settings['orogen_temperature_equator']=33.
+        settings['orogen_biome_color_af']=[.125,.5,.875]
+        encoded=json.dumps(settings)
+        self.assertGreater(len(encoded),8192)
+        with patch('terrain_generation.REGISTRY_ROOT',Path(self.temporary.name)/'registry'):
+            response=self.app.test_client().get('/api/world',query_string=dict(
+                seed='42',world_profile='orogen',generation=encoded))
+            self.assertEqual(response.status_code,200,response.json)
+            descriptor=resolve_generation(response.json['generation_profile'])
+            self.assertEqual(descriptor.settings,settings)
 
     def rehash(self, manifest):
         payload = {key:value for key,value in manifest.items() if key != 'world_hash'}

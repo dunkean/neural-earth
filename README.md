@@ -13,19 +13,87 @@ Le dépôt voisin `world-builder-rs` reste requis au commit indiqué dans
 
 Ouvrir **http://127.0.0.1:8765** ou lancer **start-terrain.cmd**.
 
+Les boutons **Carte** et **Globe** sont directement dans la barre de menus.
+Sur le globe, glisser fait orbiter la caméra ; la vitesse diminue avec le zoom.
+La molette, +/− et « Vue du monde » règlent le zoom ; les flèches font tourner
+le globe. Le globe affiche le layer sélectionné et demande le relief neuronal
+progressif aux mêmes LOD et au même moteur NN que la carte, y compris le
+raffinement et les deux côtés du méridien. Carte et globe partagent le cache
+d'altitudes et les textures rendues (ou les PNG en secours) : changer de vue
+réutilise les tiles disponibles à la même résolution sans les retélécharger.
+
+Au-delà de 60° de latitude et en zoom local, le globe calcule les détails NN
+dans une grille sphérique tournée de 90° : les pôles géographiques y sont à
+l'équateur. Les latents et le DEM gardent ainsi leurs distances physiques,
+sans être pincés en éventail. La caméra charge une zone locale de cette grille,
+avec un cache distinct ; l'atlas des continents et la carte restent inchangés.
+Les paramètres du monde et le SNR en latitude utilisent la latitude géographique.
+
+**Settings → Relief → Monde · création** choisit le **diamètre en km** et la
+**géométrie** avant génération. Le diamètre par défaut est 40 000 / π km,
+soit environ 12 732,40 km ; une planète utilise une carte équirectangulaire
+π × diamètre de large et π × diamètre / 2 de haut. Le mode **Carte plane ·
+non projetée** utilise un carré de côté égal au diamètre, des distances
+cartésiennes et des bords finis sans bouclage ; le globe y est désactivé.
+Les générateurs sélectionnés restent les sources du relief et du climat,
+y compris le générateur tectonique Orogen issu d’un maillage sphérique.
+Changer la géométrie ou le diamètre puis générer crée une identité et des
+caches distincts. Ces paramètres sont conservés dans les liens.
+
+**Rendu → Rendu → Éclairage** règle immédiatement les ombres, la lumière
+ambiante, leur contraste, le relief de l’éclairage et la direction/hauteur du
+soleil. Choisir **Global** ou un **LOD** permet notamment de régler 3, 2, 1 et 0
+séparément ; les LOD héritent du global tant que leur héritage reste coché.
+**Sans ombres**, **Doux** et **Défaut** sont des presets. Les réglages sont
+conservés dans les liens, sans régénérer les altitudes ni les caches NN ; ils
+fonctionnent avec WebGPU et le rendu PNG de secours. Le globe applique le
+global à son éclairage sphérique.
+
 La page ouvre un monde terrestre avec une nouvelle seed aléatoire. Le bootstrap
-est un heightmap signé de **1024 × 512**, sur une carte de **40 000 × 20 000 km**.
+est un heightmap signé de **1024 × 512**, sur une carte de **40 000 × 20 000 km** avec le diamètre par défaut.
 Il est généré sur CPU par le cœur natif de `world-builder-rs` : plaques,
 continentalité, bruit fractal et relief tectonique. Les distributions ETOPO
 calibrent séparément les altitudes et les profondeurs en mètres. Aucune carte
 géographique réelle ni silhouette fabriquée à la main n'est copiée.
 
-Le menu propose **Gondwana**, **grands continents séparés**, **monde terrestre**
-et **archipel mondial**. **Naturel · référence NN** conserve le conditionnement
+La combo **Generator** choisit la source du monde. Les paramètres proposent
+**Gondwana**, **grands continents séparés**, **monde terrestre** et
+**archipel mondial**. **Naturel · référence NN** conserve le conditionnement
 original du checkpoint pour comparaison. Les anciens Earth et Macro A1–A4
 sont retirés des API et de l'interface ; leur code est archivé dans
-`docs/archive/rejected_bootstrap_20261007/`. Le nouveau bootstrap n'utilise
-aucun code ou procédé de city-generator.
+`docs/archive/rejected_bootstrap_20261007/`. Le bootstrap continental conserve
+le moteur world-builder-rs ; City intervient seulement comme érosion GPU optionnelle.
+
+**Orogen · tectonic chains** ajoute la génération initiale Orogen d'origine,
+avec superplaques et mouvements tectoniques. Le menu **Génération** propose **NN**, **Tectonique** et **Custom** pour le relief initial.
+Le menu **Settings** propose les onglets **Relief**, **Érosion** et **Climat**.
+L’érosion offre **Désactivée**, **Orogen · GPU**, **Orogen · CPU** et **City · GPU**.
+Chaque onglet génère uniquement son étape ; les autres résultats sont conservés,
+avec une indication si leurs entrées ont changé. **Générer toute la chaîne**, le
+bouton général et **Random** exécutent relief → érosion → climat. Random choisit
+une nouvelle seed et génère immédiatement. City réutilise le moteur GPU du prototype
+`city_generator/rust` : incision hydraulique, relaxation thermique et diffusion,
+avec dose, itérations, talus et échelle de drainage indépendants. Le climat est
+recalculé après l'érosion. Pour installer son runtime optionnel :
+`python -m pip install -r requirements-city-gpu.txt` (déjà installé dans la `.venv` locale).
+Le pipeline atlas/NN conserve son prérequis CUDA ; cette option ne rend pas
+l'application complète compatible avec les GPU AMD/Intel ou sans GPU.
+**Orogen historique reste le défaut.** Le relief tectonique expose des options
+GPU pour le relief, la propagation et la recherche spatiale ; l’érosion GPU se
+choisit dans sa combo, avec un post-traitement GPU optionnel. Le climat a son
+propre interrupteur GPU. Ils sont tous désactivés par défaut. Le relief et l'érosion parallèles
+sont expérimentaux ; Save A / Show A permet de comparer les résultats. Installer
+le runtime NVIDIA optionnel avec `python -m pip install -r requirements-orogen-gpu.txt`.
+Sans ce runtime, ces interrupteurs se replient vers Orogen CPU ; le reçu de
+génération indique la raison. City utilise son propre runtime WebGPU.
+Le menu **Rendu** regroupe **Rendu** et **SNR**. Le SNR propose un choix
+**Global / Par LOD** et un interrupteur **SNR adaptatif** ; désactiver ce dernier
+conserve ses réglages mais ignore les règles altitude/climat/latitude.
+**Appliquer SNR** ne régénère aucune étape physique. L’onglet **Climat** expose
+le climat Orogen commun, ses saisons, vents, pluie et biomes. Les paramètres, vues de diagnostic et comparaison A/B
+permettent de tester les combinaisons. La simulation globale est mise en cache ;
+la projection de l'atlas et les détails neuronaux utilisent le GPU.
+[Fonctionnement, diagnostics et benchmark Orogen](docs/OROGEN_GENERATION.md).
 
 La vue mondiale présente les **entrées du NN**, avec une résolution source
 de **39,06 km** ; le réseau les échantillonne à **7,68 km**. Les régions visibles
@@ -36,33 +104,80 @@ le relief appris dans la silhouette initiale.
 - Molette / + / − : zoom ; glisser ou flèches : déplacement.
 - **Vue mondiale** revient à l'ensemble du monde ; **30 m / pixel** montre le détail natif.
 - Le dézoom s'arrête au **LOD 11**, soit 61,44 km/pixel. Un zoom fort présente **4 → 3 → 2 → 1 → 0**.
-- **Nouveau monde** change la seed. Un lien avec `?seed=…&profile=terrestrial-earthlike` est reproductible, y compris pour une seed u64.
+- **Random**, à côté de la graine, choisit une nouvelle seed ; **Generate** ouvre
+  le monde avec la graine et le générateur sélectionnés. Un lien avec `?seed=…&profile=terrestrial-earthlike` est reproductible, y compris pour une seed u64.
 - **Carte** sélectionne relief, biomes, température ou précipitations.
+- **Tiles visible**, dans la barre du haut, affiche les limites et les index des
+  zones réellement rendues, y compris lorsque plusieurs LOD coexistent.
+- **Raffinement · profondeur LOD**, dans **Rendering**, vaut **0** par défaut (désactivé).
+  Chaque niveau est terminé sur toute la vue avant le suivant : LOD 5 et profondeur 2
+  calcule LOD 4, puis LOD 3. Les tiles arrivent progressivement à l'écran.
+- La fenêtre **Rendering** regroupe les options de rendu. **Render** lance une progression
+  unique jusqu'au LOD choisi, sans modifier le zoom ; bouger la caméra annule ce choix.
+  **Cache · LOD gap** autorise par défaut 3 niveaux d'écart : un cache LOD 3 peut
+  s'afficher depuis LOD 6. À 0, aucun historique plus fin n’est conservé ; les parents plus grossiers disponibles restent utilisables.
+  Le raffinement continu et le rendu manuel font progresser ce LOD de rendu.
+  Pendant un zoom, le rendu plus grossier déjà affiché et ses cadres restent présents
+  jusqu'à leur remplacement effectif par les nouvelles tiles.
+- **Coarse on GPU**, coché par défaut dans **Rendu**, charge des blocs fixes du
+  coarse à 7,68 km par cellule. Interpolation, éclairage et filtrage des vues
+  éloignées sont calculés sur le GPU du navigateur : les LOD 4 à 11 réutilisent
+  les mêmes blocs pendant le zoom. Les régions nouvelles doivent être chargées ;
+  l'aperçu procédural reste affiché avant la disponibilité du coarse appris.
+  Le base model et le decoder prennent ensuite le relais aux LOD plus fins.
+  Décocher cette option rétablit les tiles calculées par LOD sur le serveur ;
+  sans WebGPU, ce chemin reste utilisé automatiquement.
+- Une nouvelle génération annule la précédente, arrête le coarse et vide les
+  calculs de l'ancienne carte. Relief, érosion et climat disposent du GPU sans
+  concurrence des NN ; la préparation mondiale reprend après la dernière
+  génération terminée uniquement si elle a été activée. L'annulation respecte le bloc GPU déjà soumis.
+- Le coarse de toute la carte est **facultatif et désactivé par défaut**.
+  Seule la zone visible est calculée ; **Prefetch** prépare les voisins lorsque
+  les tiles visibles sont prêtes. Dans **Outils**, **Préparer toute la planète**
+  ou **Prepare neural world** active explicitement la préparation mondiale en
+  fond ; **Pause preparation** la désactive. Les demandes visibles restent
+  prioritaires. `prepare_world=1` conserve cette activation dans un lien ; les
+  anciens liens `coarse_prepare=1` n'activent plus automatiquement le calcul global.
+- **Mer max LOD**, réglé à **9**, arrête les calculs des tiles sans relief au-dessus
+  de −10 m dès ce LOD et aux niveaux plus fins. Les derniers rendus restent affichés.
+  Avec un seuil 3, LOD 4 et au-dessus rendent la mer normalement ; LOD 3 et en dessous
+  la gèlent. LOD 10 et 11 rendent toujours tout. **Rendre la mer**, décoché par défaut,
+  désactive le filtre lorsqu'il est coché. L'altitude de l'intérieur rendu fait foi ;
+  l'aperçu physique apporte une classification conservatrice aux zones inconnues.
+- La file privilégie les côtes, puis les terres, puis la mer, du centre vers les bords
+  dans chaque catégorie. **Prefetch** anticipe uniquement les déplacements.
 - **Préparer le monde NN** lance la préparation coarse mondiale en fond ; **Pause préparation** suspend les prochains blocs. Les demandes visibles sont prioritaires.
 
-Ouvrir **Paramètres de génération** pour choisir séparément l'altitude et le
-climat, puis ajuster fréquence, octaves et bruit permis pour chacun des cinq
-canaux. **Appliquer paramètres** conserve la position et le zoom ; les curseurs
-seuls ne lancent aucune génération. **Mémoriser A**, puis appliquer une variante,
-permet de basculer entre A et B sur la même région. Le lien de la page conserve
-les paramètres, et **Rétablir le profil par défaut** retire les personnalisations.
+Les menus à icônes **Génération**, **Climat**, **Bruit du relief · SNR** et
+**Rendering** partagent un brouillon unique. **Apply** conserve position et zoom ;
+modifier les réglages ne déclenche pas de génération. Changer le relief initial
+conserve les paramètres communs. Les layouts continentaux sont des presets :
+plaques pour Tectonique, paramètres de bruit pour NN, atlas pour Custom. Dans
+Custom, le mode atlas ou continents procéduraux reste sélectionnable.
 
-Le préréglage **Naturel continental** conserve le signal régional Natural et
-modifie sa composante à grande échelle, avec une force et un rayon de lissage
-réglables. C'est un essai expérimental, sans garantie de géomorphologie réaliste.
-Le préréglage **Naturel · référence** restaure le chemin original du checkpoint.
-Chaque configuration possède une identité distincte pour ses caches et ses
-fenêtres NN. [Utilisation et contrat des réglages](docs/GENERATION_CONTROLS.md).
+Le menu SNR ne règle que le relief. Le SNR global contraint les entrées du NN ;
+les multiplicateurs adaptatifs utilisent altitude, température (ou autre champ
+climatique) et latitude absolue. Un multiplicateur de 1 désactive une règle.
+Les seuils et le nombre de niveaux des rampes sont éditables. Le réglage par LOD
+(-3 à 11) agit expérimentalement sur le résidu local du relief reconstruit après
+le NN ; 0 hérite du SNR global. Il ne crée pas un réseau indépendant pour chaque
+LOD. Les réglages sont persistés dans les liens et identités de cache, avec
+lecture compatible des anciennes configurations.
 
-L'exploration calcule les régions visitées à la demande. La préparation de
-toute la planète est explicite, via le bouton ou `?prepare=1`. Le benchmark
+Le layer visible se choisit dans la barre de menus. **Biomes · Orogen** affiche
+la palette et les seuils du climat commun. Préchargement des tiles voisines et
+profondeur du raffinement sont réunis dans Rendering ; ils restent indépendants.
+Les tiles intermédiaires disponibles remplacent progressivement leur parent,
+même si la caméra vise déjà un LOD plus fin. Les cadres suivent les tiles rendues.
+
+L'exploration calcule les régions visitées en priorité. Lorsqu'elle est activée,
+la préparation de toute la planète avance sur le GPU disponible. Le benchmark
 antérieur occupait environ 707 Mo par monde complètement préparé ; le quota
 coarse est par monde, sans éviction globale entre seeds. Le cache de heightmaps
 est également persistant, sans quota global.
 
-Les cinq canaux gardent leurs unités physiques. Le climat initial utilise
-les distributions WorldClim par latitude et un gradient thermique en altitude ;
-il ne simule pas encore la circulation atmosphérique. Le relief et le climat
+Les cinq canaux gardent leurs unités physiques. Le climat commun utilise
+le pipeline saisonnier Orogen, sa circulation atmosphérique et ses courants océaniques. Le relief et le climat
 appris passent par le chemin CUDA existant, avec les optimisations de fenêtres,
 poids et batches conservées. WebGPU affiche les altitudes FP32 dans le navigateur.
 

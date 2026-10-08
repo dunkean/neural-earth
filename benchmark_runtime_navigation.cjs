@@ -23,11 +23,11 @@ const sourceFiles=['index.html','terrain_lod.js','terrain_renderer.js','terrain_
  try{
   report.serverBefore=await (await fetch(serverURL+'/api/status')).json();
   const opened=Date.now();
-  await page.goto(`${serverURL}/?seed=${seed}&profile=${profile}&prepare=0${['1','2'].includes(process.env.TERRAIN_RUNTIME_LATENT_GEOMETRY)?'&latent_geometry='+process.env.TERRAIN_RUNTIME_LATENT_GEOMETRY:''}${process.env.TERRAIN_RUNTIME_PROFILING==='1'?'&profiling=1':''}`);
+  await page.goto(`${serverURL}/?seed=${seed}&profile=${profile}&coarse_prepare=0${['1','2'].includes(process.env.TERRAIN_RUNTIME_LATENT_GEOMETRY)?'&latent_geometry='+process.env.TERRAIN_RUNTIME_LATENT_GEOMETRY:''}${process.env.TERRAIN_RUNTIME_PROFILING==='1'?'&profiling=1':''}`);
   await page.waitForFunction(()=>terrainDebug.snapshot().overview&&terrainDebug.snapshot().rendererReady,{},{timeout:120000});
   report.overviewReadyMs=Date.now()-opened;
   report.worldManifest=await page.evaluate(()=>world?.world_manifest);
-  await page.locator('#prefetch').uncheck();
+  await page.locator('#runtimePanel').evaluate(el=>el.open=true);await page.locator('#prefetch').uncheck();
   assert.equal((await page.evaluate(()=>terrainDebug.snapshot())).backend,'webgpu');
   if(process.env.TERRAIN_RUNTIME_LOD11==='1'){
    phase='lod11';const begin=Date.now();await page.evaluate(()=>zoom(1e-9));

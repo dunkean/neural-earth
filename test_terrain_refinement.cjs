@@ -4,10 +4,10 @@ const script=fs.readFileSync('index.html','utf8').split('<script>')[1].split('</
 const prefix=script.slice(0,script.indexOf("view.addEventListener('wheel'"));
 function createContext(search){return vm.createContext({URLSearchParams,AbortController,performance,Map,Set,Math,Date,
  location:{search},crypto:require('node:crypto').webcrypto,
- document:{getElementById:()=>({checked:false,dataset:{},getContext:()=>({})})},
- window:{TerrainLOD:require('./terrain_lod.js')},devicePixelRatio:1,
+ document:{getElementById:()=>({checked:false,dataset:{},options:[],getContext:()=>({})})},
+ window:{TerrainLOD:require('./terrain_lod.js')},TerrainLighting:{get:()=>({})},devicePixelRatio:1,
  setTimeout:()=>1,clearTimeout:()=>{},requestAnimationFrame:()=>1});}
-const context=createContext('?prepare=0&latent_geometry=2');
+const context=createContext('?coarse_prepare=0&latent_geometry=2');
 vm.runInContext(prefix,context);
 vm.runInContext(`world={seed:'42',generation_profile:'natural',cache_profile:'test',world_bounds:[-20e6,-10e6,20e6,10e6]};
  W=8192;H=256;mpp=30;cx=122880;cy=3840;publishView=()=>{};evict=()=>{};updateStatus=()=>{};
@@ -49,10 +49,10 @@ assert(vm.runInContext('queue.length>0&&queue.every(t=>t.lod===2&&t.source_lod==
 // Geometry1 A/B survives URL reconstruction and really schedules width112
 // source3 addresses; it must not silently fall back to geometry2.
 const geometry1=vm.createContext({URLSearchParams,AbortController,performance,Map,Set,Math,Date,
- location:{search:'?prepare=0&latent_geometry=1'},crypto:require('node:crypto').webcrypto,
- document:{getElementById:()=>({checked:false,dataset:{},getContext:()=>({})})},
+ location:{search:'?coarse_prepare=0&latent_geometry=1'},crypto:require('node:crypto').webcrypto,
+ document:{getElementById:()=>({checked:false,dataset:{},options:[],getContext:()=>({})})},
  history:{replaceState(a,b,url){geometry1.savedURL=url}},
- window:{TerrainLOD:require('./terrain_lod.js')},devicePixelRatio:1,
+ window:{TerrainLOD:require('./terrain_lod.js')},TerrainLighting:{get:()=>({}),serialize:()=>''},devicePixelRatio:1,
  setTimeout:()=>1,clearTimeout:()=>{},requestAnimationFrame:()=>1});
 vm.runInContext(prefix,geometry1);
 vm.runInContext(`world={seed:'42',world_profile:'natural',generation_profile:'natural',cache_profile:'test',world_bounds:[-20e6,-10e6,20e6,10e6]};
@@ -61,7 +61,7 @@ vm.runInContext(`world={seed:'42',world_profile:'natural',generation_profile:'na
 assert(new URLSearchParams(geometry1.savedURL.split('?')[1]).get('latent_geometry')==='1');
 assert(vm.runInContext('queue.length===1&&queue[0].lod===1&&queue[0].source_lod===3',geometry1));
 
-const standard=createContext('?prepare=0');vm.runInContext(prefix,standard);
+const standard=createContext('?coarse_prepare=0');vm.runInContext(prefix,standard);
 vm.runInContext(`world={seed:'42',generation_profile:'natural',cache_profile:'test',world_bounds:[-20e6,-10e6,20e6,10e6]};
  W=256;H=256;mpp=30;cx=3840;cy=3840;publishView=()=>{};evict=()=>{};updateStatus=()=>{};
  const coarse=taskFor(4,0,0,0);tiles.set(coarse.key,{...coarse,presented:true,expiresAt:Infinity});refresh();`,standard);

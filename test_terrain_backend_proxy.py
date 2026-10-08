@@ -40,6 +40,23 @@ class Response:
 
 
 class ProxyTests(unittest.TestCase):
+    def test_suspend_does_not_spawn_idle_worker_and_blocks_reference_compute(self):
+        worker=proxy.ReferenceWorker();worker.ensure_ready=Mock()
+        with patch.object(proxy,'opener') as transport:
+            worker.suspend(True)
+            self.assertEqual(worker.forward('coarse/natural-v1/42/0/0.bin','GET',b'',b'',{})[0],409)
+            transport.assert_not_called();worker.ensure_ready.assert_not_called()
+        worker.suspend(False)
+        self.assertFalse(worker.suspended)
+
+    def test_suspend_drains_existing_worker_and_resume_reopens_admission(self):
+        worker=proxy.ReferenceWorker();worker.state='ready';worker.process=FakeProcess()
+        transport=Mock();transport.open.return_value=Response()
+        with patch.object(proxy,'opener',return_value=transport):
+            worker.suspend(True);worker.suspend(False)
+        self.assertEqual([json.loads(call.args[0].data)['paused'] for call in transport.open.call_args_list],[True,False])
+        self.assertTrue(all(call.args[0].full_url.endswith('/api/terrain/suspend') for call in transport.open.call_args_list))
+
     def test_real_loopback_bind_detects_free_and_occupied_port(self):
         with socket.socket(socket.AF_INET,socket.SOCK_STREAM) as occupied:
             if os.name=='nt':occupied.setsockopt(socket.SOL_SOCKET,socket.SO_EXCLUSIVEADDRUSE,1)

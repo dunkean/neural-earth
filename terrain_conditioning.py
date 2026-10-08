@@ -18,10 +18,12 @@ from pyfastnoiselite.pyfastnoiselite import FastNoiseLite, NoiseType, FractalTyp
 
 from terrain_world import source_distributions, latitude, lapse_rate
 from terrain_generation import resolve_generation, GENERATION_VERSION
+from terrain_geometry import reference_coordinates
 
 BOOTSTRAP_CONDITIONING_VERSION = "native-bootstrap-worldclim-v2"
+OROGEN_CLIMATE_VERSION = "orogen-worldclim-v2; thermal harmonic, precipitation half-year monthly lower bound"
 WORLD_PROFILES = ("natural", "terrestrial-gondwana", "terrestrial-continents",
-                  "terrestrial-earthlike", "terrestrial-archipelago")
+                  "terrestrial-earthlike", "terrestrial-archipelago", "orogen")
 COARSE_RESOLUTION = 7680
 WORLD_BOUNDS_METERS = (-20_000_000., -10_000_000., 20_000_000., 10_000_000.)
 WORLD_BOUNDS = WORLD_BOUNDS_METERS
@@ -29,6 +31,35 @@ CONDITIONING_SNR = (.05, .5, .5, .5, .5)
 CHANNEL_NAMES = ("elevation_m", "temperature_c", "temperature_std_c_x100",
                  "precipitation_mm_year", "precipitation_cv_percent")
 STATS_PATH = Path(__file__).resolve().parent / "terrain-diffusion" / "data" / "global" / "synthetic_map_stats.json"
+
+
+def orogen_bioclim(temperature_summer, temperature_winter, precip_summer, precip_winter):
+    """Convert Orogen encodings into physical WorldClim conditioning units.
+
+    Temperatures represent opposing seasonal month proxies (-45..45 C),
+    approximated by a 12-month harmonic. Rain values represent *totals* for
+    each half-year (one source unit = 1000 mm), not monthly extrema. Equal
+    monthly allocation within each half-year gives the minimum monthly CV
+    consistent with those totals. Intra-season monsoons cannot be recovered
+    from two totals; no independent noise or empirical histogram is invented.
+    WorldClim's reference dismo::biovars uses sample standard deviation
+    (12/11 correction) and adds 1 mm to monthly rain before computing BIO15.
+    Rain encodings above one are valid: p95 is a reference, not a ceiling.
+    """
+    ts, tw, ps, pw = [np.asarray(v, np.float32) for v in
+                       (temperature_summer, temperature_winter, precip_summer, precip_winter)]
+    if not all(np.isfinite(v).all() for v in (ts, tw, ps, pw)):
+        raise ValueError("Orogen climate must be finite")
+    if (ps < 0).any() or (pw < 0).any():
+        raise ValueError("Orogen half-year precipitation cannot be negative")
+    ts, tw = ts * 90 - 45, tw * 90 - 45
+    ps, pw = ps * 1000, pw * 1000
+    annual = ps + pw
+    cv = np.zeros_like(annual)
+    correction = np.sqrt(12 / 11)
+    np.divide(np.abs(ps - pw) * (100 * correction), annual + 12, out=cv)
+    return np.stack(((ts + tw) * .5, np.abs(ts - tw) * (100 * correction / (2 * np.sqrt(2))),
+                     annual, cv)).astype(np.float32)
 
 
 def _noise(seed: int, frequency: float, octaves: int) -> FastNoiseLite:
@@ -348,11 +379,16 @@ class GenerationConditioning:
         self.generation_settings = descriptor.settings
         self.descriptor = descriptor
         self.natural = (TunableNaturalConditioning(seed, descriptor.settings)
-                        if descriptor.settings["height_source"] != "native" or descriptor.settings["climate_source"] == "natural" else None)
+                        if descriptor.settings["height_source"] not in ("native", "orogen") or descriptor.settings["climate_source"] == "natural" else None)
         self.native = None
         if descriptor.needs_bootstrap:
-            from terrain_bootstrap import get_heightmap
-            self.heightmap = get_heightmap(self.seed, descriptor.bootstrap_style)
+            if descriptor.bootstrap_generator == 'orogen':
+                from terrain_orogen import get_heightmap
+                self.heightmap = get_heightmap(self.seed, descriptor.bootstrap_style,
+                                               options=descriptor.bootstrap_options)
+            else:
+                from terrain_bootstrap import get_heightmap
+                self.heightmap = get_heightmap(self.seed, descriptor.bootstrap_style)
         if descriptor.settings["climate_source"] == "native":
             self.native = BootstrapConditioning(seed, descriptor.bootstrap_style, heightmap=self.heightmap)
             base_frequencies = (.004, .006, .009, .005)
@@ -390,10 +426,11 @@ class GenerationConditioning:
             return delta
 
     def _raw_coordinates(self, xs, ys):
+        xs, ys = reference_coordinates(xs, ys, self.generation_settings)
         raw = (self.natural.sample_raw_coordinates(xs, ys) if self.natural is not None
                else np.empty((5, len(ys), len(xs)), np.float32))
         s = self.descriptor.settings
-        if s["height_source"] == "native":
+        if s["height_source"] in ("native", "orogen") or s["relief_pipeline"] in ("orogen", "city-gpu") or any(s.get('orogen_'+stage+'_stage') for stage in ('relief','erosion','climate')):
             height = np.asarray(self.heightmap.sample_height_m(xs, ys), np.float32)
             if height.shape != (len(ys), len(xs)):
                 raise ValueError("Height source must provide metre heights with shape (y, x)")
@@ -407,6 +444,12 @@ class GenerationConditioning:
         if s["climate_source"] == "native":
             # Native climate applies its lapse once at the selected final height.
             raw[1:] = self.native._climate(raw[0], xs, ys)
+        if s["climate_source"] == "orogen":
+            from terrain_orogen_layers import sample
+            # Orogen temperature already includes its own lapse adjustment.
+            raw[1:] = orogen_bioclim(*(sample(self.heightmap, self.heightmap.layers[name], xs, ys)
+                                      for name in ('temperature_summer', 'temperature_winter',
+                                                   'precip_summer', 'precip_winter')))
         return raw
 
     def finalize(self, raw):
@@ -438,7 +481,7 @@ class GenerationConditioning:
 @lru_cache(maxsize=12)
 def _conditioning_factory(seed, world_profile):
     descriptor = resolve_generation(world_profile)
-    if not descriptor.is_default:
+    if not descriptor.is_default or descriptor.bootstrap_generator == 'orogen':
         return GenerationConditioning(seed, descriptor)
     if world_profile == "natural":
         factory = NaturalConditioning(seed)

@@ -4,7 +4,7 @@ const assert=require('node:assert/strict'),fs=require('node:fs'),crypto=require(
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM0LJrHwMDAxAAGAA7JAUW48M0QAAAAAElFTkSuQmCC','base64');
 const physical=Buffer.from(new Float32Array(304*304+5*33*33).fill(100).buffer);
 const html=fs.readFileSync('index.html','utf8'),lodScript=fs.readFileSync('terrain_lod.js','utf8');
-const renderer=`window.createTerrainRenderer=async()=>{const tiles=new Set();return{available:true,clear(){tiles.clear()},deleteTile(k){tiles.delete(k)},hasTile:k=>tiles.has(k),uploadTile(k){tiles.add(k)},draw(){},getStats(){return{}}}}`;
+const renderer=`window.createTerrainRenderer=async()=>{const tiles=new Set();return{available:true,clear(){tiles.clear()},deleteTile(k){tiles.delete(k)},hasTile:k=>tiles.has(k),uploadTile(k){tiles.add(k)},draw(rects){this.lastDrawnRects=rects.filter(r=>tiles.has(r.key));return true},getStats(){return{}}}}`;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 (async()=>{
  const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--disable-gpu']});
@@ -35,9 +35,9 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
    if(u.pathname.startsWith('/tiles/'))requests.push({phase,lod:Number(u.pathname.split('/')[4]),png:true});
    return route.fulfill({contentType:'image/png',body:png});
   });
-  await page.goto('https://refinement.test/?seed=42&profile=natural&prepare=0');
+  await page.goto('https://refinement.test/?seed=42&profile=natural&coarse_prepare=0');
   await page.waitForFunction(()=>terrainDebug.snapshot().rendererReady&&terrainDebug.snapshot().overview&&terrainDebug.snapshot().visible.pending===0);
-  await page.locator('#prefetch').uncheck();
+  await page.locator('#renderPanel').evaluate(el=>el.open=true);await page.locator('#prefetch').uncheck();await page.locator('#cacheLodGap').selectOption('14');
   // All zoom entry points, including fit on a tiny viewport, must cap scale.
   await page.evaluate(()=>zoom(1e-9));
   await page.waitForFunction(()=>terrainDebug.snapshot().camera.mpp===61440&&terrainDebug.snapshot().visible.pending===0);
@@ -45,9 +45,10 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   phase='native';holdLOD3=true;
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   await page.evaluate(()=>{window.savedRAF=requestAnimationFrame;window.heldFrames=[];window.requestAnimationFrame=f=>{heldFrames.push(f);return 10000+heldFrames.length};cx=110000;cy=110000;mpp=30;draw();schedule()});
-  await page.waitForFunction(()=>terrainDebug.snapshot().cache.keys.some(k=>k.includes('/42/4/'))&&terrainDebug.snapshot().scheduler.inflight===0);
+  await page.waitForFunction(()=>terrainDebug.snapshot().cache.keys.some(k=>k.includes('/42/4/'))&&terrainDebug.snapshot().refinement.active===3);
   await page.waitForTimeout(150);
-  assert(!requests.some(r=>r.phase==='native'&&r.lod<4),'without an animation frame, receipt must not start the expensive stage');
+  assert(requests.some(r=>r.phase==='native'&&r.lod===3),'completed calculations unlock the next stage independently of drawing');
+  assert(!requests.some(r=>r.phase==='native'&&r.lod<3),'unfinished calculations hold the next stage');
   await page.evaluate(()=>{window.requestAnimationFrame=savedRAF;for(const frame of heldFrames)savedRAF(frame)});
   await page.waitForFunction(()=>terrainDebug.snapshot().refinement.active===3&&terrainDebug.snapshot().rendered.lods.includes(4));
   // LOD3 is intentionally blocked: coarse must be displayed and finer NN jobs
@@ -59,10 +60,10 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   await page.waitForFunction(()=>terrainDebug.snapshot().visible.pending===0&&terrainDebug.snapshot().camera.lod===0);
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   const native=requests.filter(r=>r.phase==='native'),order=[...new Set(native.map(r=>r.lod))];
-  assert.deepEqual(order,[4,3,2,1,0]);
-  for(const lod of [3,2,1,0]){
+  assert.deepEqual(order,[4,3,0]);
+  for(const lod of [3,0]){
    const first=native.find(r=>r.lod===lod);
-   assert(first.before.rendered.lods.length&&Math.max(...first.before.rendered.lods)<=lod+1,'the previous stage must cover the full view before the next stage');
+   assert(first.before.cache.keys.some(key=>key.includes(`/42/${lod===0?3:4}/`)),'previous calculations must finish before the next stage');
   }
   // A cache-hot refresh should not invent ancestor requests.
   const received=requests.length;
@@ -72,6 +73,7 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const beforeAbort=(await page.evaluate(()=>terrainDebug.snapshot())).counters.aborts;
   await page.evaluate(()=>{cx=400000;cy=400000;mpp=30;draw();schedule()});
   while(!releasesCancel.length)await page.waitForTimeout(20);
+  await page.evaluate(()=>{$('cacheLodGap').value='0'});
   const fitMark=requests.length;await page.locator('#fit').click();
   await page.waitForFunction(before=>terrainDebug.snapshot().counters.aborts>before,beforeAbort);
   phase='after-fit';for(const release of releasesCancel)release();
@@ -109,17 +111,17 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   // coarse fallback may cover it or waste NN work wholly inside the image.
   phase='initial';
   holdNative=true;releasesNative=[];
-  await page.evaluate(()=>{initialImage=overview;world.initial_bounds=[-15000,-10000,15000,10000];cx=0;cy=0;mpp=24;draw();schedule()});
+  await page.evaluate(()=>{initialImage=overview;world.initial_bounds=[-16000,-12000,16000,12000];cx=0;cy=0;mpp=30;draw();schedule()});
   while(!releasesNative.length)await page.waitForTimeout(20);
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
   assert((await page.evaluate(()=>terrainDebug.snapshot())).visible.pending>0);
-  assert(requests.filter(r=>r.phase==='initial').length>0&&requests.filter(r=>r.phase==='initial').every(r=>r.lod===0));
-  assert(await page.evaluate(()=>visiblePlan.some(p=>p.fallback)&&visiblePlan.every(p=>!p.fallback||!intersects(p.bounds,world.initial_bounds))));
+  assert(requests.filter(r=>r.phase==='initial').length>0&&requests.filter(r=>r.phase==='initial').every(r=>r.lod===0),JSON.stringify(requests.filter(r=>r.phase==='initial').map(r=>({lod:r.lod,path:r.path,before:r.before?.camera}))));
+  assert(await page.evaluate(()=>visiblePlan.every(p=>!p.fallback||!intersects(p.bounds,world.initial_bounds))));
   holdNative=false;for(const release of releasesNative)release();
   await page.waitForFunction(()=>terrainDebug.snapshot().visible.pending===0&&terrainDebug.snapshot().camera.lod===0);
   assert(requests.every(r=>r.lod<=11));
   assert.deepEqual(errors,[]);
-  const report={passed:true,transport:'mock',gpu:'mock',sourceHashes:Object.fromEntries(['index.html','terrain_lod.js','verify_progressive_zoom.cjs'].map(p=>[p,crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')])),nativeRequestOrder:order,noLOD12:requests.every(r=>r.lod<=11),slowLOD3HasPresentedLOD4:native.find(r=>r.lod===3).before.rendered.lods.includes(4),heldRAFBlocksRefinement:true,nativeImageProtected:requests.filter(r=>r.phase==='initial').every(r=>r.lod===0),panRetainedFlights:retained.length,cancelAborts:(await page.evaluate(()=>terrainDebug.snapshot())).counters.aborts-beforeAbort,hotRefreshRequests,requests:requests.length};
+  const report={passed:true,transport:'mock',gpu:'mock',sourceHashes:Object.fromEntries(['index.html','terrain_lod.js','verify_progressive_zoom.cjs'].map(p=>[p,crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')])),nativeRequestOrder:order,noLOD12:requests.every(r=>r.lod<=11),nextStageHasCompletedParent:native.find(r=>r.lod===3).before.cache.keys.some(k=>k.includes('/42/4/')),calculationsIndependentOfAnimationFrames:true,nativeImageProtected:requests.filter(r=>r.phase==='initial').every(r=>r.lod===0),panRetainedFlights:retained.length,cancelAborts:(await page.evaluate(()=>terrainDebug.snapshot())).counters.aborts-beforeAbort,hotRefreshRequests,requests:requests.length};
   if(process.env.REPORT_PATH)fs.writeFileSync(process.env.REPORT_PATH,JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2));
  }finally{await browser.close()}

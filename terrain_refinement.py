@@ -16,7 +16,7 @@ from infinite_tensor import InfiniteTensor, TensorWindow
 from terrain_diffusion.inference.world_pipeline import linear_weight_window
 from terrain_diffusion.scheduler.dpmsolver import EDMDPMSolverMultistepScheduler
 
-VERSION = 'decoder-cascade-v2-fractional-latents'
+VERSION = 'decoder-cascade-v3-coastal-residuals'
 MIN_LOD = -3
 
 
@@ -122,6 +122,19 @@ def sample_refined(world, level, i1, j1, i2, j2, *, check=None):
         parent = parent.to(world.device, dtype=torch.float32)[None, None]
         base = F.interpolate(parent, scale_factor=2, mode='bilinear', align_corners=False)
         base = base + _repeat(parent - F.avg_pool2d(base, 2))
+        # Mean correction can overshoot even when every neighbour is land.
+        # Limit its zero-mean variation to the local parent range; mixed
+        # land/sea neighbourhoods still allow interpolated coast crossings.
+        tiny = torch.finfo(parent.dtype).tiny
+        variation = base - _repeat(parent)
+        lower = -F.max_pool2d(-parent, 3, stride=1, padding=1)
+        upper = F.max_pool2d(parent, 3, stride=1, padding=1)
+        down = F.max_pool2d((-variation).clamp_min(0), 2)
+        up = F.max_pool2d(variation.clamp_min(0), 2)
+        interpolation_gain = torch.minimum(
+            (parent-lower) / down.clamp_min(tiny),
+            (upper-parent) / up.clamp_min(tiny)).clamp(0, 1)
+        base = _repeat(parent) + variation * _repeat(interpolation_gain)
 
         field = _detail_field(world, level)
         fused = field[:, 2*pi1:2*pi2, 2*pj1:2*pj2].to(world.device)
@@ -133,9 +146,18 @@ def sample_refined(world, level, i1, j1, i2, j2, *, check=None):
         # Checkpoint residuals live in signed-sqrt height space. Convert their
         # small perturbation to metres with the parent's local derivative;
         # decrease amplitude with resolution and retain zero block means.
-        amplitude = 2 * parent.abs().sqrt().clamp_min(1)
+        amplitude = 2 * parent.abs().sqrt()
         amplitude = amplitude * float(world.kwargs['residual_std']) * (0.5**level)
-        result = base + detail * _repeat(amplitude)
+        residual = detail * _repeat(amplitude)
+        # Linearizing signed-sqrt heights alone lets noise dominate very low
+        # terrain. Bound it smoothly by half the lowest absolute child height:
+        # zero at sea level, tending to the original amplitude on high ground.
+        # A shared gain per 2x2 block keeps the residual's mean exactly zero;
+        # the interpolated base can still reconstruct crossings at the coast.
+        peak = F.max_pool2d(residual.abs(), 2)
+        height = -F.max_pool2d(-base.abs(), 2)
+        gain = height / torch.hypot(height, 2*peak).clamp_min(tiny)
+        result = base + residual * _repeat(gain)
         if check is not None:
             check()
         row, col = i1 - 2*pi1, j1 - 2*pj1

@@ -1,0 +1,2227 @@
+{
+  "orogen_itcz_ocean_lat": {
+    "default": 5.0,
+    "minimum": 0.0,
+    "maximum": 25.0,
+    "label": "ITCZ ocean latitude (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_itcz_land_pull": {
+    "default": 15.0,
+    "minimum": 0.0,
+    "maximum": 40.0,
+    "label": "ITCZ land displacement (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_itcz_elevation_pull": {
+    "default": 1.5,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "label": "ITCZ elevation displacement (\u00b0/km)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_itcz_land_saturation": {
+    "default": 2.0,
+    "minimum": 0.1,
+    "maximum": 10.0,
+    "label": "ITCZ land saturation",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_itcz_min_lat": {
+    "default": 5.0,
+    "minimum": 0.0,
+    "maximum": 30.0,
+    "label": "ITCZ minimum latitude (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_itcz_max_lat": {
+    "default": 20.0,
+    "minimum": 1.0,
+    "maximum": 60.0,
+    "label": "ITCZ maximum latitude (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_itcz_strength": {
+    "default": 15.0,
+    "minimum": 0.0,
+    "maximum": 60.0,
+    "label": "ITCZ low pressure (hPa)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_itcz_width": {
+    "default": 8.0,
+    "minimum": 1.0,
+    "maximum": 30.0,
+    "label": "ITCZ pressure width (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_seasonal_shift": {
+    "default": 5.0,
+    "minimum": 0.0,
+    "maximum": 30.0,
+    "label": "Seasonal belt displacement (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_subtropical_strength": {
+    "default": 12.0,
+    "minimum": 0.0,
+    "maximum": 60.0,
+    "label": "Subtropical high pressure (hPa)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_land_weakening": {
+    "default": 0.3,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "High pressure land weakening",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_subpolar_strength": {
+    "default": 10.0,
+    "minimum": 0.0,
+    "maximum": 60.0,
+    "label": "Subpolar low pressure (hPa)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_polar_strength": {
+    "default": 8.0,
+    "minimum": 0.0,
+    "maximum": 60.0,
+    "label": "Polar high pressure (hPa)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_summer_land": {
+    "default": 10.0,
+    "minimum": 0.0,
+    "maximum": 60.0,
+    "label": "Summer continental low (hPa)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_winter_land": {
+    "default": 14.0,
+    "minimum": 0.0,
+    "maximum": 60.0,
+    "label": "Winter continental high (hPa)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_elevation": {
+    "default": 3.0,
+    "minimum": 0.0,
+    "maximum": 15.0,
+    "label": "Pressure altitude effect (hPa/km)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_noise": {
+    "default": 2.0,
+    "minimum": 0.0,
+    "maximum": 15.0,
+    "label": "Pressure noise (hPa)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_geostrophic_angle": {
+    "default": 70.0,
+    "minimum": 0.0,
+    "maximum": 90.0,
+    "label": "Geostrophic deflection (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_friction_angle": {
+    "default": 20.0,
+    "minimum": 0.0,
+    "maximum": 90.0,
+    "label": "Surface friction angle (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_continentality_km": {
+    "default": 2000.0,
+    "minimum": 100.0,
+    "maximum": 10000.0,
+    "label": "Continentality range (km)",
+    "group": "wind",
+    "step": 50
+  },
+  "orogen_continentality_smoothing_km": {
+    "default": 100.0,
+    "minimum": 0.0,
+    "maximum": 500.0,
+    "label": "Continentality smoothing (km)",
+    "group": "wind",
+    "step": 10
+  },
+  "orogen_pressure_smoothing_km": {
+    "default": 75.0,
+    "minimum": 0.0,
+    "maximum": 500.0,
+    "label": "Pressure smoothing (km)",
+    "group": "wind",
+    "step": 5
+  },
+  "orogen_ocean_coast_range": {
+    "default": 0.035,
+    "minimum": 0.005,
+    "maximum": 0.15,
+    "label": "Current coastal range",
+    "group": "ocean",
+    "step": 0.001
+  },
+  "orogen_ocean_warmth_range": {
+    "default": 2.0,
+    "minimum": 0.1,
+    "maximum": 8.0,
+    "label": "Coastal warmth range multiplier",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_west_strength": {
+    "default": 2.0,
+    "minimum": 0.0,
+    "maximum": 5.0,
+    "label": "Western boundary current strength",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_east_strength": {
+    "default": 0.8,
+    "minimum": 0.0,
+    "maximum": 5.0,
+    "label": "Eastern boundary current strength",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_west_deflection": {
+    "default": 0.7,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Western zonal attenuation",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_east_deflection": {
+    "default": 0.5,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Eastern zonal attenuation",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_circumpolar_strength": {
+    "default": 1.5,
+    "minimum": 0.0,
+    "maximum": 5.0,
+    "label": "Circumpolar current strength",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_smoothing_km": {
+    "default": 125.0,
+    "minimum": 0.0,
+    "maximum": 1000.0,
+    "label": "Current smoothing (km)",
+    "group": "ocean",
+    "step": 5
+  },
+  "orogen_ocean_warmth_smoothing_km": {
+    "default": 900.0,
+    "minimum": 0.0,
+    "maximum": 3000.0,
+    "label": "Ocean warmth smoothing (km)",
+    "group": "ocean",
+    "step": 25
+  },
+  "orogen_temperature_smoothing": {
+    "default": 1,
+    "minimum": 0,
+    "maximum": 10,
+    "label": "Temperature smoothing passes",
+    "group": "temperature",
+    "step": 1,
+    "integer": true
+  },
+  "orogen_temperature_ocean_diffusion_km": {
+    "default": 1400.0,
+    "minimum": 0.0,
+    "maximum": 5000.0,
+    "label": "Coastal heat diffusion (km)",
+    "group": "temperature",
+    "step": 50
+  },
+  "orogen_temperature_tropical_width": {
+    "default": 13.0,
+    "minimum": 0.0,
+    "maximum": 40.0,
+    "label": "Tropical plateau width (\u00b0)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_equator": {
+    "default": 28.0,
+    "minimum": -10.0,
+    "maximum": 60.0,
+    "label": "Equatorial temperature (\u00b0C)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_polar_drop": {
+    "default": 47.0,
+    "minimum": 0.0,
+    "maximum": 100.0,
+    "label": "Pole temperature drop (\u00b0C)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_latitude_power": {
+    "default": 1.4,
+    "minimum": 0.1,
+    "maximum": 4.0,
+    "label": "Latitude falloff exponent",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_reference_itcz": {
+    "default": 5.0,
+    "minimum": 0.0,
+    "maximum": 30.0,
+    "label": "Thermal reference latitude (\u00b0)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_wet_lapse": {
+    "default": 4.5,
+    "minimum": 0.0,
+    "maximum": 15.0,
+    "label": "Wet lapse rate (\u00b0C/km)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_dry_lapse_extra": {
+    "default": 4.8,
+    "minimum": 0.0,
+    "maximum": 15.0,
+    "label": "Dry lapse increment (\u00b0C/km)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_ocean_effect": {
+    "default": 16.0,
+    "minimum": 0.0,
+    "maximum": 50.0,
+    "label": "Ocean heat influence (\u00b0C)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_coastal_effect": {
+    "default": 20.0,
+    "minimum": 0.0,
+    "maximum": 50.0,
+    "label": "Coastal heat influence (\u00b0C)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_cloud_moderation": {
+    "default": 0.15,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Cloud moderation",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_clear_amplification": {
+    "default": 0.15,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Clear sky amplification",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_seasonal_boost": {
+    "default": 12.0,
+    "minimum": 0.0,
+    "maximum": 40.0,
+    "label": "Seasonal temperature boost (\u00b0C)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_maritime_factor": {
+    "default": 0.5,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Maritime seasonal factor",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_continental_extra": {
+    "default": 0.7,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Continental seasonal increment",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_precip_advection_km": {
+    "default": 2000.0,
+    "minimum": 100.0,
+    "maximum": 6000.0,
+    "label": "Moisture advection reach (km)",
+    "group": "precipitation",
+    "step": 50
+  },
+  "orogen_precip_elevation_smoothing_km": {
+    "default": 200.0,
+    "minimum": 0.0,
+    "maximum": 1000.0,
+    "label": "Orographic smoothing (km)",
+    "group": "precipitation",
+    "step": 10
+  },
+  "orogen_precip_convergence_smoothing_km": {
+    "default": 400.0,
+    "minimum": 0.0,
+    "maximum": 2000.0,
+    "label": "Frontal smoothing (km)",
+    "group": "precipitation",
+    "step": 25
+  },
+  "orogen_precip_ocean_moisture": {
+    "default": 0.4,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Ocean baseline moisture",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_ocean_warmth": {
+    "default": 0.35,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Warm water moisture contribution",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_offshore_moisture": {
+    "default": 0.25,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Offshore coastal moisture",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_retention": {
+    "default": 0.78,
+    "minimum": 0.01,
+    "maximum": 1.0,
+    "label": "Flat terrain moisture retention",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_elevation_depletion": {
+    "default": 0.55,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Altitude moisture depletion",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_itcz_width": {
+    "default": 15.0,
+    "minimum": 1.0,
+    "maximum": 40.0,
+    "label": "ITCZ rain width (\u00b0)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_itcz_core_boost": {
+    "default": 1.5,
+    "minimum": 0.0,
+    "maximum": 5.0,
+    "label": "ITCZ core rain boost",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_itcz_add": {
+    "default": 0.3,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "ITCZ rain addition",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_frontal_scale": {
+    "default": 0.055,
+    "minimum": 0.0,
+    "maximum": 0.5,
+    "label": "Convergence sensitivity",
+    "group": "precipitation",
+    "step": 0.001
+  },
+  "orogen_precip_frontal_boost": {
+    "default": 1.2,
+    "minimum": 0.0,
+    "maximum": 5.0,
+    "label": "Frontal rain boost",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_frontal_add": {
+    "default": 0.4,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Frontal moisture contribution",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_uplift_scale": {
+    "default": 15.0,
+    "minimum": 0.0,
+    "maximum": 60.0,
+    "label": "Windward gradient sensitivity",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_uplift_add": {
+    "default": 1.0,
+    "minimum": 0.0,
+    "maximum": 5.0,
+    "label": "Windward local rain boost",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_shadow_scale": {
+    "default": 18.0,
+    "minimum": 0.0,
+    "maximum": 60.0,
+    "label": "Leeward gradient sensitivity",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_shadow_local": {
+    "default": 0.95,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Local rain shadow strength",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_subtrop_summer": {
+    "default": 0.5,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Summer subtropical suppression",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_subtrop_winter": {
+    "default": 0.3,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Winter subtropical suppression",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_monsoon_relief": {
+    "default": 0.7,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Coastal monsoon relief",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_high_pressure": {
+    "default": 0.25,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "High pressure rain reduction",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_low_pressure": {
+    "default": 0.2,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Low pressure rain relief",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_polar_base": {
+    "default": 0.1,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Polar rain baseline",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_polar_coastal": {
+    "default": 0.2,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Polar coastal rain",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_polar_boost": {
+    "default": 0.15,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Polar rain multiplier",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_continental_dryness": {
+    "default": 0.55,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Continental drying",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_lee_add": {
+    "default": 0.15,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Lee cyclogenesis rain",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_ocean_base": {
+    "default": 0.15,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Ocean rain baseline",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_cutoff_start_km": {
+    "default": 2000.0,
+    "minimum": 100.0,
+    "maximum": 10000.0,
+    "label": "Dry interior starts (km)",
+    "group": "precipitation",
+    "step": 50
+  },
+  "orogen_precip_cutoff_end_km": {
+    "default": 3000.0,
+    "minimum": 100.0,
+    "maximum": 15000.0,
+    "label": "Dry interior ends (km)",
+    "group": "precipitation",
+    "step": 50
+  },
+  "orogen_precip_land_drying": {
+    "default": 0.98,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "High land coverage drying",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_shadow_min_height": {
+    "default": 0.8,
+    "minimum": 0.0,
+    "maximum": 6.0,
+    "label": "Rain shadow minimum height (km)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_shadow_reach_km": {
+    "default": 2500.0,
+    "minimum": 100.0,
+    "maximum": 6000.0,
+    "label": "Downwind rain shadow (km)",
+    "group": "precipitation",
+    "step": 50
+  },
+  "orogen_precip_shadow_retention": {
+    "default": 0.15,
+    "minimum": 0.01,
+    "maximum": 1.0,
+    "label": "Downwind shadow retention",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_windward_reach_km": {
+    "default": 1500.0,
+    "minimum": 100.0,
+    "maximum": 5000.0,
+    "label": "Upwind rain reach (km)",
+    "group": "precipitation",
+    "step": 50
+  },
+  "orogen_precip_windward_retention": {
+    "default": 0.25,
+    "minimum": 0.01,
+    "maximum": 1.0,
+    "label": "Upwind rain retention",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_shadow_propagated": {
+    "default": 0.92,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Propagated shadow reduction",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_windward_propagated": {
+    "default": 1.2,
+    "minimum": 0.0,
+    "maximum": 5.0,
+    "label": "Propagated windward rain",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_smoothing_km": {
+    "default": 100.0,
+    "minimum": 0.0,
+    "maximum": 1000.0,
+    "label": "Rain smoothing (km)",
+    "group": "precipitation",
+    "step": 10
+  },
+  "orogen_precip_heuristic_blend": {
+    "default": 0.5,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Heuristic rain proportion",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_heuristic_wind_blend": {
+    "default": 0.5,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Heuristic wind proportion",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_interior_cap": {
+    "default": 0.8,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Interior rain cap reduction",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_heuristic_itcz_shift": {
+    "default": 0.3,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Heuristic ITCZ displacement",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_summer": {
+    "default": 1.1,
+    "minimum": 0.0,
+    "maximum": 3.0,
+    "label": "Heuristic summer rain factor",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_winter": {
+    "default": 0.9,
+    "minimum": 0.0,
+    "maximum": 3.0,
+    "label": "Heuristic winter rain factor",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_med_drying": {
+    "default": 0.15,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Mediterranean interior drying",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_med_coast": {
+    "default": 0.2,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Mediterranean west coast drying",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_continental": {
+    "default": 0.65,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Heuristic continental drying",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_uplift": {
+    "default": 0.6,
+    "minimum": 0.0,
+    "maximum": 3.0,
+    "label": "Heuristic windward enhancement",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_shadow": {
+    "default": 0.7,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Heuristic shadow reduction",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_shadow_height": {
+    "default": 3.0,
+    "minimum": 0.1,
+    "maximum": 8.0,
+    "label": "Full shadow height (km)",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_koppen_ice": {
+    "default": 0.0,
+    "minimum": -20.0,
+    "maximum": 15.0,
+    "label": "Ice cap warmest month (\u00b0C)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_tundra": {
+    "default": 10.0,
+    "minimum": -10.0,
+    "maximum": 25.0,
+    "label": "Tundra warmest month (\u00b0C)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_tropical": {
+    "default": 18.0,
+    "minimum": 0.0,
+    "maximum": 35.0,
+    "label": "Tropical coldest month (\u00b0C)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_temperate": {
+    "default": 0.0,
+    "minimum": -20.0,
+    "maximum": 20.0,
+    "label": "Temperate coldest month (\u00b0C)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_hot_summer": {
+    "default": 22.0,
+    "minimum": 10.0,
+    "maximum": 40.0,
+    "label": "Hot summer threshold (\u00b0C)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_shoulder": {
+    "default": 10.0,
+    "minimum": 0.0,
+    "maximum": 25.0,
+    "label": "Warm shoulder month (\u00b0C)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_extreme_cold": {
+    "default": -38.0,
+    "minimum": -45.0,
+    "maximum": 0.0,
+    "label": "Extreme cold threshold (\u00b0C)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_hot_arid": {
+    "default": 18.0,
+    "minimum": 0.0,
+    "maximum": 35.0,
+    "label": "Hot arid annual mean (\u00b0C)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_aridity_temperature": {
+    "default": 20.0,
+    "minimum": 0.0,
+    "maximum": 60.0,
+    "label": "Aridity temperature coefficient",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_aridity_summer": {
+    "default": 280.0,
+    "minimum": 0.0,
+    "maximum": 1000.0,
+    "label": "Summer aridity addition (mm)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_aridity_mixed": {
+    "default": 140.0,
+    "minimum": 0.0,
+    "maximum": 1000.0,
+    "label": "Mixed aridity addition (mm)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_summer_fraction": {
+    "default": 0.7,
+    "minimum": 0.5,
+    "maximum": 1.0,
+    "label": "Summer rain fraction",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_winter_fraction": {
+    "default": 0.3,
+    "minimum": 0.0,
+    "maximum": 0.5,
+    "label": "Winter rain fraction",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_desert_fraction": {
+    "default": 0.5,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Desert / steppe aridity ratio",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_dry_summer_mm": {
+    "default": 50.0,
+    "minimum": 0.0,
+    "maximum": 200.0,
+    "label": "Dry summer monthly rain (mm)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_dry_summer_ratio": {
+    "default": 2.0,
+    "minimum": 1.0,
+    "maximum": 20.0,
+    "label": "Dry summer season ratio",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_dry_winter_ratio": {
+    "default": 10.0,
+    "minimum": 1.0,
+    "maximum": 30.0,
+    "label": "Dry winter season ratio",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_rainforest_mm": {
+    "default": 60.0,
+    "minimum": 0.0,
+    "maximum": 250.0,
+    "label": "Rainforest driest month (mm)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_monsoon_factor": {
+    "default": 25.0,
+    "minimum": 1.0,
+    "maximum": 100.0,
+    "label": "Monsoon annual rain factor",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_koppen_monsoon_mm": {
+    "default": 100.0,
+    "minimum": 0.0,
+    "maximum": 300.0,
+    "label": "Monsoon reference rain (mm)",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_biome_tropical_alpine": {
+    "default": 3.5,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Tropical alpine line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_tropical_snow": {
+    "default": 5.5,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Tropical snow line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_arid_alpine": {
+    "default": 3.0,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Arid alpine line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_arid_snow": {
+    "default": 5.0,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Arid snow line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_temperate_alpine": {
+    "default": 2.0,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Temperate alpine line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_temperate_snow": {
+    "default": 3.5,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Temperate snow line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_continental_alpine": {
+    "default": 1.5,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Continental alpine line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_continental_snow": {
+    "default": 3.0,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Continental snow line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_subarctic_alpine": {
+    "default": 0.8,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Subarctic alpine line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_subarctic_snow": {
+    "default": 2.0,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Subarctic snow line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_tundra_alpine": {
+    "default": 0.4,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Tundra alpine line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_tundra_snow": {
+    "default": 1.5,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Tundra snow line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_ice_alpine": {
+    "default": 0.0,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Ice alpine line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_ice_snow": {
+    "default": 0.5,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "step": 0.05,
+    "label": "Ice snow line (km)",
+    "group": "biome-altitude"
+  },
+  "orogen_biome_low_darkening": {
+    "default": 0.07,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Lowland shade strength",
+    "group": "biome-rendering",
+    "step": 0.01
+  },
+  "orogen_biome_mid_darkening": {
+    "default": 0.15,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Mountain shade strength",
+    "group": "biome-rendering",
+    "step": 0.01
+  },
+  "orogen_biome_snow_transition": {
+    "default": 2.5,
+    "minimum": 0.1,
+    "maximum": 8.0,
+    "label": "Snow transition height (km)",
+    "group": "biome-rendering",
+    "step": 0.01
+  },
+  "orogen_biome_color_af": {
+    "default": [
+      0.05,
+      0.3,
+      0.05
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Af color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_am": {
+    "default": [
+      0.08,
+      0.33,
+      0.07
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Am color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_aw": {
+    "default": [
+      0.42,
+      0.5,
+      0.18
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Aw color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_bwh": {
+    "default": [
+      0.82,
+      0.72,
+      0.5
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "BWh color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_bwk": {
+    "default": [
+      0.6,
+      0.55,
+      0.48
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "BWk color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_bsh": {
+    "default": [
+      0.72,
+      0.62,
+      0.3
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "BSh color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_bsk": {
+    "default": [
+      0.55,
+      0.52,
+      0.32
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "BSk color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_cfa": {
+    "default": [
+      0.18,
+      0.42,
+      0.12
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Cfa color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_cfb": {
+    "default": [
+      0.12,
+      0.38,
+      0.1
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Cfb color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_cfc": {
+    "default": [
+      0.1,
+      0.28,
+      0.1
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Cfc color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_csa": {
+    "default": [
+      0.45,
+      0.48,
+      0.22
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Csa color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_csb": {
+    "default": [
+      0.4,
+      0.45,
+      0.2
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Csb color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_csc": {
+    "default": [
+      0.35,
+      0.4,
+      0.2
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Csc color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_cwa": {
+    "default": [
+      0.2,
+      0.44,
+      0.14
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Cwa color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_cwb": {
+    "default": [
+      0.15,
+      0.4,
+      0.12
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Cwb color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_cwc": {
+    "default": [
+      0.12,
+      0.32,
+      0.1
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Cwc color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_dfa": {
+    "default": [
+      0.12,
+      0.36,
+      0.08
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Dfa color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_dfb": {
+    "default": [
+      0.1,
+      0.32,
+      0.08
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Dfb color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_dfc": {
+    "default": [
+      0.06,
+      0.22,
+      0.08
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Dfc color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_dfd": {
+    "default": [
+      0.05,
+      0.18,
+      0.07
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Dfd color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_dsa": {
+    "default": [
+      0.38,
+      0.38,
+      0.18
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Dsa color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_dsb": {
+    "default": [
+      0.35,
+      0.35,
+      0.17
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Dsb color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_dsc": {
+    "default": [
+      0.08,
+      0.22,
+      0.08
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Dsc color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_dsd": {
+    "default": [
+      0.06,
+      0.18,
+      0.07
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Dsd color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_dwa": {
+    "default": [
+      0.14,
+      0.36,
+      0.1
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Dwa color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_dwb": {
+    "default": [
+      0.12,
+      0.32,
+      0.09
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Dwb color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_dwc": {
+    "default": [
+      0.07,
+      0.22,
+      0.08
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Dwc color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_dwd": {
+    "default": [
+      0.05,
+      0.18,
+      0.07
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Dwd color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_et": {
+    "default": [
+      0.35,
+      0.32,
+      0.22
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "ET color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_color_ef": {
+    "default": [
+      0.78,
+      0.8,
+      0.84
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "EF color",
+    "group": "biome-palette",
+    "color": true
+  },
+  "orogen_biome_rock_color": {
+    "default": [
+      0.42,
+      0.38,
+      0.32
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Rock color",
+    "group": "biome-rendering",
+    "color": true
+  },
+  "orogen_biome_snow_color": {
+    "default": [
+      0.92,
+      0.93,
+      0.96
+    ],
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "length": 3,
+    "label": "Snow color",
+    "group": "biome-rendering",
+    "color": true
+  },
+  "orogen_itcz_sample_radius": {
+    "default": 20.0,
+    "minimum": 1.0,
+    "maximum": 60.0,
+    "label": "ITCZ sampling radius (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_baseline": {
+    "default": 1013.0,
+    "minimum": 800.0,
+    "maximum": 1200.0,
+    "label": "Baseline pressure (hPa)",
+    "group": "wind",
+    "step": 1
+  },
+  "orogen_pressure_subtropical_lat": {
+    "default": 30.0,
+    "minimum": 0.01,
+    "maximum": 90.0,
+    "label": "Subtropical high latitude (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_subtropical_width": {
+    "default": 10.0,
+    "minimum": 0.01,
+    "maximum": 90.0,
+    "label": "Pressure belt width (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_subpolar_lat": {
+    "default": 60.0,
+    "minimum": 0.01,
+    "maximum": 90.0,
+    "label": "Subpolar low latitude (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_polar_lat": {
+    "default": 85.0,
+    "minimum": 0.01,
+    "maximum": 90.0,
+    "label": "Polar high latitude (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_polar_width": {
+    "default": 8.0,
+    "minimum": 0.01,
+    "maximum": 90.0,
+    "label": "Polar pressure width (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_geostrophic_lat": {
+    "default": 5.0,
+    "minimum": 0.01,
+    "maximum": 90.0,
+    "label": "Deflection full at latitude (\u00b0)",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_wind_friction_speed": {
+    "default": 0.6,
+    "minimum": 0.01,
+    "maximum": 10.0,
+    "label": "Surface wind speed factor",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_noise_frequency": {
+    "default": 2.0,
+    "minimum": 0.01,
+    "maximum": 10.0,
+    "label": "Pressure noise frequency",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_continental_start": {
+    "default": 0.2,
+    "minimum": 0.0,
+    "maximum": 0.9,
+    "label": "Thermal continentality starts",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_pressure_continental_full": {
+    "default": 0.5,
+    "minimum": 0.01,
+    "maximum": 1.0,
+    "label": "Thermal continentality full",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_ocean_itcz_width": {
+    "default": 3.0,
+    "minimum": 0.1,
+    "maximum": 89.0,
+    "label": "Countercurrent width (\u00b0)",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_trade_lat": {
+    "default": 30.0,
+    "minimum": 0.1,
+    "maximum": 89.0,
+    "label": "Trade current ends (\u00b0)",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_westerly_start": {
+    "default": 35.0,
+    "minimum": 0.1,
+    "maximum": 89.0,
+    "label": "Westerly current starts (\u00b0)",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_westerly_end": {
+    "default": 58.0,
+    "minimum": 0.1,
+    "maximum": 89.0,
+    "label": "Westerly current ends (\u00b0)",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_polar_lat": {
+    "default": 65.0,
+    "minimum": 0.1,
+    "maximum": 89.0,
+    "label": "Polar current starts (\u00b0)",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_warm_trade_end": {
+    "default": 28.0,
+    "minimum": 0.1,
+    "maximum": 89.0,
+    "label": "Warm trade belt ends (\u00b0)",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_warm_westerly_end": {
+    "default": 55.0,
+    "minimum": 0.1,
+    "maximum": 89.0,
+    "label": "Warm westerly belt ends (\u00b0)",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_circumpolar_min": {
+    "default": 55.0,
+    "minimum": 0.1,
+    "maximum": 89.0,
+    "label": "Circumpolar belt starts (\u00b0)",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_circumpolar_max": {
+    "default": 75.0,
+    "minimum": 0.1,
+    "maximum": 89.0,
+    "label": "Circumpolar belt ends (\u00b0)",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_circumpolar_center": {
+    "default": 65.0,
+    "minimum": 0.1,
+    "maximum": 89.0,
+    "label": "Circumpolar center (\u00b0)",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_polar_speed": {
+    "default": 0.5,
+    "minimum": 0.0,
+    "maximum": 3.0,
+    "label": "Polar current speed",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_polar_transition": {
+    "default": 1.5,
+    "minimum": 0.0,
+    "maximum": 4.0,
+    "label": "Polar current transition strength",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_circumpolar_width": {
+    "default": 10.0,
+    "minimum": 1.0,
+    "maximum": 30.0,
+    "label": "Circumpolar half width (\u00b0)",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_ocean_circumpolar_deflection": {
+    "default": 0.8,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Circumpolar meridional attenuation",
+    "group": "ocean",
+    "step": 0.01
+  },
+  "orogen_temperature_blend_start": {
+    "default": 45.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Thermal latitude blending starts (\u00b0)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_cloud_threshold": {
+    "default": 0.5,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Cloud moderation starts at rain",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_clear_threshold": {
+    "default": 0.3,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Clear sky amplification below rain",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_seasonal_start": {
+    "default": 10.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Seasonal boost starts (\u00b0)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_seasonal_peak": {
+    "default": 55.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Seasonal boost peak (\u00b0)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_seasonal_fade": {
+    "default": 75.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Seasonal boost fades from (\u00b0)",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_ocean_speed": {
+    "default": 2.0,
+    "minimum": 0.0,
+    "maximum": 5.0,
+    "label": "Ocean heat speed sensitivity",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_temperature_coast_limit": {
+    "default": 0.95,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Coastal continentality cutoff",
+    "group": "temperature",
+    "step": 0.01
+  },
+  "orogen_precip_subtrop_summer_lat": {
+    "default": 30.0,
+    "minimum": 0.0,
+    "maximum": 70.0,
+    "label": "Summer subtropical center (\u00b0)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_subtrop_winter_lat": {
+    "default": 24.0,
+    "minimum": 0.0,
+    "maximum": 70.0,
+    "label": "Winter subtropical center (\u00b0)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_subtrop_summer_width": {
+    "default": 16.0,
+    "minimum": 1.0,
+    "maximum": 40.0,
+    "label": "Summer subtropical width (\u00b0)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_subtrop_winter_width": {
+    "default": 12.0,
+    "minimum": 1.0,
+    "maximum": 40.0,
+    "label": "Winter subtropical width (\u00b0)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_itcz_core_width": {
+    "default": 5.0,
+    "minimum": 0.1,
+    "maximum": 30.0,
+    "label": "ITCZ core width (\u00b0)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_itcz_outer_boost": {
+    "default": 1.0,
+    "minimum": 0.0,
+    "maximum": 5.0,
+    "label": "ITCZ outer rain boost",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_monsoon_reach": {
+    "default": 0.4,
+    "minimum": 0.01,
+    "maximum": 1.0,
+    "label": "Monsoon coastal reach fraction",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_monsoon_wind": {
+    "default": 0.15,
+    "minimum": 0.01,
+    "maximum": 1.0,
+    "label": "Monsoon wind threshold",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_high_pressure_threshold": {
+    "default": 12.0,
+    "minimum": 0.1,
+    "maximum": 60.0,
+    "label": "High pressure rain threshold (hPa)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_low_pressure_threshold": {
+    "default": 15.0,
+    "minimum": 0.1,
+    "maximum": 60.0,
+    "label": "Low pressure rain threshold (hPa)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_polar_start": {
+    "default": 40.0,
+    "minimum": 0.0,
+    "maximum": 80.0,
+    "label": "Polar rain starts (\u00b0)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_polar_full": {
+    "default": 70.0,
+    "minimum": 1.0,
+    "maximum": 90.0,
+    "label": "Polar rain full at (\u00b0)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_lee_height": {
+    "default": 1.5,
+    "minimum": 0.0,
+    "maximum": 6.0,
+    "label": "Lee cyclone minimum height (km)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_lee_height_full": {
+    "default": 5.0,
+    "minimum": 0.1,
+    "maximum": 10.0,
+    "label": "Lee cyclone full height (km)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_lee_gradient": {
+    "default": 0.01,
+    "minimum": 0.0,
+    "maximum": 0.5,
+    "label": "Lee cyclone slope threshold",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_shadow_height_start": {
+    "default": 0.5,
+    "minimum": 0.0,
+    "maximum": 5.0,
+    "label": "Shadow height ramp starts (km)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_shadow_height_range": {
+    "default": 2.5,
+    "minimum": 0.1,
+    "maximum": 10.0,
+    "label": "Shadow height ramp range (km)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_shadow_smoothing_km": {
+    "default": 150.0,
+    "minimum": 0.0,
+    "maximum": 1000.0,
+    "label": "Rain shadow smoothing (km)",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_shadow_propagated_scale": {
+    "default": 2.25,
+    "minimum": 0.0,
+    "maximum": 10.0,
+    "label": "Propagated shadow sensitivity",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_elevation_depletion_max": {
+    "default": 0.8,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Maximum altitude moisture loss",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_ocean_warmth_min": {
+    "default": -0.8,
+    "minimum": -1.0,
+    "maximum": 0.0,
+    "label": "Minimum moisture warmth",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_land_drying_start": {
+    "default": 0.4,
+    "minimum": 0.0,
+    "maximum": 0.95,
+    "label": "Land drying starts at coverage",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_land_drying_range": {
+    "default": 0.6,
+    "minimum": 0.01,
+    "maximum": 1.0,
+    "label": "Land drying coverage range",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_interior_cap_start": {
+    "default": 0.5,
+    "minimum": 0.0,
+    "maximum": 0.99,
+    "label": "Interior rain cap starts",
+    "group": "precipitation",
+    "step": 0.01
+  },
+  "orogen_precip_lee_reach_km": {
+    "default": 200.0,
+    "minimum": 0.0,
+    "maximum": 1000.0,
+    "label": "Lee cyclone coastal reach (km)",
+    "group": "precipitation",
+    "step": 10
+  },
+  "orogen_heuristic_core_lat": {
+    "default": 5.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Heuristic core lat",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_outer_lat": {
+    "default": 10.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Heuristic outer lat",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_desert_end_lat": {
+    "default": 33.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Heuristic desert end lat",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_desert_core_lat": {
+    "default": 28.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Heuristic desert core lat",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_wet_mid_lat": {
+    "default": 55.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Heuristic wet mid lat",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_polar_lat": {
+    "default": 70.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Heuristic polar lat",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_core_rain": {
+    "default": 1.0,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Heuristic core rain",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_outer_drop": {
+    "default": 0.65,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Heuristic outer drop",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_desert_rain": {
+    "default": 0.35,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Heuristic desert rain",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_desert_drop": {
+    "default": 0.33,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Heuristic desert drop",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_mid_base": {
+    "default": 0.02,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Heuristic mid base",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_mid_gain": {
+    "default": 0.48,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Heuristic mid gain",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_subpolar_base": {
+    "default": 0.5,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Heuristic subpolar base",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_subpolar_drop": {
+    "default": 0.2,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Heuristic subpolar drop",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_polar_base": {
+    "default": 0.3,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Heuristic polar base",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_polar_drop": {
+    "default": 0.2,
+    "minimum": 0.0,
+    "maximum": 2.0,
+    "label": "Heuristic polar drop",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_coastal_smoothing_km": {
+    "default": 300.0,
+    "minimum": 0.0,
+    "maximum": 2000.0,
+    "label": "Mediterranean coast influence (km)",
+    "group": "heuristic-precip",
+    "step": 10
+  },
+  "orogen_heuristic_med_start": {
+    "default": 22.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Heuristic med start",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_med_full": {
+    "default": 30.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Heuristic med full",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_med_fade": {
+    "default": 38.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Heuristic med fade",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_med_end": {
+    "default": 45.0,
+    "minimum": 0.0,
+    "maximum": 89.0,
+    "label": "Heuristic med end",
+    "group": "heuristic-precip",
+    "step": 0.01
+  },
+  "orogen_heuristic_wind_itcz": {
+    "default": 0.1,
+    "minimum": 0.0,
+    "maximum": 3.0,
+    "label": "Heuristic wind itcz",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_heuristic_wind_trade_east": {
+    "default": 0.8,
+    "minimum": 0.0,
+    "maximum": 3.0,
+    "label": "Heuristic wind trade east",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_heuristic_wind_trade_north": {
+    "default": 0.3,
+    "minimum": 0.0,
+    "maximum": 3.0,
+    "label": "Heuristic wind trade north",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_heuristic_wind_westerly_east": {
+    "default": 0.9,
+    "minimum": 0.0,
+    "maximum": 3.0,
+    "label": "Heuristic wind westerly east",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_heuristic_wind_westerly_north": {
+    "default": 0.25,
+    "minimum": 0.0,
+    "maximum": 3.0,
+    "label": "Heuristic wind westerly north",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_heuristic_wind_polar_east": {
+    "default": 0.4,
+    "minimum": 0.0,
+    "maximum": 3.0,
+    "label": "Heuristic wind polar east",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_heuristic_wind_polar_north": {
+    "default": 0.15,
+    "minimum": 0.0,
+    "maximum": 3.0,
+    "label": "Heuristic wind polar north",
+    "group": "wind",
+    "step": 0.01
+  },
+  "orogen_koppen_shoulder_fraction": {
+    "default": 0.3333333333333333,
+    "minimum": 0.0,
+    "maximum": 1.0,
+    "label": "Shoulder season interpolation",
+    "group": "koppen",
+    "step": 0.01
+  },
+  "orogen_biome_low_height": {
+    "default": 0.2,
+    "minimum": 0.01,
+    "maximum": 2.0,
+    "label": "Lowland shading height (km)",
+    "group": "biome-rendering",
+    "step": 0.01
+  },
+  "orogen_biome_rock_transition": {
+    "default": 2.0,
+    "minimum": 0.1,
+    "maximum": 8.0,
+    "label": "Fallback rock transition (km)",
+    "group": "biome-rendering",
+    "step": 0.01
+  }
+}

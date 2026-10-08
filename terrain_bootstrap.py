@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+from terrain_generation_session import run_process
 import tempfile
 import threading
 import zipfile
@@ -254,7 +255,7 @@ class WorldHeightmap:
                     directory = Path(temporary)
                     (directory / 'request.json').write_bytes(_json_bytes(request))
                     executable = _generation_binary(identity, directory)
-                    completed = subprocess.run([str(executable), str(directory / 'request.json'), str(directory / 'output')], cwd=ROOT, capture_output=True, text=True)
+                    completed = run_process([str(executable), str(directory / 'request.json'), str(directory / 'output')], cwd=ROOT, capture_output=True, text=True)
                     if completed.returncode:
                         raise RuntimeError(f'Native heightmap generation failed: {completed.stderr.strip()}')
                     raw = np.fromfile(directory / 'output' / 'height.f32', dtype='<f4').reshape(self.height, self.width)

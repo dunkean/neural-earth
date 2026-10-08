@@ -1,0 +1,198 @@
+A faire:
+- taille du monde configurable
+- faire tourner l'éclairage, les normales donnent l'impression que les rivieres sont en relief
+
+- Biome multi échelles !
+
+- tout passer en anglais
+
+
+// Verifier si utile après fix des côtes
+- configuration du SNR a LOD 3-2-1-0
+- Gestion des SNR des cotes à partir de LOD 1
+- Application de l'érosion gpu sur les LOD 3-2-1-0 pour essayer de refaire les fjords et autres structures
+
+- Affichage Globe
+
+
+
+On a:
+
+
+3 moteurs de générations de relief : une NN (infinite generation), 1 custom (from world builder rs ou world builder je sais plus), 1 orogen
+
+1 moteur de génération de climat: Orogen
+
+2 moteurs d'érosion: Orogen, City Generator Rs
+
+1 gestionnaire de caméra, de LOD, de cache et de rendu: Infinite map
+
+1 moteur de relief procédural: Infinite generation avec ses 3 réseaux qui dépendent du LOD: Coarse, "Je sais plus quoi" et latent. (d'ailleurs dans la barre d'info en base faudra remettre l'info du modèle en cours d'usage pendant la génération)
+
+Idéalement tout ca devrait être complètement modulaire, 
+
+On génère un relief (ou on le charge), on génère un climat, on applique ou pas de l'érosion (potentiellement liée au climat), on applique ensuite un moteur procédural lors du changement de LOD
+
+
+Je veux que ca devienne assez générique pour que je puisse appliquer de l'érosion après le procédural (en fonction du LOD), décider du moteur procédural (en fonction du LOD).
+
+
+J'ai pas 
+
+
+
+
+
+Pour les NN, **Infinite Map utilise trois réseaux du même checkpoint `xandergos/terrain-diffusion-30m`**, tous des U-Net, exécutés sur le GPU NVIDIA avec PyTorch/CUDA.
+
+| Réseau | Ce qu’il fait | Quand il intervient |
+|---|---|---|
+| **`coarse_model`** | Produit les grandes structures du relief et les champs climatiques appris, à **7,68 km par cellule**. Il reçoit cinq cartes : altitude, température, variation saisonnière de température, pluie et variabilité des pluies. **20 étapes de débruitage.** | Quand une région nécessite du terrain appris, ou via **Prepare neural world** pour préparer le coarse mondial. |
+| **`base_model`** | À partir du coarse, produit une représentation compacte du terrain : les **latents à 240 m**, qui décrivent notamment son aspect et ses formes locales. **Deux passes successives.** | Quand on zoome davantage dans une région. Les latents servent aussi d’aperçu avant le relief final. |
+| **`decoder_model`** | Transforme les latents en détails d’altitude et reconstruit le relief final à **30 m par pixel**. **Une passe.** | Quand le rendu demande le détail final. Le même décodeur est réutilisé expérimentalement sous 30 m, jusqu’à 3,75 m. |
+
+**Le parcours est donc :** relief initial + érosion + climat → cartes d’entrée → coarse NN → latents → relief détaillé.
+
+La vue mondiale affiche d’abord les **cartes d’entrée**, sans exécuter les trois réseaux sur toute la planète. Ensuite, les régions nécessaires sont calculées à la demande, avec des fenêtres qui se chevauchent pour raccorder les morceaux. Les résultats sont mis en cache ; revisiter une zone évite généralement de refaire l’inférence.
+
+
+
+
+
+
+
+**Avec Orogen, l’ordre est bien : relief initial → érosion → climat Orogen → réseaux neuronaux.** Le climat est donc calculé **après le relief initial, mais avant le relief neuronal final**. Le mot « relief » désigne ici deux résultats différents, ce qui crée la confusion.
+
+**1\. Ce qui se passe quand tu génères avec Orogen**
+
+La première partie construit un monde physique, sans réseau neuronal :
+
+- **Relief initial** : Orogen construit les plaques, continents, collisions et chaînes montagneuses. Il produit une carte d’altitude.
+- **Érosion** : le moteur choisi transforme cette carte. Si l’érosion est désactivée, on conserve le relief initial.
+- **Climat** : Orogen calcule températures, vents, courants et précipitations en fonction du relief actif.
+
+À ce stade, **tu as déjà un terrain et un climat utilisables**. C’est principalement ce que montre l’aperçu mondial.
+
+Ensuite, quand l’affichage demande du terrain appris, le pipeline neuronal prend ces résultats comme guides :
+
+```
+Plaques Orogen → relief initial → érosion → climat Orogen
+                                  │                │
+                                  └───────┬────────┘
+                                   5 cartes d’entrée
+                                          ↓
+                             Coarse → Base → Decoder
+                                          ↓
+                               relief neuronal à 30 m
+```
+
+Cliquer sur **Générer toute la chaîne** prépare les trois étapes physiques. Cela ne calcule pas immédiatement les trois réseaux sur toute la planète : les régions sont traitées progressivement selon l’affichage. **Prepare neural world** prépare explicitement le coarse mondial.
+
+**2\. Le coarse prend-il température et humidité ?**
+
+**Oui pour la température et les précipitations.** Il ne reçoit pas directement un champ d’humidité relative. Ses cinq cartes d’entrée sont :
+
+| Entrée | Avec Orogen, elle vient de… |
+|---|---|
+| Altitude | Relief actif, après l’érosion choisie |
+| Température moyenne | Moyenne des températures été/hiver |
+| Variation saisonnière de température | Écart entre été et hiver |
+| Précipitations annuelles | Total des précipitations été/hiver |
+| Variabilité des précipitations | Contraste saisonnier entre été et hiver |
+
+Le coarse reçoit ces cartes, plus du bruit déterminé par la seed. Il produit **une version apprise du relief et du climat**, à 7,68 km par cellule. Il peut donc modifier le terrain physique qui lui sert de guide.
+
+Le climat influence ainsi la génération du **relief neuronal**, même si le **relief initial Orogen** a été construit auparavant.
+
+**3\. Le générateur initial nommé « NN », avec fréquence et octaves**
+
+**Son étape initiale est un générateur de bruit procédural, pas un quatrième réseau neuronal.** L’intitulé « NN » est ambigu : il désigne le chemin historique de Terrain Diffusion, dont les entrées sont fabriquées à partir de bruit.
+
+Ce générateur vient du code de conditionnement synthétique de Terrain Diffusion. Il utilise du **bruit Perlin fractal**, puis transforme ses valeurs pour obtenir une distribution d’altitudes comparable aux statistiques ETOPO.
+
+Ses paramètres signifient :
+
+- **Fréquence** : règle la taille spatiale des motifs. Plus elle augmente, plus les motifs sont petits et nombreux.
+- **Octaves** : règle le nombre de couches de bruit superposées, des grandes formes aux variations plus fines.
+- **Répartition terre/mer** : modifie la distribution des hauteurs.
+
+**Ce relief initial ne prend pas le climat en entrée.** Il est construit à partir de la seed, du bruit et de ses transformations statistiques.
+
+Dans le fonctionnement historique original, le même système fabriquait également quatre cartes climatiques à partir de bruits distincts, calibrés avec des statistiques WorldClim. **Dans l’interface actuelle, le climat commun est Orogen** : le chemin habituel devient donc :
+
+```
+Relief procédural Perlin → érosion choisie → climat Orogen
+                                               ↓
+                                     Coarse → Base → Decoder
+```
+
+**4\. Ce que font ensuite les trois vrais NN**
+
+Ce sont les trois réseaux préentraînés du checkpoint `xandergos/terrain-diffusion-30m`, chargés une fois et réutilisés pour les différentes seeds.
+
+| Réseau | Entrées et rôle |
+|---|---|
+| **Coarse** | Reçoit altitude + climat. Génère les grandes structures apprises du relief et du climat. |
+| **Base** | Reçoit le coarse, y compris ses informations climatiques. Génère les latents à 240 m : une représentation compacte du terrain. |
+| **Decoder** | Reçoit les latents et du bruit. Produit les détails qui, combinés au relief de basse fréquence, donnent les altitudes finales à 30 m. Il ne reçoit pas directement les cartes climatiques Orogen. |
+
+**Il n’y a actuellement aucune nouvelle simulation Orogen après le decoder.** Le climat des vues standard provient du coarse appris, avec une correction de température liée à l’altitude affichée. Les diagnostics Orogen montrent les résultats physiques Orogen conservés.
+
+Cela explique aussi qu’une génération **Climat seule** puisse entraîner de nouveaux calculs NN : le relief physique reste identique, mais le réseau reçoit de nouvelles entrées climatiques et peut reconstruire un relief différent.
+
+Enfin, je corrige mon explication précédente du **SNR** : dans ce code, une valeur plus élevée ajoute davantage de bruit aux cartes de guidage et laisse **plus de liberté au réseau**. Une valeur plus faible lui fait suivre davantage les entrées.
+
+- **Tu n’as pas généré l’étape Climat** : l’interface garde Orogen comme source, mais les couches climatiques absentes sont remplies de zéros. Après conversion, le coarse reçoit **−45 °C, aucune variation saisonnière et aucune pluie**, en plus du relief et du bruit réglé par le SNR. C’est donc un climat constant extrême, pas une absence de conditionnement. Voir le remplissage (/D:/Workspace/Self/RPG/infinite\_map/terrain\_orogen\_stages.py:242) et la conversion (/D:/Workspace/Self/RPG/infinite\_map/terrain\_conditioning.py:415).
+- **Un climat avait déjà été généré** : il est conservé quand tu régénères seulement le relief ou l’érosion. Le coarse reçoit donc encore ce climat précédent.
+- **Tu sélectionnes réellement une autre source dans la configuration** : `natural` fournit un climat procédural par bruit ; `native` fournit le modèle climatique terrestre.
+
+Actuellement, l’interface impose Orogen comme source commune. **Ne pas cliquer sur « Générer le climat » ne désactive donc pas les entrées climatiques du NN.**
+
+
+
+
+
+**Le climat Orogen contribue bien à la fragmentation. Mais il se combine avec des terres extrêmement proches du niveau de la mer.** J’ai reproduit le problème sur ton monde actuel, puis comparé plusieurs climats en conservant exactement le même relief initial, la même seed et les mêmes bruits du NN.
+
+Sur une zone de **15,36 × 15,36 km** :
+
+| Conditionnement | Terre après décodage à 60 m | Morceaux de terre |
+|---|---:|---:|
+| Source initiale | 100 % | 1 |
+| Climat Orogen | 21 % | ≈ 540 |
+| Ancien climat Natural | 99 % | 1 |
+| Ancien climat WorldClim procédural | 63 % | 419 |
+
+Voir la comparaison visuelle (generated/coast-investigation/coast-comparison.png).
+
+**La normalisation du réseau est toujours présente.** Les entrées passent bien par les `coarse_means/coarse_stds` du checkpoint dans terrain\_inference.py:157. En revanche, les données fournies ont changé :
+
+- Les anciens bruits étaient transformés avec des distributions calibrées et des corrections reliant température, saisonnalité et pluie.
+- Orogen fournit directement ses deux saisons. L’adaptateur en déduit BIO4 et BIO15 par une approximation sinusoïdale.
+- Cette conversion plafonne la pluie annuelle à **2 000 mm** et BIO15 à **70,7 %**, et ne reproduit pas les anciennes distributions ni leurs relations. Voir terrain\_conditioning.py:415.
+
+Les essais canal par canal montrent que plusieurs entrées climatiques influencent fortement le résultat. **Je n’ai pas identifié un unique canal responsable de tout.**
+
+L’autre facteur décisif est l’altitude : dans cette zone entièrement terrestre, la source varie seulement entre **\+3 et +75 cm**, avec une médiane de **\+21 cm**. La conversion du relief Orogen utilise une courbe en puissance quatre qui écrase les faibles élévations : terrain\_orogen.py:142.
+
+Le coarse fait déjà passer une grande partie de cette zone légèrement sous zéro. Les latents et le décodeur ajoutent ensuite des variations autour de cette altitude : chaque passage du signe positif au négatif devient une côte. **Ce qui ressemble à énormément de bruit correspond ici surtout à des fluctuations de quelques dizaines de centimètres.**
+
+Réduire fortement le bruit d’altitude supprime aussi la fragmentation dans l’essai, mais remonte la médiane vers **18 m** : ce serait un réglage compensatoire, pas une correction fidèle.
+
+Je recommande donc de travailler sur **l’adaptation du climat Orogen au conditionnement attendu par le checkpoint**, puis sur **la calibration des faibles altitudes côtières**. Un simple changement de normalisation ne suffira probablement pas.
+
+Les chiffres concernent cette zone testée, pas toute la planète. Je n’ai modifié ni le code de génération ni tes réglages ; les résultats des huit essais (generated/coast-investigation/ablation-report.json) sont sauvegardés.
+
+
+
+
+
+
+
+
+
+
+
+
+
+On s'est pas compris. Le coarse il n'est appliqué qu'à LOD max ? ton test me va pas, je veux voir 6 images en fait au niveau de zoom avant latent - coarse | coarse > latent |  procédural + erosion | procédural + erosion > latent |

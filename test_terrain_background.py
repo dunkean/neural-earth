@@ -46,7 +46,7 @@ class BackgroundTests(unittest.TestCase):
             while not any(j['key'].startswith('coarse-preparation') for j in jobs.status()['jobs']):
                 if time.monotonic()>deadline:self.fail('background did not enqueue')
                 time.sleep(.01)
-            urgent=jobs.submit('teleport-visible',lambda:order.append('visible'),priority=0)
+            urgent=jobs.submit('teleport-visible-sea',lambda:order.append('visible'),priority=4999)
             release.set()
             blocker.wait(3)
             urgent.wait(3)
@@ -60,6 +60,55 @@ class BackgroundTests(unittest.TestCase):
             release.set()
             background.close()
             jobs.close()
+
+    def test_full_world_runs_to_completion_and_repeated_start_is_idempotent(self):
+        jobs=TerrainJobs()
+        entered,release=threading.Event(),threading.Event()
+        calls=[]
+        def coarse(seed,profile):
+            calls.append((seed,profile))
+            if len(calls)==1:
+                entered.set()
+                self.assertTrue(release.wait(3))
+            return {'complete_windows':len(calls),'total_windows':5}
+        background=CoarseBackground(jobs,coarse,None)
+        try:
+            background.start(42,'natural')
+            self.assertTrue(entered.wait(2))
+            token=background.generation
+            background.start(42,'natural')
+            self.assertEqual(background.generation,token)
+            background.set_focus(42,'natural',[1,2,3,4])
+            self.assertEqual(background.focus(42,'natural'),(1,2,3,4))
+            self.assertIsNone(background.focus(43,'natural'))
+            release.set()
+            deadline=time.monotonic()+3
+            while background.status()['state']=='running':
+                if time.monotonic()>deadline:self.fail('whole world never completed')
+                time.sleep(.01)
+            self.assertEqual(background.status()['state'],'complete')
+            self.assertEqual(background.status()['quanta'],5)
+            self.assertIsNone(background.status()['budget'])
+        finally:
+            release.set();background.close();jobs.close()
+
+    def test_pause_stops_after_the_current_window(self):
+        jobs=TerrainJobs()
+        entered,release=threading.Event(),threading.Event()
+        calls=[]
+        def coarse(seed,profile):
+            calls.append(1);entered.set();release.wait(3)
+            return {'complete_windows':1,'total_windows':100}
+        background=CoarseBackground(jobs,coarse,None)
+        try:
+            background.start(42,'natural')
+            self.assertTrue(entered.wait(2))
+            self.assertEqual(background.stop()['state'],'stopped')
+            release.set()
+            jobs.close()
+            self.assertEqual(len(calls),1)
+        finally:
+            release.set();background.close()
 
 
 if __name__=='__main__':unittest.main()
