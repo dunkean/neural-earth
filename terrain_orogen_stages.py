@@ -212,6 +212,8 @@ def _execute(stage, seed, style, config, width, height, parent=None, relief=None
         arrays={**{'layer_'+k:v for k,v in layers.items()}}
         if stage!='climate':
             arrays.update(height_m=raw,snapshot=np.frombuffer(snapshot.read_bytes(),np.uint8).copy())
+        else:
+            arrays['layer_climate_height_m']=np.asarray(raw,np.float32).copy()
         if stage=='relief':arrays.update(geometry)
     return arrays,dict(height_convention=core.HYPSOMETRY_RULE,seconds=time.perf_counter()-begun,original_pipeline=graph['timing'],
         original_elevation_timing=graph.get('elevationTiming',[]),original_post_timing=graph.get('postTiming',[]),
@@ -248,6 +250,14 @@ def compose(seed,style,config,width,height,stages,height_stage):
         layers.update({k[6:]:v for k,v in erosion['arrays'].items() if k.startswith('layer_')})
     if climate:
         layers.update({k[6:]:v for k,v in climate['arrays'].items() if k.startswith('layer_')})
+        if 'climate_height_m' not in layers:
+            # Older retained climates need their own generating DEM, even if
+            # relief/erosion have since changed independently.
+            parent_id=climate['metadata']['namespace']['parent']
+            parent=next((s for s in stages.values() if s['id']==parent_id),None)
+            if parent is None:
+                parent=load_stage(parent_id,seed=seed,width=width,height=height)
+            layers['climate_height_m']=parent['arrays']['height_m']
     else:
         for name in ('temperature_summer','temperature_winter','precip_summer','precip_winter',
                      'koppen',*[prefix+'_'+axis+'_'+season for prefix in ('wind','ocean_current')
@@ -256,6 +266,10 @@ def compose(seed,style,config,width,height,stages,height_stage):
             layers[name]=np.zeros_like(raw)
     for name in ('boundaries','convergence','uplift'):layers.setdefault(name,np.zeros_like(raw))
     settings=_settings(config,style)
+    from terrain_soil import generate_soil, VERSION as SOIL_VERSION
+    from terrain_geometry import world_bounds
+    layers.update(generate_soil(raw,layers,seed,world_bounds(settings),
+                                settings.get('world_topology','sphere')!='plane'))
     state=dict(height_stage=height_stage,active_height=active['id'])
     for name,artifact in stages.items():
         ns=artifact['metadata']['namespace'];wanted={k:settings[k] for k in sorted(STAGE_KEYS[name])}
@@ -268,6 +282,8 @@ def compose(seed,style,config,width,height,stages,height_stage):
         y_axis='south',sea_level_m=0,longitude_axis='atan2(z,x)',reconstruction='spherical-bilinear-at-read'),
         hypsometry=dict(rule=active['metadata'].get('height_convention',
             'original Orogen: ocean 10000*e; land 6000*t^4*(5-4*t)')),sign_preserved=True,
+        substrate=dict(version=SOIL_VERSION,composition=['sand','clay','humus'],
+                       interpretation='procedural appearance; not surveyed geology'),
         stage_state=state,generation_seconds=0.,timings={},projection_fallback_pixels=sum(
             a['metadata']['projection_fallback_pixels'] for a in stages.values()),
         original_pipeline=[item for a in stages.values() for item in a['metadata']['original_pipeline']],

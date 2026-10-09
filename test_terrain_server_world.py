@@ -32,6 +32,7 @@ from terrain_generation_session import GenerationCancelled
 import terrain_inference
 import terrain_manifest
 from terrain_generation import resolve_generation, register_generation
+from terrain_geometry import profile_bounds
 from terrain_climate import MODES
 from terrain_orogen_layers import MODES as OROGEN_MODES
 from terrain_snr_layer import MODES as SNR_MODES
@@ -81,8 +82,8 @@ class ServerWorldConstructionTests(unittest.TestCase):
             terrestrial_file_snapshot=lambda generator='native':deepcopy(reference['files']),
             lru_cache=lru_cache, hashlib=hashlib, json=json,
             shared_pipeline=None, load_pipeline=self.loader, WorldPipeline=WorldPipeline,
-            runtime_profile=profile, OUTPUT=Path(self.temporary.name),
-            WORLD_BOUNDS=(-20e6, -10e6, 20e6, 10e6),
+            runtime_profile=profile, coarse_stream_setting={'coarse':1}, OUTPUT=Path(self.temporary.name),
+            WORLD_BOUNDS=(-20e6, -10e6, 20e6, 10e6), profile_bounds=profile_bounds,
             CoarsePreparation=CoarsePreparation, worlds=OrderedDict(), active_seed=None,
             app=self.app, jsonify=jsonify, Response=Response, request=request,
             MODES=MODES+OROGEN_MODES+SNR_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=OROGEN_MODES,

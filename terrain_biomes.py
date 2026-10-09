@@ -1,8 +1,8 @@
 """Orogen biome appearance evaluated on the current physical terrain.
 
-Transport appends sixteen planes to the five existing climate channels:
-base RGB, alpine/snow lines (km), then eleven appearance constants.
-Classification stays global; coastlines, altitude and slope follow each DEM.
+Transport appends appearance, six continuous seasonal fields and nine exact
+lookup planes to the five existing physical conditioning channels.
+Classes are reconstructed from continuous seasonal fields on each DEM.
 """
 import json
 from pathlib import Path
@@ -12,13 +12,13 @@ from scipy.ndimage import distance_transform_edt
 
 from terrain_climate import expand_climate
 from terrain_orogen_layers import sample
+from terrain_koppen import CODES, COLORS, PARAMETERS, seasonal_fields, sample_classes, setting as climate_setting
 
 MODE = 'orogen-biomes'
-CLIMATE_LAYERS = 21
+CLIMATE_LAYERS = 36
 DEFAULT_ROCK_SLOPE = 40.0
 _SPECS = json.loads((Path(__file__).parent/'native/orogen/climate-parameters.json').read_text())
-_CODES = ('af am aw bwh bwk bsh bsk cfa cfb cfc csa csb csc cwa cwb cwc '
-          'dfa dfb dfc dfd dsa dsb dsc dsd dwa dwb dwc dwd et ef').split()
+_CODES = CODES
 
 
 def parse_rock_slope(value=None):
@@ -52,12 +52,16 @@ def _land_classes(world):
     return result
 
 
-def sample_biome_fields(world, xs, ys, settings, *, polar=False):
+def sample_biome_fields(world, xs, ys, settings, elevation=None, *, polar=False):
     def setting(name):
         key = 'orogen_biome_' + name
         return settings.get(key, _SPECS[key]['default'])
-    classes = _land_classes(world)
-    if polar:
+    continuous = all(name in world.layers for name in
+                     ('temperature_summer','temperature_winter','precip_summer','precip_winter'))
+    classes = None if continuous else _land_classes(world)
+    if continuous:
+        ids = sample_classes(world,xs,ys,settings,elevation,polar=polar).astype(np.int64)
+    elif polar:
         from terrain_polar import from_chart
         x, y = from_chart(*np.meshgrid(xs, ys), settings)
         x0,y0,x1,y1 = world.bounds
@@ -82,6 +86,29 @@ def sample_biome_fields(world, xs, ys, settings, *, polar=False):
                                            (len(constants),*shape))]).astype(np.float32)
 
 
+def sample_biome_transport(world, xs, ys, settings, *, polar=False):
+    """Legacy appearance, continuous seasons and exact palette/threshold tables.
+
+    The final nine planes contain lookup data in row zero, read with textureLoad
+    rather than spatial interpolation. The continuous lattice keeps source
+    detail at broad LODs; classification runs at every rendered terrain sample.
+    """
+    appearance = sample_biome_fields(world,xs,ys,settings,polar=polar)
+    seasons = seasonal_fields(world,xs,ys,settings,polar=polar)
+    lookup = np.zeros((9,len(ys),len(xs)),np.float32)
+    if len(xs)<31:
+        raise ValueError('Biome transport requires at least 31 climate columns')
+    for i, code in enumerate(CODES,1):
+        lookup[:3,0,i] = climate_setting(settings,'biome_color_'+code)
+        group = ('tropical' if i<=3 else 'arid' if i<=7 else 'temperate' if i<=16 else
+                 'continental' if i in (17,18,21,22,25,26) else 'subarctic' if i<=28 else
+                 'tundra' if i==29 else 'ice')
+        lookup[3:5,0,i] = [climate_setting(settings,'biome_'+group+'_'+name) for name in ('alpine','snow')]
+    lookup[5:8,0,:31] = COLORS.T
+    lookup[8,0,:len(PARAMETERS)] = [climate_setting(settings,'koppen_'+name) for name in PARAMETERS]
+    return np.concatenate((appearance,seasons,lookup))
+
+
 def colorize_biomes(elevation, fields, resolution, rock_slope=None):
     c = fields if fields.shape[1:] == elevation.shape else expand_climate(fields, elevation.shape)
     base = c[:3].transpose(1,2,0).copy()
@@ -98,12 +125,7 @@ def colorize_biomes(elevation, fields, resolution, rock_slope=None):
     rgb = rgb*(1-rock_t)+rock*rock_t
     snow_t = np.where(snow>0,np.clip((h-snow)/np.maximum(snow_span,1e-6),0,1)**2,0)[...,None]
     rgb = rgb*(1-snow_t)+snow_color*snow_t
-    # Central differences in physical metres, with the tile halo on both sides.
-    # This override comes after snow and vegetation, without hillshade scaling.
-    if resolution <= 30:
-        dy, dx = np.gradient(np.asarray(elevation,np.float32), resolution)
-        steep = np.hypot(dx,dy) > np.tan(np.deg2rad(parse_rock_slope(rock_slope)))
-        rgb = np.where(steep[...,None],rock,rgb)
+    # Biomes are informational. Slope-dependent materials belong to Render.
     e = elevation/10000
     deep_t = np.clip((e+.5)/.4,0,1)[...,None]
     shallow_t = np.clip((e+.1)/.1,0,1)[...,None]

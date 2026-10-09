@@ -32,6 +32,7 @@ VERSION = 'cuda-resident-window-v2'
 class InferenceProfile:
     name: str
     coarse_batch: int = 1
+    coarse_streams: int = 1
     latent_batch: int = 16
     decoder_batch: int = 1
     cached_weights: bool = True
@@ -76,12 +77,16 @@ def choose_profile(device=None) -> InferenceProfile:
         raise ValueError('TERRAIN_CANONICAL_LATENTS must be 0 or 1')
     canonical_latents = canonical_flag == '1'
     latent_batch = batch('TERRAIN_LATENT_BATCH', 1 if canonical_latents else 16, 32)
+    coarse_streams = batch('TERRAIN_COARSE_STREAMS', 4, 16)
+    if coarse_streams not in (1, 2, 4, 8, 16):
+        raise ValueError('TERRAIN_COARSE_STREAMS must be 1, 2, 4, 8 or 16')
     if canonical_latents and latent_batch != 1:
         raise ValueError('Canonical latents require TERRAIN_LATENT_BATCH=1')
     # A transient VRAM load must not silently select a different world.
     return InferenceProfile(
         name=f'cuda-{torch.cuda.get_device_capability(device)[0]}-{int(gib)}g',
         coarse_batch=batch('TERRAIN_COARSE_BATCH', 1, 1),
+        coarse_streams=coarse_streams,
         latent_batch=latent_batch,
         decoder_batch=batch('TERRAIN_DECODER_BATCH', 1, 1),
         cuda_graphs=graph_flag == '1',
@@ -154,7 +159,9 @@ def restore_models(world):
             module.__dict__.pop('_terrain_weight_cache', None)
 
 
-def _coarse_batch(world, ctxs, scheduler, weight_window, t_cond, cond_inputs, pool_size):
+def _coarse_batch(world, ctxs, scheduler, weight_window, t_cond, cond_inputs, pool_size, *, prepare_only=False):
+    if not prepare_only and len(ctxs) > 1 and coarse_stream_count(world) > 1:
+        return _coarse_stream_batch(world, ctxs, scheduler, weight_window, t_cond, cond_inputs, pool_size)
     dtype = world._dtype or torch.float32
     means = torch.tensor(world.kwargs['coarse_means'])
     stds = torch.tensor(world.kwargs['coarse_stds'])
@@ -219,6 +226,10 @@ def _coarse_batch(world, ctxs, scheduler, weight_window, t_cond, cond_inputs, po
             world.__dict__['_terrain_coarse_embeds'] = embeds
     n = len(ctxs)
     conditions = [value.expand(n) for value in cond_inputs]
+    if prepare_only:
+        from terrain_coarse_streams import CoarseSolverInputs
+        return CoarseSolverInputs(sample, torch.stack(scalar_labels), tuple([cond_img, *conditions]),
+                                  torch.stack(embeds) if embeds is not None else None)
     if world._terrain_profile.cuda_graphs and world._terrain_profile.coarse_solver_graphs:
         from terrain_coarse_graph import run_coarse_solver
         sample = run_coarse_solver(world, scheduler, sample, cond_img, scalar_labels, conditions, embeds)
@@ -234,6 +245,12 @@ def _coarse_batch(world, ctxs, scheduler, weight_window, t_cond, cond_inputs, po
             # CPU t is sufficient for the scheduler's step index and avoids its
             # initial CUDA->CPU scalar transfer. All sample arithmetic remains CUDA.
             sample = scheduler.step(model_out, t, sample).prev_sample
+    return _coarse_outputs(world, scheduler, sample, weight_window, pool_size)
+
+
+def _coarse_outputs(world, scheduler, sample, weight_window, pool_size):
+    means = torch.tensor(world.kwargs['coarse_means'])
+    stds = torch.tensor(world.kwargs['coarse_stds'])
     sample = (sample if world._terrain_profile.gpu_windows else sample.cpu()).float() / scheduler.config.sigma_data
     stds, means = stds.to(sample.device), means.to(sample.device)
     sample = sample * stds.view(1, -1, 1, 1) + means.view(1, -1, 1, 1)
@@ -244,6 +261,88 @@ def _coarse_batch(world, ctxs, scheduler, weight_window, t_cond, cond_inputs, po
             value = world._pool_coarse_conditioning(value, pool_size)
         outputs.append(torch.cat([value * weight_window[None], weight_window[None]], dim=0))
     return outputs
+
+
+def coarse_stream_count(world):
+    return getattr(world, '_terrain_coarse_streams', getattr(world._terrain_profile, 'coarse_streams', 1))
+
+
+def set_coarse_streams(world, count):
+    """Execution setting only: keep NN batch one and all existing stores."""
+    if type(count) is not int or count not in (1, 2, 4, 8, 16):
+        raise ValueError('Coarse streams must be 1, 2, 4, 8 or 16')
+    world._terrain_coarse_streams = count
+    world._terrain_coarse_streams_error = None
+    enabled = (torch.device(world.device).type == 'cuda' and world._terrain_profile.cuda_graphs
+               and world._terrain_profile.coarse_solver_graphs)
+    world._terrain_coarse_streams_effective = count if enabled else 1
+    if getattr(world, 'coarse', None) is not None:
+        world.coarse._batch_size = world._terrain_coarse_streams_effective
+
+
+def _coarse_stream_batch(world, ctxs, scheduler, weight, t_cond, conditions, pool_size):
+    """Prepare serially, dispatch batch-one solves, then finish in store order."""
+    from terrain_coarse_streams import CoarseStreamPool
+    from terrain_coarse_graph import run_coarse_solver
+    import json
+    import threading
+    owner = world.coarse_model
+    count = coarse_stream_count(world)
+    enabled = (torch.device(world.device).type == 'cuda' and world._terrain_profile.cuda_graphs
+               and world._terrain_profile.coarse_solver_graphs)
+    def scalar():
+        return [value for ctx in ctxs for value in _coarse_batch(
+                world, [ctx], scheduler, weight, t_cond, conditions, pool_size)]
+    if not enabled:
+        return scalar()
+    lock = owner.__dict__.setdefault('_terrain_stream_pool_lock', threading.RLock())
+    key = (count, str(world.device), world._dtype, json.dumps(dict(scheduler.config), sort_keys=True),
+           tuple((id(p), p._version) for p in owner.parameters()))
+    with lock:
+        inputs = [_coarse_batch(world, [ctx], scheduler, weight, t_cond, conditions, pool_size,
+                               prepare_only=True) for ctx in ctxs]
+        cached = owner.__dict__.get('_terrain_stream_pool')
+        if cached is not None and cached[0] != key:
+            cached[1].close()
+            owner.__dict__.pop('_terrain_stream_pool', None)
+            cached = None
+        if owner.__dict__.get('_terrain_stream_pool_failed_key') == key:
+            world._terrain_coarse_streams_error = owner.__dict__.get('_terrain_stream_pool_error')
+            world._terrain_coarse_streams_effective = 1
+            world.coarse._batch_size = 1
+            return scalar()
+        if cached is None:
+            candidate = None
+            try:
+                candidate = CoarseStreamPool(owner, scheduler, world.device, streams=count)
+                first = inputs[0]
+                reference = run_coarse_solver(world, scheduler, first.sample, first.conditions[0],
+                        list(first.labels.unbind()), list(first.conditions[1:]),
+                        list(first.embeds.unbind()) if first.embeds is not None else None)
+                candidate.warm(first, reference)
+            except RuntimeError as exc:
+                if candidate is not None:
+                    candidate.close()
+                owner.__dict__['_terrain_stream_pool_failed_key'] = key
+                owner.__dict__['_terrain_stream_pool_error'] = str(exc)[:400]
+                world._terrain_coarse_streams_error = str(exc)[:400]
+                world._terrain_coarse_streams_effective = 1
+                world.coarse._batch_size = 1
+                return scalar()
+            cached = (key, candidate)
+            owner.__dict__['_terrain_stream_pool'] = cached
+        outputs = []
+        for offset in range(0, len(inputs), count):
+            group, _ = cached[1].run(inputs[offset:offset+count])
+            for sample in group:
+                outputs.extend(_coarse_outputs(world, scheduler, sample, weight, pool_size))
+        world._terrain_coarse_streams_effective = count
+        world._terrain_coarse_streams_error = None
+        note = getattr(owner, '_terrain_note_graph_forwards', None)
+        if note is not None:
+            for item in inputs:
+                note(item.sample, 20)
+        return outputs
 
 
 def _build_coarse(self):
@@ -263,7 +362,9 @@ def _build_coarse(self):
         shape=(7, None, None),
         f=lambda ctxs: _coarse_batch(self, ctxs, scheduler, weight, t_cond, cond_inputs, pool),
         output_window=TensorWindow(size=(7, 64 // pool, 64 // pool), stride=(7, 48 // pool, 48 // pool)),
-        batch_size=self._terrain_profile.coarse_batch, device=cache_device,
+        batch_size=(coarse_stream_count(self) if self._terrain_profile.coarse_batch==1 and self._terrain_profile.cuda_graphs and
+                    self._terrain_profile.coarse_solver_graphs and torch.device(self.device).type=='cuda'
+                    else self._terrain_profile.coarse_batch), device=cache_device,
         tile_store=self.tile_store, tensor_id='base_coarse_map',
     )
 
@@ -455,6 +556,8 @@ def configure_world(world, profile=None, *, allow_experimental=False, world_prof
     between seed-specific worlds; their immutable eval-weight cache is shared.
     """
     profile = profile or choose_profile(world.device)
+    if type(profile.coarse_streams) is not int or profile.coarse_streams not in (1,2,4,8,16):
+        raise ValueError('Coarse streams must be 1, 2, 4, 8 or 16')
     world_profile = world_profile or getattr(world, '_terrain_world_profile', 'natural')
     from terrain_generation import resolve_generation
     descriptor = resolve_generation(world_profile)
@@ -549,6 +652,9 @@ def inference_status(world):
         ('coarse', world.coarse_model), ('base', world.base_model), ('decoder', world.decoder_model)) if hasattr(model, 'stats')}
     if '_terrain_coarse_solver_graph' in world.__dict__:
         graph_stats['coarse_solver'] = world._terrain_coarse_solver_graph.stats()
+    stream_pool = world.coarse_model.__dict__.get('_terrain_stream_pool')
+    if stream_pool:
+        graph_stats['coarse_streams'] = stream_pool[1].stats()
     from terrain_device import select_cuda_device
     return {'version': VERSION, 'device': str(world.device), 'device_selection': select_cuda_device(),
             'world_profile': getattr(world, '_terrain_world_profile', 'natural'),
@@ -556,6 +662,10 @@ def inference_status(world):
             'regional_snr': {'enabled': world._terrain_snr_active, 'cached_policies': len(world.__dict__.get('_terrain_snr_cache', {}))},
             'climate_projection': None,
             'profile': asdict(profile) if profile else None, 'cached_weight_layers': cached_layers,
+            'coarse_streams': dict(requested=coarse_stream_count(world),
+                effective=getattr(world, '_terrain_coarse_streams_effective',
+                    coarse_stream_count(world) if profile.cuda_graphs and profile.coarse_solver_graphs else 1),
+                error=getattr(world, '_terrain_coarse_streams_error', None)),
             'cached_weight_bytes': weight_bytes, 'solver_steps': 20, 'latent_fusion_steps': world.T,
             'precision': str(world._dtype), 'compile': world.torch_compile,
             'pointwise_kernels': __import__('terrain_nn_constants').kernel_status(),

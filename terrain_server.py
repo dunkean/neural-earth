@@ -32,7 +32,10 @@ from terrain_climate import CLIMATE_SIZE, MODES, sample_coarse_climate, colorize
 from terrain_orogen_layers import MODES as OROGEN_MODES, LEGENDS as OROGEN_LEGENDS, render as render_orogen_layer
 from terrain_snr_layer import MODES as SNR_MODES, render as render_snr_layer
 from terrain_styles import STYLES, MODES as STYLE_MODES, render_style, apply_contours, parse_contours
-from terrain_biomes import colorize_biomes, sample_biome_fields, parse_rock_slope
+from terrain_biomes import colorize_biomes, sample_biome_fields, sample_biome_transport, parse_rock_slope
+from terrain_koppen import COLORS as KOPPEN_COLORS, sample_classes
+from terrain_soil import sample_soil_transport
+from terrain_render import colorize_surface, parse_settings as parse_render_settings
 MODES = MODES + STYLE_MODES + OROGEN_MODES + SNR_MODES
 from terrain_conditioning import sample_conditioning_preview, WORLD_PROFILES
 from terrain_generation import resolve_generation, register_generation, generator_schema
@@ -69,6 +72,8 @@ else:
     runtime_profile = choose_profile()
     profile_data = dict(vars(runtime_profile), version=INFERENCE_VERSION)
     profile_data.pop('name', None)  # Free memory is not an identity of numerical output.
+    profile_data.pop('coarse_streams', None)  # Batch-one execution count preserves physical output.
+coarse_stream_setting = {'coarse': runtime_profile.coarse_streams if runtime_profile else 1}
 profile_data.update(model_revision=getattr(terrain_runtime, 'MODEL_REVISION', 'unversioned'),
     torch=str(torch.__version__), cuda=torch.version.cuda, cuda_device=SELECTED_DEVICE,
     compute_capability=GPU_SELECTION['selected']['compute_capability'] if GPU_SELECTION else None,
@@ -234,6 +239,8 @@ def _create_world(seed, world_profile, cache_limit, *, polar=False):
             world._terrain_polar_conditioning = conditioning(seed,world_profile)
         configure_world(world, runtime_profile, world_profile=world_profile)
         world.bind()
+        from terrain_inference import set_coarse_streams
+        set_coarse_streams(world, coarse_stream_setting['coarse'])
         world._terrain_manifest = world_manifest(seed,world_profile)
         if polar:
             from terrain_polar import chart_manifest
@@ -309,7 +316,7 @@ def get_world(seed, world_profile='natural'):
     return world
 
 
-def prepare_coarse_quantum(seed, profile):
+def prepare_coarse_quantum(seed, profile, *, budget_windows=1):
     global background_world, background_world_key
     with gpu_lock, torch.inference_mode():
         jobs.check_current_interest()
@@ -327,7 +334,7 @@ def prepare_coarse_quantum(seed, profile):
             background_world_key = key
         world=background_world
         world._terrain_coarse_preparation.prioritize(mask, coarse_background.focus(seed, profile))
-        return world._terrain_coarse_preparation.step(world,budget_windows=1)
+        return world._terrain_coarse_preparation.step(world,budget_windows=budget_windows)
 
 
 def _available_world(seed, profile):
@@ -346,8 +353,39 @@ def _available_world(seed, profile):
     return None
 
 
-coarse_background=CoarseBackground(jobs,prepare_coarse_quantum,None)
+coarse_background=CoarseBackground(jobs,prepare_coarse_quantum,None,
+                                 window_quantum=lambda:coarse_stream_setting['coarse'])
 generation_coordinator=GenerationCoordinator(jobs,coarse_background)
+
+
+@app.route('/api/inference/streams', methods=['GET', 'POST'])
+def inference_stream_settings():
+    if request.method == 'POST':
+        data = request.get_json(silent=True)
+        count = data.get('coarse') if isinstance(data, dict) else None
+        if type(count) is not int or count not in (1,2,4,8,16):
+            return jsonify(error='Coarse streams must be 1, 2, 4, 8 or 16'),400
+        with gpu_lock:
+            if count == coarse_stream_setting['coarse']:
+                return jsonify(**coarse_stream_setting, options=[1,2,4,8,16])
+            from terrain_inference import set_coarse_streams
+            live = [shared_pipeline, background_world, *worlds.values(),
+                    *preview_worlds.values(), *polar_worlds.values()]
+            owners = set()
+            for world in live:
+                if world is None:
+                    continue
+                set_coarse_streams(world, count)
+                owner = world.coarse_model
+                if id(owner) not in owners:
+                    owners.add(id(owner))
+                    cached = owner.__dict__.pop('_terrain_stream_pool', None)
+                    if cached:
+                        cached[1].close()
+                    owner.__dict__.pop('_terrain_stream_pool_failed_key', None)
+                    owner.__dict__.pop('_terrain_stream_pool_error', None)
+            coarse_stream_setting['coarse'] = count
+    return jsonify(**coarse_stream_setting, options=[1,2,4,8,16])
 
 
 @app.before_request
@@ -744,22 +782,32 @@ def response_report(report,seed,profile,lod,tx,ty,source):
     return dict(report,cache_source=source,provisional=provisional)
 
 
-def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief', lighting=None, contours=None, origin=(0, 0), seed=None, world_profile=None):
+def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief', lighting=None, contours=None, origin=(0, 0), seed=None, world_profile=None, render_settings=None):
     from terrain_styles import MODES as STYLE_MODES, render_style, apply_contours
     if mode in STYLE_MODES:
         rgb=render_style(elevation,NATIVE*2**lod,mode,lighting,origin)
     else:
         rgb = (get_relief_map(elevation, None, None, None, resolution=NATIVE*2**lod, vmin=0, vmax=4500)
                if lighting is None else render_relief(elevation, NATIVE*2**lod, lighting))
-    if mode == 'orogen-biomes':
+    if mode in ('orogen-biomes','orogen-koppen','render','soil'):
         resolution = NATIVE*2**lod
-        xs = origin[0]+(np.linspace(0,elevation.shape[1]-1,CLIMATE_SIZE)+.5)*resolution
-        ys = origin[1]+(np.linspace(0,elevation.shape[0]-1,CLIMATE_SIZE)+.5)*resolution
-        fields = physical_biome_fields(seed, world_profile, xs, ys)
-        palette = colorize_biomes(elevation,fields,resolution,parse_rock_slope(request.args.get('biome_slope')))
-        from terrain_lighting import relief_intensity
-        light = relief_intensity(elevation,resolution,lighting)
-        rgb = palette*np.where(elevation<0,1,light)[...,None]
+        xs = origin[0]+(np.arange(elevation.shape[1])+.5)*resolution
+        ys = origin[1]+(np.arange(elevation.shape[0])+.5)*resolution
+        if mode == 'orogen-koppen':
+            rgb = physical_koppen_colors(seed,world_profile,xs,ys,elevation)
+        elif mode in ('render','soil'):
+            atlas,settings = biome_atlas(seed,world_profile)
+            rgb = colorize_surface(atlas,xs,ys,elevation,resolution,settings,render_settings,
+                                   polar=selected_neural_chart()=='polar',mode=mode)
+            if mode=='render':
+                from terrain_lighting import relief_intensity
+                rgb *= np.where(elevation<0,1,relief_intensity(elevation,resolution,lighting))[...,None]
+        else:
+            fields = physical_biome_fields(seed, world_profile, xs, ys, elevation)
+            palette = colorize_biomes(elevation,fields,resolution)
+            from terrain_lighting import relief_intensity
+            light = relief_intensity(elevation,resolution,lighting)
+            rgb = palette*np.where(elevation<0,1,light)[...,None]
     elif mode not in STYLE_MODES and mode!='relief' and climate is not None:
         palette=colorize(elevation,climate,mode)
         if mode=='biomes':
@@ -772,13 +820,24 @@ def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief', lig
     return (np.clip(rgb[halo:-halo, halo:-halo], 0, 1)*255).astype(np.uint8)
 
 
-def physical_biome_fields(seed, wp, xs, ys):
+def biome_atlas(seed, wp):
     from terrain_orogen import get_heightmap
     descriptor = resolve_generation(wp)
     atlas = geometry_heightmap(get_heightmap(seed,descriptor.bootstrap_style,
         options=descriptor.bootstrap_options),descriptor.settings)
-    return sample_biome_fields(atlas,xs,ys,descriptor.settings,
+    return atlas,descriptor.settings
+
+
+def physical_biome_fields(seed, wp, xs, ys, elevation=None):
+    atlas,settings = biome_atlas(seed,wp)
+    return sample_biome_fields(atlas,xs,ys,settings,elevation,
                               polar=selected_neural_chart()=='polar')
+
+
+def physical_koppen_colors(seed, wp, xs, ys, elevation):
+    atlas,settings = biome_atlas(seed,wp)
+    return KOPPEN_COLORS[sample_classes(atlas,xs,ys,settings,elevation,
+                        polar=selected_neural_chart()=='polar')]
 
 
 def transport_climate(seed, wp, xs, ys, climate):
@@ -787,7 +846,21 @@ def transport_climate(seed, wp, xs, ys, climate):
     # the DEM and never require another neural inference.
     if resolve_generation(wp).bootstrap_generator != 'orogen':
         return climate
-    return np.concatenate([climate,physical_biome_fields(seed,wp,xs,ys)])
+    atlas,settings = biome_atlas(seed,wp)
+    # Preserve the initial atlas detail at broad LODs. At finer LODs the
+    # continuous lattice can be compact: the GPU classifies at DEM resolution.
+    from terrain_climate import expand_climate
+    cell_x=(atlas.bounds[2]-atlas.bounds[0])/atlas.width
+    cell_y=(atlas.bounds[3]-atlas.bounds[1])/atlas.height
+    width=min(304,max(len(xs),int(np.ceil(abs(xs[-1]-xs[0])/cell_x))+1))
+    height=min(304,max(len(ys),int(np.ceil(abs(ys[-1]-ys[0])/cell_y))+1))
+    if (height,width)!=climate.shape[1:]:
+        xs=np.linspace(xs[0],xs[-1],width);ys=np.linspace(ys[0],ys[-1],height)
+        climate=expand_climate(climate,(height,width))
+    return np.concatenate([climate,sample_biome_transport(atlas,xs,ys,settings,
+                           polar=selected_neural_chart()=='polar'),
+                           sample_soil_transport(atlas,xs,ys,settings,
+                           polar=selected_neural_chart()=='polar')])
 
 
 def sample_tile(world, seed, lod, tx, ty, halo=HALO):
@@ -881,6 +954,11 @@ def renderer_script():
     return send_from_directory(ROOT, 'terrain_renderer.js')
 
 
+@app.get('/terrain_render_controls.js')
+def render_controls_script():
+    return send_from_directory(ROOT, 'terrain_render_controls.js')
+
+
 @app.get('/terrain_lod.js')
 def lod_script():
     return send_from_directory(ROOT,'terrain_lod.js')
@@ -894,6 +972,11 @@ def generation_controls_script():
 @app.get('/terrain_toolbar.js')
 def toolbar_script():
     return send_from_directory(ROOT,'terrain_toolbar.js')
+
+
+@app.get('/terrain_inference_controls.js')
+def inference_controls_script():
+    return send_from_directory(ROOT,'terrain_inference_controls.js')
 
 
 @app.get('/terrain_map_tools.js')
@@ -934,6 +1017,7 @@ def status():
                    active_seed=str(active_seed), cached_seeds=[str(s[1]) for s in worlds],
                    metrics=dict(metrics), scheduler=jobs.status(), disk_cache=disk_cache.status(),
                    physical_delivery=physical_delivery.status(), inference=inference,
+                   inference_streams=dict(coarse_stream_setting),
                    latent_previews=dict(max_worlds=2,world_cache_limit_bytes=128*1024**2,
                        cached_seeds=[str(k[1]) for k in preview_worlds],
                        window_cache_bytes=sum(getattr(w.tile_store,'_bytes',0) for w in preview_worlds.values()),
@@ -1149,7 +1233,8 @@ def update_view():
             light=parse_lighting(json.dumps(data['overview_lighting'])) if data.get('overview_lighting') is not None else None
             contours=parse_contours(json.dumps(data['overview_contours'])) if data.get('overview_contours') is not None else None
             for mode in MODES:
-                suffix=(lighting_suffix(light) if mode in ('relief','biomes','orogen-biomes')+STYLE_MODES else '')+lighting_suffix(contours)
+                render_options=parse_render_settings(data.get('overview_render_settings')) if mode=='render' else None
+                suffix=(lighting_suffix(light) if mode in ('relief','biomes','orogen-biomes','render')+STYLE_MODES else '')+lighting_suffix(contours)+(lighting_suffix(render_options) if mode=='render' else '')
                 wants[f'{VERSION}/{world_profile}/{seed}/overview/{mode}{suffix}'] = 0
         focus = data.get('bounds')
         if focus is not None:
@@ -1525,8 +1610,8 @@ def native_coarse_tile(seed, tx, ty):
         payload = root.astype('<f4', copy=False).tobytes() + climate.astype('<f4', copy=False).tobytes()
         response = Response(payload, mimetype='application/octet-stream')
         response.headers['X-Terrain-Encoding'] = 'signed-sqrt'
-        response.headers['X-Terrain-Climate-Width'] = str(native_coarse.CLIMATE_SIZE)
-        response.headers['X-Terrain-Climate-Height'] = str(native_coarse.CLIMATE_SIZE)
+        response.headers['X-Terrain-Climate-Width'] = str(climate.shape[2])
+        response.headers['X-Terrain-Climate-Height'] = str(climate.shape[1])
         response.headers['X-Terrain-Climate-Layers'] = str(climate.shape[0])
         response.cache_control.max_age = 30 if report['stage'] == 'conditioning-preview' else 31536000
         return _tile_headers(response, report, hit)
@@ -1548,7 +1633,7 @@ def height_tile(seed, lod, tx, ty):
         mode = display_mode()
         if mode in SNR_MODES:
             raise ValueError('SNR layers use the PNG tile endpoint')
-        if mode in OROGEN_MODES and mode != 'orogen-biomes':
+        if mode in OROGEN_MODES and mode not in ('orogen-biomes','orogen-koppen','render','soil'):
             return orogen_diagnostic_tile(seed, lod, tx, ty, generation_profile(), mode, binary=True)
         path, report, cached, arrays = physical_tile(seed, lod, tx, ty, return_arrays=True)
         with span('tile.binary_response', cache_hit=cached, from_memory=arrays is not None):
@@ -1566,8 +1651,8 @@ def height_tile(seed, lod, tx, ty):
         report = dict(report, **tile_relief_stats(elevation, HALO))
         response = Response(payload, mimetype='application/octet-stream')
         if request.args.get('climate')=='1':
-            response.headers['X-Terrain-Climate-Width']=str(CLIMATE_SIZE)
-            response.headers['X-Terrain-Climate-Height']=str(CLIMATE_SIZE)
+            response.headers['X-Terrain-Climate-Width']=str(climate.shape[2])
+            response.headers['X-Terrain-Climate-Height']=str(climate.shape[1])
             response.headers['X-Terrain-Climate-Layers']=str(climate.shape[0])
         response.cache_control.max_age = 31536000
         response.cache_control.public = True
@@ -1588,10 +1673,10 @@ def tile(seed, lod, tx, ty):
     try:
         seed, lod, tx, ty = _tile_coordinates(seed, lod, tx, ty)
         wp,mode=generation_profile(),display_mode()
-        if mode == 'orogen-biomes':parse_rock_slope(request.args.get('biome_slope'))
+        render_settings = parse_render_settings(request.args.get('render_settings')) if mode=='render' else None
         if mode in SNR_MODES:
             return snr_diagnostic_tile(seed, lod, tx, ty, wp, mode)
-        if mode in OROGEN_MODES and mode != 'orogen-biomes':
+        if mode in OROGEN_MODES and mode not in ('orogen-biomes','orogen-koppen','render','soil'):
             return orogen_diagnostic_tile(seed, lod, tx, ty, wp, mode)
         if request.args.get('profile', PROFILE) != PROFILE:
             raise ValueError('Outdated cache profile: reload the page')
@@ -1599,14 +1684,14 @@ def tile(seed, lod, tx, ty):
         lighting = parse_lighting(request.args.get('lighting'))
         from terrain_styles import parse_contours
         contours = parse_contours(request.args.get('contours'))
-        if lighting is not None or contours is not None or mode == 'orogen-biomes':
+        if lighting is not None or contours is not None or mode in ('orogen-biomes','orogen-koppen','render','soil'):
             # Reuse physical caches, without accumulating PNGs for slider values.
             physical_path, report, cached, arrays = physical_tile(seed,lod,tx,ty,return_arrays=True)
             with image_slots:
                 started=time.perf_counter()
                 elevation=arrays[0] if arrays is not None else np.load(physical_path,allow_pickle=False)
                 climate=arrays[1] if arrays is not None else np.load(physical_path.with_suffix('.climate.npy'),allow_pickle=False)
-                rgb=render_elevation(elevation,latent_preview_source(lod) or lod,climate=climate,mode=mode,seed=seed,world_profile=wp,lighting=lighting,contours=contours,origin=(tx*256*NATIVE*2**lod-HALO*report['resolution'],ty*256*NATIVE*2**lod-HALO*report['resolution']))
+                rgb=render_elevation(elevation,latent_preview_source(lod) or lod,climate=climate,mode=mode,seed=seed,world_profile=wp,lighting=lighting,contours=contours,render_settings=render_settings,origin=(tx*256*NATIVE*2**lod-HALO*report['resolution'],ty*256*NATIVE*2**lod-HALO*report['resolution']))
                 buffer=io.BytesIO();Image.fromarray(rgb).save(buffer,format='PNG')
                 report=dict(report,**tile_relief_stats(elevation,HALO),render_seconds=round(time.perf_counter()-started,4))
             return _tile_headers(Response(buffer.getvalue(),mimetype='image/png'),report,cached)
@@ -1719,7 +1804,8 @@ def overview(seed):
         wp,mode=generation_profile(),display_mode()
         lighting=parse_lighting(request.args.get("lighting"))
         contours=parse_contours(request.args.get("contours"))
-        suffix=lighting_suffix(lighting)+lighting_suffix(contours)
+        render_settings=parse_render_settings(request.args.get('render_settings')) if mode=='render' else None
+        suffix=lighting_suffix(lighting)+lighting_suffix(contours)+(lighting_suffix(render_settings) if mode=='render' else '')
     except ValueError as exc:
         return jsonify(error=str(exc)),400
     directory = CACHE/wp/str(seed)
@@ -1749,7 +1835,7 @@ def overview(seed):
         if mode in SNR_MODES:
             manifest = world_manifest(seed, wp)
             return render_snr_layer(seed, wp, manifest['conditioning']['cond_snr'], mode, xs, ys), None, (x1-x0)/width
-        if mode in OROGEN_MODES and mode != 'orogen-biomes':
+        if mode in OROGEN_MODES and mode not in ('orogen-biomes','orogen-koppen','render','soil'):
             from terrain_orogen import get_heightmap
             descriptor = resolve_generation(wp)
             atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options), descriptor.settings)
@@ -1762,17 +1848,26 @@ def overview(seed):
     def finalize(value):
         jobs.check_current_interest()
         elevation, climate,resolution = value
-        if mode in OROGEN_MODES + SNR_MODES and mode != 'orogen-biomes':
+        if mode in OROGEN_MODES + SNR_MODES and mode not in ('orogen-biomes','orogen-koppen','render','soil'):
             rgb=elevation
-        elif mode == 'orogen-biomes':
+        elif mode in ('orogen-biomes','orogen-koppen','render','soil'):
             x0,y0,x1,y1=metadata_snapshot['overview_bounds']
             xs=x0+(np.arange(2048)+.5)*(x1-x0)/2048
             ys=y0+(np.arange(1024)+.5)*(y1-y0)/1024
-            fields=physical_biome_fields(seed,wp,xs,ys)
-            rgb=colorize_biomes(elevation,fields,resolution)
-            from terrain_lighting import relief_intensity
-            light=relief_intensity(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting)
-            rgb*=np.where(elevation<0,1,light)[...,None]
+            if mode == 'orogen-koppen':
+                rgb=physical_koppen_colors(seed,wp,xs,ys,elevation)
+            elif mode in ('render','soil'):
+                atlas,settings=biome_atlas(seed,wp)
+                rgb=colorize_surface(atlas,xs,ys,elevation,((x1-x0)/2048,(y1-y0)/1024),settings,render_settings,mode=mode)
+                if mode=='render':
+                    from terrain_lighting import relief_intensity
+                    rgb*=np.where(elevation<0,1,relief_intensity(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting))[...,None]
+            else:
+                fields=physical_biome_fields(seed,wp,xs,ys,elevation)
+                rgb=colorize_biomes(elevation,fields,resolution)
+                from terrain_lighting import relief_intensity
+                light=relief_intensity(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting)
+                rgb*=np.where(elevation<0,1,light)[...,None]
         elif mode in STYLE_MODES:
             x0,y0,x1,y1=metadata_snapshot['overview_bounds']
             rgb=render_style(elevation,((x1-x0)/2048,(y1-y0)/1024),mode,lighting,(x0,y0))
@@ -1783,11 +1878,11 @@ def overview(seed):
         else:
             x0,y0,x1,y1=metadata_snapshot['overview_bounds']
             rgb=render_relief(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting)
-        if mode not in OROGEN_MODES+SNR_MODES or mode == 'orogen-biomes':
+        if mode not in OROGEN_MODES+SNR_MODES or mode in ('orogen-biomes','orogen-koppen','render','soil'):
             rgb=apply_contours(rgb,elevation,contours,mode)
         buffer = io.BytesIO()
         Image.fromarray((np.clip(rgb, 0, 1)*255).astype(np.uint8)).save(buffer, format='PNG')
-        if lighting is not None or contours is not None:return buffer.getvalue()
+        if lighting is not None or contours is not None or render_settings is not None:return buffer.getvalue()
         _atomic_bytes(path, buffer.getvalue())
         _atomic_bytes(receipt_path,json.dumps({'world_identity':identity,'mode':mode}).encode())
         _atomic_bytes(directory/'world.json', json.dumps(metadata_snapshot, indent=2).encode())

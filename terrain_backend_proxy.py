@@ -24,8 +24,8 @@ WORKER_ENV='TERRAIN_REFERENCE_WORKER_TOKEN'
 PARENT_ENV='TERRAIN_REFERENCE_PARENT_PID'
 STATUS_PATH='/api/inference-backends'
 MAX_BODY=4*1024**2
-READ_APIS={'api/status','api/world','api/generation/schema','api/profile','generated/terrain.png'}
-WRITE_APIS={'api/view','api/view/release','api/coarse/prepare','api/terrain/suspend'}
+READ_APIS={'api/status','api/world','api/generation/schema','api/profile','api/inference/streams','generated/terrain.png'}
+WRITE_APIS={'api/view','api/view/release','api/coarse/prepare','api/terrain/suspend','api/inference/streams'}
 TILE_PATH=re.compile(r'(?:height/natural-v1/[0-9]+/-?[0-9]+/-?[0-9]+/-?[0-9]+\.bin|'
                      r'coarse/natural-v1/[0-9]+/-?[0-9]+/-?[0-9]+\.bin|'
                      r'tiles/natural-v1/[0-9]+/-?[0-9]+/-?[0-9]+/-?[0-9]+\.png|'

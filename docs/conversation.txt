@@ -1,14 +1,12 @@
 A faire:
 
-
+- LOD -2/-3: faire une tentative de remplacement
 - Biome multi échelles !
 
 // Verifier si utile après fix des côtes
 - Application de l'érosion gpu sur les LOD 3-2-1-0 pour essayer de refaire les fjords et autres structures
 
 - tout passer en anglais
-
-- cache trop petit.
 
 
 

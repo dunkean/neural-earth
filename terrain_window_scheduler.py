@@ -151,6 +151,18 @@ class WorldWindowScheduler:
             tensor._store.end_access(tensor.uuid)
         return already
 
+    def ensure_windows(self, tensor, indices, *, check=None):
+        """Submit a coarse group without decomposing any upstream stages."""
+        effective_check = check if check is not None else getattr(self._thread, 'check', None)
+        if effective_check is not None:
+            effective_check()
+        tensor._store.begin_access(tensor.uuid)
+        try:
+            with self.scope(effective_check):
+                tensor._ensure_processed(indices)
+        finally:
+            tensor._store.end_access(tensor.uuid)
+
 
 def stage_tensor(world, stage: str):
     if stage == 'coarse':

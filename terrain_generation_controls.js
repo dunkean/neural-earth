@@ -10,9 +10,10 @@ window.TerrainGenerationControls=(()=>{
     return settings.height_source==='orogen'?'orogen':settings.height_source==='natural'?'natural':'custom';
   }
   function defaults(profile){
-    if(schema?.defaults_by_profile?.[profile])return {...clone(schema.defaults_by_profile[profile]),climate_source:'orogen'};
+    const propertyDefaults=Object.fromEntries(Object.entries(schema?.properties||{}).filter(([,spec])=>spec.default!==undefined).map(([key,spec])=>[key,clone(spec.default)]));
+    if(schema?.defaults_by_profile?.[profile])return {...propertyDefaults,...clone(schema.defaults_by_profile[profile]),climate_source:'orogen'};
     const natural=profile==='natural';
-    return {world_diameter_km:40000/Math.PI,world_topology:"sphere",orogen_gpu_erosion:false,...Object.fromEntries(gpuFields.map(([key])=>[key,false])),...Object.fromEntries(cityFields.map(([key,label,min,max,step,value])=>[key,value])),height_source:natural?'natural':profile==='orogen'?'orogen':'native',climate_source:'orogen',relief_pipeline:profile==='orogen'?'orogen':'original',
+    return {...propertyDefaults,world_diameter_km:40000/Math.PI,world_topology:"sphere",orogen_gpu_erosion:false,...Object.fromEntries(gpuFields.map(([key])=>[key,false])),...Object.fromEntries(cityFields.map(([key,label,min,max,step,value])=>[key,value])),height_source:natural?'natural':profile==='orogen'?'orogen':'native',climate_source:'orogen',relief_pipeline:profile==='orogen'?'orogen':'original',
       continental_style:profile.startsWith('terrestrial-')?profile.slice(12):'earthlike',
       continental_strength:.8,macro_scale_km:600,frequency_mult:[1,1,1,1,1],
       octaves:[4,2,4,4,4],cond_snr:natural?[.5,.5,.5,.5,.5]:[.05,.5,.5,.5,.5],drop_water_pct:.5,
@@ -285,7 +286,18 @@ window.TerrainGenerationControls=(()=>{
       finally{for(const id of ['applyGeneration','resetGeneration','saveGenerationA','generateRelief','generateErosion','generateClimate','applySnr'])$(id).disabled=false;$('switchGenerationAB').disabled=!savedA;}
     }
     $('applyGeneration').onclick=()=>action(()=>submit(read(),draftBase));
-    $('resetGeneration').onclick=()=>action(async()=>{const success=await onReset(draftBase);if(success)$('generationDraftStatus').textContent='Profile defaults restored';return success});
+    $('resetGeneration').onclick=()=>action(async()=>{
+      const sequence=++applySequence;
+      const baseline=defaults(draftBase);
+      // Restore every draft control immediately, even if generation fails or
+      // a previous input is invalid. Color values and their RGB data reset together.
+      stageReferences={};write(baseline);$('generationPreset').value='current';
+      $('generationDraftStatus').textContent='Réinitialisation de tous les paramètres…';
+      const success=await onReset(draftBase);
+      if(sequence!==applySequence)return false;
+      $('generationDraftStatus').textContent=success?'Tous les paramètres de génération sont réinitialisés.':'Paramètres réinitialisés ; génération non appliquée.';
+      return success;
+    });
     function comparisonSnapshot(){const snapshot=clone(currentSnapshot());snapshot.settings={...(snapshot.settings||defaults(snapshot.profile)),...stageReferences};return snapshot;}
     $('saveGenerationA').onclick=()=>{savedA=comparisonSnapshot();savedB=null;showingA=false;$('switchGenerationAB').disabled=false;$('switchGenerationAB').textContent='Show A';$('generationDraftStatus').textContent='Settings A saved'};
     $('switchGenerationAB').onclick=()=>action(async()=>{if(!savedA)return false;const candidateB=comparisonSnapshot(),target=showingA?savedB:savedA;
@@ -328,7 +340,7 @@ window.TerrainGenerationControls=(()=>{
         const footer=document.createElement('div');footer.className='stageActions';const status=document.createElement('small');status.id='stageStatus'+scope;status.setAttribute('role','status');
         const button=document.createElement('button');button.type='button';button.id='generate'+name;button.textContent='Générer '+label;button.onclick=()=>action(()=>submit(read(),draftBase,scope));footer.append(status,button);stagePanes[name].append(footer);
       }
-      const help=document.createElement('small');help.textContent='Chaque onglet génère uniquement son étape. Toute la chaîne : relief → érosion → climat.';actions.before(help);body.append(actions);
+      const help=document.createElement('small');help.textContent='Chaque onglet génère uniquement son étape. Toute la chaîne : relief → érosion → climat. Les sols sont générés avec le relief et le climat courants.';actions.before(help);body.append(actions);
       $('applyGeneration').textContent='Générer toute la chaîne';
       const rendering=$('renderPanel').querySelector('.toolPanel'),renderHeading=rendering.querySelector('.panelHeading');
       const renderNodes=[...rendering.children].filter(node=>node!==renderHeading);const renderPanes=tabs(rendering,[['Rendering','Rendu'],['Snr','SNR']]);renderPanes.Rendering.append(...renderNodes);

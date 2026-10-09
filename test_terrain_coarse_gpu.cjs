@@ -62,9 +62,6 @@ assert.equal(sampleHeight({heights:new Float32Array(16).fill(-10),heightOptions:
     assert.equal(await page.evaluate(()=>terrainDebug.snapshot().backend),'webgpu');
     assert.equal(await page.evaluate(()=>terrainDebug.snapshot().refinement.target),0);
     assert((await page.evaluate(()=>terrainDebug.snapshot().rendered.lods)).includes(0),'Biomes render the detailed DEM');
-    await page.locator('#biomeRockSlope').fill('50');await page.locator('#biomeRockSlope').dispatchEvent('change');
-    assert.equal(await page.evaluate(()=>terrainDebug.snapshot().biomeRockSlope),50);
-    assert.equal(new URL(page.url()).searchParams.get('biome_slope'),'50');
     await page.evaluate(()=>{mpp=15;draw();refresh()});await settle();
     assert.equal(await page.evaluate(()=>terrainDebug.snapshot().refinement.target),-1);
     assert((await page.evaluate(()=>terrainDebug.snapshot().rendered.lods)).includes(-1),'Biomes also render experimental fine LODs');

@@ -38,12 +38,13 @@ def heights(case):
 
 
 class BiomeTests(unittest.TestCase):
-    def test_steep_rock_overrides_every_land_class_including_ice(self):
+    def test_steep_slopes_do_not_override_informational_biomes(self):
         case=dict(height=6000,slope=45,resolution=30,threshold=40)
         for code in range(1,31):
             with self.subTest(code=code):
                 actual=colorize_biomes(heights(case),fields(code),30,40)[152,152]
-                np.testing.assert_allclose(actual,[.42,.38,.32],atol=1e-6)
+                flat=colorize_biomes(np.full((304,304),6000,np.float32),fields(code),30)[152,152]
+                np.testing.assert_allclose(actual,flat,atol=1e-6)
 
     def test_snow_and_living_biomes_remain_below_threshold(self):
         forest=colorize_biomes(np.full((8,8),1000,np.float32),fields(),30,40)[4,4]
@@ -51,11 +52,11 @@ class BiomeTests(unittest.TestCase):
         self.assertGreater(forest[1],forest[0]*2)
         np.testing.assert_allclose(snow,[.92,.93,.96],atol=1e-6)
 
-    def test_slope_rule_starts_at_lod_zero_and_continues_at_finer_lods(self):
+    def test_informational_snow_stays_at_all_lods(self):
         for resolution in (60,30,15,7.5,3.75):
             case=dict(height=6000,slope=45,resolution=resolution)
             actual=colorize_biomes(heights(case),fields(),resolution,40)[152,152]
-            np.testing.assert_allclose(actual,[.92,.93,.96] if resolution>30 else [.42,.38,.32],atol=1e-6)
+            np.testing.assert_allclose(actual,[.92,.93,.96],atol=1e-6)
 
     def test_threshold_is_configurable_and_validated(self):
         case=dict(height=6000,slope=45,resolution=30)

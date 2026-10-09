@@ -35,9 +35,89 @@
       textureStore(destination,p,vec4<f32>(a,b,0,0));
     }`;
   const city=window.TerrainStyleRendering;
-  const modeNumber=mode=>mode==='orogen-biomes'?-1:city?.number(mode)??({relief:0,biomes:1,temperature:2,precipitation:3}[mode]??0);
+  const modeNumber=mode=>mode==='render'?-3:mode==='soil'?-4:mode==='orogen-biomes'?-1:mode==='orogen-koppen'?-2:city?.number(mode)??({relief:0,biomes:1,temperature:2,precipitation:3}[mode]??0);
+  // The compute and native coarse fragment paths compile this SAME material
+  // function. It is independent of tile layouts and height sampling strategies.
+  const materialShader=`
+    fn surfaceMeta(i:i32)->f32{return textureLoad(climate,vec2<i32>(i,0),45,0).r;}
+    fn surfacePoint(local:vec2<f32>,origin:vec2<f32>,spacing:f32)->vec3<f32>{
+      let lo=vec2<f32>(surfaceMeta(0),surfaceMeta(1));let extent=vec2<f32>(surfaceMeta(2),surfaceMeta(3))-lo;
+      if(surfaceMeta(4)<.5){return vec3<f32>(origin+(local+.5)*spacing,0.);}
+      // Divide before adding small local offsets to retain sub-metre precision.
+      let uv=(origin-lo)/extent+(local+.5)*(spacing/extent);
+      let lon=uv.x*6.283185307-3.141592654;let lat=1.570796327-uv.y*3.141592654;
+      var dir=vec3<f32>(cos(lat)*cos(lon),sin(lat),cos(lat)*sin(lon));
+      if(surfaceMeta(5)>.5){dir=vec3<f32>(dir.x,-dir.z,dir.y);}
+      return dir*(extent.x/6.283185307);
+    }
+    fn surfaceHash(c:vec3<i32>,salt:u32)->f32{
+      let v=bitcast<vec3<u32>>(c);
+      var h=(v.x*0x9e3779b9u)^(v.y*0x85ebca6bu)^(v.z*0xc2b2ae35u)^salt;
+      h=(h^(h>>16u))*0x7feb352du;h=(h^(h>>15u))*0x846ca68bu;h=h^(h>>16u);
+      return f32(h>>8u)/16777216.;
+    }
+    fn surfaceNorth(local:vec2<f32>,origin:vec2<f32>,spacing:f32)->vec2<f32>{
+      if(surfaceMeta(4)<.5){return vec2<f32>(0.);}
+      if(surfaceMeta(5)<.5){return vec2<f32>(0.,-1.);}
+      let lo=vec2<f32>(surfaceMeta(0),surfaceMeta(1));let extent=vec2<f32>(surfaceMeta(2),surfaceMeta(3))-lo;
+      let uv=(origin-lo)/extent+(local+.5)*(spacing/extent);
+      let lon=uv.x*6.283185307-3.141592654;let lat=1.570796327-uv.y*3.141592654;
+      // Geographic north of rotated (x,-z,y); analytic derivatives avoid four
+      // extra trigonometric coordinate evaluations for every visible pixel.
+      let d=vec2<f32>(-cos(lat)*cos(lon)*6.283185307/extent.x,-sin(lat)*sin(lon)*3.141592654/extent.y);
+      return d/max(length(d),1e-12);
+    }
+    fn surfaceNoise(p:vec3<f32>,salt:u32)->f32{
+      let c=vec3<i32>(floor(p));let q=fract(p);let f=q*q*(3.-2.*q);
+      return mix(mix(mix(surfaceHash(c,salt),surfaceHash(c+vec3<i32>(1,0,0),salt),f.x),mix(surfaceHash(c+vec3<i32>(0,1,0),salt),surfaceHash(c+vec3<i32>(1,1,0),salt),f.x),f.y),
+        mix(mix(surfaceHash(c+vec3<i32>(0,0,1),salt),surfaceHash(c+vec3<i32>(1,0,1),salt),f.x),mix(surfaceHash(c+vec3<i32>(0,1,1),salt),surfaceHash(c+vec3<i32>(1,1,1),salt),f.x),f.y),f.z);
+    }
+    fn surfaceOctave(p:vec3<f32>,scale:f32,offset:f32,footprint:f32)->f32{
+      // An octave is skipped entirely above Nyquist, faded before it gets there.
+      if(footprint>=scale*.5){return .5;}
+      return .5+(surfaceNoise(p/scale+offset,u32(surfaceMeta(6))+u32(offset))-.5)*(1.-smoothstep(scale*.25,scale*.5,footprint));
+    }
+    const SURFACE_FAMILY=array<i32,31>(4,0,0,1,2,2,3,3,4,4,4,1,1,1,4,4,4,4,4,5,5,4,4,5,5,4,4,5,5,6,7);
+    const SURFACE_PALETTE=array<vec4<f32>,8>(vec4<f32>(.12,.27,.13,.94),vec4<f32>(.35,.40,.19,.55),vec4<f32>(.65,.56,.37,.08),vec4<f32>(.47,.46,.26,.42),vec4<f32>(.20,.32,.16,.86),vec4<f32>(.16,.27,.19,.88),vec4<f32>(.40,.43,.28,.5),vec4<f32>(.39,.40,.37,0.));
+    const SURFACE_DECIDUOUS=array<f32,8>(.08,.15,0.,.1,.72,.15,0.,0.);
+    fn surfaceColor(id:i32,height:f32,slope:vec2<f32>,curvature:f32,point:vec3<f32>,north:vec2<f32>,footprint:f32,soil:vec3<f32>,substrateRock:vec3<f32>,humus:f32,ts:f32,tw:f32,rain:f32,alpine:f32,snowline:f32,water:vec2<f32>)->vec3<f32>{
+      if(height<0.){return mix(vec3<f32>(.24,.40,.49),vec3<f32>(.035,.10,.22),smoothstep(0.,4500.,-height));}
+      let broad=surfaceOctave(point,12000.,0.,footprint);let grove=surfaceOctave(point+(broad-.5)*vec3<f32>(900.,675.,-225.),1600.,11.,footprint);
+      let holes=surfaceOctave(point,180.,23.,footprint);let fine=surfaceOctave(point,25.,37.,footprint);let micro=surfaceOctave(point,12.,53.,footprint);
+      let family=SURFACE_FAMILY[clamp(id,0,30)];let fam=SURFACE_PALETTE[family];
+      let phase=.5-.5*cos(6.283185307*params.render0.x);let temp=mix(tw,ts,phase);
+      let moisture=clamp(rain/2200.,0.,1.);let grade=length(slope);let convex=clamp(curvature,-1.,1.);
+      let wet=clamp(water.y,0.,1.);let bank=clamp(water.x,0.,1.);
+      let herbs=smoothstep(-6.,8.,max(ts,tw))*moisture*(.35+.25*humus)*(1.-smoothstep(.45,1.4,grade));
+      let ground=mix(soil*(1.-.2*wet-.08*bank),vec3<f32>(.40,.43,.25),herbs);var rock=substrateRock*params.render3.xyz;
+      var vegetation=fam.xyz*params.render2.xyz;
+      let season=fract(params.render0.x+select(0.,.5,ts<tw));
+      let autumn=smoothstep(.58,.72,season)*(1.-smoothstep(.83,.97,season))*SURFACE_DECIDUOUS[family];
+      vegetation=mix(vegetation,vec3<f32>(.47,.34,.15),autumn*.45);
+      let dry=clamp((temp-12.)/22.,0.,1.)*(1.-moisture);
+      vegetation=mix(vegetation,vec3<f32>(.51,.46,.25),dry*.35);
+      let forestAlt=(1.-smoothstep(max(alpine*1000.-500.,0.),max(alpine*1000.+500.,1000.),height))*smoothstep(0.,12.,max(ts,tw));
+      let density=clamp(fam.w*params.render0.z*(.72+.28*moisture)*forestAlt*(.65+.7*broad)+.1*bank,0.,1.);
+      let clearing=smoothstep(.19,.74,.62*grove+.38*holes+.2*(broad-.5));
+      let cover=clamp(density*smoothstep(.12,.72,clearing+density*.3-.16)*(1.-smoothstep(.45,1.4,grade)),0.,1.);
+      var color=mix(ground,vegetation,cover);
+      let exposed=smoothstep(params.render0.w*.65,params.render0.w*1.5,grade);
+      let highland=smoothstep(max(alpine*1000.,0.),max(alpine*1000.+1600.,1600.),height)*.65;
+      let rockCover=clamp(max(exposed,highland)+.12*convex+.12*(holes-.5),0.,1.);
+      rock*=1.+params.render0.y*(.12*(broad-.5)+.08*(fine-.5));color=mix(color,rock,rockCover);
+      let aspect=dot(slope,north)/max(grade,.00001)*sign(point.y);
+      let cold=1.-smoothstep(-5.,3.,temp);
+      let localSnowline=snowline*1000.+(holes-.5)*300.+(broad-.5)*400.;
+      let altitude=smoothstep(max(localSnowline-250.,0.),max(localSnowline+700.,700.),height);
+      let potential=clamp(max(cold*.85,altitude)*params.render1.x*(1.+.15*aspect-.12*convex+.25*(holes-.5)),0.,1.);
+      let slip=.65+.55*altitude+.25*cold;let retention=1.-smoothstep(slip,slip+1.4,grade);
+      let snow=clamp(potential*retention*(1.-.2*wet),0.,1.);color=mix(color,params.render4.xyz,snow);
+      color*=1.+params.render0.y*(.15*(broad-.5)+.12*(grove-.5)+.08*(fine-.5)+.04*(micro-.5));
+      return clamp(color,vec3<f32>(0.),vec3<f32>(1.));
+    }
+  `;
   const shadeShader = `
-    struct Params { resolution:f32, halo:f32, width:f32, height:f32, mode:f32, pad0:f32, pad1:f32, pad2:f32, lighting:vec4<f32>, sunlight:vec4<f32>, style:vec4<f32> }
+    struct Params { resolution:f32, halo:f32, width:f32, height:f32, mode:f32, pad0:f32, pad1:f32, pad2:f32, lighting:vec4<f32>, sunlight:vec4<f32>, style:vec4<f32>, render0:vec4<f32>, render1:vec4<f32>, render2:vec4<f32>, render3:vec4<f32>, render4:vec4<f32> }
     @group(0) @binding(0) var elevation: texture_2d<f32>;
     @group(0) @binding(1) var blurred: texture_2d<f32>;
     @group(0) @binding(2) var color: texture_storage_2d<rgba8unorm,write>;
@@ -50,6 +130,7 @@
       let lo=vec2<i32>(floor(q));let hi=min(lo+vec2<i32>(1),size-1);let f=fract(q);
       return mix(mix(textureLoad(climate,lo,layer,0).r,textureLoad(climate,vec2<i32>(hi.x,lo.y),layer,0).r,f.x),mix(textureLoad(climate,vec2<i32>(lo.x,hi.y),layer,0).r,textureLoad(climate,hi,layer,0).r,f.x),f.y);
     }
+    fn surfaceHeight(q:vec2<f32>,level:f32)->f32{return textureLoad(elevation,vec2<i32>(q),0).r;}
     fn shade(d:vec2<f32>) -> f32 {
       // Same directional light/vertical exaggeration as upstream relief_map.py.
       let normal=normalize(vec3<f32>(d.x*params.lighting.w,d.y*params.lighting.w,1.));
@@ -60,11 +141,43 @@
       if (t<.75) { return mix(vec3<f32>(1.,1.,.6),vec3<f32>(.5,.36,.33),(t-.5)*4.); }
       return mix(vec3<f32>(.5,.36,.33),vec3<f32>(1.),(t-.75)*4.);
     }
+    // Lookup planes contain exact class palettes and the user's thresholds.
+    // Only the continuous seasonal fields are spatially interpolated.
+    fn koppenSetting(index:i32)->f32{return textureLoad(climate,vec2<i32>(index,0),35,0).r;}
+    fn classField(id:i32,layer:i32)->f32{return textureLoad(climate,vec2<i32>(id,0),layer,0).r;}
+    fn koppen(ts:f32,tw:f32,ps:f32,pw:f32)->i32{
+      let hot=max(ts,tw);let cold=min(ts,tw);let annual=(ts+tw)*.5;
+      if(hot<koppenSetting(0)){return 30;}
+      if(hot<koppenSetting(1)){return 29;}
+      let shoulder=hot-(hot-cold)*koppenSetting(20);
+      let summer=select(pw,ps,ts>=tw);let winter=select(ps,pw,ts>=tw);let total=summer+winter;
+      var fraction=.5;if(total>0.){fraction=summer/total;}
+      var extra=koppenSetting(10);
+      if(fraction>=koppenSetting(11)){extra=koppenSetting(9);}
+      else if(fraction<=koppenSetting(12)){extra=0.;}
+      let threshold=max(0.,koppenSetting(8)*annual+extra);
+      if(total<threshold){return select(6,4,total<threshold*koppenSetting(13))+select(0,1,annual<koppenSetting(7));}
+      if(cold>=koppenSetting(2)){
+        let dry=min(summer,winter)/6.;
+        if(dry>=koppenSetting(17)){return 1;}
+        return select(3,2,total>=koppenSetting(18)*(koppenSetting(19)-dry));
+      }
+      var pattern=0;
+      if(summer<winter&&summer/6.<koppenSetting(14)&&summer<winter/koppenSetting(15)){pattern=1;}
+      else if(summer>=winter&&winter<summer/koppenSetting(16)){pattern=2;}
+      var letter=3;
+      if(hot>=koppenSetting(4)){letter=0;}else if(shoulder>=koppenSetting(5)){letter=1;}
+      else if(cold>=koppenSetting(6)){letter=2;}
+      if(cold>=koppenSetting(3)){return select(9,8+pattern*3+letter,letter<3);}
+      return 17+pattern*4+letter;
+    }
     ${city?.shader||''}
+    ${materialShader}
     @compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3<u32>) {
       if (any(id.xy>=textureDimensions(color))) { return; }
       let p=vec2<i32>(id.xy)+vec2<i32>(i32(params.halo));
       let height=textureLoad(elevation,p,0).r;
+      let level=0.;
       let temp=clim(p,0)+clim(p,4)*max(height,0.);
       let rain=max(clim(p,2),0.);
       var rgb:vec3<f32>;
@@ -79,13 +192,41 @@
         reliefLight=mix(1.,params.lighting.y+(1.-params.lighting.y)*hs,params.lighting.x);
         rgb=terrain(.25+.75*pow(clamp(height/4500.,0.,1.),.7))*reliefLight;
       }
-      if (params.mode == -1. && textureNumLayers(climate)>=21u) {
+      var climateClass=0;
+      if((params.mode == -1. || params.mode == -2. || params.mode == -3.) && textureNumLayers(climate)>=36u){
+        // Render applies altitude continuously in its masks. Regional material
+        // families use the baseline climate to avoid ET/EF snowline feedback.
+        let classificationHeight=select(max(height,0.),0.,params.mode == -3.);
+        climateClass=koppen(clamp(clim(p,21)-clim(p,23)*classificationHeight,-45.,45.),clamp(clim(p,24)-clim(p,26)*classificationHeight,-45.,45.),max(clim(p,22),0.),max(clim(p,25),0.));
+        if(height<0.){climateClass=0;}
+      }
+      if((params.mode == -3. || params.mode == -4.) && textureNumLayers(climate)>=46u){
+        let soil=vec3<f32>(clim(p,36),clim(p,37),clim(p,38));
+        if(params.mode == -4.){rgb=select(soil,vec3<f32>(.06,.17,.27),height<0.);}
+        else{
+          let local=vec2<f32>(p);let point=surfacePoint(local,params.style.xy,params.resolution);
+          let sx=surfaceHeight(local+vec2<f32>(1,0),level);let nx=surfaceHeight(local-vec2<f32>(1,0),level);
+          let sy=surfaceHeight(local+vec2<f32>(0,1),level);let ny=surfaceHeight(local-vec2<f32>(0,1),level);
+          let slopeX=(sx-nx)*.5/params.resolution;let slopeY=(sy-ny)*.5/params.resolution;
+          let convex=(4.*height-sx-nx-sy-ny)/params.resolution;
+          let north=surfaceNorth(local,params.style.xy,params.resolution);
+          let materialFootprint=params.resolution;
+          rgb=surfaceColor(climateClass,height,vec2<f32>(slopeX,slopeY),convex,point,north,materialFootprint,soil,vec3<f32>(clim(p,39),clim(p,40),clim(p,41)),clim(p,44),clamp(clim(p,21)-clim(p,23)*max(height,0.),-45.,45.),clamp(clim(p,24)-clim(p,26)*max(height,0.),-45.,45.),max(clim(p,22),0.)+max(clim(p,25),0.),classField(climateClass,30),classField(climateClass,31),vec2<f32>(0.));
+          rgb*=select(reliefLight,1.,height<0.);
+        }
+      } else if(params.mode == -2. && textureNumLayers(climate)>=36u){
+        rgb=vec3<f32>(classField(climateClass,32),classField(climateClass,33),classField(climateClass,34));
+      } else if (params.mode == -1. && textureNumLayers(climate)>=21u) {
         let h=max(height,0.)/1000.;
-        let alpine=clim(p,8);let snow=clim(p,9);
+        var alpine=clim(p,8);var snow=clim(p,9);
         let low=max(clim(p,10),.000001);
         let rock=vec3<f32>(clim(p,15),clim(p,16),clim(p,17));
         let snowColor=vec3<f32>(clim(p,18),clim(p,19),clim(p,20));
         var biome=vec3<f32>(clim(p,5),clim(p,6),clim(p,7));
+        if(textureNumLayers(climate)>=36u){
+          biome=vec3<f32>(classField(climateClass,27),classField(climateClass,28),classField(climateClass,29));
+          alpine=classField(climateClass,30);snow=classField(climateClass,31);
+        }
         if(h<low){biome*=1.-clim(p,11)+clim(p,11)*h/low;}
         if(alpine>0.&&h>low&&h<alpine){biome*=1.-(h-low)/max(alpine-low,.000001)*clim(p,12);}
         if(alpine>0.&&h>alpine){
@@ -94,11 +235,6 @@
           biome=mix(biome,rock,t*t);
         }
         if(snow>0.&&h>snow){let t=clamp((h-snow)/max(clim(p,14),.000001),0.,1.);biome=mix(biome,snowColor,t*t);}
-        if(params.resolution<=30.){
-          let slopeX=(textureLoad(elevation,p+vec2<i32>(1,0),0).r-textureLoad(elevation,p-vec2<i32>(1,0),0).r)*.5/params.resolution;
-          let slopeY=(textureLoad(elevation,p+vec2<i32>(0,1),0).r-textureLoad(elevation,p-vec2<i32>(0,1),0).r)*.5/params.resolution;
-          if(length(vec2<f32>(slopeX,slopeY))>params.pad0){biome=rock;}
-        }
         // Apply hillshade directly: deriving light from the white altitude
         // palette and clipping it would erase shadows on snowy mountains.
         rgb=biome*reliefLight;
@@ -195,10 +331,6 @@
   const coarsePalette=shadeShader.slice(shadeShader.indexOf('    fn shade('),shadeShader.indexOf('    @compute'));
   const coarseColor=shadeShader.slice(shadeShader.indexOf('      let temp='),shadeShader.indexOf('      textureStore(color'))
     .replaceAll('params.mode','params.field.z')
-    .replaceAll('params.pad0','params.style.z')
-    .replace('let slopeX=(textureLoad(elevation,p+vec2<i32>(1,0),0).r-textureLoad(elevation,p-vec2<i32>(1,0),0).r)*.5/params.resolution;', 'let slopeX=(heightAt(p+vec2<f32>(1,0),level)-heightAt(p-vec2<f32>(1,0),level))*.5/params.viewport.w;')
-    .replace('let slopeY=(textureLoad(elevation,p+vec2<i32>(0,1),0).r-textureLoad(elevation,p-vec2<i32>(0,1),0).r)*.5/params.resolution;', 'let slopeY=(heightAt(p+vec2<f32>(0,1),level)-heightAt(p-vec2<f32>(0,1),level))*.5/params.viewport.w;')
-    .replaceAll('params.resolution<=30.','params.viewport.w<=30.')
     .replace('let dx=(textureLoad(blurred,p+vec2<i32>(1,0),0).rg-textureLoad(blurred,p-vec2<i32>(1,0),0).rg)*3./params.resolution;',
       'let dx=(heightAt(p+vec2<f32>(1,0),level)-heightAt(p-vec2<f32>(1,0),level))*3./params.viewport.w;')
     .replace('let dy=(textureLoad(blurred,p+vec2<i32>(0,1),0).rg-textureLoad(blurred,p-vec2<i32>(0,1),0).rg)*3./params.resolution;',
@@ -208,10 +340,12 @@
     .replace('let deltaY=(textureLoad(blurred,p+vec2<i32>(0,1),0).rg-textureLoad(blurred,p-vec2<i32>(0,1),0).rg)*.5/params.resolution;','let deltaY=vec2<f32>((heightAt(p+vec2<f32>(0,1),level)-heightAt(p-vec2<f32>(0,1),level))*.5/params.viewport.w);')
     .replaceAll('/params.resolution','/params.viewport.w')
     .replace('vec2<f32>(p)','p')
+    .replace('let materialFootprint=params.resolution;', 'let materialFootprint=max(footprint*params.viewport.w,.01);')
+    .replaceAll('params.resolution','params.viewport.w')
     .replace('let hs=pow(clamp(.75*shade(vec2<f32>(dx.r,dy.r))+.25*shade(vec2<f32>(dx.g,dy.g)),0.,1.),.85*params.lighting.z);',
       'let hs=pow(shade(vec2<f32>(dx,dy)),.85*params.lighting.z);');
   const coarseShader=`
-    struct Params {rect:vec4<f32>,viewport:vec4<f32>,crop:vec4<f32>,field:vec4<f32>,lighting:vec4<f32>,sunlight:vec4<f32>,style:vec4<f32>,contours:vec4<f32>}
+    struct Params {rect:vec4<f32>,viewport:vec4<f32>,crop:vec4<f32>,field:vec4<f32>,lighting:vec4<f32>,sunlight:vec4<f32>,style:vec4<f32>,contours:vec4<f32>,render0:vec4<f32>,render1:vec4<f32>,render2:vec4<f32>,render3:vec4<f32>,render4:vec4<f32>}
     struct Vertex {@builtin(position) position:vec4<f32>,@location(0) uv:vec2<f32>}
     @group(0) @binding(0) var<uniform> params:Params;
     @group(0) @binding(1) var elevation:texture_2d<f32>;
@@ -238,6 +372,7 @@
     }
     fn physicalAt(p:vec2<f32>,level:i32)->f32{let v=rootAt(p,level);return sign(v)*v*v;}
     fn heightAt(p:vec2<f32>,level:f32)->f32{let lo=i32(floor(level));return mix(physicalAt(p,lo),physicalAt(p,min(lo+1,3)),fract(level));}
+    fn surfaceHeight(q:vec2<f32>,level:f32)->f32{return heightAt(q,level);}
     fn clim(p:vec2<f32>,layer:i32)->f32{
       let size=vec2<i32>(textureDimensions(climate));let q=clamp(p/params.field.xy,vec2<f32>(0.),vec2<f32>(1.))*vec2<f32>(size-1);
       let lo=vec2<i32>(floor(q));let hi=min(lo+1,size-1);let f=fract(q);
@@ -303,13 +438,13 @@
         {binding:4,visibility:GPUShaderStage.COMPUTE,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},
       ]});
       this.renderLayout=device.createBindGroupLayout({entries:[
-        {binding:0,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:128}},
+        {binding:0,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:208}},
         {binding:1,visibility:GPUShaderStage.FRAGMENT,texture:{}},
         {binding:2,visibility:GPUShaderStage.FRAGMENT,sampler:{type:'filtering'}},
         {binding:3,visibility:GPUShaderStage.FRAGMENT,texture:{sampleType:'unfilterable-float'}},
       ]});
       this.coarseLayout=device.createBindGroupLayout({entries:[
-        {binding:0,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:128}},
+        {binding:0,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:208}},
         {binding:1,visibility:GPUShaderStage.FRAGMENT,texture:{sampleType:'unfilterable-float'}},
         {binding:2,visibility:GPUShaderStage.FRAGMENT,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},
       ]});
@@ -321,7 +456,7 @@
         device.createComputePipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[this.shadeLayout]}),compute:{module:shade,entryPoint:'main'}}),
         device.createRenderPipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[this.renderLayout]}),vertex:{module:render,entryPoint:'vertex'},fragment:{module:render,entryPoint:'fragment',targets:[{format:this.format}]},primitive:{topology:'triangle-list'}}),
       ]);
-      this.contourLayout=device.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:128}}]});
+      this.contourLayout=device.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:208}}]});
       this.contourPipeline=await device.createRenderPipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[this.contourLayout]}),vertex:{module:contour,entryPoint:'vertex',buffers:[{arrayStride:20,stepMode:'instance',attributes:[{shaderLocation:0,offset:0,format:'float32x4'},{shaderLocation:1,offset:16,format:'float32'}]}]},fragment:{module:contour,entryPoint:'fragment',targets:[{format:this.format,blend:{color:{srcFactor:'src-alpha',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}]},primitive:{topology:'triangle-list'}});
       const validation=await device.popErrorScope(); if(validation)throw Error(validation.message);
       this.sampler=device.createSampler({magFilter:'linear',minFilter:'linear'});
@@ -350,7 +485,7 @@
       const innerWidth=width-2*halo,innerHeight=height-2*halo;
       const elevation=this.makeTexture(width,height,'r32float',GPUTextureUsage.COPY_DST);
       const color=this.makeTexture(innerWidth,innerHeight,'rgba8unorm',GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_SRC);
-      if(climate!==null&&(!(climate instanceof Float32Array)||![5,21].includes(climate.length/(climateWidth*climateHeight))))throw Error('Invalid tile climate');
+      if(climate!==null&&(!(climate instanceof Float32Array)||![5,21,36,46].includes(climate.length/(climateWidth*climateHeight))))throw Error('Invalid tile climate');
       const climateLayers=climate?climate.length/(climateWidth*climateHeight):5;
       const climateTexture=this.device.createTexture({size:[climateWidth,climateHeight,climateLayers],format:'r32float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
       const climateValues=climate||new Float32Array(climateWidth*climateHeight*5);
@@ -369,9 +504,9 @@
       const {elevation,color,climate:climateTexture,halo,resolution:metresPerSample,origin,lod}=tile;
       const [width,height]=tile.params,innerWidth=width-2*halo,innerHeight=height-2*halo;
       this.scratch(width,height);
-      const params=this.device.createBuffer({size:80,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+      const params=this.device.createBuffer({size:160,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
       const selectedMode=tile.params[2];
-      this.device.queue.writeBuffer(params,0,new Float32Array([metresPerSample,halo,innerWidth,innerHeight,selectedMode,Math.tan((this.biomeRockSlope??40)*Math.PI/180),0,0,...(window.TerrainLighting?.vectors(lod)||[1,.35,1,1,-.5,-.5,.70710678,0]),...origin,0,0]));
+      this.device.queue.writeBuffer(params,0,new Float32Array([metresPerSample,halo,innerWidth,innerHeight,selectedMode,0,0,0,...(window.TerrainLighting?.vectors(lod)||[1,.35,1,1,-.5,-.5,.70710678,0]),...origin,0,0,...this.renderVectors()]));
       const horizontalGroup=this.device.createBindGroup({layout:this.blurLayout,entries:[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchA.createView()}]});
       const shadeGroup=this.device.createBindGroup({layout:this.shadeLayout,entries:[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchB.createView()},{binding:2,resource:color.createView()},{binding:3,resource:{buffer:params}},{binding:4,resource:climateTexture.createView({dimension:'2d-array'})}]});
       const encoder=this.device.createCommandEncoder({label:'terrain shade once'});
@@ -381,9 +516,19 @@
       this.device.queue.submit([encoder.finish()]); params.destroy();tile.shadedMode=selectedMode;
     }
     setBiomeRockSlope(angle) {
+      // Compatibility for existing callers; Biomes no longer uses this value.
       if(!Number.isFinite(angle)||angle<1||angle>89)throw Error('Invalid biome rock slope');
-      if(this.biomeRockSlope===angle)return;this.biomeRockSlope=angle;this.styleRevision++;
-      for(const tile of this.tiles.values())if(tile.params[2]===-1)tile.shadedMode=null;
+      this.biomeRockSlope=angle;
+    }
+    renderVectors(){
+      const s={season:.5,variation:1,forest:1,rock_slope:40,snow:1,vegetation_tint:[1,1,1],rock_tint:[1,1,1],snow_color:[.94,.96,.97],...this.renderSettings};
+      return [s.season,s.variation,s.forest,Math.tan(s.rock_slope*Math.PI/180),s.snow,0,0,0,...s.vegetation_tint,0,...s.rock_tint,0,...s.snow_color,0];
+    }
+    setRenderSettings(value){
+      const s=window.TerrainRender?.normalize(value)||value;
+      const signature=JSON.stringify(s);if(signature===this.renderSignature)return;
+      this.renderSignature=signature;this.renderSettings=s;this.styleRevision++;
+      for(const tile of this.tiles.values())if(tile.params[2]===-3)tile.shadedMode=null;
     }
     setMode(mode) {
       if(this.mode===mode)return;this.mode=mode;this.styleRevision++;
@@ -392,7 +537,7 @@
     }
     uploadCoarse(key, roots, {width=160,height=160,halo=16,metresPerSample=7680,climate,climateWidth=41,climateHeight=41,mode='relief',interpolation='monotone',origin=[0,0]}={}) {
       if(!this.available)return false;
-      if(!(roots instanceof Float32Array)||roots.length!==width*height||width%8||height%8||halo<8||!(climate instanceof Float32Array)||![5,21].includes(climate.length/(climateWidth*climateHeight)))throw Error('Invalid native coarse block');
+      if(!(roots instanceof Float32Array)||roots.length!==width*height||width%8||height%8||halo<8||!(climate instanceof Float32Array)||![5,21,36,46].includes(climate.length/(climateWidth*climateHeight)))throw Error('Invalid native coarse block');
       this.deleteTile(key);
       const elevation=this.device.createTexture({size:[width,height],format:'r32float',mipLevelCount:4,usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.STORAGE_BINDING});
       const climateLayers=climate?climate.length/(climateWidth*climateHeight):5;
@@ -465,17 +610,17 @@
       const contourSettings=city?.get();
       if(contourSettings?.enabled)for(const r of visible){const tile=this.tiles.get(r.key);this.prepareContours(tile,contourSettings.interval,r);}
       this.evict();visible=visible.filter(r=>this.tiles.has(r.key));
-      visible.forEach((r,i)=>{const tile=this.tiles.get(r.key);this.uniformData.set([r.x,r.y,r.width,r.height,width,height,tile.halo||0,tile.resolution||0,...(r.uv||[0,0,1,1]),...(tile.params||[0,0,0,0]),...(window.TerrainLighting?.vectors(r.lod)||[1,.35,1,1,-.5,-.5,.70710678,0]),...(tile.origin||[0,0]),Math.tan((this.biomeRockSlope??40)*Math.PI/180),0,...(city?.vectors()||[0,100,0,0])],i*stride/4)});
+      visible.forEach((r,i)=>{const tile=this.tiles.get(r.key);this.uniformData.set([r.x,r.y,r.width,r.height,width,height,tile.halo||0,tile.resolution||0,...(r.uv||[0,0,1,1]),...(tile.params||[0,0,0,0]),...(window.TerrainLighting?.vectors(r.lod)||[1,.35,1,1,-.5,-.5,.70710678,0]),...(tile.origin||[0,0]),0,0,...(city?.vectors()||[0,100,0,0]),...this.renderVectors()],i*stride/4)});
       if(visible.length)this.device.queue.writeBuffer(this.uniform,0,this.uniformData,0,visible.length*stride/4);
       const encoder=this.device.createCommandEncoder();const pass=encoder.beginRenderPass({colorAttachments:[{view:this.context.getCurrentTexture().createView(),clearValue:{r:0,g:0,b:0,a:0},loadOp:'clear',storeOp:'store'}]});
       pass.setPipeline(this.pipeline);
       visible.forEach((r,i)=>{
         const tile=this.tiles.get(r.key);tile.lastUsed=++this.serial;
         pass.setPipeline(tile.native?this.coarsePipeline:this.pipeline);
-        tile.group??=this.device.createBindGroup(tile.native?{layout:this.coarseLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:128}},{binding:1,resource:tile.elevation.createView()},{binding:2,resource:tile.climate.createView({dimension:'2d-array'})}]}:{layout:this.renderLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:128}},{binding:1,resource:tile.color.createView()},{binding:2,resource:this.sampler},{binding:3,resource:tile.elevation.createView()}]});
+        tile.group??=this.device.createBindGroup(tile.native?{layout:this.coarseLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:208}},{binding:1,resource:tile.elevation.createView()},{binding:2,resource:tile.climate.createView({dimension:'2d-array'})}]}:{layout:this.renderLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:208}},{binding:1,resource:tile.color.createView()},{binding:2,resource:this.sampler},{binding:3,resource:tile.elevation.createView()}]});
         pass.setBindGroup(0,tile.group,[i*stride]);pass.draw(6);
         if(contourSettings?.enabled&&tile.contourCount){
-          pass.setPipeline(this.contourPipeline);tile.contourGroup??=this.device.createBindGroup({layout:this.contourLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:128}}]});
+          pass.setPipeline(this.contourPipeline);tile.contourGroup??=this.device.createBindGroup({layout:this.contourLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:208}}]});
           pass.setBindGroup(0,tile.contourGroup,[i*stride]);pass.setVertexBuffer(0,tile.contourBuffer);pass.draw(6,tile.contourCount);
         }
       });

@@ -32,7 +32,7 @@ ROOT = Path(__file__).resolve().parent
 NATIVE = ROOT / 'native' / 'orogen'
 _LOCK = threading.RLock()
 _SOURCES = [ROOT / 'terrain_orogen.py', ROOT / 'terrain_orogen_cuda.py',
-            ROOT / 'terrain_city_erosion.py', ROOT / 'terrain_orogen_gpu.py', ROOT / 'terrain_orogen_stages.py', ROOT / 'terrain_orogen_layers.py', ROOT / 'terrain_conditioning.py', ROOT / 'terrain_generation.py', ROOT / 'terrain_world.py', ROOT / 'terrain_geometry.py', ROOT / 'terrain_bootstrap.py'] + sorted(
+            ROOT / 'terrain_city_erosion.py', ROOT / 'terrain_orogen_gpu.py', ROOT / 'terrain_orogen_stages.py', ROOT / 'terrain_orogen_layers.py', ROOT / 'terrain_soil.py', ROOT / 'terrain_conditioning.py', ROOT / 'terrain_generation.py', ROOT / 'terrain_world.py', ROOT / 'terrain_geometry.py', ROOT / 'terrain_bootstrap.py'] + sorted(
                 p for directory in (NATIVE, ROOT / 'native' / 'city_erosion') for p in directory.rglob('*') if p.is_file())
 _IMPORTED_DIGESTS = {str(p.relative_to(ROOT)).replace('\\', '/'): _sha_file(p) for p in _SOURCES}
 

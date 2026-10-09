@@ -5,8 +5,9 @@ from collections import OrderedDict
 
 
 class CoarseBackground:
-    def __init__(self, jobs, compute, status):
+    def __init__(self, jobs, compute, status, *, window_quantum=None):
         self.jobs, self.compute, self.status_function = jobs, compute, status
+        self.window_quantum = window_quantum
         self.lock = threading.Lock()
         self.generation = 0
         self.task = None
@@ -56,14 +57,20 @@ class CoarseBackground:
     def _run(self, token, task):
         try:
             quantum = 0
-            while task['budget'] is None or quantum < task['budget']:
+            windows = 0
+            while task['budget'] is None or windows < task['budget']:
                 if not self._active(token):
                     return
                 # Stopping a task cancels the next safe quantum. The currently
                 # launched NN window always finishes and persists its result.
+                count = self.window_quantum() if self.window_quantum else 1
+                if task['budget'] is not None:
+                    count = min(count, task['budget']-windows)
                 def compute():
                     if not self._active(token):
                         return None
+                    if self.window_quantum:
+                        return self.compute(int(task['seed']),task['world_profile'],budget_windows=count)
                     return self.compute(int(task['seed']),task['world_profile'])
                 key=f"coarse-preparation/{token}/{quantum}"
                 # Every visible priority is <5000, including explicitly
@@ -74,6 +81,8 @@ class CoarseBackground:
                 with self.lock:
                     task['quanta']+=1
                     task['progress']=result
+                    windows += result.get('quantum_windows', count) if result else 0
+                    task['computed_windows'] = windows
                 quantum += 1
                 if result and result.get('disk_budget_exhausted'):
                     with self.lock:

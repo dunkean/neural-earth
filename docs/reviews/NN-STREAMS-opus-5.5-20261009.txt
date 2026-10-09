@@ -1,0 +1,90 @@
+# Avis : streams parallèles en batch 1 pour coarse, base et decoder
+
+**En bref :** votre réponse provisoire est juste, mais elle passe à côté de l'obstacle principal. Ce ne sont pas d'abord les verrous qui empêchent le parallélisme. C'est la structure synchrone « `f(ctxs)` puis écriture dans le store », avec un seul thread GPU. Un moteur C++ ne changerait pas cette structure. Je recommande d'abord une expérience fork-join sous PyTorch, et de viser surtout le coarse.
+
+## Faits vérifiés dans le code
+
+- **Aucune concurrence GPU aujourd'hui.** Il n'y a qu'un thread `terrain-compute` (`terrain_jobs.py:191-192`) et un `gpu_lock` global (`terrain_server.py:54`). Tout passe par le stream courant.
+- **Un seul graph par forme, réutilisé en série.** `CudaGraphModel` garde un graph par clé de forme. Le verrou couvre la soumission, et `stream.wait_event(last_use)` place chaque replay derrière le précédent (`terrain_cuda_graphs.py:155-170`). Deux streams qui utilisent la même forme passent donc l'un après l'autre. De plus, en CUDA, un même graph exec ne s'exécute pas en même temps que lui-même.
+- **Coarse : un seul graph à 20 pas.** Il est partagé par le modèle propriétaire, avec un `RLock` qui couvre sélection et replay, et un scheduler mutable dans l'adaptateur (`terrain_coarse_graph.py:71-86`, `:42-44`).
+- **Base : deux passes.** La passe 2 (`step_latent_map_0`) lit les fenêtres **fusionnées** de la passe 1 (taille 64, pas 32) et la fenêtre coarse 4×4 avec halo (`world_pipeline.py:1245`, `:1288-1296`). Le découpage en batches de 16 fait partie de l'état numérique (`terrain_window_scheduler.py:63-66`, `terrain_inference.py:54`). `canonical_latents` impose le batch 1 (`terrain_inference.py:78-80`).
+- **Decoder : dépend des latents fusionnés** (`terrain_inference.py:413-414`).
+- **Gardes en production :** coarse et decoder >1 sont refusés (`terrain_inference.py:462-465`), et le SNR régional exige `len(ctxs)==1` (`:187-188`).
+- **Caches non protégés :** compteurs et caches paresseux de `world.__dict__` (`terrain_window_scheduler.py:92-110`, `terrain_inference.py:208-219`, `:324-336`).
+- **Non vérifié :** je n'ai pas inspecté le package `infinite_tensor`. Je ne sais donc rien de la thread safety ni de l'ordre d'accumulation de son store. La docstring parle d'une « same ordered sum » (`terrain_window_scheduler.py:169`).
+
+## Mesures historiques
+
+Reçus RTX 3090, sur GPU partagé (`docs/performance_x5/opus-5.5.txt:13-33`) :
+- coarse : ≈1,8 ms par pas, ≈11 TFLOPS ;
+- base en batch 16 : ≈6,1 ms par fenêtre, ≈31 TFLOPS ;
+- decoder : ≈73 ms par tuile 512², ≈19 TFLOPS.
+
+## 1. Par modèle
+
+| | Coarse 64², 20 pas | Base, deux passes | Decoder 512² |
+|---|---|---|---|
+| Indépendance | Fenêtres indépendantes en calcul. Seul le store est partagé | Batches indépendants dans une passe ; barrière entre passes 1 et 2 (halo) | Tuiles indépendantes une fois les latents fusionnés |
+| Occupation GPU (hypothèse) | Faible : petits kernels, déjà regroupés en un graph | Batch 16 occupe déjà bien le GPU | Une forward 512² occupe probablement tout le GPU |
+| Gain plausible des streams | **Le plus crédible** | Faible si on garde les batches réels ; **probablement négatif** en batch 1 forcé | Faible : bande mémoire partagée |
+| Isolation requise | N graphs + N schedulers + buffers d'entrée par stream | N × graphs pour chaque taille de batch, soit beaucoup de VRAM | N graphs 512² |
+| Risque numérique | Faible si mêmes kernels (à prouver) | Batch 1 forcé = nouveau mode numérique (équivalent canonique) | Faible si mêmes kernels |
+
+**Base, les deux options :**
+- **Garder les batches réels sur N streams.** Le découpage est conservé et les passe-1 se répartissent sur les streams. La passe 2 attend des événements « voisinage passe 1 fusionné ». Le gain se limiterait aux batches de queue (290 fenêtres en 19 appels) et aux trous côté hôte.
+- **Imposer le batch 1.** Cela casse le comportement actuel et réduit très probablement le débit. Ça n'a de sens que pour **réduire le coût de `canonical_latents`**, qui supprime déjà la dépendance à l'ordre de navigation. C'est là un usage légitime des streams pour le base.
+
+## 2. Fenêtres d'un même modèle ou pipeline entre régions
+
+- **Fenêtres d'un même modèle :** c'est un fork-join à l'intérieur d'un quantum. Les dépendances restent simples : aucune en coarse, une barrière par passe en base, aucune en decoder.
+- **Pipeline coarse → base → decoder :** deux régions ne sont indépendantes que si leurs **fermetures de dépendances** sont disjointes. Ce n'est presque jamais le cas entre voisines : chevauchements 64/48 pour le coarse, 64/32 pour le base, halo coarse en `offset=-1`. Il faudrait suivre la disponibilité par fenêtre avec des événements, sinon on lit des sommes partielles.
+- **Le recouvrement le plus intéressant est hétérogène (mécanisme théorique) :** un coarse de fond, peu gourmand en SM, sur un stream de basse priorité, pendant un decoder de premier plan. Aujourd'hui, un quantum coarse (~36 ms) bloque le premier plan via `gpu_lock` (`terrain_server.py:315`).
+
+## 3. Changements concrets
+
+1. **Pool de graphs par stream.** `CudaGraphModel` deviendrait un pool d'instances par (clé, slot de stream), avec une instance réservée pendant le vol et `last_use` par instance (`terrain_cuda_graphs.py:80-170`). Même chose pour `run_coarse_solver`, avec une copie de scheduler par instance (`terrain_coarse_graph.py:73-86`).
+2. **Un nouveau drapeau `coarse_streams`, sans assouplir `coarse_batch`.** Le `f` regroupe k contextes mais lance k forwards batch 1, chacun sur son stream et avec son propre SNR régional. Le contrôle `len(ctxs)!=1` passe alors par fenêtre (`terrain_inference.py:157-246`). Les gardes `:462-465` restent telles quelles.
+3. **Fork-join dans un seul thread hôte.** `CoarsePreparation.step(budget_windows=N)` (`terrain_coarse.py:714`) lance N fenêtres, attend les événements, puis **écrit dans le store dans l'ordre canonique des indices**. Le `gpu_lock` et le worker unique restent : pas de nouveaux threads Python, donc pas de course sur le store ni sur les compteurs.
+4. **Entrées hôte en mémoire épinglée.** Le bruit et le conditionnement seraient préparés dans des tampons épinglés par slot, avec copie `non_blocking` sur le stream du slot. Aujourd'hui, `torch.from_numpy(...).to(device)` passe par de la mémoire paginable.
+5. **Plus tard seulement :** remplacer le `gpu_lock` par une admission par stream avec priorités. Cela demande d'abord d'auditer le store `infinite_tensor`.
+
+## 4. Fidélité et identité
+
+- **Ce qui ne change pas en théorie :** les mêmes kernels sur les mêmes formes ne changent pas leur arithmétique selon la concurrence.
+- **Ce qui peut quand même différer :**
+  - choix d'algorithmes cuDNN/cuBLAS sensible au workspace et à la mémoire libre, alors que N pools réduisent la mémoire libre ;
+  - kernels à atomiques ;
+  - capture différente d'une instance à l'autre.
+- **Ce que vérifie le contrôle actuel :** il compare graph et eager (`terrain_cuda_graphs.py:119-121`), **pas** une instance de graph à une autre. Il faudrait ajouter une égalité inter-instances sur une entrée de référence.
+- **Fusion :** il faut écrire dans le store dans l'ordre canonique, quel que soit l'ordre de complétion.
+- **Ordre de navigation :** le base dépend déjà de la composition des batches. Les streams ne doivent pas aggraver cela, donc ils ne doivent pas changer le découpage.
+- **Identité des caches :** si les octets diffèrent, il faut versionner l'identité runtime (`VERSION`, `terrain_inference.py:28`) et les fenêtres coarse persistées.
+- **libtorch :** il appelle les mêmes bibliothèques, mais l'identité bit à bit reste à prouver.
+- **TensorRT :** ses fusions et choix de tactiques changeront presque certainement les octets. Ce serait un nouveau monde, avec un plan figé dans le manifest.
+
+## 5. Verdict
+
+**Investissez d'abord dans les streams PyTorch, uniquement pour le coarse et le recouvrement coarse de fond / premier plan.** Pas de moteur C++ pour l'instant :
+- les graphs ont déjà supprimé l'essentiel du coût de lancement du coarse ;
+- le coût hôte restant (bruit numpy, conditionnement, gestion `InfiniteTensor`) n'est pas dans le moteur d'inférence ;
+- d'après les estimations historiques, ≈28 % du temps est hors NN.
+
+Pour la vitesse brute du decoder et du base, un prototype TensorRT du decoder seul reste la piste la plus sérieuse, en acceptant une nouvelle identité de monde.
+
+## Expérience proposée (hors serveur, ~1 jour)
+
+- **Charges, avec mêmes fenêtres et mêmes batches pour N = 1, 2, 4 :**
+  - 32 fenêtres coarse fixes ;
+  - le découpage réel d'une requête LOD 3 pour le base (19 batches enregistrés, passe 2 après événements), plus une variante batch 1 × N pour le mode canonique ;
+  - 16 tuiles decoder ;
+  - un mixte : decoder de premier plan en haute priorité et coarse de fond en basse priorité.
+- **Mesures :**
+  - temps GPU par stream (événements) et temps mural ;
+  - fenêtres par seconde ;
+  - latence p50/p95 du premier plan dans le cas mixte ;
+  - `max_memory_reserved` et taille des pools de graphs ;
+  - timeline nsys pour **prouver** le recouvrement réel.
+- **Comparaison numérique :** `torch.equal` par fenêtre face à N=1, puis sur le rectangle fusionné après écriture canonique. Si ce n'est pas égal, écart maximal en mètres.
+- **Critère proposé (à fixer par vous) :** au moins 1,2× sur la préparation coarse, ou un p95 de premier plan amélioré, avec égalité bit à bit sur ce GPU. Sinon, abandon.
+
+Toutes les estimations de gain ci-dessus sont des hypothèses. Je n'ai rien exécuté ni modifié.

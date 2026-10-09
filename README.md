@@ -13,6 +13,25 @@ Le dépôt voisin `world-builder-rs` reste requis au commit indiqué dans
 
 Ouvrir **http://127.0.0.1:8765** ou lancer **start-terrain.cmd**.
 
+**Rendu → Calcul neuronal → Streams coarse** choisit 1, 2, 4, 8 ou 16
+fenêtres traitées en parallèle, avec 4 par défaut. Le réglage est partagé
+entre les onglets du même moteur et conservé dans les liens. Le batch du
+réseau reste à 1 et les fenêtres calculées restent réutilisables après un
+changement. Plus de streams augmente la mémoire et la durée des groupes
+avant de rendre la main au premier plan. Le serveur peut revenir au calcul
+séquentiel si la capture ne peut pas être admise ; le panneau indique alors
+le nombre effectif. `TERRAIN_COARSE_STREAMS` règle la valeur au démarrage.
+Les [mesures sur les trois modèles](docs/performance_streams/README.txt)
+montrent des gains modestes pour base/décodeur, dont les streams restent
+expérimentaux.
+
+La vue d'ensemble du layer est chargée et affichée avant les nouvelles tiles
+et la préparation coarse. Les LOD parents déjà prêts restent visibles pendant
+le zoom et sont remplacés progressivement par les blocs plus fins disponibles.
+Les vues larges utilisent leurs tiles de LOD parent ; les blocs coarse natifs
+prennent le relais aux LOD 7 à 4. Un changement d'éclairage ou de courbes garde
+la vue d'ensemble du même layer jusqu'à l'arrivée de son remplacement.
+
 Les boutons **Carte** et **Globe** sont directement dans la barre de menus.
 Sur le globe, glisser fait orbiter la caméra ; la vitesse diminue avec le zoom.
 La molette, +/− et « Vue du monde » règlent le zoom ; les flèches font tourner

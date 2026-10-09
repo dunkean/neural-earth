@@ -7,7 +7,7 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
 
 (async()=>{const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});try{
 
- const page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],worldRequests=[],generationRequests=[];let appliedSettings=null;page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
+ const page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],worldRequests=[],generationRequests=[];let appliedSettings=null,failNextGeneration=false;page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
 
  await page.route('https://lod.test/**',async route=>{const u=new URL(route.request().url());
 
@@ -20,7 +20,8 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
 
  if(u.pathname==='/api/generation/run'){
   const data=route.request().postDataJSON();generationRequests.push(data);
-  if(data.stage==='all')appliedSettings={...schema.defaults_by_profile[data.profile],...data.settings};
+  if(failNextGeneration){failNextGeneration=false;return route.fulfill({status:400,json:{error:'Generation test failure'}});}
+  if(data.stage==='all'||data.stage==='restore')appliedSettings={...schema.defaults_by_profile[data.profile],...data.settings};
   else{const changed=Object.fromEntries(schema.stage_groups[data.stage].map(key=>[key,data.settings[key]]));appliedSettings={...appliedSettings,...changed};}
   for(const name of ['relief','erosion','climate'])appliedSettings['orogen_'+name+'_stage']||={relief:'a',erosion:'b',climate:'c'}[name].repeat(64);
   return route.fulfill({json:{world_profile:data.profile,generation_settings:appliedSettings}});
@@ -164,13 +165,55 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
  const beforeRestore=generationRequests.length;
  await page.click('#switchGenerationAB');
  await page.waitForFunction(()=>terrainDebug.snapshot().generationSettings?.snr_adaptive_enabled===true);
- assert.equal(generationRequests.length,beforeRestore,'A restores retained stages without computing them');
+ assert.equal(generationRequests.length,beforeRestore+1);assert.equal(generationRequests.at(-1).stage,'restore','A restores retained stages');
  await page.click('#switchGenerationAB');
  await page.waitForFunction(()=>terrainDebug.snapshot().generationSettings?.snr_adaptive_enabled===false);
- assert.equal(generationRequests.length,beforeRestore,'B restores retained stages without computing them');
+ assert.equal(generationRequests.length,beforeRestore+2);assert.equal(generationRequests.at(-1).stage,'restore','B restores retained stages');
+ await page.locator('#generationPanel > summary').click();
+ // Every generation field, including exact RGB arrays, resets in the form
+ // and in the actual generation request. Invalid drafts must not block reset.
+ const resetProfile=await page.evaluate(()=>generationControls.draftSnapshot().profile);
+ const baseline=await page.evaluate(profile=>generationControls.defaults(profile),resetProfile);
+ await page.evaluate(schema=>{
+   for(const [id,spec] of Object.entries(schema.properties)){
+     const input=document.getElementById(id);if(!input)continue;
+     if(spec.color){input.value='#123456';input.dispatchEvent(new Event('input',{bubbles:true}));}
+     else if(input.type==='checkbox')input.checked=!input.checked;
+     else if(spec.minimum!==undefined)input.value=spec.default===spec.minimum?spec.maximum:spec.minimum;
+   }
+   document.getElementById('macroScale').value='invalid';
+   for(const key of ['vegetation_tint','rock_tint','snow_color']){const input=document.getElementById('render_'+key);input.value='#123456';input.dispatchEvent(new Event('input'));}
+   const season=document.getElementById('render_season');season.value='0';season.dispatchEvent(new Event('input'));
+ },schema);
+ const assertReset=async()=>{
+   assert.deepEqual(await page.evaluate(()=>TerrainRender.get()),await page.evaluate(()=>TerrainRender.defaults()),'Generation reset includes all Render settings');
+   for(const key of ['vegetation_tint','rock_tint','snow_color'])assert.deepEqual(JSON.parse(await page.getAttribute('#render_'+key,'data-rgb')),await page.evaluate(k=>TerrainRender.defaults()[k],key),'Render exact RGB reset');
+   const draft=await page.evaluate(()=>generationControls.read());
+   for(const [key,value] of Object.entries(draft)){
+     if(key.endsWith('_stage'))continue;
+     assert.deepEqual(value,baseline[key],key+' returns to its default');
+   }
+   for(const [key,spec] of Object.entries(schema.properties).filter(([,spec])=>spec.color)){
+     const hex='#'+baseline[key].map(v=>Math.round(v*255).toString(16).padStart(2,'0')).join('');
+     assert.equal(await page.inputValue('#'+key),hex,key+' visible color resets');
+     assert.deepEqual(JSON.parse(await page.getAttribute('#'+key,'data-rgb')),baseline[key],key+' RGB precision resets');
+   }
+ };
+ await page.locator('#renderPanel').evaluate(el=>el.open=false);
+ await page.locator('#generationPanel').evaluate(el=>el.open=true);
+ failNextGeneration=true;await page.click('#resetGeneration');
+ await page.waitForFunction(()=>document.getElementById('generationDraftStatus').textContent==='Paramètres réinitialisés ; génération non appliquée.');
+ await assertReset();
+ await page.click('#resetGeneration');
+ await page.waitForFunction(()=>document.getElementById('generationDraftStatus').textContent==='Tous les paramètres de génération sont réinitialisés.');
+ await assertReset();
+ const resetRequest=generationRequests.at(-1);assert.equal(resetRequest.stage,'all');
+ assert.deepEqual(resetRequest.settings,baseline,'Reset sends every canonical default');
+ await page.reload();await page.waitForFunction(()=>terrainDebug.snapshot().world==='42'&&terrainDebug.snapshot().visible.pending===0);
+ await assertReset();
  await page.locator('#generationPanel > summary').click();
  await page.locator('#layerPanel > summary').click();
- await page.getByRole('button',{name:'Biomes · Orogen',exact:true}).click();
+ await page.getByRole('button',{name:'Biomes',exact:true}).click();
  await page.waitForFunction(()=>terrainDebug.snapshot().mode==='orogen-biomes');
  await page.setViewportSize({width:390,height:844});
  await page.locator('#generationPanel > summary').click();await page.click('#tabClimate');

@@ -17,7 +17,10 @@ from PIL import Image
 from flask import Flask, Response, has_request_context, jsonify, request, send_file
 
 from terrain_climate import MODES as CLIMATE_MODES, colorize
-from terrain_biomes import colorize_biomes, parse_rock_slope, sample_biome_fields
+from terrain_biomes import colorize_biomes, parse_rock_slope, sample_biome_fields, sample_biome_transport
+from terrain_koppen import COLORS as KOPPEN_COLORS, sample_classes
+from terrain_soil import sample_soil_transport
+from terrain_render import colorize_surface, parse_settings as parse_render_settings
 from terrain_jobs import JobCancelled, QueueFull
 from terrain_orogen_layers import EXTRA, MODES, render, sample
 from terrain_snr_layer import MODES as SNR_MODES
@@ -46,6 +49,7 @@ class BiomeTileRenderingTests(unittest.TestCase):
         for lod in (4, 0, -1):
             self.elevations[lod][:, :100] = -1000
             self.elevations[lod][:, 200:] = 5000
+        self.atlas=SimpleNamespace(bounds=(-20e6,-10e6,20e6,10e6),width=2,height=2,height_m=np.zeros((2,2),np.float32),layers={'koppen':np.full((2,2),9),'temperature_summer':np.full((2,2),65/90),'temperature_winter':np.full((2,2),50/90),'precip_summer':np.full((2,2),.5),'precip_winter':np.full((2,2),.5)})
         self.physical = Mock(side_effect=self.physical_tile)
         self.diagnostic = Mock(side_effect=AssertionError('Biomes must use current terrain'))
         self.snr_diagnostic = Mock(return_value=Response(b'SNR', mimetype='image/png'))
@@ -69,13 +73,17 @@ class BiomeTileRenderingTests(unittest.TestCase):
             span=lambda *args, **kwargs: nullcontext(),
             get_relief_map=get_relief_map, colorize=colorize,
             colorize_biomes=colorize_biomes,parse_rock_slope=parse_rock_slope,
-            physical_biome_fields=lambda seed,wp,xs,ys: sample_biome_fields(
+            biome_atlas=lambda seed,wp:(self.atlas,{}),
+            sample_classes=sample_classes,KOPPEN_COLORS=KOPPEN_COLORS,
+            sample_biome_transport=sample_biome_transport,selected_neural_chart=lambda:None,
+            sample_soil_transport=sample_soil_transport,colorize_surface=colorize_surface,parse_render_settings=parse_render_settings,
+            physical_biome_fields=lambda seed,wp,xs,ys,elevation=None: sample_biome_fields(
                 SimpleNamespace(bounds=(-1,-1,1,1),width=2,height=2,layers={'koppen':np.full((2,2),9)}),
                 np.linspace(-.5,.5,len(xs)),np.linspace(-.5,.5,len(ys)),{}),
             JobCancelled=JobCancelled, QueueFull=QueueFull)
         tree = ast.parse((ROOT / 'terrain_server.py').read_text(encoding='utf-8'))
         names = {'display_mode', '_tile_coordinates', 'height_tile', 'tile',
-                 'render_elevation', '_tile_headers', 'transport_climate'}
+                 'render_elevation', '_tile_headers', 'transport_climate', 'physical_koppen_colors'}
         nodes = [node for node in tree.body if getattr(node, 'name', None) in names]
         self.assertEqual({node.name for node in nodes}, names)
         exec(compile(ast.Module(body=nodes, type_ignores=[]),
@@ -126,17 +134,42 @@ class BiomeTileRenderingTests(unittest.TestCase):
                 response = client.get(f'/height/natural-v1/42/{lod}/0/0.bin?profile=fixture&mode=orogen-biomes&climate=1')
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.headers['X-Terrain-Climate-Width'], '33')
-                self.assertEqual(response.headers['X-Terrain-Climate-Layers'], '21')
+                self.assertEqual(response.headers['X-Terrain-Climate-Layers'], '46')
                 values = np.frombuffer(response.data, dtype='<f4')
                 np.testing.assert_array_equal(values[:304*304], self.elevations[lod].ravel())
                 np.testing.assert_array_equal(values[304*304:304*304+5*33*33], self.climate.ravel())
-                self.assertEqual(values.size,304*304+21*33*33)
+                self.assertEqual(values.size,304*304+46*33*33)
         self.diagnostic.assert_not_called()
 
-    def test_invalid_biome_slope_does_not_generate_terrain(self):
-        response=self.app.test_client().get('/tiles/natural-v1/42/0/0/0.png?mode=orogen-biomes&biome_slope=90')
+    def test_koppen_routes_through_current_terrain_at_every_lod(self):
+        for lod in (9,4,0,-1):
+            response=self.app.test_client().get(f'/tiles/natural-v1/42/{lod}/0/0.png?profile=fixture&mode=orogen-koppen')
+            self.assertEqual(response.status_code,200)
+            with Image.open(io.BytesIO(response.data)) as image:
+                pixels=np.array(image)
+            if lod!=9:
+                np.testing.assert_array_equal(pixels[128,20],(KOPPEN_COLORS[0]*255).astype(np.uint8))
+                np.testing.assert_array_equal(pixels[128,230],(KOPPEN_COLORS[30]*255).astype(np.uint8))
+            response=self.app.test_client().get(f'/height/natural-v1/42/{lod}/0/0.bin?profile=fixture&mode=orogen-koppen&climate=1')
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.headers['X-Terrain-Climate-Layers'],'46')
+        self.diagnostic.assert_not_called()
+
+    def test_invalid_render_settings_do_not_generate_terrain(self):
+        response=self.app.test_client().get('/tiles/natural-v1/42/0/0/0.png?mode=render&render_settings={"rock_slope":90}')
         self.assertEqual(response.status_code,400)
         self.physical.assert_not_called()
+
+    def test_render_and_soil_follow_terrain_without_diagnostic_inference(self):
+        for mode in ('render','soil'):
+            for lod in (9,4,0,-1):
+                response=self.app.test_client().get(f'/tiles/natural-v1/42/{lod}/0/0.png?profile=fixture&mode={mode}')
+                self.assertEqual(response.status_code,200)
+                with Image.open(io.BytesIO(response.data)) as image:
+                    pixels=np.array(image)
+                    self.assertEqual(image.size,(256,256))
+                    if lod!=9:self.assertGreater(pixels[128,20,2],pixels[128,20,0])
+        self.diagnostic.assert_not_called()
 
     def test_visible_snow_preserves_relief_shadows_in_png(self):
         xs=(np.arange(304,dtype=np.float32)-152)*30
@@ -230,6 +263,7 @@ class DiagnosticTileRenderingTests(unittest.TestCase):
 
     def test_all_diagnostic_pngs_exclude_halo_at_positive_and_negative_coordinates(self):
         for mode in MODES:
+            if mode in ('render','soil'):continue
             for lod, tx, ty in ((9, -1, -1), (4, 2, 1)):
                 with self.subTest(mode=mode, lod=lod, tx=tx, ty=ty):
                     _, actual = self.tile(mode, lod, tx, ty)
@@ -242,6 +276,7 @@ class DiagnosticTileRenderingTests(unittest.TestCase):
 
     def test_adjacent_tiles_match_one_continuous_render_in_both_axes(self):
         for mode in MODES:
+            if mode in ('render','soil'):continue
             if mode == 'orogen-height':
                 continue  # Relief shading uses a halo; covered by the test above.
             for axis in (0, 1):

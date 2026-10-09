@@ -17,6 +17,9 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
    if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:html});
    if(u.pathname==='/terrain_renderer.js')return route.fulfill({contentType:'application/javascript',body:renderer});
    if(u.pathname==='/terrain_lod.js')return route.fulfill({contentType:'application/javascript',body:lodScript});
+   if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+fs.readFileSync('terrain_styles.json','utf8')+';\n'+fs.readFileSync('terrain_style_rendering.js','utf8')});
+   if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(u.pathname.slice(1),'utf8')});
+   if(u.pathname==='/api/inference/streams')return route.fulfill({json:{coarse:4}});
    if(u.pathname==='/api/world')return route.fulfill({json:{seed:u.searchParams.get('seed'),version:'natural-v1',world_profile:'natural',generation_profile:'natural',cache_profile:'test',world_bounds:[-20e6,-10e6,20e6,10e6],overview_bounds:[-20e6,-10e6,20e6,10e6],overview:'/api/overview/test.png',gpu:'Fake'}});
    if(u.pathname==='/api/view'){
     const body=route.request().postDataJSON();assert(body.tiles.every(t=>t.lod<=11));return route.fulfill({json:{accepted:true}});

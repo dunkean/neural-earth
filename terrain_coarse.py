@@ -255,7 +255,10 @@ class CoarsePreparation:
             for key in ('coarse_batch', 'latent_batch', 'decoder_batch', 'canonical_latents'):
                 if key in declared and declared[key] != getattr(world._terrain_profile, key):
                     raise ValueError(f'Coarse manifest {key} does not match pipeline')
-        if tensor.batch_size != 1:
+        from terrain_inference import coarse_stream_count
+        if tensor.batch_size != 1 and not (
+                getattr(getattr(world, '_terrain_profile', None), 'coarse_batch', None) == 1
+                and tensor.batch_size == coarse_stream_count(world)):
             raise ValueError('Persistent coarse requires the validated batch-one profile')
         if getattr(tensor, '_terrain_coarse_preparation', None) is self:
             return self
@@ -281,7 +284,7 @@ class CoarsePreparation:
                         bounds=self.bounds, grid=vars(self.grid), context_cells=CONTEXT_CELLS,
                         tensor_shape=tensor.shape,
                         output_window=tensor.output_window.to_dict(),
-                        dtype=str(tensor.dtype), batch_size=tensor.batch_size,
+                        dtype=str(tensor.dtype), batch_size=1,
                         weight_sha256=self._weight_digest)
         if self._contract_path.exists():
             if json.loads(self._contract_path.read_text(encoding='utf-8')) != json.loads(_json_bytes(contract)):
@@ -715,7 +718,7 @@ class CoarsePreparation:
         """Run at most ``budget_windows`` missing coarse model windows.
 
         The caller owns its GPU lock. Interest/cancellation is checked before
-        each window. A cancelled step leaves atomic completed files reusable.
+        each group. A cancelled step leaves atomic completed files reusable.
         """
         if world.coarse is not self._tensor:
             raise ValueError('Preparation is not installed on this world')
@@ -730,50 +733,57 @@ class CoarsePreparation:
         generated_before = self.network_windows
         examined = 0
         while examined < total and self.network_windows - generated_before < budget_windows:
-            if self._priority_order is None:
-                index = self._indices[self._cursor]
-            else:
-                index = self._priority_order[self._priority_cursor]
-                self._priority_cursor = (self._priority_cursor+1) % total
-            self._cursor = (self._cursor + 1) % total
-            examined += 1
-            with self._namespace.condition:
-                pending = index in self._namespace.pending
-            if index in self._persisted_indices or pending:
-                continue
+            group = []
+            remaining = budget_windows - (self.network_windows - generated_before)
+            group_size = min(remaining, self._tensor.batch_size or 1)
+            while examined < total and len(group) < group_size:
+                if self._priority_order is None:
+                    index = self._indices[self._cursor]
+                else:
+                    index = self._priority_order[self._priority_cursor]
+                    self._priority_cursor = (self._priority_cursor+1) % total
+                self._cursor = (self._cursor + 1) % total
+                examined += 1
+                with self._namespace.condition:
+                    pending = index in self._namespace.pending
+                if index not in self._persisted_indices and not pending:
+                    group.append(index)
+            if not group:
+                break
             if check is not None:
                 check()
             # Use the installed real InfiniteTensor scheduler and cache. The
             # weighted window is persisted by the wrapped coarse f.
             scheduler = getattr(world, '_terrain_window_scheduler', None)
             if scheduler is not None:
-                scheduler.ensure_window(self._tensor, index, check=check)
+                if len(group) == 1:
+                    scheduler.ensure_window(self._tensor, group[0], check=check)
+                else:
+                    scheduler.ensure_windows(self._tensor, group, check=check)
             else:
                 self._tensor._store.begin_access(self._tensor.uuid)
                 try:
-                    self._tensor._ensure_processed([index])
+                    self._tensor._ensure_processed(group)
                 finally:
                     self._tensor._store.end_access(self._tensor.uuid)
-            with self._namespace.condition:
-                pending = index in self._namespace.pending
-            if not pending and self._load_window(index) is None:
-                if self.disk_budget_exhausted:
-                    break
-                # A window may have been materialized in RAM before install,
-                # or a persisted file can be damaged while RAM is still hot.
-                # Coarse has no dependencies, so regenerate this exact scalar
-                # window and save its weighted output without fused readback.
-                if check is not None:
-                    check()
-                start = perf_counter()
-                output = self._model_f([index])[0]
-                self.model_submission_seconds += perf_counter() - start
-                persist_start = perf_counter()
-                self._save_window(index, output)
-                self.persistence_seconds += perf_counter() - persist_start
-                self.network_windows += 1
-                if self.disk_budget_exhausted:
-                    break
+            for index in group:
+                with self._namespace.condition:
+                    pending = index in self._namespace.pending
+                if not pending and self._load_window(index) is None:
+                    if self.disk_budget_exhausted:
+                        break
+                    # Repair RAM-only materializations or damaged disk windows.
+                    if check is not None:
+                        check()
+                    start = perf_counter()
+                    output = self._model_f([index])[0]
+                    self.model_submission_seconds += perf_counter() - start
+                    persist_start = perf_counter()
+                    self._save_window(index, output)
+                    self.persistence_seconds += perf_counter() - persist_start
+                    self.network_windows += 1
+            if self.disk_budget_exhausted:
+                break
         with self._namespace.condition:
             pending_plan = set(self._namespace.pending).intersection(self._planned_indices)
             all_submitted = len(self._persisted_indices | pending_plan) >= total
@@ -782,7 +792,7 @@ class CoarsePreparation:
             # intermediate quanta leave disk work off the compute lane.
             self.flush()
         self._save_cursor()
-        return self.status()
+        return dict(self.status(), quantum_windows=self.network_windows-generated_before)
 
     def _required_indices(self, i1, j1, i2, j2):
         region = (slice(0, self._tensor.shape[0]), slice(i1, i2), slice(j1, j2))

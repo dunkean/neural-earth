@@ -47,13 +47,19 @@ class IndependentStages(unittest.TestCase):
         self.assertEqual([call.args[0] for call in execute.call_args_list],['climate'])
         self.assertEqual(set(execution),{'climate'})
         np.testing.assert_array_equal(climate.height_m,initial.height_m)
+        np.testing.assert_array_equal(climate.layers['climate_height_m'],initial.height_m)
         self.assertFalse(np.array_equal(climate.layers['temperature_summer'],initial.layers['temperature_summer']))
+        from terrain_soil import NAMES
+        self.assertTrue(all(name in climate.layers for name in NAMES))
+        self.assertEqual(climate.metadata['substrate']['composition'],['sand','clay','humus'])
+        self.assertFalse(np.array_equal(climate.layers['soil_humus'],initial.layers['soil_humus']))
         self.assertEqual(climate.metadata['stage_state']['erosion']['id'],initial.metadata['stage_state']['erosion']['id'])
         self.assertEqual(resolve_generation(climate_profile).settings['orogen_hydraulic'],self.settings['orogen_hydraulic'])
         options=dict(resolve_generation(climate_profile).settings,orogen_hydraulic=0.,orogen_thermal=0.,orogen_glacial=0.)
         with patch.object(stages,'_execute',wraps=stages._execute) as execute:
             erosion_profile,eroded,_=self.run_stage(options,'erosion',climate_profile)
         self.assertEqual([call.args[0] for call in execute.call_args_list],['erosion'])
+        np.testing.assert_array_equal(eroded.layers['climate_height_m'],climate.height_m)
         for name,value in climate.layers.items():
             if stages.is_climate_field(name):np.testing.assert_array_equal(eroded.layers[name],value)
         self.assertTrue(eroded.metadata['stage_state']['climate']['stale'])

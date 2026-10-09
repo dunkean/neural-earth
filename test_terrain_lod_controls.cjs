@@ -5,7 +5,7 @@ const canvasContext=new Proxy({}, {get(target,key){return target[key]??((...args
 const context=vm.createContext({URLSearchParams,AbortController,performance,Map,Set,Math,Date,
  location:{search:''},crypto:require('node:crypto').webcrypto,
  document:{getElementById(id){if(!elements.has(id))elements.set(id,{checked:id==='prefetch',value:id==='refinementDepth'?'0':id==='seaMaxLod'?'9':id==='cacheLodGap'?'3':'',dataset:{},options:[],getContext:()=>canvasContext});return elements.get(id)}},
- window:{TerrainLOD:require('./terrain_lod.js')},TerrainLOD:require('./terrain_lod.js'),devicePixelRatio:1,setTimeout:()=>1,clearTimeout(){},requestAnimationFrame:()=>1});
+ window:{TerrainLOD:require('./terrain_lod.js'),TerrainRender:{serialize:()=> '{}',get:()=>({})}},TerrainLOD:require('./terrain_lod.js'),devicePixelRatio:1,setTimeout:()=>1,clearTimeout(){},requestAnimationFrame:()=>1});
 vm.runInContext(script.slice(0,script.indexOf("view.addEventListener('wheel'")),context);
 const run=code=>vm.runInContext(code,context);
 run(`world={seed:'42',generation_profile:'natural',cache_profile:'test',world_bounds:[-20e6,-10e6,20e6,10e6]};
@@ -222,7 +222,7 @@ run(`inflight.clear();tiles.clear();visiblePlan=[];renderer=null;overview=null;i
  world.world_bounds=[0,0,16e6,8e6];world.scheduling_land_mask={bounds:world.world_bounds,width:16,height:8,rows:Array(8).fill('0000000000000000')};
  W=256;H=128;cx=8e6;cy=4e6;$('renderSea').checked=false;$('seaMaxLod').value='9';
  $('refinementDepth').value='14';$('cacheLodGap').value='0';$('prefetch').checked=false;zoomUntil=0;`);
-const climateModes=['biomes','temperature','precipitation','orogen-biomes','orogen-koppen',
+const climateModes=['temperature','precipitation',
  'orogen-temperature-summer','orogen-temperature-winter','orogen-precip-summer','orogen-precip-winter',
  'orogen-pressure-summer','orogen-pressure-winter','orogen-rain-shadow','orogen-continentality',
  'orogen-wind-summer','orogen-wind-winter','orogen-currents-summer','orogen-currents-winter'];
@@ -246,3 +246,10 @@ assert(run('seaFilteringAt(9)'),'relief keeps its sea constraint');
 assert(run('continuousRefinement()'),'relief keeps its depth control');
 console.log('Climate layers cover sea at fixed LOD9 across zoom, manual LOD and refinement controls: OK');
 
+
+for(const mode of ['biomes','orogen-biomes','orogen-koppen','render','soil']){
+ run(`viewMode=${JSON.stringify(mode)};forcedView=null;$('renderSea').checked=true;$('refinementDepth').value='0';mpp=120;refresh()`);
+ assert.equal(run('fixedClimateLod()'),false);assert.equal(run('requestedLod()'),2,mode+' follows terrain camera LOD');
+ run(`$('forcedLod').value='0';forceViewLod()`);assert.equal(run('requestedLod()'),0,mode+' permits terrain LOD override');
+}
+console.log('Biomes and Köppen follow camera and requested terrain LOD: OK');

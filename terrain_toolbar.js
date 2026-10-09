@@ -18,10 +18,10 @@ window.TerrainToolbar=(()=>{
     panel.innerHTML='<summary title="Layer visible" aria-label="Layer visible"><span class="selectedLayer">Relief</span><span aria-hidden="true">▾</span></summary><div class="toolPanel"><div class="panelHeading"><strong>Layer visible</strong><button type="button" class="panelClose" aria-label="Close layer menu">×</button></div><div class="layerGroups"></div></div>';
     label.hidden=true;controls.append(label,panel);
     const groups=panel.querySelector('.layerGroups'),buttons=[],labels=new Map([
-      ['relief','Relief'],['orogen-biomes','Biomes'],['temperature','Température annuelle'],['precipitation','Précipitations annuelles'],['orogen-koppen','Köppen']
+      ['relief','Relief'],['render','Render'],['soil','Sols'],['orogen-biomes','Biomes'],['temperature','Température annuelle'],['precipitation','Précipitations annuelles'],['orogen-koppen','Köppen']
     ]);
     const sections=[
-      ['Cartes principales',['relief','orogen-biomes','temperature','precipitation','orogen-koppen']],
+      ['Cartes principales',['relief','render','soil','orogen-biomes','temperature','precipitation','orogen-koppen']],
       ['Styles de carte',Object.keys(window.TerrainStyles||{})],
       ['Climat saisonnier',['orogen-temperature-summer','orogen-temperature-winter','orogen-precip-summer','orogen-precip-winter']],
       ['Atmosphère',['orogen-pressure-summer','orogen-pressure-winter','orogen-wind-summer','orogen-wind-winter','orogen-rain-shadow','orogen-continentality']],

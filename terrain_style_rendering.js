@@ -4,7 +4,7 @@
  */
 window.TerrainStyleRendering=(()=>{
   const styles=window.TerrainStyles;
-  const number=mode=>{const basic={'orogen-biomes':-1,relief:0,biomes:1,temperature:2,precipitation:3}[mode];const index=Object.keys(styles).indexOf(mode);return basic??(index<0?0:index+4);};
+  const number=mode=>{const basic={render:-3,soil:-4,'orogen-biomes':-1,relief:0,biomes:1,temperature:2,precipitation:3}[mode];const index=Object.keys(styles).indexOf(mode);return basic??(index<0?0:index+4);};
   const f=x=>Number(x).toFixed(8);
   const rgb=hex=>'vec3<f32>('+[1,3,5].map(i=>f(parseInt(hex.slice(i,i+2),16)/255)).join(',')+')';
   const paletteWGSL=Object.entries(styles).map(([mode,p],i)=>{
