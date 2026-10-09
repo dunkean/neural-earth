@@ -22,6 +22,7 @@ window.TerrainToolbar=(()=>{
     ]);
     const sections=[
       ['Cartes principales',['relief','orogen-biomes','temperature','precipitation','orogen-koppen']],
+      ['Styles de carte',Object.keys(window.TerrainStyles||{})],
       ['Climat saisonnier',['orogen-temperature-summer','orogen-temperature-winter','orogen-precip-summer','orogen-precip-winter']],
       ['Atmosphère',['orogen-pressure-summer','orogen-pressure-winter','orogen-wind-summer','orogen-wind-winter','orogen-rain-shadow','orogen-continentality']],
       ['Océans',['orogen-currents-summer','orogen-currents-winter']],

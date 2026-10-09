@@ -17,9 +17,12 @@ from PIL import Image
 from flask import Flask, Response, has_request_context, jsonify, request, send_file
 
 from terrain_climate import MODES as CLIMATE_MODES, colorize
+from terrain_biomes import colorize_biomes, parse_rock_slope, sample_biome_fields
 from terrain_jobs import JobCancelled, QueueFull
 from terrain_orogen_layers import EXTRA, MODES, render, sample
 from terrain_snr_layer import MODES as SNR_MODES
+from terrain_lighting import parse_lighting, render_relief
+from terrain_styles import MODES as STYLE_MODES
 from terrain_priority import tile_relief_stats
 
 ROOT = Path(__file__).resolve().parent
@@ -51,10 +54,12 @@ class BiomeTileRenderingTests(unittest.TestCase):
             np=np, io=io, json=json, Image=Image, time=time, tile_relief_stats=tile_relief_stats,
             TILE=256, HALO=24, NATIVE=30, MIN_LOD=-3, CLIMATE_SIZE=33,
             WORLD_BOUNDS=(-20e6, -10e6, 20e6, 10e6), PROFILE='fixture',
-            MODES=CLIMATE_MODES+MODES+SNR_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=MODES, CACHE=Path(temporary.name),
+            MODES=CLIMATE_MODES+STYLE_MODES+MODES+SNR_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=MODES, CACHE=Path(temporary.name),
             resolve_generation=lambda wp: SimpleNamespace(bootstrap_generator='orogen',
                 settings={'climate_source':'orogen'}),
             generation_profile=lambda: 'orogen',
+            profile_bounds=lambda _: (-20e6,-10e6,20e6,10e6),
+            parse_lighting=parse_lighting,render_relief=render_relief,
             pin_cache_io=lambda key: lambda function: function,
             orogen_diagnostic_tile=self.diagnostic, snr_diagnostic_tile=self.snr_diagnostic, physical_tile=self.physical,
             selected_coarse_interpolation=lambda lod: None,
@@ -63,10 +68,14 @@ class BiomeTileRenderingTests(unittest.TestCase):
             _record_tile_disk=lambda *args: None, image_slots=threading.BoundedSemaphore(2),
             span=lambda *args, **kwargs: nullcontext(),
             get_relief_map=get_relief_map, colorize=colorize,
+            colorize_biomes=colorize_biomes,parse_rock_slope=parse_rock_slope,
+            physical_biome_fields=lambda seed,wp,xs,ys: sample_biome_fields(
+                SimpleNamespace(bounds=(-1,-1,1,1),width=2,height=2,layers={'koppen':np.full((2,2),9)}),
+                np.linspace(-.5,.5,len(xs)),np.linspace(-.5,.5,len(ys)),{}),
             JobCancelled=JobCancelled, QueueFull=QueueFull)
         tree = ast.parse((ROOT / 'terrain_server.py').read_text(encoding='utf-8'))
         names = {'display_mode', '_tile_coordinates', 'height_tile', 'tile',
-                 'render_elevation', '_tile_headers'}
+                 'render_elevation', '_tile_headers', 'transport_climate'}
         nodes = [node for node in tree.body if getattr(node, 'name', None) in names]
         self.assertEqual({node.name for node in nodes}, names)
         exec(compile(ast.Module(body=nodes, type_ignores=[]),
@@ -93,7 +102,7 @@ class BiomeTileRenderingTests(unittest.TestCase):
         for lod, stage in ((9, 'conditioning-preview'), (4, 'coarse'),
                            (0, 'decoder'), (-1, 'decoder-refinement')):
             with self.subTest(lod=lod):
-                response = client.get(f'/tiles/natural-v1/42/{lod}/0/0.png?profile=fixture&mode=biomes')
+                response = client.get(f'/tiles/natural-v1/42/{lod}/0/0.png?profile=fixture&mode=orogen-biomes')
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.headers['X-Terrain-Stage'], stage)
                 self.assertEqual(float(response.headers['X-Terrain-Elevation-Max']),
@@ -106,7 +115,7 @@ class BiomeTileRenderingTests(unittest.TestCase):
         self.assertGreater(lowland[1], lowland[2])
         for lod in (4, 0, -1):
             self.assertGreater(images[lod][128, 20, 2], images[lod][128, 20, 1], 'New coast is ocean')
-            self.assertGreater(images[lod][128, 230].min(), 200, 'New high peak is snowy')
+            self.assertGreater(images[lod][128, 230].min(), lowland.max(), 'Peak is brighter than lowland vegetation')
         self.assertEqual([call.args[1] for call in self.physical.call_args_list], [9, 4, 0, -1])
         self.diagnostic.assert_not_called()
 
@@ -114,13 +123,51 @@ class BiomeTileRenderingTests(unittest.TestCase):
         client = self.app.test_client()
         for lod in (9, 4, 0, -1):
             with self.subTest(lod=lod):
-                response = client.get(f'/height/natural-v1/42/{lod}/0/0.bin?profile=fixture&mode=biomes&climate=1')
+                response = client.get(f'/height/natural-v1/42/{lod}/0/0.bin?profile=fixture&mode=orogen-biomes&climate=1')
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.headers['X-Terrain-Climate-Width'], '33')
+                self.assertEqual(response.headers['X-Terrain-Climate-Layers'], '21')
                 values = np.frombuffer(response.data, dtype='<f4')
                 np.testing.assert_array_equal(values[:304*304], self.elevations[lod].ravel())
-                np.testing.assert_array_equal(values[304*304:], self.climate.ravel())
+                np.testing.assert_array_equal(values[304*304:304*304+5*33*33], self.climate.ravel())
+                self.assertEqual(values.size,304*304+21*33*33)
         self.diagnostic.assert_not_called()
+
+    def test_invalid_biome_slope_does_not_generate_terrain(self):
+        response=self.app.test_client().get('/tiles/natural-v1/42/0/0/0.png?mode=orogen-biomes&biome_slope=90')
+        self.assertEqual(response.status_code,400)
+        self.physical.assert_not_called()
+
+    def test_visible_snow_preserves_relief_shadows_in_png(self):
+        xs=(np.arange(304,dtype=np.float32)-152)*30
+        self.elevations[0]=np.broadcast_to(8000+xs*np.tan(np.deg2rad(30)),(304,304)).copy()
+        client=self.app.test_client()
+        def pixel(lighting):
+            response=client.get('/tiles/natural-v1/42/0/0/0.png?profile=fixture&mode=orogen-biomes&lighting='+json.dumps(lighting))
+            self.assertEqual(response.status_code,200)
+            with Image.open(io.BytesIO(response.data)) as image:return np.array(image)[128,128].astype(int)
+        shaded=pixel({'strength':1})
+        unshaded=pixel({'strength':0})
+        self.assertGreater(unshaded.mean()-shaded.mean(),100)
+        self.assertGreater(unshaded.min(),230)
+
+
+    def test_city_styles_and_contours_render_physical_tiles(self):
+        client = self.app.test_client()
+        for mode in STYLE_MODES:
+            response = client.get(f'/tiles/natural-v1/42/0/0/0.png?profile=fixture&mode={mode}&contours='+
+                '{"enabled":true,"interval":100}')
+            self.assertEqual(response.status_code, 200)
+            with Image.open(io.BytesIO(response.data)) as image:
+                self.assertEqual(image.size, (256, 256))
+            response.close()
+        self.assertEqual(self.physical.call_count, len(STYLE_MODES))
+        self.diagnostic.assert_not_called()
+
+    def test_invalid_contours_do_not_schedule_physical_work(self):
+        response = self.app.test_client().get('/tiles/natural-v1/42/0/0/0.png?mode=topographic&contours={"interval":0}')
+        self.assertEqual(response.status_code, 400)
+        self.physical.assert_not_called()
 
 
 class DiagnosticTileRenderingTests(unittest.TestCase):
@@ -154,7 +201,9 @@ class DiagnosticTileRenderingTests(unittest.TestCase):
             np=np, io=io, Image=Image, time=time, tile_relief_stats=tile_relief_stats,
             world_manifest=lambda seed, wp: {}, world_identity=lambda manifest: 'fixture',
             resolve_generation=lambda wp: SimpleNamespace(
-                bootstrap_style='earthlike', bootstrap_options={}),
+                bootstrap_style='earthlike', bootstrap_options={},settings={}),
+            geometry_heightmap=lambda atlas, _: atlas,
+            profile_bounds=lambda _: self.atlas.bounds,
             render_orogen_layer=render)
         tree = ast.parse((ROOT / 'terrain_server.py').read_text(encoding='utf-8'))
         names = {'orogen_diagnostic_tile', '_tile_headers'}

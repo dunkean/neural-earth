@@ -65,7 +65,7 @@ def _files(model_root: Path, world_profile: str = 'natural'):
         # Request ordering determines BF16 batch composition and physical bytes.
         "index.html", "terrain_lod.js", "terrain_generation_controls.js", "terrain_toolbar.js",
         "terrain_server.py", "terrain_app.py", "terrain_final_mips.py", "terrain_refinement.py",
-        "terrain_background.py", "terrain_generation_session.py", "terrain_climate.py", "terrain_window_scheduler.py",
+        "terrain_background.py", "terrain_generation_session.py", "terrain_climate.py", "terrain_biomes.py", "terrain_window_scheduler.py",
         "terrain_coarse.py", "terrain_native_coarse.py", "terrain_coarse_graph.py", "terrain_device.py", "terrain_jobs.py",
         "terrain_disk_cache.py", "terrain_nn_constants.py", "terrain_cuda_graphs.py", "terrain_cuda_kernels.py", "terrain_interpolation.py", "terrain_profiling.py", "terrain_snr.py", "terrain_delivery.py")
     implementation = {name: _digest(ROOT / name) for name in implementation_names

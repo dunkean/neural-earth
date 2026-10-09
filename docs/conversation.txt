@@ -1,45 +1,18 @@
 A faire:
-- taille du monde configurable
-- faire tourner l'éclairage, les normales donnent l'impression que les rivieres sont en relief
+
 
 - Biome multi échelles !
 
-- tout passer en anglais
-
-
 // Verifier si utile après fix des côtes
-- configuration du SNR a LOD 3-2-1-0
-- Gestion des SNR des cotes à partir de LOD 1
 - Application de l'érosion gpu sur les LOD 3-2-1-0 pour essayer de refaire les fjords et autres structures
 
-- Affichage Globe
+- tout passer en anglais
+
+- cache trop petit.
 
 
 
-On a:
-
-
-3 moteurs de générations de relief : une NN (infinite generation), 1 custom (from world builder rs ou world builder je sais plus), 1 orogen
-
-1 moteur de génération de climat: Orogen
-
-2 moteurs d'érosion: Orogen, City Generator Rs
-
-1 gestionnaire de caméra, de LOD, de cache et de rendu: Infinite map
-
-1 moteur de relief procédural: Infinite generation avec ses 3 réseaux qui dépendent du LOD: Coarse, "Je sais plus quoi" et latent. (d'ailleurs dans la barre d'info en base faudra remettre l'info du modèle en cours d'usage pendant la génération)
-
-Idéalement tout ca devrait être complètement modulaire, 
-
-On génère un relief (ou on le charge), on génère un climat, on applique ou pas de l'érosion (potentiellement liée au climat), on applique ensuite un moteur procédural lors du changement de LOD
-
-
-Je veux que ca devienne assez générique pour que je puisse appliquer de l'érosion après le procédural (en fonction du LOD), décider du moteur procédural (en fonction du LOD).
-
-
-J'ai pas 
-
-
+------------------------------------------------------------------------------------------------------
 
 
 

@@ -15,6 +15,7 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
 
  if(u.pathname==='/terrain_renderer.js')return route.fulfill({contentType:'application/javascript',body:'window.createTerrainRenderer=async()=>({available:false,clear(){},draw(){},deleteTile(){},getStats(){return{}}})'});
 
+ if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+fs.readFileSync('terrain_styles.json','utf8')+';\n'+fs.readFileSync('terrain_style_rendering.js','utf8')});
  if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(root+u.pathname,'utf8')});
 
  if(u.pathname==='/api/generation/run'){

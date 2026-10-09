@@ -55,16 +55,22 @@ class CoastalRefinementTests(unittest.TestCase):
                                 self.assertTrue((actual * height > 0).all())
                                 self.assertGreater(actual.std().item(), 0, 'Keep fine detail above/below sea level')
 
-    def test_each_level_preserves_parent_means_including_a_crossing(self):
+    def test_each_level_preserves_parent_means_away_from_the_native_coast(self):
         for device in self.devices():
             world = self.world(device, lambda y, x: (x + .3) * .05 + y * .003)
             with patch('terrain_refinement._detail_field', return_value=DetailField(device, smooth=True)):
                 for level in (1, 2, 3):
                     with self.subTest(device=device, lod=-level):
-                        parent = sample_refined(world, level-1, -8, -8, 8, 8)
-                        child = sample_refined(world, level, -16, -16, 16, 16)
+                        extent = 8*2**(level-1)
+                        parent = sample_refined(world, level-1, -extent, -extent, extent, extent)
+                        child = sample_refined(world, level, -2*extent, -2*extent, 2*extent, 2*extent)
                         means = F.avg_pool2d(child[None, None], 2)[0, 0]
-                        torch.testing.assert_close(means, parent, rtol=2e-6, atol=1e-7)
+                        # The native coastal band deliberately relaxes mean
+                        # offsets; compare conservative blocks further inland.
+                        columns = torch.arange(-extent, extent, device=device)
+                        outside = (columns.div(2**(level-1), rounding_mode='floor').abs() >= 3)
+                        self.assertTrue(outside.any())
+                        torch.testing.assert_close(means[:, outside], parent[:, outside], rtol=2e-6, atol=1e-7)
                         self.assertTrue((child < 0).any())
                         self.assertTrue((child > 0).any())
 
@@ -117,6 +123,38 @@ class CoastalRefinementTests(unittest.TestCase):
                 self.assertTrue((child[:, 0] < 0).all())
                 self.assertTrue((child[:, 1] > 0).all())
                 torch.testing.assert_close(child.mean(), parent.squeeze())
+
+    def test_irregular_coast_follows_native_surface_without_new_pixel_islands(self):
+        for device in self.devices():
+            # A connected diagonal coastline, with strongly varying heights.
+            # Conservative 2x2 offsets previously detached pixels along it.
+            heights = lambda y, x: (x+y+.2)*torch.where((x//2+y//3)%2 == 0, .01, 12.)
+            world = self.world(device, heights)
+            native = world.get(-10, -10, 10, 10, with_climate=False)['elev']
+            with patch('terrain_refinement._detail_field', return_value=DetailField(device, smooth=True)):
+                for level in (1, 2, 3):
+                    scale = 2**level
+                    actual = sample_refined(world, level, -8*scale, -8*scale, 8*scale, 8*scale)
+                    reference = F.interpolate(native[None, None], scale_factor=scale,
+                                              mode='bilinear', align_corners=False)[0, 0]
+                    reference = reference[2*scale:-2*scale, 2*scale:-2*scale]
+                    with self.subTest(device=device, lod=-level):
+                        self.assertTrue(torch.equal(actual >= 0, reference >= 0))
+
+    def test_native_coast_is_stable_at_far_and_negative_coordinates(self):
+        for device in self.devices():
+            for origin in (-100000003, 100000003):
+                world = self.world(device, lambda y, x: (x-origin+.2)*.05)
+                with patch('terrain_refinement._detail_field', return_value=DetailField(device)):
+                    for level in (1, 2, 3):
+                        scale = 2**level
+                        start = origin*scale
+                        actual = sample_refined(world, level, -2*scale, start-2*scale,
+                                                2*scale, start+2*scale)
+                        columns = torch.arange(-2*scale, 2*scale, device=device)
+                        reference = ((columns.float()+.5)/scale-.5+.2)*.05
+                        with self.subTest(device=device, origin=origin, lod=-level):
+                            self.assertTrue(torch.equal(actual >= 0, (reference >= 0)[None].expand_as(actual)))
 
 
 if __name__ == '__main__':

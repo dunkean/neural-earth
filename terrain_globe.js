@@ -108,7 +108,7 @@ window.TerrainGlobe=(()=>{
       setImage(image){if(lost||image===lastImage)return;lastImage=image;gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);if(image){gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);ready=true;}else ready=false;},
       setTiles(plan,state,wb,renderer=null){
         if(lost)return[];if(!state){detailReady=false;gpuDetailReady=false;surfaceSignature=null;surfaceTiles=[];surfacePresented=[];return[];}
-        const signature=JSON.stringify([state.uvBounds,state.mpp,state.detailProjection,!!renderer,renderer?.uploads,window.TerrainLighting?.serialize(),plan.map(p=>[p.tile.key,p.bounds,p.uv])]);
+        const signature=JSON.stringify([state.uvBounds,state.mpp,state.detailProjection,!!renderer,renderer?.uploads,renderer?.styleRevision,window.TerrainLighting?.serialize(),window.TerrainStyleRendering?.get(),plan.map(p=>[p.tile.key,p.bounds,p.uv])]);
         if(signature===surfaceSignature&&plan.every((p,i)=>p.tile===surfaceTiles[i]))return surfacePresented;
         surfaceSignature=signature;surfaceTiles=plan.map(p=>p.tile);surfacePresented=[];gpuDetailReady=false;detailBounds=state.uvBounds;detailOrbit=state.detailProjection?.orbit||[yaw,pitch];detailRoll=state.detailProjection?.roll||[1,0];detailOffset=[(state.cx-wb[0])/(wb[2]-wb[0])-detailBounds[0],(state.cy-wb[1])/(wb[3]-wb[1])-detailBounds[1]];detailReady=plan.length>0;if(!detailReady)return[];
         const [u0,v0,u1,v1]=detailBounds,worldWidth=wb[2]-wb[0],worldHeight=wb[3]-wb[1],limit=Math.min(4096,gl.getParameter(gl.MAX_TEXTURE_SIZE));

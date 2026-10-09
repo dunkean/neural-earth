@@ -28,11 +28,11 @@ def lighting_suffix(settings):
     return '.light-' + hashlib.sha256(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:16]
 
 
-def render_relief(elevation, resolution, settings):
+def relief_intensity(elevation, resolution, settings=None):
+    """Terrain illumination, independent of altitude palette or biome color."""
     import numpy as np
     from scipy.ndimage import gaussian_filter
-    from matplotlib import colormaps
-    s = dict(DEFAULT_LIGHTING, **settings)
+    s = dict(DEFAULT_LIGHTING, **(settings or {}))
     az, alt = math.radians(s['azimuth']), math.radians(s['altitude'])
     light = (math.sin(az)*math.cos(alt), -math.cos(az)*math.cos(alt), math.sin(alt))
     sx, sy = resolution if isinstance(resolution, tuple) else (resolution, resolution)
@@ -41,7 +41,13 @@ def render_relief(elevation, resolution, settings):
         dx, dy = dx*s['exaggeration'], dy*s['exaggeration']
         return np.clip((dx*light[0]+dy*light[1]+light[2])/np.sqrt(dx*dx+dy*dy+1), 0, 1)
     hs = np.power(.75*shade(6.)+.25*shade(1.2), .85*s['contrast'])
-    intensity = (1-s['strength']) + s['strength']*(s['ambient']+(1-s['ambient'])*hs)
+    return (1-s['strength']) + s['strength']*(s['ambient']+(1-s['ambient'])*hs)
+
+
+def render_relief(elevation, resolution, settings):
+    import numpy as np
+    from matplotlib import colormaps
+    intensity = relief_intensity(elevation, resolution, settings)
     rgb = colormaps['terrain'](.25+.75*np.power(np.clip(elevation/4500, 0, 1), .7))[..., :3]
     rgb *= intensity[..., None]
     depth = np.power(np.clip(-elevation/10000, 0, 1), .7)[..., None]

@@ -12,16 +12,18 @@ assert.equal(sampleHeight({heights:new Float32Array(16).fill(-10),heightOptions:
     await page.route('https://coarse.test/**',async route=>{
       const u=new URL(route.request().url());
       if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync('index.html','utf8')});
+      if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+fs.readFileSync('terrain_styles.json','utf8')+';\n'+fs.readFileSync('terrain_style_rendering.js','utf8')});
       if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(u.pathname.slice(1),'utf8')});
-      if(u.pathname==='/api/world')return route.fulfill({json:{version:'natural-v1',cache_profile:'test',world_identity:'test-world',world_profile:'natural',generation_profile:'natural',seed:u.searchParams.get('seed'),world_bounds:[-2e6,-1e6,2e6,1e6],overview_bounds:[-2e6,-1e6,2e6,1e6],overview:'/overview.png',gpu:'GPU fixture'}});
+      if(u.pathname==='/api/world')return route.fulfill({json:{version:'natural-v1',cache_profile:'test',world_identity:'test-world',world_profile:'natural',generation_profile:'natural',seed:u.searchParams.get('seed'),orogen_layers:{'orogen-biomes':'Adaptive Orogen biomes'},world_bounds:[-2e6,-1e6,2e6,1e6],overview_bounds:[-2e6,-1e6,2e6,1e6],overview:'/overview.png',gpu:'GPU fixture'}});
       if(u.pathname==='/api/view'){subscriptions.push(route.request().postDataJSON());return route.fulfill({json:{accepted:true}})}
       if(u.pathname==='/api/status')return route.fulfill({json:{scheduler:{queued:0,computing:0,encoding:0}}});
       if(u.pathname.startsWith('/coarse/')||u.pathname.startsWith('/height/')){
         requests.push(u.pathname);
         const native=u.pathname.startsWith('/coarse/'),source=u.searchParams.get('source_lod'),lod=Number(u.pathname.split('/')[4]);
         const width=native?160:source?256/2**(3-lod)+48:304,halo=native?16:24;
-        const climateSize=native?41:33,values=new Float32Array(width*width+5*climateSize**2);values.fill(native?25:625,0,width*width);values.fill(20,width*width,width*width+climateSize**2);
-        return route.fulfill({contentType:'application/octet-stream',body:Buffer.from(values.buffer),headers:{'X-Terrain-Width':String(width),'X-Terrain-Halo':String(halo),'X-Terrain-Encoding':native?'signed-sqrt':'metres','X-Terrain-Climate-Width':String(climateSize),'X-Terrain-Climate-Height':String(climateSize),'X-Terrain-Resolution':native?'7680':String(30*2**lod),'X-Terrain-Stage':native||lod>=4?'coarse':source||lod===3?'latent':'decoder','X-Terrain-Source-LOD':source||String(native?4:lod),'X-Terrain-Elevation-Min':'625','X-Terrain-Elevation-Max':'625','X-Terrain-Source-Resolution':native?'7680':source||lod===3?'240':'30'}});
+        const climateSize=native?41:33,values=new Float32Array(width*width+21*climateSize**2);values.fill(native?25:625,0,width*width);values.fill(20,width*width,width*width+climateSize**2);
+        [.12,.38,.10,2,3.5,.2,.07,.15,2,2.5,.42,.38,.32,.92,.93,.96].forEach((v,i)=>values.fill(v,width*width+(5+i)*climateSize**2,width*width+(6+i)*climateSize**2));
+        return route.fulfill({contentType:'application/octet-stream',body:Buffer.from(values.buffer),headers:{'X-Terrain-Width':String(width),'X-Terrain-Halo':String(halo),'X-Terrain-Encoding':native?'signed-sqrt':'metres','X-Terrain-Climate-Width':String(climateSize),'X-Terrain-Climate-Height':String(climateSize),'X-Terrain-Climate-Layers':'21','X-Terrain-Resolution':native?'7680':String(30*2**lod),'X-Terrain-Stage':native||lod>=4?'coarse':source||lod===3?'latent':'decoder','X-Terrain-Source-LOD':source||String(native?4:lod),'X-Terrain-Elevation-Min':'625','X-Terrain-Elevation-Max':'625','X-Terrain-Source-Resolution':native?'7680':source||lod===3?'240':'30'}});
       }
       return route.fulfill({contentType:'image/png',body:png});
     });
@@ -53,6 +55,19 @@ assert.equal(sampleHeight({heights:new Float32Array(16).fill(-10),heightOptions:
     await page.evaluate(()=>{mpp=480;document.getElementById('refinementDepth').value='1';resetBackend();draw();refresh()});
     await page.waitForFunction(()=>refinementProgress()?.complete&&terrainDebug.snapshot().rendered.sources.includes('latent')&&terrainDebug.snapshot().scheduler.inflight===0).catch(async e=>{console.error(JSON.stringify(await page.evaluate(()=>({snapshot:terrainDebug.snapshot(),progress:refinementProgress(),queue:queue.map(t=>({lod:t.lod,native:t.native_coarse,source:t.source_lod})),interests:interests.size})),null,2));throw e});
     await page.screenshot({path:'tmp/coarse-gpu-ui.png'});
+    // The visible Biomes layer follows camera/refinement LODs and remains GPU.
+    await page.evaluate(()=>{document.getElementById('mapMode').value='orogen-biomes';document.getElementById('mapMode').dispatchEvent(new Event('change'));document.getElementById('refinementDepth').value='0';mpp=30;draw();refresh()});
+    await settle();
+    assert.equal(await page.evaluate(()=>terrainDebug.snapshot().mode),'orogen-biomes');
+    assert.equal(await page.evaluate(()=>terrainDebug.snapshot().backend),'webgpu');
+    assert.equal(await page.evaluate(()=>terrainDebug.snapshot().refinement.target),0);
+    assert((await page.evaluate(()=>terrainDebug.snapshot().rendered.lods)).includes(0),'Biomes render the detailed DEM');
+    await page.locator('#biomeRockSlope').fill('50');await page.locator('#biomeRockSlope').dispatchEvent('change');
+    assert.equal(await page.evaluate(()=>terrainDebug.snapshot().biomeRockSlope),50);
+    assert.equal(new URL(page.url()).searchParams.get('biome_slope'),'50');
+    await page.evaluate(()=>{mpp=15;draw();refresh()});await settle();
+    assert.equal(await page.evaluate(()=>terrainDebug.snapshot().refinement.target),-1);
+    assert((await page.evaluate(()=>terrainDebug.snapshot().rendered.lods)).includes(-1),'Biomes also render experimental fine LODs');
     // Validate signed units, palette, continuous drawing, physical mip means,
     // and shared-halo seams directly on the real GPU.
     const shader=await page.evaluate(async()=>{

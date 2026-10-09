@@ -31,7 +31,9 @@ from terrain_disk_cache import TerrainDiskCache
 from terrain_climate import CLIMATE_SIZE, MODES, sample_coarse_climate, colorize
 from terrain_orogen_layers import MODES as OROGEN_MODES, LEGENDS as OROGEN_LEGENDS, render as render_orogen_layer
 from terrain_snr_layer import MODES as SNR_MODES, render as render_snr_layer
-MODES = MODES + OROGEN_MODES + SNR_MODES
+from terrain_styles import STYLES, MODES as STYLE_MODES, render_style, apply_contours, parse_contours
+from terrain_biomes import colorize_biomes, sample_biome_fields, parse_rock_slope
+MODES = MODES + STYLE_MODES + OROGEN_MODES + SNR_MODES
 from terrain_conditioning import sample_conditioning_preview, WORLD_PROFILES
 from terrain_generation import resolve_generation, register_generation, generator_schema
 from terrain_bootstrap import RASTER_WIDTH, RASTER_HEIGHT
@@ -742,10 +744,23 @@ def response_report(report,seed,profile,lod,tx,ty,source):
     return dict(report,cache_source=source,provisional=provisional)
 
 
-def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief', lighting=None):
-    rgb = (get_relief_map(elevation, None, None, None, resolution=NATIVE*2**lod, vmin=0, vmax=4500)
-           if lighting is None else render_relief(elevation, NATIVE*2**lod, lighting))
-    if mode!='relief' and climate is not None:
+def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief', lighting=None, contours=None, origin=(0, 0), seed=None, world_profile=None):
+    from terrain_styles import MODES as STYLE_MODES, render_style, apply_contours
+    if mode in STYLE_MODES:
+        rgb=render_style(elevation,NATIVE*2**lod,mode,lighting,origin)
+    else:
+        rgb = (get_relief_map(elevation, None, None, None, resolution=NATIVE*2**lod, vmin=0, vmax=4500)
+               if lighting is None else render_relief(elevation, NATIVE*2**lod, lighting))
+    if mode == 'orogen-biomes':
+        resolution = NATIVE*2**lod
+        xs = origin[0]+(np.linspace(0,elevation.shape[1]-1,CLIMATE_SIZE)+.5)*resolution
+        ys = origin[1]+(np.linspace(0,elevation.shape[0]-1,CLIMATE_SIZE)+.5)*resolution
+        fields = physical_biome_fields(seed, world_profile, xs, ys)
+        palette = colorize_biomes(elevation,fields,resolution,parse_rock_slope(request.args.get('biome_slope')))
+        from terrain_lighting import relief_intensity
+        light = relief_intensity(elevation,resolution,lighting)
+        rgb = palette*np.where(elevation<0,1,light)[...,None]
+    elif mode not in STYLE_MODES and mode!='relief' and climate is not None:
         palette=colorize(elevation,climate,mode)
         if mode=='biomes':
             # Preserve relief shading, using luminance rather than its height palette.
@@ -753,7 +768,26 @@ def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief', lig
             if lighting is not None:light=1-lighting['strength']+lighting['strength']*light
             palette*=np.where(elevation<0,1,light)[...,None]
         rgb=palette
+    rgb=apply_contours(rgb,elevation,contours,mode)
     return (np.clip(rgb[halo:-halo, halo:-halo], 0, 1)*255).astype(np.uint8)
+
+
+def physical_biome_fields(seed, wp, xs, ys):
+    from terrain_orogen import get_heightmap
+    descriptor = resolve_generation(wp)
+    atlas = geometry_heightmap(get_heightmap(seed,descriptor.bootstrap_style,
+        options=descriptor.bootstrap_options),descriptor.settings)
+    return sample_biome_fields(atlas,xs,ys,descriptor.settings,
+                              polar=selected_neural_chart()=='polar')
+
+
+def transport_climate(seed, wp, xs, ys, climate):
+    # Keep the five physical conditioning channels and their caches unchanged.
+    # Display fields travel with every physical tile so GPU layer switches reuse
+    # the DEM and never require another neural inference.
+    if resolve_generation(wp).bootstrap_generator != 'orogen':
+        return climate
+    return np.concatenate([climate,physical_biome_fields(seed,wp,xs,ys)])
 
 
 def sample_tile(world, seed, lod, tx, ty, halo=HALO):
@@ -829,6 +863,12 @@ def index():
 @app.get('/terrain_globe.js')
 def globe_script():
     return send_from_directory(ROOT, 'terrain_globe.js')
+
+
+@app.get('/terrain_styles.js')
+def styles_script():
+    source='window.TerrainStyles='+json.dumps(STYLES)+';\n'+(ROOT/'terrain_style_rendering.js').read_text(encoding='utf-8')
+    return Response(source,mimetype='application/javascript')
 
 
 @app.get('/terrain_lighting.js')
@@ -1107,8 +1147,9 @@ def update_view():
                 wants[request_tile_key(seed,lod,tx,ty,world_profile,source,coarse_interpolation)] = priority
         if data.get('overview'):
             light=parse_lighting(json.dumps(data['overview_lighting'])) if data.get('overview_lighting') is not None else None
+            contours=parse_contours(json.dumps(data['overview_contours'])) if data.get('overview_contours') is not None else None
             for mode in MODES:
-                suffix=lighting_suffix(light) if mode in ('relief','biomes') else ''
+                suffix=(lighting_suffix(light) if mode in ('relief','biomes','orogen-biomes')+STYLE_MODES else '')+lighting_suffix(contours)
                 wants[f'{VERSION}/{world_profile}/{seed}/overview/{mode}{suffix}'] = 0
         focus = data.get('bounds')
         if focus is not None:
@@ -1277,7 +1318,7 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
             report.update(generation_profile=wp,neural_chart='polar' if polar else None,climate_width=CLIMATE_SIZE,climate_height=CLIMATE_SIZE)
             report.update(world_identity=world_identity(world_manifest(seed,wp)),
                           source_kind='experimental-neural-refinement' if stage=='decoder-refinement' else 'conditioning-input' if stage=='conditioning-preview' else 'learned-approximation' if stage in ('coarse','coarse-area-mean','latent') else 'native-dem-reduction',
-                           exact_final_mip=stage=='final-dem-mip',height_filter='parent-mean-preserving-decoder-cascade' if stage=='decoder-refinement' else 'block-mean-native' if stage=='final-dem-mip' else 'coarse-physical-area-mean+gaussian-sigma-0.65px' if stage=='coarse-area-mean' else f'coarse-{"monotone-cubic" if coarse_interpolation=="monotone" else "bilinear"}+gaussian-sigma-0.65px' if stage=='coarse' and lod==4 else 'conditioning-preview+gaussian-sigma-0.65px' if stage=='conditioning-preview' else 'source-approximation+gaussian-sigma-0.65px' if stage in ('coarse','latent') else 'native')
+                           exact_final_mip=stage=='final-dem-mip',height_filter='native-bilinear-coast+interior-parent-mean-preserving-decoder-cascade' if stage=='decoder-refinement' else 'block-mean-native' if stage=='final-dem-mip' else 'coarse-physical-area-mean+gaussian-sigma-0.65px' if stage=='coarse-area-mean' else f'coarse-{"monotone-cubic" if coarse_interpolation=="monotone" else "bilinear"}+gaussian-sigma-0.65px' if stage=='coarse' and lod==4 else 'conditioning-preview+gaussian-sigma-0.65px' if stage=='conditioning-preview' else 'source-approximation+gaussian-sigma-0.65px' if stage in ('coarse','latent') else 'native')
             if stage=='decoder-refinement':
                 report.update(refinement_level=-lod, refinement_version=REFINEMENT_VERSION,
                               checkpoint_resolution=NATIVE, detail_amplitude_scale=0.5**(-lod))
@@ -1479,11 +1520,14 @@ def native_coarse_tile(seed, tx, ty):
             job = jobs.submit(key, compute, finalize, session=_session(session) if session else None,
                 epoch=int(request.args.get('epoch', 0)), lane='cpu' if preview_only else 'gpu')
             root, climate, report = job.wait()
+        cx, cy = native_coarse.climate_axes(tx, ty, profile_bounds(wp))
+        climate = transport_climate(seed,wp,cx*NATIVE,cy*NATIVE,climate)
         payload = root.astype('<f4', copy=False).tobytes() + climate.astype('<f4', copy=False).tobytes()
         response = Response(payload, mimetype='application/octet-stream')
         response.headers['X-Terrain-Encoding'] = 'signed-sqrt'
         response.headers['X-Terrain-Climate-Width'] = str(native_coarse.CLIMATE_SIZE)
         response.headers['X-Terrain-Climate-Height'] = str(native_coarse.CLIMATE_SIZE)
+        response.headers['X-Terrain-Climate-Layers'] = str(climate.shape[0])
         response.cache_control.max_age = 30 if report['stage'] == 'conditioning-preview' else 31536000
         return _tile_headers(response, report, hit)
     except (ValueError, TypeError) as exc:
@@ -1504,7 +1548,7 @@ def height_tile(seed, lod, tx, ty):
         mode = display_mode()
         if mode in SNR_MODES:
             raise ValueError('SNR layers use the PNG tile endpoint')
-        if mode in OROGEN_MODES:
+        if mode in OROGEN_MODES and mode != 'orogen-biomes':
             return orogen_diagnostic_tile(seed, lod, tx, ty, generation_profile(), mode, binary=True)
         path, report, cached, arrays = physical_tile(seed, lod, tx, ty, return_arrays=True)
         with span('tile.binary_response', cache_hit=cached, from_memory=arrays is not None):
@@ -1512,12 +1556,19 @@ def height_tile(seed, lod, tx, ty):
             payload=elevation.astype('<f4',copy=False).tobytes()
             if request.args.get('climate')=='1':
                 climate=arrays[1] if arrays is not None else np.load(path.with_suffix('.climate.npy'),allow_pickle=False)
+                resolution = report['resolution']
+                width = elevation.shape[1]
+                halo = report.get('halo',HALO)
+                xs = tx*TILE*NATIVE*2**lod+(np.linspace(-halo+.5,width-halo-.5,CLIMATE_SIZE))*resolution
+                ys = ty*TILE*NATIVE*2**lod+(np.linspace(-halo+.5,width-halo-.5,CLIMATE_SIZE))*resolution
+                climate = transport_climate(seed,generation_profile(),xs,ys,climate)
                 payload+=climate.astype('<f4',copy=False).tobytes()
         report = dict(report, **tile_relief_stats(elevation, HALO))
         response = Response(payload, mimetype='application/octet-stream')
         if request.args.get('climate')=='1':
             response.headers['X-Terrain-Climate-Width']=str(CLIMATE_SIZE)
             response.headers['X-Terrain-Climate-Height']=str(CLIMATE_SIZE)
+            response.headers['X-Terrain-Climate-Layers']=str(climate.shape[0])
         response.cache_control.max_age = 31536000
         response.cache_control.public = True
         return _tile_headers(response, report, cached)
@@ -1537,22 +1588,25 @@ def tile(seed, lod, tx, ty):
     try:
         seed, lod, tx, ty = _tile_coordinates(seed, lod, tx, ty)
         wp,mode=generation_profile(),display_mode()
+        if mode == 'orogen-biomes':parse_rock_slope(request.args.get('biome_slope'))
         if mode in SNR_MODES:
             return snr_diagnostic_tile(seed, lod, tx, ty, wp, mode)
-        if mode in OROGEN_MODES:
+        if mode in OROGEN_MODES and mode != 'orogen-biomes':
             return orogen_diagnostic_tile(seed, lod, tx, ty, wp, mode)
         if request.args.get('profile', PROFILE) != PROFILE:
             raise ValueError('Outdated cache profile: reload the page')
         coarse_interpolation=selected_coarse_interpolation(lod)
         lighting = parse_lighting(request.args.get('lighting'))
-        if lighting is not None:
+        from terrain_styles import parse_contours
+        contours = parse_contours(request.args.get('contours'))
+        if lighting is not None or contours is not None or mode == 'orogen-biomes':
             # Reuse physical caches, without accumulating PNGs for slider values.
             physical_path, report, cached, arrays = physical_tile(seed,lod,tx,ty,return_arrays=True)
             with image_slots:
                 started=time.perf_counter()
                 elevation=arrays[0] if arrays is not None else np.load(physical_path,allow_pickle=False)
                 climate=arrays[1] if arrays is not None else np.load(physical_path.with_suffix('.climate.npy'),allow_pickle=False)
-                rgb=render_elevation(elevation,latent_preview_source(lod) or lod,climate=climate,mode=mode,lighting=lighting)
+                rgb=render_elevation(elevation,latent_preview_source(lod) or lod,climate=climate,mode=mode,seed=seed,world_profile=wp,lighting=lighting,contours=contours,origin=(tx*256*NATIVE*2**lod-HALO*report['resolution'],ty*256*NATIVE*2**lod-HALO*report['resolution']))
                 buffer=io.BytesIO();Image.fromarray(rgb).save(buffer,format='PNG')
                 report=dict(report,**tile_relief_stats(elevation,HALO),render_seconds=round(time.perf_counter()-started,4))
             return _tile_headers(Response(buffer.getvalue(),mimetype='image/png'),report,cached)
@@ -1561,7 +1615,7 @@ def tile(seed, lod, tx, ty):
             report = dict(report, **tile_relief_stats(arrays[0], HALO))
             with image_slots, span('tile.render_refinement', lod=lod):
                 started=time.perf_counter()
-                rgb=render_elevation(arrays[0],lod,climate=arrays[1],mode=mode)
+                rgb=render_elevation(arrays[0],lod,climate=arrays[1],mode=mode,seed=seed,world_profile=wp,origin=((tx*256-HALO)*NATIVE*2**lod,(ty*256-HALO)*NATIVE*2**lod))
                 buffer=io.BytesIO()
                 Image.fromarray(rgb).save(buffer,format='PNG')
                 report=dict(report,render_seconds=round(time.perf_counter()-started,4))
@@ -1592,7 +1646,7 @@ def tile(seed, lod, tx, ty):
                 elevation = arrays[0] if arrays is not None else np.load(physical_path, allow_pickle=False)
                 report = dict(report, **tile_relief_stats(elevation, HALO))
                 climate=arrays[1] if arrays is not None else np.load(physical_path.with_suffix('.climate.npy'),allow_pickle=False)
-                rgb = render_elevation(elevation,source_lod or lod,climate=climate,mode=mode)
+                rgb = render_elevation(elevation,source_lod or lod,climate=climate,mode=mode,seed=seed,world_profile=wp,origin=((tx*256-HALO)*NATIVE*2**lod,(ty*256-HALO)*NATIVE*2**lod))
                 buffer = io.BytesIO()
                 Image.fromarray(rgb).save(buffer, format='PNG')
                 report = dict(report, render_seconds=round(time.perf_counter()-started, 4))
@@ -1640,6 +1694,20 @@ def _tile_headers(response, report, cache_hit):
     return response
 
 
+@lru_cache(maxsize=2)
+def physical_overview(seed, world_profile, identity, bounds):
+    # Display palettes share one immutable atlas; switching styles never samples
+    # the generator or climate again. Identity protects regenerated worlds.
+    x0,y0,x1,y1=bounds
+    xs=x0+(np.arange(2048)+.5)*(x1-x0)/2048
+    ys=y0+(np.arange(1024)+.5)*(y1-y0)/1024
+    macro=conditioning_preview(seed,world_profile,xs,ys)
+    elevation=np.asarray(macro['elev'],np.float32)
+    climate=np.asarray(macro['climate'],np.float32)
+    elevation.flags.writeable=False;climate.flags.writeable=False
+    return elevation,climate,(x1-x0)/2048
+
+
 @app.get('/api/overview/natural-v1/<int:seed>.png')
 @pin_cache_io(lambda seed: f'{VERSION}/{generation_profile()}/{seed}/overview')
 def overview(seed):
@@ -1650,7 +1718,8 @@ def overview(seed):
     try:
         wp,mode=generation_profile(),display_mode()
         lighting=parse_lighting(request.args.get("lighting"))
-        suffix=lighting_suffix(lighting)
+        contours=parse_contours(request.args.get("contours"))
+        suffix=lighting_suffix(lighting)+lighting_suffix(contours)
     except ValueError as exc:
         return jsonify(error=str(exc)),400
     directory = CACHE/wp/str(seed)
@@ -1680,22 +1749,33 @@ def overview(seed):
         if mode in SNR_MODES:
             manifest = world_manifest(seed, wp)
             return render_snr_layer(seed, wp, manifest['conditioning']['cond_snr'], mode, xs, ys), None, (x1-x0)/width
-        if mode in OROGEN_MODES:
+        if mode in OROGEN_MODES and mode != 'orogen-biomes':
             from terrain_orogen import get_heightmap
             descriptor = resolve_generation(wp)
             atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options), descriptor.settings)
             return render_orogen_layer(atlas, mode, xs, ys), None, (x1-x0)/width
         # A worldwide preview cannot monopolize the compute lane with thousands
         # of learned windows. The incremental coarse worker replaces it later.
-        macro=conditioning_preview(seed,wp,xs,ys)
+        value=physical_overview(seed,wp,identity,tuple(metadata_snapshot['overview_bounds']))
         jobs.check_current_interest()
-        climate=macro['climate'].copy()
-        return macro['elev'],climate,(x1-x0)/width
+        return value
     def finalize(value):
         jobs.check_current_interest()
         elevation, climate,resolution = value
-        if mode in OROGEN_MODES + SNR_MODES:
+        if mode in OROGEN_MODES + SNR_MODES and mode != 'orogen-biomes':
             rgb=elevation
+        elif mode == 'orogen-biomes':
+            x0,y0,x1,y1=metadata_snapshot['overview_bounds']
+            xs=x0+(np.arange(2048)+.5)*(x1-x0)/2048
+            ys=y0+(np.arange(1024)+.5)*(y1-y0)/1024
+            fields=physical_biome_fields(seed,wp,xs,ys)
+            rgb=colorize_biomes(elevation,fields,resolution)
+            from terrain_lighting import relief_intensity
+            light=relief_intensity(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting)
+            rgb*=np.where(elevation<0,1,light)[...,None]
+        elif mode in STYLE_MODES:
+            x0,y0,x1,y1=metadata_snapshot['overview_bounds']
+            rgb=render_style(elevation,((x1-x0)/2048,(y1-y0)/1024),mode,lighting,(x0,y0))
         elif mode!='relief':
             rgb=colorize(elevation,climate,mode)
         elif lighting is None:
@@ -1703,9 +1783,11 @@ def overview(seed):
         else:
             x0,y0,x1,y1=metadata_snapshot['overview_bounds']
             rgb=render_relief(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting)
+        if mode not in OROGEN_MODES+SNR_MODES or mode == 'orogen-biomes':
+            rgb=apply_contours(rgb,elevation,contours,mode)
         buffer = io.BytesIO()
         Image.fromarray((np.clip(rgb, 0, 1)*255).astype(np.uint8)).save(buffer, format='PNG')
-        if lighting is not None:return buffer.getvalue()
+        if lighting is not None or contours is not None:return buffer.getvalue()
         _atomic_bytes(path, buffer.getvalue())
         _atomic_bytes(receipt_path,json.dumps({'world_identity':identity,'mode':mode}).encode())
         _atomic_bytes(directory/'world.json', json.dumps(metadata_snapshot, indent=2).encode())

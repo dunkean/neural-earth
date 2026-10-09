@@ -23,7 +23,7 @@ EXTRA = {
     'orogen-superplates': ('superPlates', 'Superplate groups driving broad mountain belts'),
     'orogen-hotspots': ('hotspot', 'Original hotspot contribution'),
     'orogen-orogeny': ('orogenicPower', 'Original orogenic power'),
-    'orogen-biomes': ('biomes', 'Original Orogen biome palette and alpine / snow thresholds'),
+    'orogen-biomes': ('biomes', 'Orogen biomes following terrain LOD, altitude and slope'),
     'orogen-koppen': ('koppen', 'Original Köppen classes · categorical'),
     'orogen-temperature-summer': ('temperature_summer', 'Northern summer temperature · -45 to +45 °C'),
     'orogen-temperature-winter': ('temperature_winter', 'Northern winter temperature · -45 to +45 °C'),

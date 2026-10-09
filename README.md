@@ -49,6 +49,32 @@ conservés dans les liens, sans régénérer les altitudes ni les caches NN ; il
 fonctionnent avec WebGPU et le rendu PNG de secours. Le globe applique le
 global à son éclairage sphérique.
 
+**Layer visible → Styles de carte** reprend les styles de `city_generator` :
+Parchemin, Atlas, Classique (Watabou), Gravure, Cadastre, Blueprint, Enluminure,
+Topographique et Nuit, ainsi que **MNE · Copernicus (Rust)** du prototype Rust.
+Les palettes de terrain, d'eau et de courbes sont communes à WebGPU et au PNG
+de secours ; les styles suivent le relief disponible à chaque LOD, sur carte
+et globe. Leur plage de couleur est fixée à 0–4 500 m pour rester cohérente
+entre tuiles et niveaux de zoom.
+Le grain du papier et les hachures suivent la résolution du terrain, y compris
+aux LOD négatifs, pour éviter les gros blocs de texture en zoom local.
+Changer de style recolore les textures physiques en cache, sans recharger les
+altitudes ni relancer le NN. Les vues d'ensemble déjà rendues sont réutilisées.
+**Rendu → Rendu → Courbes de niveau** active les lignes et règle leur
+équidistance, automatiquement selon le zoom ou en mètres en mode manuel.
+Un slider logarithmique règle la densité automatique (3,125–200 %). L'ancien
+minimum de 25 % est au milieu et devient la valeur par défaut ; la moitié gauche
+permet d'espacer davantage les courbes. Un autre slider règle la largeur de
+0,3 à 4 px (0,9 px par défaut).
+Chaque cinquième ligne est une courbe principale. Les courbes sont des segments
+interpolés sur les altitudes affichées, continus aux frontières des tuiles,
+sans régénérer le relief. Les pentes fortes conservent leurs lignes. Les liens
+conservent le style, l'activation, l'intervalle, le mode automatique, la densité et la largeur.
+Les tokens visuels de `terrain_styles.json` sont adaptés de
+`city_generator/web/src/render/styles.ts` et `rust/bridge/terrainRender.ts`
+(GPL-3.0). Les couches urbaines et leurs symboles restent propres au générateur
+de villes.
+
 La page ouvre un monde terrestre avec une nouvelle seed aléatoire. Le bootstrap
 est un heightmap signé de **1024 × 512**, sur une carte de **40 000 × 20 000 km** avec le diamètre par défaut.
 Il est généré sur CPU par le cœur natif de `world-builder-rs` : plaques,
@@ -167,8 +193,21 @@ le NN ; 0 hérite du SNR global. Il ne crée pas un réseau indépendant pour ch
 LOD. Les réglages sont persistés dans les liens et identités de cache, avec
 lecture compatible des anciennes configurations.
 
-Le layer visible se choisit dans la barre de menus. **Biomes · Orogen** affiche
-la palette et les seuils du climat commun. Préchargement des tiles voisines et
+Aux LOD −1, −2 et −3, la bande côtière suit une interpolation bilinéaire du
+DEM neuronal natif à 30 m. Les corrections de moyenne par blocs y sont
+désactivées : elles créaient des pixels de terre ou d'eau détachés des côtes.
+Le détail du décodeur reste limité pour conserver le signe de cette surface.
+La conservation des moyennes reste exacte hors de cette bande ; les îlots
+déjà présents dans le DEM natif peuvent rester visibles.
+
+Le layer visible se choisit dans la barre de menus. **Biomes** utilise la palette
+du climat Orogen commun et suit le relief à chaque LOD : côtes, altitude et neige.
+Au LOD 0 et aux niveaux plus fins, les pentes supérieures à 40° deviennent
+rocheuses, même sous la neige ; ce seuil est réglable dans **Rendu → Biomes**.
+L'éclairage du relief s'applique directement aux couleurs, y compris à la neige,
+pour conserver les ombres des versants dès la vue mondiale initiale.
+[Documentation des biomes en anglais et en français](docs/BIOME_LAYER.md).
+Préchargement des tiles voisines et
 profondeur du raffinement sont réunis dans Rendering ; ils restent indépendants.
 Les tiles intermédiaires disponibles remplacent progressivement leur parent,
 même si la caméra vise déjà un LOD plus fin. Les cadres suivent les tiles rendues.
