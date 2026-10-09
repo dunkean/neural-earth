@@ -2,6 +2,10 @@
 
 **Procedural worlds, from tectonic plates to neural terrain.**
 
+[![Watch the Neural Earth teaser (1 min)](docs/images/teaser-poster.jpg)](docs/videos/neural-earth-teaser.mp4)
+
+**[Watch the 1-minute teaser](docs/videos/neural-earth-teaser.mp4)**: World Orogen, InfiniteDiffusion, then live Neural Earth navigation from world view to 7.5 m terrain. Loading times are accelerated, and on-screen badges show each speed-up. The project is open source and looking for contributors.
+
 Neural Earth builds on **[World Orogen](https://github.com/raguilar011095/planet_heightmap_generation)** ([project](https://orogen.studio/)) and **[InfiniteDiffusion / Terrain Diffusion](https://github.com/xandergos/terrain-diffusion)** ([scientific paper](https://arxiv.org/abs/2512.08309), [project](https://xandergos.github.io/terrain-diffusion/)). We combine their planetary generation and learned refinement into a complete procedural world workflow: continents, tectonic relief, erosion, seasonal climate, biomes, soils, and continuous exploration in a map or globe.
 
 The long-term goal is to integrate **MagnaUrbis** ([GitHub](https://github.com/dunkean/magna-urbis), [website](https://dunkean.github.io/magna-urbis/)) for procedural roads, settlements and cities, extending the geographic world into a populated world. This integration is planned. The project is currently hosted as [burgmap](https://github.com/dunkean/burgmap); the `magna-urbis` repository and website links anticipate its upcoming rename.
