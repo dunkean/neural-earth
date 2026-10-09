@@ -1,0 +1,2625 @@
+{
+  "project": "Neural Earth",
+  "capturedAt": "2026-10-09T14:15:36.537Z",
+  "seed": "42",
+  "model": "xandergos/terrain-diffusion-30m",
+  "modelRevision": "9ef8030cb805b433b98ec25c5dddefbac07a9e26",
+  "sites": {
+    "snow": {
+      "seed": "42",
+      "x": 478515.625,
+      "y": 2998046.875,
+      "source_elevation_m": 3359.632568359375,
+      "source_summer_temperature_c": -8.09549331665039,
+      "source_annual_rain_mm": 226.302001953125,
+      "koppen_id": 30,
+      "source_atlas": "5aecbacdc7bebb460b8e5f991234f1c629dd348f42e77c3c79c327b8eea0c99b.npz"
+    },
+    "coast": {
+      "seed": "42",
+      "x": -16318359.375,
+      "y": -283203.125,
+      "source_elevation_m": 83.99493408203125,
+      "source_summer_temperature_c": 17.532520294189453,
+      "source_annual_rain_mm": 1678.0325927734375,
+      "koppen_id": 0,
+      "source_atlas": "5aecbacdc7bebb460b8e5f991234f1c629dd348f42e77c3c79c327b8eea0c99b.npz"
+    },
+    "desert": {
+      "seed": "42",
+      "x": 3369140.625,
+      "y": -2158203.125,
+      "source_elevation_m": 1046.9215087890625,
+      "source_summer_temperature_c": 12.258113861083984,
+      "source_annual_rain_mm": 224.3399200439453,
+      "koppen_id": 4,
+      "source_atlas": "5aecbacdc7bebb460b8e5f991234f1c629dd348f42e77c3c79c327b8eea0c99b.npz"
+    }
+  },
+  "captures": [
+    {
+      "file": "world.png",
+      "kind": "overview",
+      "label": "Procedural world",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=400&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 10,
+        "lods": [
+          10
+        ],
+        "qualityLods": [
+          10
+        ],
+        "sources": [
+          "conditioning-preview"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 24,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 24,
+        "ready": 24,
+        "pending": 0,
+        "lod": 10
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": true,
+      "renderSea": false
+    },
+    {
+      "file": "layer-relief.png",
+      "kind": "layer",
+      "label": "Relief",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=relief&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 10,
+        "lods": [
+          10
+        ],
+        "qualityLods": [
+          10
+        ],
+        "sources": [
+          "conditioning-preview"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 24,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 24,
+        "ready": 24,
+        "pending": 0,
+        "lod": 10
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": true,
+      "renderSea": false
+    },
+    {
+      "file": "layer-render.png",
+      "kind": "layer",
+      "label": "Natural materials",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 10,
+        "lods": [
+          10
+        ],
+        "qualityLods": [
+          10
+        ],
+        "sources": [
+          "conditioning-preview"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 24,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 24,
+        "ready": 24,
+        "pending": 0,
+        "lod": 10
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": true,
+      "renderSea": false
+    },
+    {
+      "file": "layer-orogen-biomes.png",
+      "kind": "layer",
+      "label": "Biomes",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=orogen-biomes&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 10,
+        "lods": [
+          10
+        ],
+        "qualityLods": [
+          10
+        ],
+        "sources": [
+          "conditioning-preview"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 24,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 24,
+        "ready": 24,
+        "pending": 0,
+        "lod": 10
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": true,
+      "renderSea": false
+    },
+    {
+      "file": "layer-orogen-koppen.png",
+      "kind": "layer",
+      "label": "Köppen climate",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=orogen-koppen&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 10,
+        "lods": [
+          10
+        ],
+        "qualityLods": [
+          10
+        ],
+        "sources": [
+          "conditioning-preview"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 24,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 24,
+        "ready": 24,
+        "pending": 0,
+        "lod": 10
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": true,
+      "renderSea": false
+    },
+    {
+      "file": "layer-soil.png",
+      "kind": "layer",
+      "label": "Soils",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=soil&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 10,
+        "lods": [
+          10
+        ],
+        "qualityLods": [
+          10
+        ],
+        "sources": [
+          "conditioning-preview"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 24,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 24,
+        "ready": 24,
+        "pending": 0,
+        "lod": 10
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": true,
+      "renderSea": false
+    },
+    {
+      "file": "layer-pedology.png",
+      "kind": "layer",
+      "label": "Pedology",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=pedology&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 9,
+        "lods": [
+          9
+        ],
+        "qualityLods": [
+          9
+        ],
+        "sources": [
+          "orogen-diagnostic"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 72,
+        "hasFineHistory": true
+      },
+      "visible": {
+        "wanted": 72,
+        "ready": 72,
+        "pending": 0,
+        "lod": 9
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": false
+    },
+    {
+      "file": "layer-temperature.png",
+      "kind": "layer",
+      "label": "Temperature",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=temperature&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 9,
+        "lods": [
+          9
+        ],
+        "qualityLods": [
+          9
+        ],
+        "sources": [
+          "conditioning-preview"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 72,
+        "hasFineHistory": true
+      },
+      "visible": {
+        "wanted": 72,
+        "ready": 72,
+        "pending": 0,
+        "lod": 9
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": true,
+      "renderSea": false
+    },
+    {
+      "file": "layer-precipitation.png",
+      "kind": "layer",
+      "label": "Precipitation",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=precipitation&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 9,
+        "lods": [
+          9
+        ],
+        "qualityLods": [
+          9
+        ],
+        "sources": [
+          "conditioning-preview"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 72,
+        "hasFineHistory": true
+      },
+      "visible": {
+        "wanted": 72,
+        "ready": 72,
+        "pending": 0,
+        "lod": 9
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": true,
+      "renderSea": false
+    },
+    {
+      "file": "layer-orogen-plates.png",
+      "kind": "layer",
+      "label": "Tectonic plates",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=orogen-plates&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 10,
+        "lods": [
+          10
+        ],
+        "qualityLods": [
+          10
+        ],
+        "sources": [
+          "orogen-diagnostic"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 24,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 24,
+        "ready": 24,
+        "pending": 0,
+        "lod": 10
+      },
+      "renderer": "png",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": false
+    },
+    {
+      "file": "layer-orogen-uplift.png",
+      "kind": "layer",
+      "label": "Tectonic uplift",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=orogen-uplift&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 10,
+        "lods": [
+          10
+        ],
+        "qualityLods": [
+          10
+        ],
+        "sources": [
+          "orogen-diagnostic"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 24,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 24,
+        "ready": 24,
+        "pending": 0,
+        "lod": 10
+      },
+      "renderer": "png",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": false
+    },
+    {
+      "file": "layer-orogen-wind-summer.png",
+      "kind": "layer",
+      "label": "Summer winds",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=orogen-wind-summer&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 9,
+        "lods": [
+          9
+        ],
+        "qualityLods": [
+          9
+        ],
+        "sources": [
+          "orogen-diagnostic"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 72,
+        "hasFineHistory": true
+      },
+      "visible": {
+        "wanted": 72,
+        "ready": 72,
+        "pending": 0,
+        "lod": 9
+      },
+      "renderer": "png",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": false
+    },
+    {
+      "file": "layer-orogen-currents-summer.png",
+      "kind": "layer",
+      "label": "Ocean currents",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=orogen-currents-summer&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2",
+      "camera": {
+        "cx": 0,
+        "cy": 0,
+        "mpp": 41200,
+        "lod": 10,
+        "nominalLod": 10,
+        "latitude": 0
+      },
+      "rendered": {
+        "targetLod": 9,
+        "lods": [
+          9
+        ],
+        "qualityLods": [
+          9
+        ],
+        "sources": [
+          "orogen-diagnostic"
+        ],
+        "sourceResolutions": [
+          19531.25
+        ],
+        "patches": 72,
+        "hasFineHistory": true
+      },
+      "visible": {
+        "wanted": 72,
+        "ready": 72,
+        "pending": 0,
+        "lod": 9
+      },
+      "renderer": "png",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": false
+    },
+    {
+      "file": "snow-lod-4.png",
+      "kind": "zoom",
+      "label": "snow",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": 478515.625,
+        "cy": 2998046.875,
+        "mpp": 480,
+        "lod": 4,
+        "nominalLod": 4,
+        "latitude": -26.982421875
+      },
+      "rendered": {
+        "targetLod": 4,
+        "lods": [
+          4
+        ],
+        "qualityLods": [
+          4
+        ],
+        "sources": [
+          "coarse"
+        ],
+        "sourceResolutions": [
+          7680
+        ],
+        "patches": 15,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 12,
+        "ready": 12,
+        "pending": 0,
+        "lod": 4
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": false
+    },
+    {
+      "file": "snow-lod-3.png",
+      "kind": "zoom",
+      "label": "snow",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": 478515.625,
+        "cy": 2998046.875,
+        "mpp": 240,
+        "lod": 3,
+        "nominalLod": 3,
+        "latitude": -26.982421875
+      },
+      "rendered": {
+        "targetLod": 3,
+        "lods": [
+          3
+        ],
+        "qualityLods": [
+          3
+        ],
+        "sources": [
+          "latent"
+        ],
+        "sourceResolutions": [
+          240
+        ],
+        "patches": 15,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 14,
+        "ready": 14,
+        "pending": 0,
+        "lod": 3
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": false
+    },
+    {
+      "file": "snow-lod-2.png",
+      "kind": "zoom",
+      "label": "snow",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": 478515.625,
+        "cy": 2998046.875,
+        "mpp": 120,
+        "lod": 2,
+        "nominalLod": 2,
+        "latitude": -26.982421875
+      },
+      "rendered": {
+        "targetLod": 2,
+        "lods": [
+          2
+        ],
+        "qualityLods": [
+          2
+        ],
+        "sources": [
+          "decoder"
+        ],
+        "sourceResolutions": [
+          30
+        ],
+        "patches": 15,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 12,
+        "ready": 12,
+        "pending": 0,
+        "lod": 2
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": false
+    },
+    {
+      "file": "snow-lod-1.png",
+      "kind": "zoom",
+      "label": "snow",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": 478515.625,
+        "cy": 2998046.875,
+        "mpp": 60,
+        "lod": 1,
+        "nominalLod": 1,
+        "latitude": -26.982421875
+      },
+      "rendered": {
+        "targetLod": 1,
+        "lods": [
+          1
+        ],
+        "qualityLods": [
+          1
+        ],
+        "sources": [
+          "decoder"
+        ],
+        "sourceResolutions": [
+          30
+        ],
+        "patches": 15,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 14,
+        "ready": 14,
+        "pending": 0,
+        "lod": 1
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": false
+    },
+    {
+      "file": "snow-lod-0.png",
+      "kind": "zoom",
+      "label": "snow",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": 478515.625,
+        "cy": 2998046.875,
+        "mpp": 30,
+        "lod": 0,
+        "nominalLod": 0,
+        "latitude": -26.982421875
+      },
+      "rendered": {
+        "targetLod": 0,
+        "lods": [
+          0
+        ],
+        "qualityLods": [
+          0
+        ],
+        "sources": [
+          "decoder"
+        ],
+        "sourceResolutions": [
+          30
+        ],
+        "patches": 15,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 15,
+        "ready": 15,
+        "pending": 0,
+        "lod": 0
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": false
+    },
+    {
+      "file": "coast-lod-4.png",
+      "kind": "zoom",
+      "label": "coast",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": -16318359.375,
+        "cy": -283203.125,
+        "mpp": 480,
+        "lod": 4,
+        "nominalLod": 4,
+        "latitude": 2.548828125
+      },
+      "rendered": {
+        "targetLod": 4,
+        "lods": [
+          4
+        ],
+        "qualityLods": [
+          4
+        ],
+        "sources": [
+          "coarse"
+        ],
+        "sourceResolutions": [
+          7680
+        ],
+        "patches": 15,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 10,
+        "ready": 10,
+        "pending": 0,
+        "lod": 4
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": false
+    },
+    {
+      "file": "coast-lod-3.png",
+      "kind": "zoom",
+      "label": "coast",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=400&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": -16318359.375,
+        "cy": -283203.125,
+        "mpp": 240,
+        "lod": 3,
+        "nominalLod": 3,
+        "latitude": 2.548828125
+      },
+      "rendered": {
+        "targetLod": 3,
+        "lods": [
+          3
+        ],
+        "qualityLods": [
+          3
+        ],
+        "sources": [
+          "latent"
+        ],
+        "sourceResolutions": [
+          240
+        ],
+        "patches": 15,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 15,
+        "ready": 15,
+        "pending": 0,
+        "lod": 3
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": true
+    },
+    {
+      "file": "coast-lod-2.png",
+      "kind": "zoom",
+      "label": "coast",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=400&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": -16318359.375,
+        "cy": -283203.125,
+        "mpp": 120,
+        "lod": 2,
+        "nominalLod": 2,
+        "latitude": 2.548828125
+      },
+      "rendered": {
+        "targetLod": 2,
+        "lods": [
+          2
+        ],
+        "qualityLods": [
+          2
+        ],
+        "sources": [
+          "decoder"
+        ],
+        "sourceResolutions": [
+          30
+        ],
+        "patches": 15,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 15,
+        "ready": 15,
+        "pending": 0,
+        "lod": 2
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": true
+    },
+    {
+      "file": "coast-lod-1.png",
+      "kind": "zoom",
+      "label": "coast",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=400&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": -16318359.375,
+        "cy": -283203.125,
+        "mpp": 60,
+        "lod": 1,
+        "nominalLod": 1,
+        "latitude": 2.548828125
+      },
+      "rendered": {
+        "targetLod": 1,
+        "lods": [
+          1
+        ],
+        "qualityLods": [
+          1
+        ],
+        "sources": [
+          "decoder"
+        ],
+        "sourceResolutions": [
+          30
+        ],
+        "patches": 15,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 15,
+        "ready": 15,
+        "pending": 0,
+        "lod": 1
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": true
+    },
+    {
+      "file": "coast-lod-0.png",
+      "kind": "zoom",
+      "label": "coast",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=400&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": -16318359.375,
+        "cy": -283203.125,
+        "mpp": 30,
+        "lod": 0,
+        "nominalLod": 0,
+        "latitude": 2.548828125
+      },
+      "rendered": {
+        "targetLod": 0,
+        "lods": [
+          0
+        ],
+        "qualityLods": [
+          0
+        ],
+        "sources": [
+          "decoder"
+        ],
+        "sourceResolutions": [
+          30
+        ],
+        "patches": 20,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 20,
+        "ready": 20,
+        "pending": 0,
+        "lod": 0
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": true
+    },
+    {
+      "file": "desert-lod-4.png",
+      "kind": "zoom",
+      "label": "desert",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=400&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": 3369140.625,
+        "cy": -2158203.125,
+        "mpp": 480,
+        "lod": 4,
+        "nominalLod": 4,
+        "latitude": 19.423828125
+      },
+      "rendered": {
+        "targetLod": 4,
+        "lods": [
+          4
+        ],
+        "qualityLods": [
+          4
+        ],
+        "sources": [
+          "coarse"
+        ],
+        "sourceResolutions": [
+          7680
+        ],
+        "patches": 15,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 15,
+        "ready": 15,
+        "pending": 0,
+        "lod": 4
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": true
+    },
+    {
+      "file": "desert-lod-3.png",
+      "kind": "zoom",
+      "label": "desert",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": 3369140.625,
+        "cy": -2158203.125,
+        "mpp": 240,
+        "lod": 3,
+        "nominalLod": 3,
+        "latitude": 19.423828125
+      },
+      "rendered": {
+        "targetLod": 3,
+        "lods": [
+          3
+        ],
+        "qualityLods": [
+          3
+        ],
+        "sources": [
+          "latent"
+        ],
+        "sourceResolutions": [
+          240
+        ],
+        "patches": 20,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 20,
+        "ready": 20,
+        "pending": 0,
+        "lod": 3
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": true
+    },
+    {
+      "file": "desert-lod-2.png",
+      "kind": "zoom",
+      "label": "desert",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": 3369140.625,
+        "cy": -2158203.125,
+        "mpp": 120,
+        "lod": 2,
+        "nominalLod": 2,
+        "latitude": 19.423828125
+      },
+      "rendered": {
+        "targetLod": 2,
+        "lods": [
+          2
+        ],
+        "qualityLods": [
+          2
+        ],
+        "sources": [
+          "decoder"
+        ],
+        "sourceResolutions": [
+          30
+        ],
+        "patches": 15,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 15,
+        "ready": 15,
+        "pending": 0,
+        "lod": 2
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": true
+    },
+    {
+      "file": "desert-lod-1.png",
+      "kind": "zoom",
+      "label": "desert",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": 3369140.625,
+        "cy": -2158203.125,
+        "mpp": 60,
+        "lod": 1,
+        "nominalLod": 1,
+        "latitude": 19.423828125
+      },
+      "rendered": {
+        "targetLod": 1,
+        "lods": [
+          1
+        ],
+        "qualityLods": [
+          1
+        ],
+        "sources": [
+          "decoder"
+        ],
+        "sourceResolutions": [
+          30
+        ],
+        "patches": 15,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 15,
+        "ready": 15,
+        "pending": 0,
+        "lod": 1
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": true
+    },
+    {
+      "file": "desert-lod-0.png",
+      "kind": "zoom",
+      "label": "desert",
+      "url": "http://127.0.0.1:8765/?seed=42&profile=orogen&mode=render&view=map&render_settings=%7B%22season%22%3A0.5%2C%22variation%22%3A1%2C%22forest%22%3A1%2C%22moisture%22%3A0%2C%22rock_slope%22%3A40%2C%22snow%22%3A1%2C%22vegetation_tint%22%3A%5B1%2C1%2C1%5D%2C%22rock_tint%22%3A%5B1%2C1%2C1%5D%2C%22snow_color%22%3A%5B0.94%2C0.96%2C0.97%5D%7D&lighting=%7B%22global%22%3A%7B%22strength%22%3A1%2C%22ambient%22%3A0.35%2C%22contrast%22%3A1%2C%22exaggeration%22%3A6%2C%22azimuth%22%3A315%2C%22altitude%22%3A45%7D%2C%22lods%22%3A%7B%7D%7D&contours=0&contour_interval=2000&contour_auto=1&contour_width=0.9&contour_density=25&prepare_world=0&nn_engine=exact&coarse_streams=4&coarse_interpolation=monotone&cache_gib=2&coarse_gpu=0",
+      "camera": {
+        "cx": 3369140.625,
+        "cy": -2158203.125,
+        "mpp": 30,
+        "lod": 0,
+        "nominalLod": 0,
+        "latitude": 19.423828125
+      },
+      "rendered": {
+        "targetLod": 0,
+        "lods": [
+          0
+        ],
+        "qualityLods": [
+          0
+        ],
+        "sources": [
+          "decoder"
+        ],
+        "sourceResolutions": [
+          30
+        ],
+        "patches": 20,
+        "hasFineHistory": false
+      },
+      "visible": {
+        "wanted": 20,
+        "ready": 20,
+        "pending": 0,
+        "lod": 0
+      },
+      "renderer": "webgpu",
+      "renderSettings": {
+        "season": 0.5,
+        "variation": 1,
+        "forest": 1,
+        "moisture": 0,
+        "rock_slope": 40,
+        "snow": 1,
+        "vegetation_tint": [
+          1,
+          1,
+          1
+        ],
+        "rock_tint": [
+          1,
+          1,
+          1
+        ],
+        "snow_color": [
+          0.94,
+          0.96,
+          0.97
+        ]
+      },
+      "lighting": {
+        "global": {
+          "strength": 1,
+          "ambient": 0.35,
+          "contrast": 1,
+          "exaggeration": 6,
+          "azimuth": 315,
+          "altitude": 45
+        },
+        "lods": {}
+      },
+      "coarseGpu": false,
+      "renderSea": true
+    }
+  ],
+  "generationSettings": {
+    "city_erosion_iterations": 12,
+    "city_erosion_motif_km": 300.0,
+    "city_erosion_strength": 1.0,
+    "city_erosion_talus": 0.6,
+    "climate_source": "orogen",
+    "cond_snr": [
+      0.05,
+      0.5,
+      0.5,
+      0.5,
+      0.5
+    ],
+    "continental_strength": 0.8,
+    "continental_style": "earthlike",
+    "drop_water_pct": 0.5,
+    "frequency_mult": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "height_source": "orogen",
+    "macro_scale_km": 600.0,
+    "octaves": [
+      4,
+      2,
+      4,
+      4,
+      4
+    ],
+    "orogen_biome_arid_alpine": 3.0,
+    "orogen_biome_arid_snow": 5.0,
+    "orogen_biome_color_af": [
+      0.05,
+      0.3,
+      0.05
+    ],
+    "orogen_biome_color_am": [
+      0.08,
+      0.33,
+      0.07
+    ],
+    "orogen_biome_color_aw": [
+      0.42,
+      0.5,
+      0.18
+    ],
+    "orogen_biome_color_bsh": [
+      0.72,
+      0.62,
+      0.3
+    ],
+    "orogen_biome_color_bsk": [
+      0.55,
+      0.52,
+      0.32
+    ],
+    "orogen_biome_color_bwh": [
+      0.82,
+      0.72,
+      0.5
+    ],
+    "orogen_biome_color_bwk": [
+      0.6,
+      0.55,
+      0.48
+    ],
+    "orogen_biome_color_cfa": [
+      0.18,
+      0.42,
+      0.12
+    ],
+    "orogen_biome_color_cfb": [
+      0.12,
+      0.38,
+      0.1
+    ],
+    "orogen_biome_color_cfc": [
+      0.1,
+      0.28,
+      0.1
+    ],
+    "orogen_biome_color_csa": [
+      0.45,
+      0.48,
+      0.22
+    ],
+    "orogen_biome_color_csb": [
+      0.4,
+      0.45,
+      0.2
+    ],
+    "orogen_biome_color_csc": [
+      0.35,
+      0.4,
+      0.2
+    ],
+    "orogen_biome_color_cwa": [
+      0.2,
+      0.44,
+      0.14
+    ],
+    "orogen_biome_color_cwb": [
+      0.15,
+      0.4,
+      0.12
+    ],
+    "orogen_biome_color_cwc": [
+      0.12,
+      0.32,
+      0.1
+    ],
+    "orogen_biome_color_dfa": [
+      0.12,
+      0.36,
+      0.08
+    ],
+    "orogen_biome_color_dfb": [
+      0.1,
+      0.32,
+      0.08
+    ],
+    "orogen_biome_color_dfc": [
+      0.06,
+      0.22,
+      0.08
+    ],
+    "orogen_biome_color_dfd": [
+      0.05,
+      0.18,
+      0.07
+    ],
+    "orogen_biome_color_dsa": [
+      0.38,
+      0.38,
+      0.18
+    ],
+    "orogen_biome_color_dsb": [
+      0.35,
+      0.35,
+      0.17
+    ],
+    "orogen_biome_color_dsc": [
+      0.08,
+      0.22,
+      0.08
+    ],
+    "orogen_biome_color_dsd": [
+      0.06,
+      0.18,
+      0.07
+    ],
+    "orogen_biome_color_dwa": [
+      0.14,
+      0.36,
+      0.1
+    ],
+    "orogen_biome_color_dwb": [
+      0.12,
+      0.32,
+      0.09
+    ],
+    "orogen_biome_color_dwc": [
+      0.07,
+      0.22,
+      0.08
+    ],
+    "orogen_biome_color_dwd": [
+      0.05,
+      0.18,
+      0.07
+    ],
+    "orogen_biome_color_ef": [
+      0.78,
+      0.8,
+      0.84
+    ],
+    "orogen_biome_color_et": [
+      0.35,
+      0.32,
+      0.22
+    ],
+    "orogen_biome_continental_alpine": 1.5,
+    "orogen_biome_continental_snow": 3.0,
+    "orogen_biome_ice_alpine": 0.0,
+    "orogen_biome_ice_snow": 0.5,
+    "orogen_biome_low_darkening": 0.07,
+    "orogen_biome_low_height": 0.2,
+    "orogen_biome_mid_darkening": 0.15,
+    "orogen_biome_rock_color": [
+      0.42,
+      0.38,
+      0.32
+    ],
+    "orogen_biome_rock_transition": 2.0,
+    "orogen_biome_snow_color": [
+      0.92,
+      0.93,
+      0.96
+    ],
+    "orogen_biome_snow_transition": 2.5,
+    "orogen_biome_subarctic_alpine": 0.8,
+    "orogen_biome_subarctic_snow": 2.0,
+    "orogen_biome_temperate_alpine": 2.0,
+    "orogen_biome_temperate_snow": 3.5,
+    "orogen_biome_tropical_alpine": 3.5,
+    "orogen_biome_tropical_snow": 5.5,
+    "orogen_biome_tundra_alpine": 0.4,
+    "orogen_biome_tundra_snow": 1.5,
+    "orogen_climate_stage": "",
+    "orogen_continent_count": 4,
+    "orogen_continent_variety": 0.35,
+    "orogen_continentality_km": 2000.0,
+    "orogen_continentality_smoothing_km": 100.0,
+    "orogen_convergence_threshold": 0.75,
+    "orogen_detail": 204000,
+    "orogen_erosion_stage": "",
+    "orogen_friction_angle": 20.0,
+    "orogen_geostrophic_angle": 70.0,
+    "orogen_geostrophic_lat": 5.0,
+    "orogen_glacial": 0.5,
+    "orogen_gpu_climate": false,
+    "orogen_gpu_erosion": false,
+    "orogen_gpu_post": false,
+    "orogen_gpu_propagation": false,
+    "orogen_gpu_raster": false,
+    "orogen_gpu_relief": false,
+    "orogen_height_stage": "erosion",
+    "orogen_heuristic_coastal_smoothing_km": 300.0,
+    "orogen_heuristic_continental": 0.65,
+    "orogen_heuristic_core_lat": 5.0,
+    "orogen_heuristic_core_rain": 1.0,
+    "orogen_heuristic_desert_core_lat": 28.0,
+    "orogen_heuristic_desert_drop": 0.33,
+    "orogen_heuristic_desert_end_lat": 33.0,
+    "orogen_heuristic_desert_rain": 0.35,
+    "orogen_heuristic_itcz_shift": 0.3,
+    "orogen_heuristic_med_coast": 0.2,
+    "orogen_heuristic_med_drying": 0.15,
+    "orogen_heuristic_med_end": 45.0,
+    "orogen_heuristic_med_fade": 38.0,
+    "orogen_heuristic_med_full": 30.0,
+    "orogen_heuristic_med_start": 22.0,
+    "orogen_heuristic_mid_base": 0.02,
+    "orogen_heuristic_mid_gain": 0.48,
+    "orogen_heuristic_outer_drop": 0.65,
+    "orogen_heuristic_outer_lat": 10.0,
+    "orogen_heuristic_polar_base": 0.3,
+    "orogen_heuristic_polar_drop": 0.2,
+    "orogen_heuristic_polar_lat": 70.0,
+    "orogen_heuristic_shadow": 0.7,
+    "orogen_heuristic_shadow_height": 3.0,
+    "orogen_heuristic_subpolar_base": 0.5,
+    "orogen_heuristic_subpolar_drop": 0.2,
+    "orogen_heuristic_summer": 1.1,
+    "orogen_heuristic_uplift": 0.6,
+    "orogen_heuristic_wet_mid_lat": 55.0,
+    "orogen_heuristic_wind_itcz": 0.1,
+    "orogen_heuristic_wind_polar_east": 0.4,
+    "orogen_heuristic_wind_polar_north": 0.15,
+    "orogen_heuristic_wind_trade_east": 0.8,
+    "orogen_heuristic_wind_trade_north": 0.3,
+    "orogen_heuristic_wind_westerly_east": 0.9,
+    "orogen_heuristic_wind_westerly_north": 0.25,
+    "orogen_heuristic_winter": 0.9,
+    "orogen_hydraulic": 0.5,
+    "orogen_itcz_elevation_pull": 1.5,
+    "orogen_itcz_land_pull": 15.0,
+    "orogen_itcz_land_saturation": 2.0,
+    "orogen_itcz_max_lat": 20.0,
+    "orogen_itcz_min_lat": 5.0,
+    "orogen_itcz_ocean_lat": 5.0,
+    "orogen_itcz_sample_radius": 20.0,
+    "orogen_koppen_aridity_mixed": 140.0,
+    "orogen_koppen_aridity_summer": 280.0,
+    "orogen_koppen_aridity_temperature": 20.0,
+    "orogen_koppen_desert_fraction": 0.5,
+    "orogen_koppen_dry_summer_mm": 50.0,
+    "orogen_koppen_dry_summer_ratio": 2.0,
+    "orogen_koppen_dry_winter_ratio": 10.0,
+    "orogen_koppen_extreme_cold": -38.0,
+    "orogen_koppen_hot_arid": 18.0,
+    "orogen_koppen_hot_summer": 22.0,
+    "orogen_koppen_ice": 0.0,
+    "orogen_koppen_monsoon_factor": 25.0,
+    "orogen_koppen_monsoon_mm": 100.0,
+    "orogen_koppen_rainforest_mm": 60.0,
+    "orogen_koppen_shoulder": 10.0,
+    "orogen_koppen_shoulder_fraction": 0.3333333333333333,
+    "orogen_koppen_summer_fraction": 0.7,
+    "orogen_koppen_temperate": 0.0,
+    "orogen_koppen_tropical": 18.0,
+    "orogen_koppen_tundra": 10.0,
+    "orogen_koppen_winter_fraction": 0.3,
+    "orogen_land_coverage": 0.3,
+    "orogen_motion_strength": 1.0,
+    "orogen_ocean_circumpolar_center": 65.0,
+    "orogen_ocean_circumpolar_deflection": 0.8,
+    "orogen_ocean_circumpolar_max": 75.0,
+    "orogen_ocean_circumpolar_min": 55.0,
+    "orogen_ocean_circumpolar_strength": 1.5,
+    "orogen_ocean_circumpolar_width": 10.0,
+    "orogen_ocean_coast_range": 0.035,
+    "orogen_ocean_east_deflection": 0.5,
+    "orogen_ocean_east_strength": 0.8,
+    "orogen_ocean_itcz_width": 3.0,
+    "orogen_ocean_polar_lat": 65.0,
+    "orogen_ocean_polar_speed": 0.5,
+    "orogen_ocean_polar_transition": 1.5,
+    "orogen_ocean_smoothing_km": 125.0,
+    "orogen_ocean_trade_lat": 30.0,
+    "orogen_ocean_warm_trade_end": 28.0,
+    "orogen_ocean_warm_westerly_end": 55.0,
+    "orogen_ocean_warmth_range": 2.0,
+    "orogen_ocean_warmth_smoothing_km": 900.0,
+    "orogen_ocean_west_deflection": 0.7,
+    "orogen_ocean_west_strength": 2.0,
+    "orogen_ocean_westerly_end": 58.0,
+    "orogen_ocean_westerly_start": 35.0,
+    "orogen_plate_count": 80,
+    "orogen_precip_advection_km": 2000.0,
+    "orogen_precip_continental_dryness": 0.55,
+    "orogen_precip_convergence_smoothing_km": 400.0,
+    "orogen_precip_cutoff_end_km": 3000.0,
+    "orogen_precip_cutoff_start_km": 2000.0,
+    "orogen_precip_elevation_depletion": 0.55,
+    "orogen_precip_elevation_depletion_max": 0.8,
+    "orogen_precip_elevation_smoothing_km": 200.0,
+    "orogen_precip_frontal_add": 0.4,
+    "orogen_precip_frontal_boost": 1.2,
+    "orogen_precip_frontal_scale": 0.055,
+    "orogen_precip_heuristic_blend": 0.5,
+    "orogen_precip_heuristic_wind_blend": 0.5,
+    "orogen_precip_high_pressure": 0.25,
+    "orogen_precip_high_pressure_threshold": 12.0,
+    "orogen_precip_interior_cap": 0.8,
+    "orogen_precip_interior_cap_start": 0.5,
+    "orogen_precip_itcz_add": 0.3,
+    "orogen_precip_itcz_core_boost": 1.5,
+    "orogen_precip_itcz_core_width": 5.0,
+    "orogen_precip_itcz_outer_boost": 1.0,
+    "orogen_precip_itcz_width": 15.0,
+    "orogen_precip_land_drying": 0.98,
+    "orogen_precip_land_drying_range": 0.6,
+    "orogen_precip_land_drying_start": 0.4,
+    "orogen_precip_lee_add": 0.15,
+    "orogen_precip_lee_gradient": 0.01,
+    "orogen_precip_lee_height": 1.5,
+    "orogen_precip_lee_height_full": 5.0,
+    "orogen_precip_lee_reach_km": 200.0,
+    "orogen_precip_low_pressure": 0.2,
+    "orogen_precip_low_pressure_threshold": 15.0,
+    "orogen_precip_monsoon_reach": 0.4,
+    "orogen_precip_monsoon_relief": 0.7,
+    "orogen_precip_monsoon_wind": 0.15,
+    "orogen_precip_ocean_base": 0.15,
+    "orogen_precip_ocean_moisture": 0.4,
+    "orogen_precip_ocean_warmth": 0.35,
+    "orogen_precip_ocean_warmth_min": -0.8,
+    "orogen_precip_offshore_moisture": 0.25,
+    "orogen_precip_polar_base": 0.1,
+    "orogen_precip_polar_boost": 0.15,
+    "orogen_precip_polar_coastal": 0.2,
+    "orogen_precip_polar_full": 70.0,
+    "orogen_precip_polar_start": 40.0,
+    "orogen_precip_retention": 0.78,
+    "orogen_precip_shadow_height_range": 2.5,
+    "orogen_precip_shadow_height_start": 0.5,
+    "orogen_precip_shadow_local": 0.95,
+    "orogen_precip_shadow_min_height": 0.8,
+    "orogen_precip_shadow_propagated": 0.92,
+    "orogen_precip_shadow_propagated_scale": 2.25,
+    "orogen_precip_shadow_reach_km": 2500.0,
+    "orogen_precip_shadow_retention": 0.15,
+    "orogen_precip_shadow_scale": 18.0,
+    "orogen_precip_shadow_smoothing_km": 150.0,
+    "orogen_precip_smoothing_km": 100.0,
+    "orogen_precip_subtrop_summer": 0.5,
+    "orogen_precip_subtrop_summer_lat": 30.0,
+    "orogen_precip_subtrop_summer_width": 16.0,
+    "orogen_precip_subtrop_winter": 0.3,
+    "orogen_precip_subtrop_winter_lat": 24.0,
+    "orogen_precip_subtrop_winter_width": 12.0,
+    "orogen_precip_uplift_add": 1.0,
+    "orogen_precip_uplift_scale": 15.0,
+    "orogen_precip_windward_propagated": 1.2,
+    "orogen_precip_windward_reach_km": 1500.0,
+    "orogen_precip_windward_retention": 0.25,
+    "orogen_precipitation_offset": 0.0,
+    "orogen_pressure_baseline": 1013.0,
+    "orogen_pressure_continental_full": 0.5,
+    "orogen_pressure_continental_start": 0.2,
+    "orogen_pressure_elevation": 3.0,
+    "orogen_pressure_itcz_strength": 15.0,
+    "orogen_pressure_itcz_width": 8.0,
+    "orogen_pressure_land_weakening": 0.3,
+    "orogen_pressure_noise": 2.0,
+    "orogen_pressure_noise_frequency": 2.0,
+    "orogen_pressure_polar_lat": 85.0,
+    "orogen_pressure_polar_strength": 8.0,
+    "orogen_pressure_polar_width": 8.0,
+    "orogen_pressure_smoothing_km": 75.0,
+    "orogen_pressure_subpolar_lat": 60.0,
+    "orogen_pressure_subpolar_strength": 10.0,
+    "orogen_pressure_subtropical_lat": 30.0,
+    "orogen_pressure_subtropical_strength": 12.0,
+    "orogen_pressure_subtropical_width": 10.0,
+    "orogen_pressure_summer_land": 10.0,
+    "orogen_pressure_winter_land": 14.0,
+    "orogen_relief_stage": "",
+    "orogen_roughness": 0.4,
+    "orogen_seasonal_shift": 5.0,
+    "orogen_sharpening": 0.5,
+    "orogen_smoothing": 0.1,
+    "orogen_spread": 5.0,
+    "orogen_temperature_blend_start": 45.0,
+    "orogen_temperature_clear_amplification": 0.15,
+    "orogen_temperature_clear_threshold": 0.3,
+    "orogen_temperature_cloud_moderation": 0.15,
+    "orogen_temperature_cloud_threshold": 0.5,
+    "orogen_temperature_coast_limit": 0.95,
+    "orogen_temperature_coastal_effect": 20.0,
+    "orogen_temperature_continental_extra": 0.7,
+    "orogen_temperature_dry_lapse_extra": 4.8,
+    "orogen_temperature_equator": 28.0,
+    "orogen_temperature_latitude_power": 1.4,
+    "orogen_temperature_maritime_factor": 0.5,
+    "orogen_temperature_ocean_diffusion_km": 1400.0,
+    "orogen_temperature_ocean_effect": 16.0,
+    "orogen_temperature_ocean_speed": 2.0,
+    "orogen_temperature_offset": 0.0,
+    "orogen_temperature_polar_drop": 47.0,
+    "orogen_temperature_reference_itcz": 5.0,
+    "orogen_temperature_seasonal_boost": 12.0,
+    "orogen_temperature_seasonal_fade": 75.0,
+    "orogen_temperature_seasonal_peak": 55.0,
+    "orogen_temperature_seasonal_start": 10.0,
+    "orogen_temperature_smoothing": 1,
+    "orogen_temperature_tropical_width": 13.0,
+    "orogen_temperature_wet_lapse": 4.5,
+    "orogen_thermal": 0.1,
+    "orogen_warp": 0.75,
+    "orogen_wind_friction_speed": 0.6,
+    "relief_pipeline": "orogen",
+    "snr_adaptive_enabled": true,
+    "snr_altitude_gain": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "snr_altitude_range_m": [
+      500.0,
+      3000.0
+    ],
+    "snr_bins": 16,
+    "snr_detail_mode": "global",
+    "snr_driver_channel": "temperature",
+    "snr_driver_gain": [
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "snr_driver_range": [
+      5.0,
+      -10.0
+    ],
+    "snr_latitude_gain": 1.0,
+    "snr_latitude_range": [
+      0.0,
+      75.0
+    ],
+    "snr_lod": [
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0,
+      0.0
+    ],
+    "world_diameter_km": 12732.395447351628,
+    "world_topology": "sphere"
+  },
+  "composites": {
+    "zoom": [
+      "zoom-snow.png",
+      "zoom-coast.png",
+      "zoom-desert.png"
+    ],
+    "layers": [
+      "layers-surface.png",
+      "layers-environment.png",
+      "layers-dynamics.png"
+    ],
+    "note": "Unmodified application viewport captures assembled into panels with captions. Outlines mark the centered footprint of the next zoom; captions distinguish displayed sampling from source resolution."
+  },
+  "worldIdentity": "6e122704a026d292937f716bea84bd2f5774e2b646ef33595486c1674b8691a7",
+  "gpu": "NVIDIA GeForce RTX 3090"
+}

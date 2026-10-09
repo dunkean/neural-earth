@@ -1,275 +1,144 @@
-# Terrain Diffusion — monde terrestre
+# Neural Earth
 
-Cloner le projet avec ses dépendances et références épinglées :
+**Procedural worlds, from tectonic plates to neural terrain.**
 
-```powershell
-git clone --recurse-submodules https://github.com/dunkean/infinite_map.git
-```
+Neural Earth builds on **[World Orogen](https://github.com/raguilar011095/planet_heightmap_generation)** ([project](https://orogen.studio/)) and **[InfiniteDiffusion / Terrain Diffusion](https://github.com/xandergos/terrain-diffusion)** ([scientific paper](https://arxiv.org/abs/2512.08309), [project](https://xandergos.github.io/terrain-diffusion/)). We combine their planetary generation and learned refinement into a complete procedural world workflow: continents, tectonic relief, erosion, seasonal climate, biomes, soils, and continuous exploration in a map or globe.
 
-Les sous-modules conservent les dépôts upstream à leurs commits de référence.
-Les poids, caches, données générées et environnements locaux sont exclus de Git.
-Le dépôt voisin `world-builder-rs` reste requis au commit indiqué dans
-[le contrat natif](docs/TERRAIN_BOOTSTRAP_NATIVE.md).
+Orogen's erosion methods draw on [stream-power incision](https://doi.org/10.1016/j.geomorph.2012.10.008) and [Priority-Flood drainage](https://doi.org/10.1016/j.cageo.2013.04.024). These are scientific method references, rather than a dedicated Orogen paper.
 
-Ouvrir **http://127.0.0.1:8765** ou lancer **start-terrain.cmd**.
+![Neural Earth procedural planet](docs/images/world.png)
 
-**Rendu → Calcul neuronal → Streams coarse** choisit 1, 2, 4, 8 ou 16
-fenêtres traitées en parallèle, avec 4 par défaut. Le réglage est partagé
-entre les onglets du même moteur et conservé dans les liens. Le batch du
-réseau reste à 1 et les fenêtres calculées restent réutilisables après un
-changement. Plus de streams augmente la mémoire et la durée des groupes
-avant de rendre la main au premier plan. Le serveur peut revenir au calcul
-séquentiel si la capture ne peut pas être admise ; le panneau indique alors
-le nombre effectif. `TERRAIN_COARSE_STREAMS` règle la valeur au démarrage.
-Les [mesures sur les trois modèles](docs/performance_streams/README.txt)
-montrent des gains modestes pour base/décodeur, dont les streams restent
-expérimentaux.
+## Explore a world at five scales
 
-La vue d'ensemble du layer est chargée et affichée avant les nouvelles tiles
-et la préparation coarse. Les LOD parents déjà prêts restent visibles pendant
-le zoom et sont remplacés progressivement par les blocs plus fins disponibles.
-Les vues larges utilisent leurs tiles de LOD parent ; les blocs coarse natifs
-prennent le relais aux LOD 7 à 4. Un changement d'éclairage ou de courbes garde
-la vue d'ensemble du même layer jusqu'à l'arrivée de son remplacement.
+Actual application captures centered on the same location within each series. Left to right: **LOD 4 → 3 → 2 → 1 → 0**, ending at the model's **30 m** native terrain resolution. Neural detail is generated as you explore. The Render layer uses climate-informed surface materials.
 
-Les boutons **Carte** et **Globe** sont directement dans la barre de menus.
-Sur le globe, glisser fait orbiter la caméra ; la vitesse diminue avec le zoom.
-La molette, +/− et « Vue du monde » règlent le zoom ; les flèches font tourner
-le globe. Le globe affiche le layer sélectionné et demande le relief neuronal
-progressif aux mêmes LOD et au même moteur NN que la carte, y compris le
-raffinement et les deux côtés du méridien. Carte et globe partagent le cache
-d'altitudes et les textures rendues (ou les PNG en secours) : changer de vue
-réutilise les tiles disponibles à la même résolution sans les retélécharger.
+**Snow-covered mountains**
 
-Au-delà de 60° de latitude et en zoom local, le globe calcule les détails NN
-dans une grille sphérique tournée de 90° : les pôles géographiques y sont à
-l'équateur. Les latents et le DEM gardent ainsi leurs distances physiques,
-sans être pincés en éventail. La caméra charge une zone locale de cette grille,
-avec un cache distinct ; l'atlas des continents et la carte restent inchangés.
-Les paramètres du monde et le SNR en latitude utilisent la latitude géographique.
+![Snow-covered mountains at LOD 4 through LOD 0](docs/images/zoom-snow.png)
 
-**Settings → Relief → Monde · création** choisit le **diamètre en km** et la
-**géométrie** avant génération. Le diamètre par défaut est 40 000 / π km,
-soit environ 12 732,40 km ; une planète utilise une carte équirectangulaire
-π × diamètre de large et π × diamètre / 2 de haut. Le mode **Carte plane ·
-non projetée** utilise un carré de côté égal au diamètre, des distances
-cartésiennes et des bords finis sans bouclage ; le globe y est désactivé.
-Les générateurs sélectionnés restent les sources du relief et du climat,
-y compris le générateur tectonique Orogen issu d’un maillage sphérique.
-Changer la géométrie ou le diamètre puis générer crée une identité et des
-caches distincts. Ces paramètres sont conservés dans les liens.
+**Green mountains meeting the sea**
 
-**Rendu → Rendu → Éclairage** règle immédiatement les ombres, la lumière
-ambiante, leur contraste, le relief de l’éclairage et la direction/hauteur du
-soleil. Choisir **Global** ou un **LOD** permet notamment de régler 3, 2, 1 et 0
-séparément ; les LOD héritent du global tant que leur héritage reste coché.
-**Sans ombres**, **Doux** et **Défaut** sont des presets. Les réglages sont
-conservés dans les liens, sans régénérer les altitudes ni les caches NN ; ils
-fonctionnent avec WebGPU et le rendu PNG de secours. Le globe applique le
-global à son éclairage sphérique.
+![Green coastal mountains at LOD 4 through LOD 0](docs/images/zoom-coast.png)
 
-**Layer visible → Styles de carte** reprend les styles de `city_generator` :
-Parchemin, Atlas, Classique (Watabou), Gravure, Cadastre, Blueprint, Enluminure,
-Topographique et Nuit, ainsi que **MNE · Copernicus (Rust)** du prototype Rust.
-Les palettes de terrain, d'eau et de courbes sont communes à WebGPU et au PNG
-de secours ; les styles suivent le relief disponible à chaque LOD, sur carte
-et globe. Leur plage de couleur est fixée à 0–4 500 m pour rester cohérente
-entre tuiles et niveaux de zoom.
-Le grain du papier et les hachures suivent la résolution du terrain, y compris
-aux LOD négatifs, pour éviter les gros blocs de texture en zoom local.
-Changer de style recolore les textures physiques en cache, sans recharger les
-altitudes ni relancer le NN. Les vues d'ensemble déjà rendues sont réutilisées.
-**Rendu → Rendu → Courbes de niveau** active les lignes et règle leur
-équidistance, automatiquement selon le zoom ou en mètres en mode manuel.
-Un slider logarithmique règle la densité automatique (3,125–200 %). L'ancien
-minimum de 25 % est au milieu et devient la valeur par défaut ; la moitié gauche
-permet d'espacer davantage les courbes. Un autre slider règle la largeur de
-0,3 à 4 px (0,9 px par défaut).
-Chaque cinquième ligne est une courbe principale. Les courbes sont des segments
-interpolés sur les altitudes affichées, continus aux frontières des tuiles,
-sans régénérer le relief. Les pentes fortes conservent leurs lignes. Les liens
-conservent le style, l'activation, l'intervalle, le mode automatique, la densité et la largeur.
-Les tokens visuels de `terrain_styles.json` sont adaptés de
-`city_generator/web/src/render/styles.ts` et `rust/bridge/terrainRender.ts`
-(GPL-3.0). Les couches urbaines et leurs symboles restent propres au générateur
-de villes.
+**Desert terrain**
 
-La page ouvre un monde terrestre avec une nouvelle seed aléatoire. Le bootstrap
-est un heightmap signé de **1024 × 512**, sur une carte de **40 000 × 20 000 km** avec le diamètre par défaut.
-Il est généré sur CPU par le cœur natif de `world-builder-rs` : plaques,
-continentalité, bruit fractal et relief tectonique. Les distributions ETOPO
-calibrent séparément les altitudes et les profondeurs en mètres. Aucune carte
-géographique réelle ni silhouette fabriquée à la main n'est copiée.
+![Desert terrain at LOD 4 through LOD 0](docs/images/zoom-desert.png)
 
-La combo **Generator** choisit la source du monde. Les paramètres proposent
-**Gondwana**, **grands continents séparés**, **monde terrestre** et
-**archipel mondial**. **Naturel · référence NN** conserve le conditionnement
-original du checkpoint pour comparaison. Les anciens Earth et Macro A1–A4
-sont retirés des API et de l'interface ; leur code est archivé dans
-`docs/archive/rejected_bootstrap_20261007/`. Le bootstrap continental conserve
-le moteur world-builder-rs ; City intervient seulement comme érosion GPU optionnelle.
+Full-size captures, seeds, coordinates, settings and source resolutions are recorded in the [screenshot manifest](docs/images/screenshots.json).
 
-**Orogen · tectonic chains** ajoute la génération initiale Orogen d'origine,
-avec superplaques et mouvements tectoniques. Le menu **Génération** propose **NN**, **Tectonique** et **Custom** pour le relief initial.
-Le menu **Settings** propose les onglets **Relief**, **Érosion** et **Climat**.
-L’érosion offre **Désactivée**, **Orogen · GPU**, **Orogen · CPU** et **City · GPU**.
-Chaque onglet génère uniquement son étape ; les autres résultats sont conservés,
-avec une indication si leurs entrées ont changé. **Générer toute la chaîne**, le
-bouton général et **Random** exécutent relief → érosion → climat. Random choisit
-une nouvelle seed et génère immédiatement. City réutilise le moteur GPU du prototype
-`city_generator/rust` : incision hydraulique, relaxation thermique et diffusion,
-avec dose, itérations, talus et échelle de drainage indépendants. Le climat est
-recalculé après l'érosion. Pour installer son runtime optionnel :
-`python -m pip install -r requirements-city-gpu.txt` (déjà installé dans la `.venv` locale).
-Le pipeline atlas/NN conserve son prérequis CUDA ; cette option ne rend pas
-l'application complète compatible avec les GPU AMD/Intel ou sans GPU.
-**Orogen historique reste le défaut.** Le relief tectonique expose des options
-GPU pour le relief, la propagation et la recherche spatiale ; l’érosion GPU se
-choisit dans sa combo, avec un post-traitement GPU optionnel. Le climat a son
-propre interrupteur GPU. Ils sont tous désactivés par défaut. Le relief et l'érosion parallèles
-sont expérimentaux ; Save A / Show A permet de comparer les résultats. Installer
-le runtime NVIDIA optionnel avec `python -m pip install -r requirements-orogen-gpu.txt`.
-Sans ce runtime, ces interrupteurs se replient vers Orogen CPU ; le reçu de
-génération indique la raison. City utilise son propre runtime WebGPU.
-Le menu **Rendu** regroupe **Rendu** et **SNR**. Le SNR propose un choix
-**Global / Par LOD** et un interrupteur **SNR adaptatif** ; désactiver ce dernier
-conserve ses réglages mais ignore les règles altitude/climat/latitude.
-**Appliquer SNR** ne régénère aucune étape physique. L’onglet **Climat** expose
-le climat Orogen commun, ses saisons, vents, pluie et biomes. Les paramètres, vues de diagnostic et comparaison A/B
-permettent de tester les combinaisons. La simulation globale est mise en cache ;
-la projection de l'atlas et les détails neuronaux utilisent le GPU.
-[Fonctionnement, diagnostics et benchmark Orogen](docs/OROGEN_GENERATION.md).
+## Read the world through its layers
 
-La vue mondiale présente les **entrées du NN**, avec une résolution source
-de **39,06 km** ; le réseau les échantillonne à **7,68 km**. Les régions visibles
-passent ensuite par le coarse appris, les latents à 240 m et le DEM natif à
-30 m. Le NN peut déplacer les côtes : aucun masque ne remet artificiellement
-le relief appris dans la silhouette initiale.
+![Terrain, natural materials, biomes and climate classification](docs/images/layers-surface.png)
 
-- Molette / + / − : zoom ; glisser ou flèches : déplacement.
-- **Vue mondiale** revient à l'ensemble du monde ; **30 m / pixel** montre le détail natif.
-- Le dézoom s'arrête au **LOD 11**, soit 61,44 km/pixel. Un zoom fort présente **4 → 3 → 2 → 1 → 0**.
-- **Random**, à côté de la graine, choisit une nouvelle seed ; **Generate** ouvre
-  le monde avec la graine et le générateur sélectionnés. Un lien avec `?seed=…&profile=terrestrial-earthlike` est reproductible, y compris pour une seed u64.
-- **Carte** sélectionne relief, biomes, température ou précipitations.
-- **Tiles visible**, dans la barre du haut, affiche les limites et les index des
-  zones réellement rendues, y compris lorsque plusieurs LOD coexistent.
-- **Raffinement · profondeur LOD**, dans **Rendering**, vaut **0** par défaut (désactivé).
-  Chaque niveau est terminé sur toute la vue avant le suivant : LOD 5 et profondeur 2
-  calcule LOD 4, puis LOD 3. Les tiles arrivent progressivement à l'écran.
-- La fenêtre **Rendering** regroupe les options de rendu. **Render** lance une progression
-  unique jusqu'au LOD choisi, sans modifier le zoom ; bouger la caméra annule ce choix.
-  **Cache autorisé (Go)** règle le budget des tuiles du navigateur et du rendu GPU,
-  à **2 Go par défaut**. Il est conservé dans les liens (`cache_gib`) et limite
-  la profondeur effective du raffinement.
-  **Cache · LOD gap** autorise par défaut 3 niveaux d'écart : un cache LOD 3 peut
-  s'afficher depuis LOD 6. À 0, aucun historique plus fin n’est conservé ; les parents plus grossiers disponibles restent utilisables.
-  Le raffinement continu et le rendu manuel font progresser ce LOD de rendu.
-  Pendant un zoom, le rendu plus grossier déjà affiché et ses cadres restent présents
-  jusqu'à leur remplacement effectif par les nouvelles tiles.
-- **Coarse on GPU**, coché par défaut dans **Rendu**, charge des blocs fixes du
-  coarse à 7,68 km par cellule. Interpolation, éclairage et filtrage des vues
-  éloignées sont calculés sur le GPU du navigateur : les LOD 4 à 11 réutilisent
-  les mêmes blocs pendant le zoom. Les régions nouvelles doivent être chargées ;
-  l'aperçu procédural reste affiché avant la disponibilité du coarse appris.
-  Le base model et le decoder prennent ensuite le relais aux LOD plus fins.
-  Décocher cette option rétablit les tiles calculées par LOD sur le serveur ;
-  sans WebGPU, ce chemin reste utilisé automatiquement.
-- Une nouvelle génération annule la précédente, arrête le coarse et vide les
-  calculs de l'ancienne carte. Relief, érosion et climat disposent du GPU sans
-  concurrence des NN ; la préparation mondiale reprend après la dernière
-  génération terminée uniquement si elle a été activée. L'annulation respecte le bloc GPU déjà soumis.
-- Le coarse de toute la carte est **facultatif et désactivé par défaut**.
-  Seule la zone visible est calculée ; **Prefetch** prépare les voisins lorsque
-  les tiles visibles sont prêtes. Dans **Outils**, **Préparer toute la planète**
-  ou **Prepare neural world** active explicitement la préparation mondiale en
-  fond ; **Pause preparation** la désactive. Les demandes visibles restent
-  prioritaires. `prepare_world=1` conserve cette activation dans un lien ; les
-  anciens liens `coarse_prepare=1` n'activent plus automatiquement le calcul global.
-- **Mer max LOD**, réglé à **9**, arrête les calculs des tiles sans relief au-dessus
-  de −10 m dès ce LOD et aux niveaux plus fins. Les derniers rendus restent affichés.
-  Avec un seuil 3, LOD 4 et au-dessus rendent la mer normalement ; LOD 3 et en dessous
-  la gèlent. LOD 10 et 11 rendent toujours tout. **Rendre la mer**, décoché par défaut,
-  désactive le filtre lorsqu'il est coché. L'altitude de l'intérieur rendu fait foi ;
-  l'aperçu physique apporte une classification conservatrice aux zones inconnues.
-- La file privilégie les côtes, puis les terres, puis la mer, du centre vers les bords
-  dans chaque catégorie. **Prefetch** anticipe uniquement les déplacements.
-- **Préparer le monde NN** lance la préparation coarse mondiale en fond ; **Pause préparation** suspend les prochains blocs. Les demandes visibles sont prioritaires.
+![Soils, pedology, temperature and precipitation](docs/images/layers-environment.png)
 
-Les menus à icônes **Génération**, **Climat**, **Bruit du relief · SNR** et
-**Rendering** partagent un brouillon unique. **Apply** conserve position et zoom ;
-modifier les réglages ne déclenche pas de génération. Changer le relief initial
-conserve les paramètres communs. Les layouts continentaux sont des presets :
-plaques pour Tectonique, paramètres de bruit pour NN, atlas pour Custom. Dans
-Custom, le mode atlas ou continents procéduraux reste sélectionnable.
+![Tectonic plates, uplift, winds and ocean currents](docs/images/layers-dynamics.png)
 
-Le menu SNR ne règle que le relief. Le SNR global contraint les entrées du NN ;
-les multiplicateurs adaptatifs utilisent altitude, température (ou autre champ
-climatique) et latitude absolue. Un multiplicateur de 1 désactive une règle.
-Les seuils et le nombre de niveaux des rampes sont éditables. Le réglage par LOD
-(-3 à 11) agit expérimentalement sur le résidu local du relief reconstruit après
-le NN ; 0 hérite du SNR global. Il ne crée pas un réseau indépendant pour chaque
-LOD. Les réglages sont persistés dans les liens et identités de cache, avec
-lecture compatible des anciennes configurations.
+The menu also includes seasonal climate, crust types, plate boundaries, convergence, hotspots, rain shadows, atmospheric pressure and cartographic styles. [Layer guide](docs/layers.md).
 
-Aux LOD −1, −2 et −3, la bande côtière suit une interpolation bilinéaire du
-DEM neuronal natif à 30 m. Les corrections de moyenne par blocs y sont
-désactivées : elles créaient des pixels de terre ou d'eau détachés des côtes.
-Le détail du décodeur reste limité pour conserver le signe de cette surface.
-La conservation des moyennes reste exacte hors de cette bande ; les îlots
-déjà présents dans le DEM natif peuvent rester visibles.
+## Install and run
 
-Le layer visible se choisit dans la barre de menus. **Biomes** utilise la palette
-du climat Orogen commun et suit le relief à chaque LOD : côtes, altitude et neige.
-Au LOD 0 et aux niveaux plus fins, les pentes supérieures à 40° deviennent
-rocheuses, même sous la neige ; ce seuil est réglable dans **Rendu → Biomes**.
-L'éclairage du relief s'applique directement aux couleurs, y compris à la neige,
-pour conserver les ombres des versants dès la vue mondiale initiale.
-[Documentation des biomes en anglais et en français](docs/BIOME_LAYER.md).
-Préchargement des tiles voisines et
-profondeur du raffinement sont réunis dans Rendering ; ils restent indépendants.
-Les tiles intermédiaires disponibles remplacent progressivement leur parent,
-même si la caméra vise déjà un LOD plus fin. Les cadres suivent les tiles rendues.
+This is a **local Windows/Python application**. Neural inference requires an **NVIDIA GPU with CUDA and BF16 support**. A **24 GB GPU such as the RTX 3090** is the tested reference for comfortable exploration; smaller cards have no certified minimum configuration. Browser WebGPU accelerates rendering; the neural networks run on the Python server. PNG fallback still needs CUDA.
 
-L'exploration calcule les régions visitées en priorité. Lorsqu'elle est activée,
-la préparation de toute la planète avance sur le GPU disponible. Le benchmark
-antérieur occupait environ 707 Mo par monde complètement préparé ; le quota
-coarse est par monde, sans éviction globale entre seeds. Le cache de heightmaps
-est également persistant, sans quota global.
-
-Les cinq canaux gardent leurs unités physiques. Le climat commun utilise
-le pipeline saisonnier Orogen, sa circulation atmosphérique et ses courants océaniques. Le relief et le climat
-appris passent par le chemin CUDA existant, avec les optimisations de fenêtres,
-poids et batches conservées. WebGPU affiche les altitudes FP32 dans le navigateur.
-
-Le heightmap est immutable, persisté et vérifié. Les identités comprennent la
-seed demandée, le candidat déterministe retenu, les paramètres natifs, les sources,
-le binaire Rust, les poids NN et les règles de calibration. Les anciennes identités
-de cache restent séparées et ne sont pas réutilisées par le nouveau générateur.
-
-Pré requis locaux : Python 3.12 / environnement `.venv`, PyTorch CUDA, checkpoint
-`xandergos/terrain-diffusion-30m`, rasters ETOPO/WorldClim, Cargo et dépôt voisin
-`../world-builder-rs` au commit documenté. Le bridge compile automatiquement en
-release au premier démarrage si nécessaire. Les dépendances Rust sont verrouillées.
-Les poids, l'environnement et les résultats résident dans **E:\TerrainDiffusionRuntime**.
+Install Python 3.12, Node.js and an NVIDIA driver compatible with the locked CUDA 12.8 build:
 
 ```powershell
-.\.venv\Scripts\python.exe launch_terrain.py --no-open
+git clone --recurse-submodules https://github.com/dunkean/neural-earth.git
+cd neural-earth
+py -3.12 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install -r requirements-lock.txt --extra-index-url https://download.pytorch.org/whl/cu128
 ```
 
-Le serveur écoute sur `127.0.0.1:8765`. Journaux : `server.log`, `server-error.log`.
-Les tests GPU se lancent séparément, serveur arrêté.
+Prepare the geography inputs and runtime directory using the [installation guide](docs/installation.md), then launch:
 
-[Nouveau bootstrap et validation](docs/TERRAIN_BOOTSTRAP_RESTART.md) ·
-[Générateur natif et contrat](docs/TERRAIN_BOOTSTRAP_NATIVE.md) ·
-[Conditionnement physique](docs/TERRAIN_BOOTSTRAP_CONDITIONING.md) ·
-[Qualité CPU et NN](docs/TERRESTRIAL_BOOTSTRAP_QA.md) ·
-[Étude world-builder-rs](docs/TERRAIN_BOOTSTRAP_WORLD_BUILDER_STUDY.md) ·
-[Étude des autres projets](docs/TERRAIN_BOOTSTRAP_LOCAL_STUDY.md) ·
-[Littérature](docs/TERRAIN_BOOTSTRAP_LITERATURE.md) ·
-[Reviews](docs/reviews/).
+```powershell
+.\.venv\Scripts\python.exe launch_terrain.py
+```
 
-Les anciens rapports de navigation et de bootstrap sont des preuves historiques.
-Le nouveau bootstrap ne certifie ni une planète entièrement apprise ni une
-génération NN froide instantanée. L'hydrologie, les glaciers et le raccord au
-reste du moteur procédural sont les étapes suivantes.
+Or double-click **start-neural-earth.cmd**. Open **http://127.0.0.1:8765**. Pinned model weights download on first use; loading all three networks and preparing CUDA Graphs takes time.
+
+The default **Tectonic** generator uses bundled Orogen code. **Custom → Continental atlas** additionally requires Rust/Cargo and a pinned sibling `world-builder-rs` checkout. Optional GPU erosion has separate dependencies. The installation guide documents these and the current `E:/TerrainDiffusionRuntime` storage convention.
+
+## How it works
+
+### Planetary structure and physical conditioning
+
+Orogen constructs plates on a spherical mesh, derives boundary motion and stress, builds mountain belts and ocean basins, and applies the selected erosion. Its seasonal climate uses latitude, elevation, atmospheric circulation, ocean currents and moisture transport. Neural Earth rasterizes the source into a persistent atlas and adapts it to five checkpoint conditioning fields:
+
+| Field | Physical convention |
+| --- | --- |
+| Elevation | Signed meters; negative values are below sea level |
+| BIO1 | Annual mean temperature, °C |
+| BIO4 | Monthly temperature standard deviation × 100 |
+| BIO12 | Annual precipitation, mm/year |
+| BIO15 | Monthly precipitation coefficient of variation, % |
+
+Two seasonal states become monthly proxies to match these statistics. This approximates a climatology, rather than a full atmospheric simulation. Relief, erosion and climate are independent retained stages.
+
+```mermaid
+flowchart LR
+    A[Seed + settings] --> B[Orogen / noise / custom atlas]
+    B --> C[Optional erosion]
+    C --> D[Orogen seasonal climate]
+    D --> E[Five conditioning fields]
+    E --> F[Coarse → latent → decoder]
+    F --> G[Physical elevation tiles]
+    D --> H[Biomes + soils + diagnostics]
+    G --> I[WebGPU map / globe]
+    H --> I
+```
+
+### Three pretrained neural networks
+
+We use the unchanged **[xandergos/terrain-diffusion-30m](https://huggingface.co/xandergos/terrain-diffusion-30m)** checkpoint, pinned to revision `9ef8030cb805b433b98ec25c5dddefbac07a9e26`. Its `EDMUnet2D` networks use magnitude-preserving layers. Neural Earth runs them in BF16 on CUDA; it does not train a new model.
+
+| Network | Role | Physical sampling scale |
+| --- | --- | ---: |
+| `coarse_model` | Regional elevation statistics and climate; 20 diffusion solver steps | 7,680 m |
+| `base_model` | Conditioned latent terrain generation | 240 m |
+| `decoder_model` | Reconstruction of Laplacian-encoded elevation detail | 30 m |
+
+InfiniteDiffusion evaluates overlapping windows of a deterministic noise field on demand. Shared dependencies and context allow consistent spatial access without materializing the entire high-resolution planet. Learned detail is reconstructed with coarse elevation constraints. Coastlines can move during refinement: a land mask does not force the neural DEM into the initial silhouette.
+
+### Scale, navigation and rendering
+
+Display sampling follows `r(LOD) = 30 × 2^LOD` meters. At LOD 4, the screen samples at 480 m while the neural coarse source is 7,680 m: interpolation smooths display, without adding source resolution. LOD 3 uses 240 m latents; LOD 2–0 use the 30 m decoder with downsampling.
+
+```mermaid
+flowchart LR
+    A[Procedural overview] --> B[Learned coarse · 7.68 km]
+    B --> C[Latents · 240 m]
+    C --> D[Decoded DEM · 30 m]
+    D --> E[Optional experimental sub-30 m refinement]
+```
+
+The camera remains responsive while visible regions receive priority. Parent tiles stay visible until finer coverage arrives. World identities include settings, weights and source fingerprints. Physical heights are cached separately from appearance: lighting, contours and materials recolor existing terrain without rerunning the networks. Near the poles, the globe uses a rotated spherical chart for local neural sampling.
+
+[Technical architecture and limitations](docs/architecture.md).
+
+## Use the viewer
+
+- **Scroll / + / −** zoom; drag or use arrows to move. **Map / Globe** changes the view.
+- **Settings** controls source relief, erosion and climate. Each tab generates its stage; **Generate full pipeline** runs all three.
+- **Layer menu** selects surface, climate, geology and cartographic views.
+- **Rendering** controls lighting, contours, materials, cache budget and refinement depth.
+- **SNR** controls allowed conditioning noise: lower values follow the source more closely. Per-LOD controls separately scale displayed relief detail.
+- **Tools → Prepare neural world** enables optional global coarse preparation. Visible regions remain prioritized.
+- Share the URL to preserve seed, generation settings, camera and display preferences. **Save A / Show A** compares applied variants.
+
+## Scope and performance
+
+Neural Earth produces a complete geographic world to explore, with finite spherical or planar geometry. It does not generate an entire planet at 30 m on startup. Larger visible regions, deeper refinement and more streams increase computation and memory. Four coarse streams are the default scheduling balance; the coarse network batch remains one.
+
+Terrain and climate target worldbuilding plausibility. Biomes and materials are visual models, without independent ecosystem simulation. Neural detail does not guarantee globally connected rivers or preservation of every source erosion feature. Optional sub-30 m refinement is experimental.
+
+## Documentation and credits
+
+- [Installation and troubleshooting](docs/installation.md)
+- [Architecture and neural generation](docs/architecture.md)
+- [Layers](docs/layers.md), [biomes](docs/biomes.md) and [materials](docs/materials.md)
+- [Development and layout](CONTRIBUTING.md)
+- [Third-party provenance and licenses](THIRD_PARTY_NOTICES.md)
+
+Upstream projects retain their names, licenses and pinned revisions. Native adaptations have explicit provenance. Historical audits, reviews and implementation work reports are archived outside this repository.
