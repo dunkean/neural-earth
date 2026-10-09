@@ -50,7 +50,7 @@ Or use `start-neural-earth.cmd`. Open **http://127.0.0.1:8765**. Logs are `serve
 
 ## Optional dependencies
 
-The default Tectonic source needs Node.js, without npm installation. **Custom â†’ Continental atlas** additionally needs Rust/Cargo and this pinned sibling source:
+The default Tectonic source needs Node.js, without npm installation. **Custom → Continental atlas** additionally needs Rust/Cargo and this pinned sibling source:
 
 ```powershell
 git clone https://github.com/dunkean/world-builder-rs.git ../world-builder-rs

@@ -4,25 +4,29 @@
 
 Neural Earth builds on **[World Orogen](https://github.com/raguilar011095/planet_heightmap_generation)** ([project](https://orogen.studio/)) and **[InfiniteDiffusion / Terrain Diffusion](https://github.com/xandergos/terrain-diffusion)** ([scientific paper](https://arxiv.org/abs/2512.08309), [project](https://xandergos.github.io/terrain-diffusion/)). We combine their planetary generation and learned refinement into a complete procedural world workflow: continents, tectonic relief, erosion, seasonal climate, biomes, soils, and continuous exploration in a map or globe.
 
+The long-term goal is to integrate **MagnaUrbis** ([GitHub](https://github.com/dunkean/magna-urbis), [website](https://dunkean.github.io/magna-urbis/)) for procedural roads, settlements and cities, extending the geographic world into a populated world. This integration is planned. The project is currently hosted as [burgmap](https://github.com/dunkean/burgmap); the `magna-urbis` repository and website links anticipate its upcoming rename.
+
 Orogen's erosion methods draw on [stream-power incision](https://doi.org/10.1016/j.geomorph.2012.10.008) and [Priority-Flood drainage](https://doi.org/10.1016/j.cageo.2013.04.024). These are scientific method references, rather than a dedicated Orogen paper.
 
 ![Neural Earth procedural planet](docs/images/world.png)
 
-## Explore a world at five scales
+## From planetary scale to local terrain
 
-Actual application captures centered on the same location within each series. Left to right: **LOD 4 â†’ 3 â†’ 2 â†’ 1 â†’ 0**, ending at the model's **30 m** native terrain resolution. Neural detail is generated as you explore. The Render layer uses climate-informed surface materials.
+Actual application captures follow three locations from **LOD 9 to LOD -2**. Read each two-row sheet left to right: **9, 8, 7, 6, 5, 4** on the first row, then **3, 2, 1, 0, -1, -2** on the second. The first row moves quickly from the planetary overview to regional relief; every fine view is captured only after its requested tiles have finished loading.
+
+LOD 0 reaches the checkpoint's **30 m native terrain resolution**. LOD -1 and -2 show **experimental sub-30 m refinement**, sampled at 15 m and 7.5 m; these are not independently trained higher-resolution terrain. Click a sheet to open its full-size version.
 
 **Snow-covered mountains**
 
-![Snow-covered mountains at LOD 4 through LOD 0](docs/images/zoom-snow.png)
+[![Snow-covered mountains from LOD 9 to LOD -2 in two rows](docs/images/zoom-snow.png)](docs/images/zoom-snow.png)
 
 **Green mountains meeting the sea**
 
-![Green coastal mountains at LOD 4 through LOD 0](docs/images/zoom-coast.png)
+[![Green coastal mountains from LOD 9 to LOD -2 in two rows](docs/images/zoom-coast.png)](docs/images/zoom-coast.png)
 
 **Desert terrain**
 
-![Desert terrain at LOD 4 through LOD 0](docs/images/zoom-desert.png)
+[![Desert terrain from LOD 9 to LOD -2 in two rows](docs/images/zoom-desert.png)](docs/images/zoom-desert.png)
 
 Full-size captures, seeds, coordinates, settings and source resolutions are recorded in the [screenshot manifest](docs/images/screenshots.json).
 
@@ -58,7 +62,7 @@ Prepare the geography inputs and runtime directory using the [installation guide
 
 Or double-click **start-neural-earth.cmd**. Open **http://127.0.0.1:8765**. Pinned model weights download on first use; loading all three networks and preparing CUDA Graphs takes time.
 
-The default **Tectonic** generator uses bundled Orogen code. **Custom â†’ Continental atlas** additionally requires Rust/Cargo and a pinned sibling `world-builder-rs` checkout. Optional GPU erosion has separate dependencies. The installation guide documents these and the current `E:/TerrainDiffusionRuntime` storage convention.
+The default **Tectonic** generator uses bundled Orogen code. **Custom → Continental atlas** additionally requires Rust/Cargo and a pinned sibling `world-builder-rs` checkout. Optional GPU erosion has separate dependencies. The installation guide documents these and the current `E:/TerrainDiffusionRuntime` storage convention.
 
 ## How it works
 
@@ -69,8 +73,8 @@ Orogen constructs plates on a spherical mesh, derives boundary motion and stress
 | Field | Physical convention |
 | --- | --- |
 | Elevation | Signed meters; negative values are below sea level |
-| BIO1 | Annual mean temperature, Â°C |
-| BIO4 | Monthly temperature standard deviation Ã— 100 |
+| BIO1 | Annual mean temperature, °C |
+| BIO4 | Monthly temperature standard deviation × 100 |
 | BIO12 | Annual precipitation, mm/year |
 | BIO15 | Monthly precipitation coefficient of variation, % |
 
@@ -82,7 +86,7 @@ flowchart LR
     B --> C[Optional erosion]
     C --> D[Orogen seasonal climate]
     D --> E[Five conditioning fields]
-    E --> F[Coarse â†’ latent â†’ decoder]
+    E --> F[Coarse → latent → decoder]
     F --> G[Physical elevation tiles]
     D --> H[Biomes + soils + diagnostics]
     G --> I[WebGPU map / globe]
@@ -103,13 +107,13 @@ InfiniteDiffusion evaluates overlapping windows of a deterministic noise field o
 
 ### Scale, navigation and rendering
 
-Display sampling follows `r(LOD) = 30 Ã— 2^LOD` meters. At LOD 4, the screen samples at 480 m while the neural coarse source is 7,680 m: interpolation smooths display, without adding source resolution. LOD 3 uses 240 m latents; LOD 2â€“0 use the 30 m decoder with downsampling.
+Display sampling follows `r(LOD) = 30 × 2^LOD` meters. At LOD 4, the screen samples at 480 m while the neural coarse source is 7,680 m: interpolation smooths display, without adding source resolution. LOD 3 uses 240 m latents; LOD 2–0 use the 30 m decoder with downsampling.
 
 ```mermaid
 flowchart LR
-    A[Procedural overview] --> B[Learned coarse Â· 7.68 km]
-    B --> C[Latents Â· 240 m]
-    C --> D[Decoded DEM Â· 30 m]
+    A[Procedural overview] --> B[Learned coarse · 7.68 km]
+    B --> C[Latents · 240 m]
+    C --> D[Decoded DEM · 30 m]
     D --> E[Optional experimental sub-30 m refinement]
 ```
 
@@ -119,12 +123,12 @@ The camera remains responsive while visible regions receive priority. Parent til
 
 ## Use the viewer
 
-- **Scroll / + / âˆ’** zoom; drag or use arrows to move. **Map / Globe** changes the view.
+- **Scroll / + / −** zoom; drag or use arrows to move. **Map / Globe** changes the view.
 - **Settings** controls source relief, erosion and climate. Each tab generates its stage; **Generate full pipeline** runs all three.
 - **Layer menu** selects surface, climate, geology and cartographic views.
 - **Rendering** controls lighting, contours, materials, cache budget and refinement depth.
 - **SNR** controls allowed conditioning noise: lower values follow the source more closely. Per-LOD controls separately scale displayed relief detail.
-- **Tools â†’ Prepare neural world** enables optional global coarse preparation. Visible regions remain prioritized.
+- **Tools → Prepare neural world** enables optional global coarse preparation. Visible regions remain prioritized.
 - Share the URL to preserve seed, generation settings, camera and display preferences. **Save A / Show A** compares applied variants.
 
 ## Scope and performance
