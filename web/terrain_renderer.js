@@ -168,8 +168,9 @@
       rock=surfaceMix(rock,surfaceMix(vec3<f32>(.36,.30,.25),vec3<f32>(.60,.38,.25),sstep(.1,.6,m2)),arid*.85);
       rock=surfaceMix(rock,substrateRock,.35);
       if(!bare){
+        // Warm stone at every LOD; regional minerals only affect brightness.
         let neutral=dot(rock,vec3<f32>(.2126,.7152,.0722));
-        rock=surfaceMix(rock,vec3<f32>(neutral),.5*materialDetail);
+        rock=neutral*vec3<f32>(1.04,1.,.94);
       }
       rock=rock*params.render3.xyz;
       // Horizontal strata, resolved only on fine tiles; strongest in arid ranges.

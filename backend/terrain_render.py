@@ -177,9 +177,10 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
     rock = mix(rock,mix([.36,.30,.25],[.60,.38,.25],smooth(.1,.6,m2)),arid*F(.85))
     rock = mix(rock,np.moveaxis(soil[3:6],0,-1),F(.35))
     if not bare:
-        # Keep regional mineral hues, but halve their chroma at equal luminance.
+        # Warm stone at every LOD: retain regional brightness without vivid
+        # mineral hues on exposed cliffs (including older substrate atlases).
         neutral = np.sum(rock*np.array([.2126,.7152,.0722],F),axis=-1)
-        rock = mix(rock,neutral[...,None],F(.5)*material_detail)
+        rock = neutral[...,None]*np.array([1.04,1.,.94],F)
     rock = rock*np.asarray(s['rock_tint'],F)
     # Horizontal strata, resolved only on fine tiles; strongest in arid ranges.
     strata = np.sin(F(2*np.pi)*(h+F(120.)*patch[0])/F(90.))*F(1-float(smooth(25,45,fp)))
