@@ -1,10 +1,11 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const gl=new Proxy({getShaderParameter:()=>true,getProgramParameter:()=>true,getParameter:()=>4096}, {get:(o,k)=>o[k]??(()=>({}))});
 const listeners={},canvas={clientHeight:600,getContext:()=>gl,addEventListener:(name,fn)=>listeners[name]=fn,setPointerCapture(){},parentElement:{focus(){}}};
 const context=vm.createContext({window:{},document:{createElement:()=>({getContext:()=>({clearRect(){},drawImage(){}})})},Math,Number,Float32Array,Uint8Array});
-vm.runInContext(fs.readFileSync('terrain_globe.js','utf8'),context);
+vm.runInContext(readRepositoryFile('terrain_globe.js','utf8'),context);
 const globe=context.window.TerrainGlobe.create(canvas,{isActive:()=>true}),wb=[-20e6,-10e6,20e6,10e6];
 const start=globe.snapshot();globe.orbit(.1,0);const far=globe.snapshot().yaw-start.yaw;
 globe.zoom(100);const before=globe.snapshot();globe.orbit(.1,0);const near=globe.snapshot().yaw-before.yaw;
@@ -25,13 +26,13 @@ globe.fit();globe.orbit(0,Math.PI);const pole=globe.camera(1000,600,wb);
 assert(pole.bounds.every(Number.isFinite));assert.equal(pole.uvBounds[1],0);
 
 // Exercise the shared scheduler with real globe camera bounds and learned tiles.
-const script=fs.readFileSync('index.html','utf8').split('<script>')[1].split('</script>')[0],elements=new Map();
+const script=readRepositoryFile('index.html','utf8').split('<script>')[1].split('</script>')[0],elements=new Map();
 const noopContext=new Proxy({}, {get:(o,k)=>o[k]??(()=>{})});
 const lighting={get:()=>({}),serialize:()=>'',vectors:()=>[0,1,1,1,0,0,1,0]};
 const mapContext=vm.createContext({console,URLSearchParams,AbortController,performance,Map,Set,Math,Date,
  location:{search:'?coarse_prepare=0'},crypto:require('node:crypto').webcrypto,
  document:{getElementById(id){if(!elements.has(id))elements.set(id,{checked:id==='renderSea',value:id==='refinementDepth'?'0':id==='cacheLodGap'?'3':'',dataset:{},options:[],getContext:()=>noopContext,setAttribute(){}});return elements.get(id)}},
- window:{TerrainLOD:require(NEURAL_EARTH_ROOT + '/terrain_lod.js')},TerrainLOD:require(NEURAL_EARTH_ROOT + '/terrain_lod.js'),TerrainLighting:lighting,devicePixelRatio:1,
+ window:{TerrainLOD:require(NEURAL_EARTH_ROOT + '/web/terrain_lod.js')},TerrainLOD:require(NEURAL_EARTH_ROOT + '/web/terrain_lod.js'),TerrainLighting:lighting,devicePixelRatio:1,
  setTimeout:()=>1,clearTimeout(){},requestAnimationFrame:()=>1});
 vm.runInContext(script.slice(0,script.indexOf("view.addEventListener('wheel'")),mapContext);
 const run=code=>vm.runInContext(code,mapContext);

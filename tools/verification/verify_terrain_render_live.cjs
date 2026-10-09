@@ -23,7 +23,7 @@ const assert=require('node:assert/strict'),path=require('node:path');
   });
   if(region){
     await page.evaluate(({x,y})=>{fitBounds([x-120000,y-75000,x+120000,y+75000]);},region);
-    await page.waitForFunction(()=>terrainDebug.snapshot().rendered.patches>0&&terrainDebug.snapshot().visible.pending===0,{timeout:120000});
+    await page.waitForFunction(()=>{const d=terrainDebug.snapshot();return d.visible.wanted>0&&d.visible.lod===d.camera.lod&&d.rendered.lods.includes(d.camera.lod)&&d.visible.pending===0;},{timeout:120000});
     await page.screenshot({path:path.join(NEURAL_EARTH_ROOT,'output/render-region.png')});
   }
   await page.evaluate(()=>{const input=document.getElementById('render_snow_color');input.value='#ee1122';input.dispatchEvent(new Event('input'));});

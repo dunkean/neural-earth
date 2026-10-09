@@ -1,5 +1,6 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Complete viewer with synthetic physical tiles, real WebGPU/WebGL and PNG fallback.
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
@@ -14,9 +15,9 @@ const fs=require('node:fs'),path=require('node:path'),assert=require('node:asser
       const png=Buffer.from(await page.evaluate(()=>{const c=document.createElement('canvas');c.width=c.height=256;const ctx=c.getContext('2d');ctx.fillStyle='#bbd9ed';ctx.fillRect(0,0,256,256);return c.toDataURL().split(',')[1]}),'base64');
       await page.route('https://styles.test/**',async route=>{
         const url=new URL(route.request().url()),name=url.pathname;
-        if(name==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync('index.html')});
-        if(name==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+fs.readFileSync('terrain_styles.json','utf8')+';\n'+fs.readFileSync('terrain_style_rendering.js','utf8')});
-        if(name.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(path.basename(name))});
+        if(name==='/')return route.fulfill({contentType:'text/html',body:readRepositoryFile('index.html')});
+        if(name==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+readRepositoryFile('terrain_styles.json','utf8')+';\n'+readRepositoryFile('terrain_style_rendering.js','utf8')});
+        if(name.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:readRepositoryFile(path.basename(name))});
         if(name==='/api/world')return route.fulfill({json:{seed:'42',world_profile:'natural',generation_profile:'natural',gpu:'test',version:'test-v1',cache_profile:'test',world_topology:'sphere',world_diameter_km:12732.4,world_bounds:[-20e6,-10e6,20e6,10e6],overview_bounds:[-20e6,-10e6,20e6,10e6],overview:'/overview/test.png'}});
         if(name==='/api/view'){const body=route.request().postDataJSON();views.push(body);return route.fulfill({json:{accepted:true,epoch:body.epoch}});}
         if(name==='/api/status')return route.fulfill({json:{scheduler:{queued:0,computing:0,encoding:0}}});

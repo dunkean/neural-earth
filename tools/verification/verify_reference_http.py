@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import hashlib
 import json
 from pathlib import Path
@@ -35,7 +37,7 @@ def main():
                 actual_sha256=hashlib.sha256(payload).hexdigest(),
                 height_max_m=height_error,climate_max=climate_error,headers=headers,
                 wall_seconds=time.perf_counter()-start,
-                source_sha256={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in
+                source_sha256={name:hashlib.sha256((source_path(name, root=ROOT)).read_bytes()).hexdigest() for name in
                     ('terrain_server.py','terrain_inference.py','terrain_window_scheduler.py','terrain_climate.py')},
                 passed=height_error==0 and all(value==0 for value in climate_error),
                 note='One saved 304-square height+compact-climate HTTP packet; not a general proof of order invariance.')

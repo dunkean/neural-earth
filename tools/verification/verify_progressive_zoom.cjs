@@ -1,11 +1,12 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Real inline client and coverage planner, mocked transport/renderer only.
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),crypto=require('node:crypto');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM0LJrHwMDAxAAGAA7JAUW48M0QAAAAAElFTkSuQmCC','base64');
 const physical=Buffer.from(new Float32Array(304*304+5*33*33).fill(100).buffer);
-const html=fs.readFileSync('index.html','utf8'),lodScript=fs.readFileSync('terrain_lod.js','utf8');
+const html=readRepositoryFile('index.html','utf8'),lodScript=readRepositoryFile('terrain_lod.js','utf8');
 const renderer=`window.createTerrainRenderer=async()=>{const tiles=new Set();return{available:true,clear(){tiles.clear()},deleteTile(k){tiles.delete(k)},hasTile:k=>tiles.has(k),uploadTile(k){tiles.add(k)},draw(rects){this.lastDrawnRects=rects.filter(r=>tiles.has(r.key));return true},getStats(){return{}}}}`;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 (async()=>{
@@ -19,8 +20,8 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
    if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:html});
    if(u.pathname==='/terrain_renderer.js')return route.fulfill({contentType:'application/javascript',body:renderer});
    if(u.pathname==='/terrain_lod.js')return route.fulfill({contentType:'application/javascript',body:lodScript});
-   if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+fs.readFileSync('terrain_styles.json','utf8')+';\n'+fs.readFileSync('terrain_style_rendering.js','utf8')});
-   if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(u.pathname.slice(1),'utf8')});
+   if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+readRepositoryFile('terrain_styles.json','utf8')+';\n'+readRepositoryFile('terrain_style_rendering.js','utf8')});
+   if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:readRepositoryFile(u.pathname.slice(1),'utf8')});
    if(u.pathname==='/api/inference/streams')return route.fulfill({json:{coarse:4}});
    if(u.pathname==='/api/world')return route.fulfill({json:{seed:u.searchParams.get('seed'),version:'natural-v1',world_profile:'natural',generation_profile:'natural',cache_profile:'test',world_bounds:[-20e6,-10e6,20e6,10e6],overview_bounds:[-20e6,-10e6,20e6,10e6],overview:'/api/overview/test.png',gpu:'Fake'}});
    if(u.pathname==='/api/view'){
@@ -126,7 +127,7 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   await page.waitForFunction(()=>terrainDebug.snapshot().visible.pending===0&&terrainDebug.snapshot().camera.lod===0);
   assert(requests.every(r=>r.lod<=11));
   assert.deepEqual(errors,[]);
-  const report={passed:true,transport:'mock',gpu:'mock',sourceHashes:Object.fromEntries(['index.html','terrain_lod.js','tools/verification/verify_progressive_zoom.cjs'].map(p=>[p,crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex')])),nativeRequestOrder:order,noLOD12:requests.every(r=>r.lod<=11),nextStageHasCompletedParent:native.find(r=>r.lod===3).before.cache.keys.some(k=>k.includes('/42/4/')),calculationsIndependentOfAnimationFrames:true,nativeImageProtected:requests.filter(r=>r.phase==='initial').every(r=>r.lod===0),panRetainedFlights:retained.length,cancelAborts:(await page.evaluate(()=>terrainDebug.snapshot())).counters.aborts-beforeAbort,hotRefreshRequests,requests:requests.length};
+  const report={passed:true,transport:'mock',gpu:'mock',sourceHashes:Object.fromEntries(['index.html','terrain_lod.js','tools/verification/verify_progressive_zoom.cjs'].map(p=>[p,crypto.createHash('sha256').update(readRepositoryFile(p)).digest('hex')])),nativeRequestOrder:order,noLOD12:requests.every(r=>r.lod<=11),nextStageHasCompletedParent:native.find(r=>r.lod===3).before.cache.keys.some(k=>k.includes('/42/4/')),calculationsIndependentOfAnimationFrames:true,nativeImageProtected:requests.filter(r=>r.phase==='initial').every(r=>r.lod===0),panRetainedFlights:retained.length,cancelAborts:(await page.evaluate(()=>terrainDebug.snapshot())).counters.aborts-beforeAbort,hotRefreshRequests,requests:requests.length};
   if(process.env.REPORT_PATH)fs.writeFileSync(process.env.REPORT_PATH,JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2));
  }finally{await browser.close()}

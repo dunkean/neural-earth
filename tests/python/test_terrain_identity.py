@@ -78,7 +78,15 @@ class TerrestrialIdentityTests(unittest.TestCase):
                 a=manifest.build_manifest(0,checkpoint_source=root)
                 self.assertIsNone(a['files']['bootstrap_native'])
                 self.assertNotIn('terrain_bootstrap.py',a['files']['implementation'])
+                self.assertNotIn('terrain_render.py',a['files']['implementation'])
                 self.assertEqual(manifest.verify_manifest_files(a,root),a['world_hash'])
+                digest=manifest._digest
+                def changed_material(path):
+                    value=digest(path)
+                    return dict(value,sha256='changed') if Path(path).name=='terrain_render.py' else value
+                with patch.object(manifest,'_digest',side_effect=changed_material):
+                    b=manifest.build_manifest(0,checkpoint_source=root)
+                self.assertEqual(a['world_hash'],b['world_hash'],'Material edits keep the neural cache identity')
 
     def test_exporter_rejects_wrong_world_or_seed_before_neural_reads(self):
         world = SimpleNamespace(seed=0, _terrain_world_profile='terrestrial-gondwana')

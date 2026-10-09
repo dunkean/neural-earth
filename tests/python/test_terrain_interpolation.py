@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import ast
 import math
 from pathlib import Path
@@ -54,7 +56,7 @@ class InterpolationTests(unittest.TestCase):
             calls.append((source,x0,y0,x1,y1))
             yy,xx=np.meshgrid(np.arange(y0,y1),np.arange(x0,x1),indexing='ij')
             return (np.sin(xx*.03)*40+np.cos(yy*.07)*30-15).astype(np.float32)
-        tree=ast.parse((_REPO_ROOT / 'terrain_server.py').read_text(encoding='utf-8'))
+        tree=ast.parse((source_path('terrain_server.py', root=_REPO_ROOT)).read_text(encoding='utf-8'))
         function=next(node for node in tree.body if getattr(node,'name',None)=='sample_field')
         namespace=dict(np=np,math=math,map_coordinates=map_coordinates,_field_block=block)
         exec(compile(ast.Module(body=[function],type_ignores=[]),'<actual server sampler>','exec'),namespace)

@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import argparse
 import hashlib
 import json
@@ -59,7 +61,7 @@ def main():
             report['samples'].append(item)
             print(json.dumps(item), flush=True)
             del outputs, graphs, expected, actual
-    report['sources'] = {name: hashlib.sha256((_REPO_ROOT/name).read_bytes()).hexdigest()
+    report['sources'] = {name: hashlib.sha256((source_path(name, root=_REPO_ROOT)).read_bytes()).hexdigest()
                          for name in ('terrain_cuda_kernels.py', 'tools/benchmarks/benchmark_terrain_kernels.py')}
     report['kernel'] = kernels.status()
     report['passed'] = True

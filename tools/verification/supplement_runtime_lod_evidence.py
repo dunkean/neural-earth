@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import argparse
 import hashlib
 import json
@@ -76,7 +78,7 @@ def supplement(directory):
                     'Historical p95_seconds fields are interpolated quantiles of very small samples; this supplement reports median/min/max.',
                     'The hardened benchmark require-exact flag has not been exercised by a new GPU run.'
                 ],supplement_source_sha256=sha(Path(__file__)),
-                test_source_sha256={name:sha(root/name) for name in ('tests/python/test_runtime_latent_batch.py','tests/python/test_runtime_benchmark.py')},
+                test_source_sha256={name:sha(source_path(name, root=root)) for name in ('tests/python/test_runtime_latent_batch.py','tests/python/test_runtime_benchmark.py')},
                 test_execution='Not performed by this supplement; source hashes alone are not test results.',
                 independent_array_comparison_count=sum(len(row['comparisons']) for row in rows if not row['self_comparison']),
                 self_array_comparison_count=sum(len(row['comparisons']) for row in rows if row['self_comparison']),

@@ -1,10 +1,11 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const {sampleHeight, distanceLabel} = require(NEURAL_EARTH_ROOT + '/terrain_map_tools.js');
+const {sampleHeight, distanceLabel} = require(NEURAL_EARTH_ROOT + '/web/terrain_map_tools.js');
 const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
 
 // Bilinear sampling respects pixel centres, halo, and negative map coordinates.
@@ -22,23 +23,29 @@ assert.equal(distanceLabel(1500),'1.50 km');
   try {
     const page = await browser.newPage({viewport:{width:1280,height:900}});
     const errors = [], requests = [];let pauseWorld=false,releaseWorld,snrHeightRequests=0,computing=0;
+    let pauseFineTiles=false,firstFineRequestResolve;
+    const fineReleases=[];
     page.on('pageerror',e=>errors.push(e.message));
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM0LJrHwMDAxAAGAA7JAUW48M0QAAAAAElFTkSuQmCC','base64');
     const physical = new Float32Array(304*304+5*33*33); physical.fill(-125.5,0,304*304);
     const gpuStub = `window.createTerrainRenderer=async()=>{const tiles=new Set();return{available:true,uploadTile(k){tiles.add(k)},hasTile(k){return tiles.has(k)},deleteTile(k){tiles.delete(k)},clear(){tiles.clear()},draw(rects){this.lastDrawnRects=rects.filter(r=>tiles.has(r.key));return true},getStats(){return{status:'webgpu'}}}}`;
     await page.route('https://map-tools.test/**',async route => {
       const u = new URL(route.request().url()); requests.push(u.pathname);
-      if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync('index.html','utf8')});
+      if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:readRepositoryFile('index.html','utf8')});
       if(u.pathname==='/terrain_renderer.js')return route.fulfill({contentType:'application/javascript',body:gpuStub});
-      if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+fs.readFileSync('terrain_styles.json','utf8')+';\n'+fs.readFileSync('terrain_style_rendering.js','utf8')});
-      if(['/terrain_lighting.js','/terrain_globe.js','/terrain_lod.js','/terrain_generation_controls.js','/terrain_map_tools.js','/terrain_toolbar.js'].includes(u.pathname))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(u.pathname.slice(1),'utf8')});
+      if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+readRepositoryFile('terrain_styles.json','utf8')+';\n'+readRepositoryFile('terrain_style_rendering.js','utf8')});
+      if(['/terrain_lighting.js','/terrain_globe.js','/terrain_lod.js','/terrain_generation_controls.js','/terrain_map_tools.js','/terrain_toolbar.js'].includes(u.pathname))return route.fulfill({contentType:'application/javascript',body:readRepositoryFile(u.pathname.slice(1),'utf8')});
       if(u.pathname==='/api/generation/run'){const data=route.request().postDataJSON();return route.fulfill({json:{world_profile:data.profile,generation_settings:data.settings}});}
-      if(u.pathname==='/api/world'){if(pauseWorld)await new Promise(resolve=>releaseWorld=resolve);return route.fulfill({json:{version:'natural-v1',cache_profile:'mock',world_profile:u.searchParams.get('world_profile'),generation_profile:u.searchParams.get('world_profile'),seed:u.searchParams.get('seed'),world_bounds:[-500000,-250000,500000,250000],overview_bounds:[-500000,-250000,500000,250000],overview:'/overview.png',gpu:'Mock GPU',generation_schema:{properties:JSON.parse(fs.readFileSync('native/orogen/climate-parameters.json','utf8'))}}});}
+      if(u.pathname==='/api/world'){if(pauseWorld)await new Promise(resolve=>releaseWorld=resolve);return route.fulfill({json:{version:'natural-v1',cache_profile:'mock',world_profile:u.searchParams.get('world_profile'),generation_profile:u.searchParams.get('world_profile'),seed:u.searchParams.get('seed'),world_bounds:[-500000,-250000,500000,250000],overview_bounds:[-500000,-250000,500000,250000],overview:'/overview.png',gpu:'Mock GPU',generation_schema:{properties:JSON.parse(readRepositoryFile('native/orogen/climate-parameters.json','utf8'))}}});}
       if(u.pathname==='/api/status')return route.fulfill({json:{scheduler:{queued:0,computing,encoding:0}}});
       if(u.pathname==='/api/view')return route.fulfill({json:{accepted:true}});
       if(u.pathname.startsWith('/height/')){
         if(u.searchParams.get('mode')?.startsWith('snr-'))snrHeightRequests++;
         const source=u.searchParams.get('source_lod'),lod=Number(u.pathname.split('/')[4]),width=source?256/2**(3-lod)+48:304;
+        if(pauseFineTiles&&lod<=3){
+          assert.equal(await page.locator('#loadingIndicator').isVisible(),true,'Spinner precedes the first fine HTTP response, with idle server telemetry');
+          await new Promise(resolve=>{fineReleases.push(resolve);firstFineRequestResolve?.();});
+        }
         const values=new Float32Array(width*width+(u.searchParams.has('climate')?5*33*33:0));values.fill(-125.5,0,width*width);
         return route.fulfill({contentType:'application/octet-stream',body:Buffer.from(values.buffer),headers:{'X-Terrain-Width':String(width),'X-Terrain-Halo':'24','X-Terrain-Climate-Width':u.searchParams.has('climate')?'33':'0','X-Terrain-Climate-Height':u.searchParams.has('climate')?'33':'0','X-Terrain-Stage':source?'latent':'decoder','X-Terrain-Source-LOD':source||String(lod),'X-Terrain-Source-Resolution':source?'240':'30'}});
       }
@@ -50,6 +57,23 @@ assert.equal(distanceLabel(1500),'1.50 km');
     assert.equal(await page.locator('#legend').isVisible(),false);
     assert.equal(await page.locator('#lodIndicator').textContent(),'LOD '+(await page.evaluate(()=>terrainDebug.snapshot().camera.lod)));
     await page.waitForFunction(()=>document.getElementById('loadingIndicator').hidden);
+    // Hold the first fine batch while the mocked server still reports idle.
+    const firstFineRequest=new Promise(resolve=>firstFineRequestResolve=resolve);
+    pauseFineTiles=true;
+    await page.locator('#renderPanel > summary').click();
+    await page.locator('#tabRendering').click();
+    await page.locator('#renderSea').check();
+    await page.locator('#renderPanel .panelClose').click();
+    await page.locator('#native').click();
+    await Promise.race([firstFineRequest,new Promise((_,reject)=>setTimeout(()=>reject(Error('No first fine request')),10000))]);
+    assert.ok(fineReleases.length>0,'First fine response is still blocked');
+    assert.equal(await page.locator('#loadingIndicator').isVisible(),true);
+    assert.equal(await page.locator('#viewport').getAttribute('aria-busy'),'true');
+    pauseFineTiles=false;for(const release of fineReleases)release();
+    await settle();
+    await page.locator('#renderPanel > summary').click();
+    await page.locator('#tabRendering').click();await page.locator('#renderSea').uncheck();
+    await page.locator('#renderPanel .panelClose').click();await page.locator('#fit').click();await settle();
     assert.equal(await page.locator('#worldPanel').count(),0);
     for(const id of ['seed','random','apply'])assert.equal(await page.locator('#'+id).isVisible(),true);
     const viewBeforeRendering=await page.locator('#viewport').boundingBox();
@@ -127,12 +151,12 @@ assert.equal(distanceLabel(1500),'1.50 km');
     const draft=await page.evaluate(()=>generationControls.read());
     assert.equal(draft.orogen_biome_tropical_snow,4.125,'exact entry must retain precision beyond slider steps');
     assert.deepEqual(draft.orogen_biome_color_af,[68/255,136/255,34/255]);
-    for(const key of Object.keys(JSON.parse(fs.readFileSync('native/orogen/climate-parameters.json','utf8'))))assert.ok(key in draft,key+' must be editable');
+    for(const key of Object.keys(JSON.parse(readRepositoryFile('native/orogen/climate-parameters.json','utf8'))))assert.ok(key in draft,key+' must be editable');
     assert.equal(requests.filter(path=>path==='/api/world').length,worldRequests,'draft changes must not generate a world');
     await page.locator('#resetGeneration').click();
-    await page.waitForFunction(()=>document.getElementById('generationDraftStatus').textContent==='Tous les paramètres de génération sont réinitialisés.');
+    await page.waitForFunction(()=>document.getElementById('generationDraftStatus').textContent==='All generation settings have been reset.');
     const reset=await page.evaluate(()=>generationControls.read());
-    const climateDefaults=JSON.parse(fs.readFileSync('native/orogen/climate-parameters.json','utf8'));
+    const climateDefaults=JSON.parse(readRepositoryFile('native/orogen/climate-parameters.json','utf8'));
     for(const [key,spec] of Object.entries(climateDefaults))assert.deepEqual(reset[key],spec.default,key+' resets with property-only schema');
     await page.locator('#orogenClimateSearch').fill('');
     await page.locator('#renderPanel > summary').click();await page.locator('#tabSnr').click();

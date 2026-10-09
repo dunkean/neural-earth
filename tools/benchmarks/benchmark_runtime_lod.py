@@ -27,7 +27,9 @@ import numpy as np
 import torch
 
 if '--source-dir' in sys.argv:
-    sys.path.insert(0,sys.argv[sys.argv.index('--source-dir')+1])
+    source_root = Path(sys.argv[sys.argv.index('--source-dir')+1]).resolve()
+    source_modules = source_root / 'backend' if (source_root / 'backend').is_dir() else source_root
+    sys.path.insert(0, str(source_modules))
 
 from terrain_app import ROOT, RUNTIME, load_pipeline
 from terrain_diffusion.inference.world_pipeline import WorldPipeline

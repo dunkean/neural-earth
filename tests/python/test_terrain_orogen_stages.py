@@ -61,6 +61,10 @@ class IndependentStages(unittest.TestCase):
         self.assertTrue(all(name in climate.layers for name in NAMES))
         self.assertEqual(climate.metadata['substrate']['composition'],['sand','clay','humus'])
         self.assertFalse(np.array_equal(climate.layers['soil_humus'],initial.layers['soil_humus']))
+        from terrain_pedology import NAMES as PEDOLOGY_NAMES
+        self.assertTrue(all(name in climate.layers for name in PEDOLOGY_NAMES))
+        self.assertEqual(climate.metadata['pedology']['cell_metres'],200000)
+        self.assertFalse(np.array_equal(climate.layers['pedology_red'],initial.layers['pedology_red']))
         self.assertEqual(climate.metadata['stage_state']['erosion']['id'],initial.metadata['stage_state']['erosion']['id'])
         self.assertEqual(resolve_generation(climate_profile).settings['orogen_hydraulic'],self.settings['orogen_hydraulic'])
         options=dict(resolve_generation(climate_profile).settings,orogen_hydraulic=0.,orogen_thermal=0.,orogen_glacial=0.)

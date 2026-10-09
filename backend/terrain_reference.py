@@ -1,0 +1,621 @@
+"""Fixed, reproducible conditioning comparisons and optional NN stage export.
+
+Usage: ``python backend/terrain_reference.py --output E:/TerrainDiffusionRuntime/reference``.
+The default command runs on CPU. ``--neural A0`` additionally runs a bounded
+crop through the installed CUDA checkpoint and exports coarse, latent and DEM.
+"""
+from __future__ import annotations
+
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
+import argparse
+from dataclasses import asdict
+import csv
+import hashlib
+import json
+from pathlib import Path
+
+import numpy as np
+from PIL import Image, ImageDraw
+from scipy.ndimage import map_coordinates
+import torch
+
+from terrain_conditioning import WORLD_PROFILES, CHANNEL_NAMES as CHANNELS, make_conditioning_factory
+ABLATIONS = ("A0",)
+from terrain_manifest import (MODEL_ROOT, build_manifest, verify_manifest_files,
+                              world_identity, write_manifest)
+
+CORPUS_PATH = REPO_ROOT / "tests/fixtures/reference_corpus.json"
+PALETTE_STOPS = [(-8000, (7, 20, 52)), (-4000, (20, 53, 110)),
+                 (-500, (68, 132, 169)), (-1, (151, 199, 208)),
+                 (0, (231, 220, 168)), (200, (110, 151, 80)),
+                 (1200, (103, 104, 77)), (3000, (143, 135, 121)),
+                 (6000, (220, 218, 208)), (9000, (250, 249, 245))]
+
+
+def _sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        while block := stream.read(4*1024*1024):
+            h.update(block)
+    return h.hexdigest()
+
+
+def _relative(output: Path, path: Path) -> str:
+    return path.relative_to(output).as_posix()
+
+
+def _artifact_dir(output: Path, manifest: dict, site: dict) -> Path:
+    namespace = "worlds" if manifest.get("complete") else "previews-incomplete"
+    identity = world_identity(manifest) if manifest.get("complete") else manifest["world_hash"]
+    return Path(output) / namespace / identity / site["id"]
+
+
+def _write_identity_manifest(output: Path, manifest: dict, stage: str) -> Path:
+    identity = world_identity(manifest) if manifest.get("complete") else manifest["world_hash"]
+    path = Path(output) / "manifests" / stage / f"{identity}.json"
+    write_manifest(path, manifest)
+    return path
+
+
+def conditioning_manifest(seed: int, ablation: str, *, model_root=None,
+                          file_hashes=True) -> dict:
+    kwargs = {"file_hashes": file_hashes, "backend": "cpu-conditioning",
+              "precision": "float32", "numerical_profile": "conditioning-only-v1",
+              "inference_profile": {"stage": "conditioning-only", "ablation": ablation}}
+    if model_root is not None:
+        kwargs["checkpoint_source"] = model_root
+    return build_manifest(seed, ablation, **kwargs)
+
+
+def neural_manifest(world, ablation: str, *, checkpoint_source=None,
+                    file_hashes=True) -> dict:
+    """Bind identity to the configured world, not a prospective CLI default."""
+    actual_profile = getattr(world, "_terrain_world_profile", "natural")
+    expected_profile = "natural" if ablation == "A0" else ablation
+    if actual_profile != expected_profile:
+        raise ValueError(f"Configured world {actual_profile} does not match {ablation}")
+    from terrain_inference import VERSION as inference_version
+    execution = getattr(world, "_terrain_profile", None)
+    if execution is None:
+        raise ValueError("World has no configured inference profile")
+    profile = asdict(execution)
+    profile.pop("name", None)  # Free-memory labels do not change arithmetic.
+    kwargs = dict(world.kwargs)
+    relevant = ("cond_snr", "frequency_mult", "drop_water_pct", "native_resolution",
+                "latent_compression", "residual_std", "residual_mean", "coarse_pooling",
+                "coarse_means", "coarse_stds")
+    generation = {"execution": profile,
+                  "checkpoint_kwargs": {key: kwargs[key] for key in relevant if key in kwargs},
+                  "torch_compile": bool(world.torch_compile),
+                  "world_profile": actual_profile,
+                  "device": str(getattr(world, "device", "unknown")),
+                  "compute_capability": list(torch.cuda.get_device_capability(world.device))
+                    if str(getattr(world, "device", "")).startswith("cuda") and torch.cuda.is_available()
+                    else None}
+    return build_manifest(int(world.seed), ablation,
+                          checkpoint_source=checkpoint_source,
+                          numerical_profile=inference_version,
+                          precision=str(getattr(world, "_dtype", "unknown")),
+                          backend="torch-cuda", inference_profile=generation,
+                          file_hashes=file_hashes)
+
+
+def read_corpus(path=CORPUS_PATH) -> dict:
+    corpus = json.loads(Path(path).read_text(encoding="utf-8"))
+    if corpus["schema"] != "terrain-reference-corpus-v1":
+        raise ValueError("Unsupported reference corpus")
+    ids = [s["id"] for s in corpus["sites"]]
+    if len(ids) != len(set(ids)):
+        raise ValueError("Duplicate site identifiers")
+    return corpus
+
+
+def fixed_palette(elevation: np.ndarray) -> np.ndarray:
+    values = np.asarray(elevation, np.float32)
+    knots = np.asarray([x[0] for x in PALETTE_STOPS], np.float32)
+    colors = np.asarray([x[1] for x in PALETTE_STOPS], np.float32)
+    image = np.stack([np.interp(values, knots, colors[:, c]) for c in range(3)], axis=-1)
+    return np.clip(np.rint(image), 0, 255).astype(np.uint8)
+
+
+def fixed_hillshade(elevation: np.ndarray, cell_metres: float = 30.) -> np.ndarray:
+    """One fixed north-west light for every profile, without local exposure."""
+    dy, dx = np.gradient(np.asarray(elevation, np.float32), cell_metres)
+    nx, ny, nz = -dx, -dy, np.ones_like(dx)
+    norm = np.sqrt(nx*nx+ny*ny+nz*nz)
+    light_x, light_y, light_z = -.5, -.5, np.sqrt(.5)
+    intensity = np.clip((nx*light_x+ny*light_y+nz*light_z)/norm, 0, 1)
+    return np.clip(np.rint((.25+.75*intensity)*255), 0, 255).astype(np.uint8)
+
+
+def _metrics(fields: np.ndarray) -> dict:
+    elev = fields[0]
+    result = {"land_fraction": float(np.mean(elev >= 0)),
+              "coast_edge_fraction": float(np.mean((elev[:, :-1] >= 0) != (elev[:, 1:] >= 0))),
+              "mountain_fraction_1500m": float(np.mean(elev > 1500)),
+              "plain_fraction_0_300m": float(np.mean((elev >= 0) & (elev < 300)))}
+    for i, name in enumerate(CHANNELS):
+        a = fields[i]
+        result[name] = _array_summary(a)
+    return result
+
+
+def _array_summary(a: np.ndarray) -> dict:
+    return {"min": float(a.min()), "p05": float(np.quantile(a, .05)),
+            "median": float(np.median(a)), "p95": float(np.quantile(a, .95)),
+            "max": float(a.max()), "mean": float(a.mean())}
+
+
+def _site_bounds(site, cells):
+    half = cells//2
+    return (site["center_cj"]-half, site["center_ci"]-half,
+            site["center_cj"]-half+cells, site["center_ci"]-half+cells)
+
+
+def export_conditioning_site(site: dict, ablation: str, output: Path,
+                             manifest: dict, cells: int = 64,
+                             checkpoint_source=None) -> dict:
+    seed = int(site["seed"])
+    factory = make_conditioning_factory(seed, "natural" if ablation == "A0" else ablation)
+    cj0, ci0, cj1, ci1 = _site_bounds(site, cells)
+    raw = factory.sample_raw(cj0, ci0, cj1, ci1)
+    fields = factory.finalize(raw)
+    if not np.isfinite(fields).all() or fields.shape != (5, cells, cells):
+        raise ValueError(f"Invalid conditioning at {site['id']} {ablation}")
+    output = Path(output)
+    directory = _artifact_dir(output, manifest, site)
+    directory.mkdir(parents=True, exist_ok=True)
+    encoded = fields.copy()
+    encoded[0] = np.sign(encoded[0])*np.sqrt(np.abs(encoded[0]))
+    exporter_hash = _sha256(Path(__file__))
+    npz_path = directory / "conditioning.npz"
+    np.savez_compressed(npz_path, physical=fields, model_input=encoded,
+                        land_mask=(fields[0] >= 0),
+                        coarse_bounds=np.array([cj0, ci0, cj1, ci1], dtype=np.int64),
+                        manifest_hash=np.array(manifest["world_hash"]),
+                        seed_u64=np.array(site["seed"]), ablation=np.array(ablation),
+                        exporter_sha256=np.array(exporter_hash))
+    Image.fromarray(fixed_palette(fields[0]), "RGB").resize((512, 512),
+        Image.Resampling.NEAREST).save(directory / "elevation.png")
+    with (directory / "centre_profile.csv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(("coarse_cj", "metres_x", "elevation_m", "land"))
+        for j in range(cells):
+            h = float(fields[0, cells//2, j])
+            writer.writerow((cj0+j, (cj0+j+.5)*7680, h, int(h >= 0)))
+    result = {"site": site, "ablation": ablation, "stage": "conditioning",
+              "bounds_coarse": [cj0, ci0, cj1, ci1], "metrics": _metrics(fields),
+              "palette_elevation_m": PALETTE_STOPS,
+              "manifest_hash": manifest["world_hash"], "npz_sha256": _sha256(npz_path),
+              "exporter_sha256": exporter_hash}
+    (directory / "metrics.json").write_text(json.dumps(result, indent=2)+"\n", encoding="utf-8")
+    return {"manifest_hash": manifest["world_hash"],
+            "checkpoint_source": str(Path(checkpoint_source or MODEL_ROOT).resolve()),
+            "manifest": _relative(output, _write_identity_manifest(output, manifest, "conditioning")),
+            "npz": _relative(output, npz_path),
+            "metrics": _relative(output, directory / "metrics.json"),
+            "png": _relative(output, directory / "elevation.png")}
+
+
+def _comparison(output: Path, site: dict, artifacts: dict):
+    canvas = Image.new("RGB", (1024, 1064), (25, 27, 31))
+    draw = ImageDraw.Draw(canvas)
+    for k, ablation in enumerate(ABLATIONS):
+        x, y = (k%2)*512, (k//2)*532
+        image = Image.open(Path(output) / artifacts[ablation]["png"])
+        canvas.paste(image, (x, y+20))
+        draw.text((x+8, y+3), f"{ablation}  {site['id']}  seed={site['seed']}", fill="white")
+    path = Path(output) / "comparisons" / site["id"] / "conditioning.png"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    canvas.save(path)
+
+
+def export_neural_intermediates(world, site: dict, output: Path, *,
+                                native_pixels: int = 256,
+                                checkpoint_source=None) -> dict:
+    """Capture actual checkpoint stages from a bound WorldPipeline.
+
+    Caller owns GPU lifecycle and must configure the matching world profile.
+    Stage arrays preserve the internal weighted forms as well as decoded values.
+    """
+    if int(world.seed) != int(site["seed"]):
+        raise ValueError("World seed differs from corpus site")
+    if native_pixels < 64 or native_pixels > 2048 or native_pixels % 2:
+        raise ValueError("native_pixels must be even and between 64 and 2048")
+    profile = getattr(world, "_terrain_world_profile", "natural")
+    ablation = "A0" if profile == "natural" else profile
+    manifest = neural_manifest(world, ablation, checkpoint_source=checkpoint_source)
+    ci, cj = int(site["center_ci"]), int(site["center_cj"])
+    coarse = world.coarse[:, ci-32:ci+32, cj-32:cj+32].float().cpu().numpy()
+    pi, pj = (int(site.get("focus_native_i", ci*256+128)),
+              int(site.get("focus_native_j", cj*256+128)))
+    li, lj = pi//8, pj//8
+    latent_cells = max(64, (native_pixels+7)//8+16)
+    latent_cells += latent_cells % 2
+    latent_half = latent_cells//2
+    latent = world.latents[:, li-latent_half:li+latent_half,
+                           lj-latent_half:lj+latent_half].float().cpu().numpy()
+    half = native_pixels//2
+    final = world.get(pi-half, pj-half, pi-half+native_pixels,
+                      pj-half+native_pixels, with_climate=True)
+    elev = final["elev"].float().cpu().numpy()
+    climate = final["climate"].float().cpu().numpy()
+    output = Path(output)
+    directory = _artifact_dir(output, manifest, site)
+    directory.mkdir(parents=True, exist_ok=True)
+    coarse_bounds = np.array([cj-32, ci-32, cj+32, ci+32], dtype=np.int64)
+    latent_bounds = np.array([lj-latent_half, li-latent_half,
+                              lj+latent_half, li+latent_half], dtype=np.int64)
+    native_bounds = np.array([pj-half, pi-half, pj-half+native_pixels,
+                              pi-half+native_pixels], dtype=np.int64)
+    exporter_hash = _sha256(Path(__file__))
+    npz_path = directory / "stages.npz"
+    np.savez_compressed(npz_path, coarse_weighted=coarse,
+                        coarse_unweighted=coarse[:-1]/coarse[-1:], latent_weighted=latent,
+                        latent_normalized=latent[:-1]/latent[-1:],
+                        latent_lowfreq=latent[4]/latent[-1],
+                        dem_m=elev, climate=climate,
+                        coarse_bounds=coarse_bounds, latent_bounds=latent_bounds,
+                        focus_native=np.array([pi, pj], dtype=np.int64),
+                        native_bounds=native_bounds,
+                        manifest_hash=np.array(manifest["world_hash"]),
+                        seed_u64=np.array(site["seed"]), ablation=np.array(ablation),
+                        world_profile=np.array(profile),
+                        exporter_sha256=np.array(exporter_hash))
+    palette = fixed_palette(elev)
+    shade = fixed_hillshade(elev)
+    Image.fromarray(palette, "RGB").save(directory / "dem.png")
+    Image.fromarray(shade, "L").save(directory / "dem-hillshade.png")
+    shaded = np.clip(np.rint(palette.astype(np.float32)*(.45+.55*shade[..., None]/255)), 0, 255)
+    Image.fromarray(shaded.astype(np.uint8), "RGB").save(directory / "dem-shaded.png")
+    coarse_sqrt = coarse[0]/coarse[-1]
+    coarse_m = np.sign(coarse_sqrt)*np.square(coarse_sqrt)
+    latent_sqrt = latent[4]/latent[-1]*38.6-31.4
+    latent_m = np.sign(latent_sqrt)*np.square(latent_sqrt)
+    Image.fromarray(fixed_palette(coarse_m), "RGB").save(directory / "coarse.png")
+    Image.fromarray(fixed_palette(latent_m), "RGB").save(directory / "latent.png")
+    with (directory / "centre_profile.csv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(("native_j", "metres_x", "elevation_m", "land"))
+        for j, h in enumerate(elev[native_pixels//2]):
+            writer.writerow((native_bounds[0]+j, (native_bounds[0]+j+.5)*30,
+                             float(h), int(h >= 0)))
+    result = {"site": site["id"], "ablation": ablation, "stage": "decoder", "dem_metrics": _metrics(
+        np.concatenate((elev[None], climate[:4]), axis=0)),
+        "coarse_shape": list(coarse.shape), "latent_shape": list(latent.shape),
+        "native_shape": list(elev.shape), "coarse_bounds": coarse_bounds.tolist(),
+        "latent_bounds": latent_bounds.tolist(), "native_bounds": native_bounds.tolist(),
+        "manifest_hash": manifest["world_hash"], "seed_u64": site["seed"],
+        "world_profile": profile, "inference_profile": manifest["generation"]["inference_profile"],
+        "numerical_profile": manifest["generation"]["numerical_profile"],
+        "npz_sha256": _sha256(npz_path), "exporter_sha256": exporter_hash}
+    (directory / "metrics.json").write_text(json.dumps(result, indent=2)+"\n", encoding="utf-8")
+    return {"manifest_hash": manifest["world_hash"],
+            "checkpoint_source": str(Path(checkpoint_source or MODEL_ROOT).resolve()),
+            "manifest": _relative(output, _write_identity_manifest(output, manifest, "neural")),
+            "npz": _relative(output, npz_path),
+            "metrics": _relative(output, directory / "metrics.json"),
+            "png": _relative(output, directory / "dem.png"),
+            "shaded_png": _relative(output, directory / "dem-shaded.png"),
+            "hillshade_png": _relative(output, directory / "dem-hillshade.png"),
+            "coarse_png": _relative(output, directory / "coarse.png"),
+            "latent_png": _relative(output, directory / "latent.png"),
+            "profile_csv": _relative(output, directory / "centre_profile.csv")}
+
+
+def _neural_comparison(output: Path, site: dict, artifacts: dict):
+    size = 512
+    for key, filename in (("png", "dem.png"), ("shaded_png", "dem-shaded.png"),
+                          ("coarse_png", "coarse.png"), ("latent_png", "latent.png")):
+        canvas = Image.new("RGB", (2*size, 2*(size+20)), (25, 27, 31))
+        draw = ImageDraw.Draw(canvas)
+        for k, ablation in enumerate(ABLATIONS):
+            image = Image.open(Path(output) / artifacts[ablation][key])
+            image = image.resize((size, size), Image.Resampling.NEAREST)
+            x, y = (k%2)*size, (k//2)*(size+20)
+            canvas.paste(image, (x, y+20))
+            draw.text((x+4, y+3), f"{ablation} {site['id']}", fill="white")
+        path = Path(output) / "comparisons" / site["id"] / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        canvas.save(path)
+    _profile_comparison(output, site, artifacts)
+
+
+def _profile_comparison(output: Path, site: dict, artifacts: dict):
+    lines = {}
+    xs = None
+    for ablation in ABLATIONS:
+        with _bound_path(output, artifacts[ablation]["profile_csv"]).open(
+                newline="", encoding="utf-8") as stream:
+            rows = list(csv.DictReader(stream))
+        current_x = np.asarray([int(row["native_j"]) for row in rows])
+        if xs is None:
+            xs = current_x
+        elif not np.array_equal(xs, current_x):
+            raise ValueError("Profile samples are not co-registered")
+        lines[ablation] = np.asarray([float(row["elevation_m"]) for row in rows])
+    height = 400
+    width = 1024
+    left, right, top, bottom = 78, 20, 38, 42
+    ylow = min(float(v.min()) for v in lines.values())
+    yhigh = max(float(v.max()) for v in lines.values())
+    span = max(100., yhigh-ylow)
+    ylow -= .06*span
+    yhigh += .06*span
+    canvas = Image.new("RGB", (width, height), (247, 247, 245))
+    draw = ImageDraw.Draw(canvas)
+    plot_w, plot_h = width-left-right, height-top-bottom
+    draw.rectangle((left, top, left+plot_w, top+plot_h), outline=(75, 75, 75))
+    if ylow <= 0 <= yhigh:
+        zero_y = top+(yhigh/(yhigh-ylow))*plot_h
+        draw.line((left, zero_y, left+plot_w, zero_y), fill=(115, 145, 185), width=2)
+    colors = {"A0": (30, 55, 75)}
+    for k, ablation in enumerate(ABLATIONS):
+        values = lines[ablation]
+        pts = [(left+j*plot_w/max(1, len(values)-1),
+                top+(yhigh-v)/(yhigh-ylow)*plot_h) for j, v in enumerate(values)]
+        draw.line(pts, fill=colors[ablation], width=2)
+        draw.text((left+k*180, 10), f"{ablation} {values.min():.0f}..{values.max():.0f} m",
+                  fill=colors[ablation])
+    draw.text((4, top), f"{yhigh:.0f} m", fill=(35, 35, 35))
+    draw.text((4, top+plot_h-12), f"{ylow:.0f} m", fill=(35, 35, 35))
+    draw.text((left, height-27),
+              f"Common native east-west transect, {len(xs)} × 30 m; seed {site['seed']}",
+              fill=(35, 35, 35))
+    path = Path(output) / "comparisons" / site["id"] / "height-profile.png"
+    canvas.save(path)
+
+
+def _bound_path(output: Path, relative: str) -> Path:
+    root = Path(output).resolve()
+    path = (root / relative).resolve()
+    if not path.is_relative_to(root):
+        raise ValueError("Artifact path escapes output directory")
+    return path
+
+
+def _read_artifact(output: Path, record: dict, site: dict, ablation: str,
+                   stage: str):
+    manifest = json.loads(_bound_path(output, record["manifest"]).read_text(encoding="utf-8"))
+    identity = verify_manifest_files(manifest, Path(record["checkpoint_source"]))
+    if identity != record["manifest_hash"] or manifest["seed_u64"] != site["seed"]:
+        raise ValueError(f"Manifest mismatch: {site['id']} {ablation} {stage}")
+    if manifest["ablation"] != ablation:
+        raise ValueError("Ablation mismatch")
+    expected_backend = "cpu-conditioning" if stage == "conditioning" else "torch-cuda"
+    if manifest["generation"]["backend"] != expected_backend:
+        raise ValueError("Artifact backend mismatch")
+    metrics = json.loads(_bound_path(output, record["metrics"]).read_text(encoding="utf-8"))
+    npz_path = _bound_path(output, record["npz"])
+    if metrics["manifest_hash"] != identity or metrics["npz_sha256"] != _sha256(npz_path):
+        raise ValueError(f"Stale or mixed artifact: {site['id']} {ablation} {stage}")
+    if metrics.get("exporter_sha256") != _sha256(Path(__file__)):
+        raise ValueError(f"Artifact exporter differs from current reporter: {site['id']} {ablation} {stage}")
+    with np.load(npz_path, allow_pickle=False) as saved:
+        data = {name: saved[name] for name in saved.files}
+    if (str(data["manifest_hash"].item()) != identity or
+            str(data["seed_u64"].item()) != site["seed"] or
+            str(data["ablation"].item()) != ablation or
+            str(data["exporter_sha256"].item()) != metrics["exporter_sha256"]):
+        raise ValueError("NPZ identity mismatch")
+    if stage == "neural":
+        expected_profile = "natural" if ablation == "A0" else ablation
+        if (str(data["world_profile"].item()) != expected_profile or
+                metrics["world_profile"] != expected_profile or
+                metrics["numerical_profile"] != manifest["generation"]["numerical_profile"] or
+                metrics["inference_profile"] != manifest["generation"]["inference_profile"]):
+            raise ValueError("Neural numerical profile mismatch")
+        expected_bounds = [site.get("focus_native_j", site["center_cj"]*256+128),
+                           site.get("focus_native_i", site["center_ci"]*256+128)]
+        bounds = data["native_bounds"].tolist()
+        if [(bounds[0]+bounds[2])//2, (bounds[1]+bounds[3])//2] != expected_bounds:
+            raise ValueError("Neural native focus mismatch")
+    else:
+        if data["coarse_bounds"].tolist() != list(_site_bounds(site, data["physical"].shape[-1])):
+            raise ValueError("Conditioning bounds mismatch")
+    return manifest, data
+
+
+def _footprint(bounds, resolution_m: int, shape) -> dict:
+    return {"bounds_indices_x0_y0_x1_y1": [int(v) for v in bounds],
+            "cell_size_m": resolution_m, "shape_rows_cols": list(shape),
+            "coordinate_system": "flat metre; x=column, y=row, y-down; bounds are cell edges"}
+
+
+def _sample_to_native(field: np.ndarray, source_bounds, cell_native: int,
+                      native_bounds) -> np.ndarray:
+    x0, y0, x1, y1 = [int(v) for v in native_bounds]
+    sx0, sy0 = int(source_bounds[0]), int(source_bounds[1])
+    xs = (np.arange(x0, x1, dtype=np.float64)+.5)/cell_native-.5-sx0
+    ys = (np.arange(y0, y1, dtype=np.float64)+.5)/cell_native-.5-sy0
+    xx, yy = np.meshgrid(xs, ys)
+    return map_coordinates(field, [yy, xx], order=1, mode="nearest").astype(np.float32)
+
+
+def write_e1_report(output: Path, sites: list[dict], index: dict | None = None) -> dict:
+    """Validate provenance, then separate context distributions from matched crops."""
+    output = Path(output)
+    index = index or json.loads((output / "index.json").read_text(encoding="utf-8"))
+    if not index.get("manifest_complete"):
+        raise ValueError("E1 requires complete manifests")
+    report = {"schema": "terrain-e1-comparison-v2", "stage": "checkpoint-decoder",
+              "reporter_sha256": _sha256(Path(__file__)),
+              "sites": {}, "visual_gate": "requires human review; no automatic acceptance",
+              "context_note": "Full stage arrays cover different areas. Context summaries are not same-area comparisons.",
+              "matched_note": "Coarse and latent elevations are bilinearly sampled at the exact DEM pixel centers; this is an explicit interpolation, not native 30 m information."}
+    for site in sites:
+        rows = {}
+        baseline_dem = None
+        baseline_bounds = None
+        for ablation in ABLATIONS:
+            try:
+                cpu_record = index["conditioning_artifacts"][site["id"]][ablation]
+                nn_record = index["neural_artifacts"][site["id"]][ablation]
+            except KeyError as exc:
+                raise ValueError(f"Missing indexed E1 artifact: {site['id']} {ablation}") from exc
+            cpu_manifest, c = _read_artifact(output, cpu_record, site, ablation, "conditioning")
+            nn_manifest, n = _read_artifact(output, nn_record, site, ablation, "neural")
+            if cpu_manifest["files"] != nn_manifest["files"]:
+                raise ValueError("CPU and neural artifacts have different source/model hashes")
+            cond = c["physical"][0]
+            coarse_sqrt = n["coarse_unweighted"][0]
+            coarse_m = np.sign(coarse_sqrt)*np.square(coarse_sqrt)
+            latent_sqrt = n["latent_lowfreq"]*38.6-31.4
+            latent_m = np.sign(latent_sqrt)*np.square(latent_sqrt)
+            dem = n["dem_m"]
+            cb = c["coarse_bounds"].tolist()
+            nb = n["coarse_bounds"].tolist()
+            lb = n["latent_bounds"].tolist()
+            db = n["native_bounds"].tolist()
+            if cb != nb or dem.shape != (db[3]-db[1], db[2]-db[0]):
+                raise ValueError("Stage bounds or dimensions do not align")
+            coarse_delta = coarse_m-cond
+            cond_sqrt = np.sign(cond)*np.sqrt(np.abs(cond))
+            coarse_sqrt_delta = coarse_sqrt-cond_sqrt
+            correlation = (float(np.corrcoef(cond.ravel(), coarse_m.ravel())[0, 1])
+                           if np.std(cond) > 0 and np.std(coarse_m) > 0 else None)
+            matched_coarse = {
+                "footprint": _footprint(cb, 7680, cond.shape),
+                "height_mae_m": float(np.mean(np.abs(coarse_delta))),
+                "sqrt_height_mae": float(np.mean(np.abs(coarse_sqrt_delta))),
+                "height_bias_m": float(np.mean(coarse_delta)),
+                "coast_mask_disagreement": float(np.mean((cond >= 0) != (coarse_m >= 0))),
+                "height_correlation": correlation}
+            context = {
+                "conditioning": {"elevation_m": _array_summary(cond),
+                                 "footprint": _footprint(cb, 7680, cond.shape)},
+                "coarse": {"elevation_m": _array_summary(coarse_m),
+                           "footprint": _footprint(nb, 7680, coarse_m.shape)},
+                "latent_lowfreq": {"elevation_m": _array_summary(latent_m),
+                                   "footprint": _footprint(lb, 240, latent_m.shape)},
+                "dem": {"elevation_m": _array_summary(dem),
+                        "footprint": _footprint(db, 30, dem.shape),
+                        "land_fraction": float(np.mean(dem >= 0))}}
+            matched = {}
+            for name, field, bounds, scale in (
+                    ("conditioning", cond, cb, 256),
+                    ("coarse", coarse_m, nb, 256),
+                    ("latent_lowfreq", latent_m, lb, 8)):
+                sampled = _sample_to_native(field, bounds, scale, db)
+                delta = sampled-dem
+                matched[name] = {"interpolation": "bilinear at native pixel centres",
+                                 "native_bounds": db, "sampled_elevation_m": _array_summary(sampled),
+                                 "mae_to_dem_m": float(np.mean(np.abs(delta))),
+                                 "coast_mask_disagreement": float(np.mean((sampled >= 0) != (dem >= 0)))}
+            row = {"conditioning_manifest_hash": cpu_record["manifest_hash"],
+                   "neural_manifest_hash": nn_record["manifest_hash"],
+                   "context_distributions": context,
+                   "matched_coarse_grid": matched_coarse,
+                   "matched_native_footprint": matched}
+            if ablation == "A0":
+                baseline_dem, baseline_bounds = dem, db
+            else:
+                if db != baseline_bounds or dem.shape != baseline_dem.shape:
+                    raise ValueError("Cross-ablation DEM pixels differ")
+                delta = dem-baseline_dem
+                row["vs_A0_same_native_pixels"] = {
+                    "height_mae_m": float(np.mean(np.abs(delta))),
+                    "height_rmse_m": float(np.sqrt(np.mean(delta*delta))),
+                    "coast_mask_disagreement": float(np.mean((dem >= 0) != (baseline_dem >= 0)))}
+            rows[ablation] = row
+        report["sites"][site["id"]] = {"kind": site["kind"],
+                                       "selected_from": site.get("selected_from", "A0"),
+                                       "profiles": rows}
+    (output / "e1_report.json").write_text(json.dumps(report, indent=2)+"\n", encoding="utf-8")
+    return report
+
+
+def export_corpus(output: Path, *, corpus_path=CORPUS_PATH, model_root=None,
+                  full_manifest=True, sites=None, ablations=ABLATIONS) -> dict:
+    corpus = read_corpus(corpus_path)
+    chosen = [site for site in corpus["sites"] if sites is None or site["id"] in sites]
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=True)
+    manifests = {}
+    artifacts = {}
+    diagnostics = {}
+    for site in chosen:
+        artifacts[site["id"]] = {}
+        for ablation in ablations:
+            key = (site["seed"], ablation)
+            if key not in manifests:
+                manifests[key] = conditioning_manifest(int(site["seed"]), ablation,
+                    model_root=model_root, file_hashes=full_manifest)
+            artifacts[site["id"]][ablation] = export_conditioning_site(
+                site, ablation, output, manifests[key], corpus["conditioning_window_cells"],
+                checkpoint_source=model_root)
+        if tuple(ablations) == ABLATIONS:
+            _comparison(output, site, artifacts[site["id"]])
+    index = {"schema": "terrain-reference-index-v2", "corpus_schema": corpus["schema"],
+             "sites": [s["id"] for s in chosen],
+             "ablations": list(ablations), "conditioning_world_hashes": {
+                 f"seed-{seed}-{ablation}": manifest["world_hash"]
+                 for (seed, ablation), manifest in manifests.items()},
+             "manifest_complete": full_manifest, "conditioning_artifacts": artifacts,
+             "climate_diagnostics": diagnostics, "neural_world_hashes": {},
+             "neural_artifacts": {}, "neural_exported": False,
+             "palette_elevation_m": PALETTE_STOPS}
+    (output / "index.json").write_text(json.dumps(index, indent=2)+"\n", encoding="utf-8")
+    return index
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--site", action="append", help="repeat for selected corpus sites")
+    parser.add_argument("--neural-site", action="append",
+                        help="repeat to limit NN exports while keeping full CPU corpus")
+    parser.add_argument("--ablation", action="append", choices=("A0", *WORLD_PROFILES))
+    parser.add_argument("--quick", action="store_true", help="omit file hashes; preview only")
+    parser.add_argument("--neural", choices=("A0", *WORLD_PROFILES, "all"),
+                        help="export actual checkpoint stages for one or all ablations on CUDA")
+    parser.add_argument("--native-pixels", type=int, default=None,
+                        help="override corpus native crop size")
+    args = parser.parse_args()
+    ablations = tuple(args.ablation or ABLATIONS)
+    if args.neural and args.quick:
+        parser.error("Neural export requires full hashed manifests")
+    if args.neural == "all" and ablations != ABLATIONS:
+        parser.error("Neural all requires all conditioning ablations")
+    index = export_corpus(args.output, full_manifest=not args.quick,
+                          sites=args.site, ablations=ablations)
+    if args.neural:
+        # This path deliberately invokes the same loader and numerical profile
+        # as the application. GPU execution is opt-in and never used for CPU QA.
+        from terrain_app import load_pipeline, resolve_model_source
+        from terrain_inference import configure_world
+        checkpoint_source = Path(resolve_model_source())
+        selected_sites = [s for s in read_corpus()["sites"]
+                          if (args.site is None or s["id"] in args.site) and
+                             (args.neural_site is None or s["id"] in args.neural_site)]
+        if not selected_sites:
+            parser.error("No neural sites selected")
+        neural_ablations = ABLATIONS if args.neural == "all" else (args.neural,)
+        for ablation in neural_ablations:
+            profile = "natural" if ablation == "A0" else ablation
+            for site in selected_sites:
+                world = load_pipeline(int(site["seed"]))
+                configure_world(world, world_profile=profile)
+                world.rebuild()
+                record = export_neural_intermediates(world, site, args.output,
+                    native_pixels=args.native_pixels or site.get("native_dem_window_pixels") or
+                                  read_corpus()["native_dem_window_pixels"],
+                    checkpoint_source=checkpoint_source)
+                index["neural_artifacts"].setdefault(site["id"], {})[ablation] = record
+                index["neural_world_hashes"][f"seed-{site['seed']}-{ablation}"] = record["manifest_hash"]
+                (args.output / "index.json").write_text(json.dumps(index, indent=2)+"\n", encoding="utf-8")
+                print(f"Neural {ablation} {site['id']} complete", flush=True)
+        if args.neural == "all":
+            for site in selected_sites:
+                _neural_comparison(args.output, site, index["neural_artifacts"][site["id"]])
+            write_e1_report(args.output, selected_sites, index)
+        index["neural_exported"] = True
+        index["neural_ablation"] = list(neural_ablations)
+        index["neural_sites"] = [s["id"] for s in selected_sites]
+        (args.output / "index.json").write_text(json.dumps(index, indent=2)+"\n", encoding="utf-8")
+    print(json.dumps(index, indent=2))
+
+
+if __name__ == "__main__":
+    main()

@@ -11,6 +11,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import argparse
 import hashlib
 import json
@@ -84,7 +86,7 @@ with torch.inference_mode():
     report=dict(stage=stage,seed=args.seed,lod=args.lod,tx=args.tx,ty=args.ty,layout=args.layout,
                 instrumented_seconds=seconds,torch=str(torch.__version__),gpu=torch.cuda.get_device_name(),
                 finite=bool(np.isfinite(elevation).all() and np.isfinite(climate).all()),
-                source_sha256={p:hashlib.sha256((server.ROOT/p).read_bytes()).hexdigest() for p in files},
+                source_sha256={p:hashlib.sha256((source_path(p, root=server.ROOT)).read_bytes()).hexdigest() for p in files},
                 note='Fresh RAM store; natural profile; CUDA graphs warmed. Profiler overhead prevents direct wall-clock comparisons.')
     if args.reference:
         with np.load(args.reference,allow_pickle=False) as reference:

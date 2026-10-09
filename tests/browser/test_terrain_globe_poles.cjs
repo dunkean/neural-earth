@@ -1,5 +1,6 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Compare the real WebGL projection with float64 spherical coordinates.
 const fs=require('node:fs'),assert=require('node:assert/strict');
 const {chromium}=require(NEURAL_EARTH_ROOT + '/webgpu/node_modules/playwright');
@@ -19,7 +20,7 @@ const {chromium}=require(NEURAL_EARTH_ROOT + '/webgpu/node_modules/playwright');
         return original.call(this,shader,source);
       };
     });
-    await page.addScriptTag({content:fs.readFileSync('terrain_globe.js','utf8')});
+    await page.addScriptTag({content:readRepositoryFile('terrain_globe.js','utf8')});
     const cases=await page.evaluate(()=>{
       const canvas=document.getElementById('globe'),gl=canvas.getContext('webgl');
       const wb=[-20e6,-10e6,20e6,10e6],results=[];

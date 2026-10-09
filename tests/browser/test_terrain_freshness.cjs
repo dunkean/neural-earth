@@ -1,8 +1,9 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Exercise the real response/promotion functions with controlled network races.
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const html=fs.readFileSync('index.html','utf8');
+const html=readRepositoryFile('index.html','utf8');
 const script=html.split('<script>')[1].split('</script>')[0];
 const prefix=script.slice(0,script.indexOf("view.addEventListener('wheel'"));
 const poll=script.slice(script.indexOf('setInterval(async()=>'),script.indexOf("addEventListener('pagehide'"));

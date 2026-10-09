@@ -12,4 +12,4 @@ The annual-cycle control runs from northern winter to summer and back; southern 
 
 Coarse material colors are baked per block, mode and settings; frames reuse filtered albedo with terrain lighting. Fine tiles also cache GPU colors. Appearance sources have a separate identity from neural heights, so material-only edits do not rerun the networks. The full appearance transport contains 50 planes, including physical climate/biomes, substrate, metadata and pedology; older 46-plane transport remains readable.
 
-Implementations: [CPU reference](../terrain_render.py), [WebGPU renderer](../terrain_renderer.js), [soil model](../terrain_soil.py), [pedology](../terrain_pedology.py) and [material controls](../terrain_render_controls.js).
+Implementations: [CPU reference](../backend/terrain_render.py), [WebGPU renderer](../web/terrain_renderer.js), [soil model](../backend/terrain_soil.py), [pedology](../backend/terrain_pedology.py) and [material controls](../web/terrain_render_controls.js).

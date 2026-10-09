@@ -1,5 +1,6 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Isolated WebGPU shader QA, without requests to the model/server. Readback only here.
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
@@ -7,8 +8,8 @@ const http=require('node:http');
 const path=require('node:path');
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
 (async()=>{
-  const source=fs.readFileSync(path.join(NEURAL_EARTH_ROOT,'terrain_renderer.js'));
-  const styles='window.TerrainStyles='+fs.readFileSync(path.join(NEURAL_EARTH_ROOT,'terrain_styles.json'),'utf8')+';\n'+fs.readFileSync(path.join(NEURAL_EARTH_ROOT,'terrain_style_rendering.js'),'utf8');
+  const source=readRepositoryFile(path.join(NEURAL_EARTH_ROOT,'terrain_renderer.js'));
+  const styles='window.TerrainStyles='+readRepositoryFile(path.join(NEURAL_EARTH_ROOT,'terrain_styles.json'),'utf8')+';\n'+readRepositoryFile(path.join(NEURAL_EARTH_ROOT,'terrain_style_rendering.js'),'utf8');
   const server=http.createServer((req,res)=>{
     if(req.url==='/terrain_styles.js'){res.setHeader('Content-Type','application/javascript');res.end(styles);}
     else if(req.url==='/terrain_renderer.js'){res.setHeader('Content-Type','application/javascript');res.end(source);}
@@ -139,7 +140,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntim
     assert.ok(report.biomes[1]>report.biomes[0],'Wet temperate land is green');
     assert.ok(report.stats.totalBytes<=report.stats.maxBytes);
     assert.equal(Object.keys(report.styles).length,10);assert.equal(new Set(Object.values(report.styles).map(p=>p.join(','))).size,10);
-    const palettes=JSON.parse(fs.readFileSync(path.join(NEURAL_EARTH_ROOT,'terrain_styles.json'),'utf8'));
+    const palettes=JSON.parse(readRepositoryFile(path.join(NEURAL_EARTH_ROOT,'terrain_styles.json'),'utf8'));
     for(const [mode,pixel]of Object.entries(report.styles)){
       const pal=palettes[mode],t=(1000/4500)**(mode==='copernicus'?1:.85),upper=pal.hypso.findIndex(s=>s[0]>=t),a=pal.hypso[upper-1],b=pal.hypso[upper],u=(t-a[0])/(b[0]-a[0]);
       for(let c=0;c<3;c++){const start=parseInt(a[1].slice(1+c*2,3+c*2),16),end=parseInt(b[1].slice(1+c*2,3+c*2),16);assert(Math.abs(pixel[c]-(start+(end-start)*u))<=Math.ceil(255*pal.grain)+2,`${mode} must use the shared physical palette`);}

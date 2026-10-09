@@ -1,5 +1,6 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Isolated WebGPU shader QA, without requests to the model/server. Readback only here.
 const assert=require('node:assert/strict');
 const fs=require('node:fs');
@@ -7,7 +8,7 @@ const http=require('node:http');
 const path=require('node:path');
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
 (async()=>{
-  const source=fs.readFileSync(path.join(NEURAL_EARTH_ROOT,'terrain_renderer.js'));
+  const source=readRepositoryFile(path.join(NEURAL_EARTH_ROOT,'terrain_renderer.js'));
   const server=http.createServer((req,res)=>{
     if(req.url==='/terrain_renderer.js'){res.setHeader('Content-Type','application/javascript');res.end(source);}
     else {res.setHeader('Content-Type','text/html');res.end('<canvas id="map" style="width:512px;height:256px"></canvas><script src="/terrain_renderer.js"></script>');}

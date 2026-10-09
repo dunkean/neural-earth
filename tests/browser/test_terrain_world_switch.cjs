@@ -1,8 +1,9 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Reproduce late camera acknowledgements while opening a customized world.
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const script=fs.readFileSync('index.html','utf8').split('<script>')[1].split('</script>')[0];
+const script=readRepositoryFile('index.html','utf8').split('<script>')[1].split('</script>')[0];
 const prefix=script.slice(0,script.indexOf("view.addEventListener('wheel'"));
 const elements=new Map(),requests=[];
 const context=vm.createContext({console,URLSearchParams,AbortController,performance,Map,Set,Math,Date,

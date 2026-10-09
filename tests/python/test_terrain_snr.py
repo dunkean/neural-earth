@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import hashlib
 import ast
 import json
@@ -45,7 +47,7 @@ class SnrTests(unittest.TestCase):
     def test_latent_preview_obeys_requested_lod_instead_of_source_lod(self):
         from types import SimpleNamespace
         from scipy.ndimage import gaussian_filter
-        tree=ast.parse((_REPO_ROOT/'terrain_server.py').read_text(encoding='utf-8'))
+        tree=ast.parse((source_path('terrain_server.py', root=_REPO_ROOT)).read_text(encoding='utf-8'))
         node=next(node for node in tree.body if getattr(node,'name',None)=='sample_latent_preview')
         def sample_field(world,xs,ys,stage):
             yy,xx=np.mgrid[:len(ys),:len(xs)]

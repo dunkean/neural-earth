@@ -1,8 +1,9 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // World preparation stays off by default and starts only after explicit opt-in.
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const source=fs.readFileSync('index.html','utf8').split('<script>')[1].split('</script>')[0];
+const source=readRepositoryFile('index.html','utf8').split('<script>')[1].split('</script>')[0];
 const elements=new Map(),requests=[];
 const context=vm.createContext({console,URLSearchParams,AbortController,performance,Map,Set,Math,Date,
  location:{search:'?prepare=0'},history:{replaceState(){}},crypto:require('node:crypto').webcrypto,
@@ -38,6 +39,28 @@ const metadata=seed=>({seed,world_profile:'natural',generation_profile:'natural'
  assert.equal(elements.get('loadingIndicator').hidden,false,'Coarse cannot wait two seconds for server polling');
  assert.match(elements.get('loadingLabel').textContent,/Computing coarse/);
  run('inflight.clear();updateActivity()');assert.equal(elements.get('loadingIndicator').hidden,true);
+ // First base/decoder requests show activity before polling or a first batch.
+ for(const lod of [-3,0,1,2,3,4]){
+  run(`queue=[{lod:${lod}}];updateActivity()`);
+  assert.equal(elements.get('loadingIndicator').hidden,false,`Queued LOD ${lod} already shows activity`);
+  run(`queue=[];inflight.set('first',{task:{lod:${lod}}});updateActivity()`);
+  assert.equal(elements.get('loadingIndicator').hidden,false,`First LOD ${lod} transfer precedes server telemetry`);
+  run('inflight.clear();updateActivity()');assert.equal(elements.get('loadingIndicator').hidden,true);
+ }
+ run("serverStatus.model_preload={state:'warming',warming_model:'base'};updateActivity()");
+ assert.equal(elements.get('loadingIndicator').hidden,false);
+ assert.match(elements.get('loadingLabel').textContent,/CUDA Graphs.*base/);
+ run("serverStatus.model_preload={state:'ready'};updateActivity()");
+ assert.equal(elements.get('loadingIndicator').hidden,true);
+ // Inspect the spinner at the HTTP call itself, while its response is blocked.
+ run(`rendererReady=true;renderer=null;backendEpoch=0;publishedEpoch=cameraEpoch;
+ serverStatus.scheduler={queued:0,computing:0,encoding:0};`);
+ for(const lod of [0,3,4]){
+  const firstTile=run(`fetchTile({key:'first-${lod}',lod:${lod},tx:0,ty:0,path:'42/${lod}/0/0',worldProfile:'natural',mode:'relief',epoch,nnEngine})`);
+  const tileRequest=requests.shift();assert.ok(tileRequest.url.startsWith('/tiles/'));
+  assert.equal(elements.get('loadingIndicator').hidden,false,'Spinner is active before any batch response');
+  tileRequest.resolve({status:409});await firstTile;
+ }
  // A zoom does not cancel global preparation or start another full-world job.
  run('automaticPreparation=false;');
  const second=run("openWorld('43','natural',{generation:{height_source:'natural'}})");

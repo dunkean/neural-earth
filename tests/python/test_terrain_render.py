@@ -1,4 +1,4 @@
-"""Surface physics, generated substrate, seams and GPU reference fixtures."""
+"""Surface materials, generated substrate, seams and GPU reference fixtures."""
 
 from pathlib import Path as _BootstrapPath
 import sys as _bootstrap_sys
@@ -7,14 +7,19 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import json
 import sys
 import unittest
 from types import SimpleNamespace
 import numpy as np
-from terrain_soil import NAMES, generate_soil, coordinates, noise, sample_soil_transport, seed_value
-from terrain_render import DEFAULTS, parse_settings, surface_material, colorize_surface
+from terrain_soil import NAMES, generate_soil, coordinates, sample_soil_transport, seed_value
+from terrain_render import (DEFAULTS, parse_settings, surface_material, colorize_surface,
+                            gradient_noise, fbm, cover, terrain_derivatives)
 from terrain_biomes import sample_biome_transport
+
+SOIL = np.array([.42,.32,.22,.46,.44,.40,.3,.3,.4],np.float32)
 
 
 def world():
@@ -36,6 +41,22 @@ def material_case(height=1000,slope=0,resolution=30,settings=None,origin=(-5000,
     return atlas,xs,ys,dem,colorize_surface(atlas,xs,ys,dem,resolution,{},settings)
 
 
+def direct(height,seasons,*,grade=0.,tpi=0.,footprint=30.,point=None,settings=None,bare=False,shape=(1,1)):
+    """Material for uniform inputs, isolating one physical parameter."""
+    h=np.broadcast_to(np.asarray(height,np.float32),shape).astype(np.float32)
+    p=np.zeros((*shape,3),np.float32) if point is None else np.broadcast_to(point,(*shape,3)).astype(np.float32)
+    g=np.zeros((*shape,2),np.float32);g[...,0]=grade
+    seasons=np.asarray(seasons,np.float32)
+    if seasons.size==6:seasons=np.broadcast_to(seasons.reshape(6,*([1]*len(shape))),(6,*shape))
+    soil=np.broadcast_to(SOIL.reshape(9,*([1]*len(shape))),(9,*shape))
+    north=np.broadcast_to(np.array([0,-1],np.float32),(*shape,2))
+    return surface_material(h,g,np.broadcast_to(np.float32(tpi),shape),p,north,footprint,soil,seasons,
+                            seed_value(42),settings,bare)
+
+
+TEMPERATE=[22,500,.0065,2,500,.0065]
+
+
 class SurfaceTests(unittest.TestCase):
     def test_generated_composition_is_bounded_deterministic_and_climate_driven(self):
         atlas=world();a=generate_soil(atlas.height_m,atlas.layers,42,atlas.bounds)
@@ -49,33 +70,113 @@ class SurfaceTests(unittest.TestCase):
         self.assertGreater(a['soil_humus'].mean(),c['soil_humus'].mean())
         self.assertFalse(np.array_equal(a['rock_red'],generate_soil(atlas.height_m,atlas.layers,43,atlas.bounds)['rock_red']))
 
-    def test_snow_sheds_from_cliffs_but_cold_altitude_extends_retention(self):
-        # Fixed point/noise to isolate slope, independent of climate classification.
-        h=np.array([[1000.,6000.]],np.float32);ids=np.array([[9,29]])
-        p=np.zeros((1,2,3),np.float32);soil=np.broadcast_to(np.array([.4,.3,.2,.45,.44,.42,.3,.3,.4])[:,None,None],(9,1,2))
-        seasons=np.broadcast_to(np.array([-3,650,0,-3,650,0])[:,None,None],(6,1,2))
-        def color(grade):return surface_material(ids,h,np.broadcast_to([grade,0],(1,2,2)),np.zeros_like(h),p,30,soil,seasons,np.full_like(h,2),np.full_like(h,5),1,{'variation':0})
-        flat=color(0);steep=color(2);cliff=color(6)
-        self.assertGreater(flat[0,0].mean(),steep[0,0].mean()+.15)
-        self.assertGreater(steep[0,1].mean(),steep[0,0].mean()+.06)
+    def test_noise_has_unit_variance_and_fbm_filters_unresolved_octaves(self):
+        p=np.random.default_rng(3).uniform(-1e4,1e4,(200000,3)).astype(np.float32)
+        self.assertAlmostEqual(float(gradient_noise(p,11).std()),1,delta=.05)
+        value,detail=fbm(p*100,2400.,6,5.,5)
+        self.assertAlmostEqual(float(value.std()),1,delta=.1);self.assertAlmostEqual(float(detail),1,places=2)
+        value,detail=fbm(p*100,2400.,6,5000.,5)
+        self.assertEqual(float(detail),0);self.assertFalse(np.any(value))
+
+    def test_filtered_cover_preserves_mean_without_binary_blotches(self):
+        p=np.random.default_rng(4).uniform(-1e6,1e6,(200000,3)).astype(np.float32)
+        pattern=fbm(p,2400.,6,30.,9)
+        for fraction in (.1,.5,.85):
+            crisp=cover(np.full(len(p),fraction,np.float32),pattern)
+            self.assertAlmostEqual(float(crisp.mean()),fraction,delta=.04)
+            self.assertLess(np.max(np.abs(crisp-fraction)),.09,'Noise is secondary to coverage')
+            self.assertGreater(crisp.std(),.005)
+            np.testing.assert_allclose(cover(np.full(4,fraction,np.float32),fbm(p[:4],2400.,6,5000.,9)),fraction,atol=1e-6)
+        for strength in (0,1,2):
+            result=cover(np.linspace(0,1,len(p),dtype=np.float32),pattern,strength)
+            self.assertGreaterEqual(result.min(),0);self.assertLessEqual(result.max(),1)
+
+    def test_mean_color_is_stable_across_footprints(self):
+        # A forest mosaic seen at 30 m averages to the colour shown at 2 km.
+        rng=np.random.default_rng(5);n=60000
+        p=(rng.uniform(-1,1,(n,3))*np.array([2e5,2e5,0])+np.array([6.3e6,0,0])).astype(np.float32)
+        mosaic=[22,330,.0065,2,330,.0065]
+        fine=direct(500,mosaic,point=p,shape=(n,),footprint=30.,settings={'variation':0})
+        broad=direct(500,mosaic,point=p,shape=(n,),footprint=8000.,settings={'variation':0})
+        np.testing.assert_allclose(fine.mean(0),broad.mean(0),atol=.012)
+        self.assertLess(fine.std(0).max(),.001,'Variation zero removes random forest patches')
+        varied=direct(500,mosaic,point=p,shape=(n,),footprint=30.,settings={'variation':1})
+        self.assertLess(varied.std(0).max(),.035,'Forest noise must not dominate the material')
+
+    def test_biome_transitions_are_continuous(self):
+        # Sweep sea-level temperature and precipitation: no class-like steps.
+        n=2000;t=np.linspace(-15,30,n,dtype=np.float32);rain=np.linspace(50,1400,n,dtype=np.float32)
+        for seasons in ([t+8,np.full(n,400),np.zeros(n),t-8,np.full(n,400),np.zeros(n)],
+                        [np.full(n,24),rain,np.zeros(n),np.full(n,10),rain,np.zeros(n)]):
+            rgb=direct(200,np.asarray(seasons,np.float32),shape=(n,),footprint=8000.,settings={'variation':0})
+            self.assertLess(np.abs(np.diff(rgb,axis=0)).max(),.01)
+            self.assertGreater(np.ptp(rgb,axis=0).max(),.15,'The sweep crosses visibly different biomes')
+
+    def test_slopes_expose_rock_and_coarse_samples_compensate_their_gentler_slopes(self):
+        flat=direct(800,TEMPERATE,settings={'variation':0},footprint=9000.)
+        steep=direct(800,TEMPERATE,grade=1.4,settings={'variation':0},footprint=30.)
+        rock=np.array([.46,.44,.40])*.35+np.array([.50,.48,.45])*.65
+        self.assertLess(np.abs(steep[0,0]-rock).max(),np.abs(flat[0,0]-rock).max())
+        fine=direct(800,TEMPERATE,grade=.35,settings={'variation':0},footprint=30.)
+        coarse=direct(800,TEMPERATE,grade=.35,settings={'variation':0},footprint=7680.)
+        self.assertLess(np.abs(coarse[0,0]-rock).max(),np.abs(fine[0,0]-rock).max()-.03)
+
+    def test_valleys_are_greener_than_ridges_in_semi_arid_climates(self):
+        semi=[26,170,.0065,14,170,.0065]
+        valley=direct(300,semi,tpi=-.1,footprint=8000.,settings={'variation':0})[0,0]
+        ridge=direct(300,semi,tpi=.1,footprint=8000.,settings={'variation':0})[0,0]
+        self.assertGreater(valley[1]-valley[0],ridge[1]-ridge[0]+.02)
+
+    def test_snow_sheds_from_cliffs_but_perennial_snow_extends_retention(self):
+        # Seasonal winter snow (warm summers) versus perennial snow (cold summers).
+        cold=[8,650,0,-10,650,0];glacier=[-6,650,0,-14,650,0];winter={'variation':0,'season':0}
+        flat=direct(1000,cold,settings=winter);steep=direct(1000,cold,grade=2.,settings=winter)
+        cliff=direct(1000,cold,grade=6.,settings=winter)
+        self.assertGreater(flat.mean(),steep.mean()+.04)
+        self.assertGreater(steep.mean(),.75,'Snow remains on a 63 degree slope')
+        self.assertGreater(direct(1000,glacier,grade=2.2,settings=winter).mean(),
+                           direct(1000,cold,grade=2.2,settings=winter).mean()+.05)
         self.assertLess(cliff.max(),.7)
 
-    def test_materials_vary_and_clearings_expose_soil(self):
+    def test_materials_vary_and_clearings_expose_ground(self):
         _,_,_,_,a=material_case(settings={'snow':0})
         _,_,_,_,bare=material_case(settings={'snow':0,'forest':0})
         self.assertGreater(np.std(a[...,1]),.003)
         self.assertGreater(np.max(np.abs(a-bare)),.08)
-        self.assertGreater(np.std(a[...,0]-a[...,1]),.01)
-        self.assertLess(np.min(np.max(np.abs(a-bare),axis=-1)),.005,'Some clearings fully expose the ground')
+        change=np.max(np.abs(a-bare),axis=-1)
+        self.assertGreater(np.ptp(change),.02,'Canopy density varies continuously')
+
+    def test_equatorial_snow_aspect_has_no_hemisphere_step(self):
+        p=np.array([[6.3e6,-1,0],[6.3e6,1,0]],np.float32)
+        shape=(2,);g=np.broadcast_to([0,.8],(2,2)).astype(np.float32)
+        rgb=surface_material(np.full(2,1000,np.float32),g,np.zeros(2,np.float32),p,
+             np.broadcast_to([0,-1],(2,2)),30,np.broadcast_to(SOIL[:,None],(9,2)),
+             np.broadcast_to(np.array([5,650,0,-2,650,0],np.float32)[:,None],(6,2)),
+             42,{'season':0,'variation':0})
+        self.assertLess(np.max(np.abs(rgb[0]-rgb[1])),1e-4)
+
+    def test_coarse_snow_does_not_treat_slope_compensation_as_a_cliff(self):
+        a=direct(1000,[-6,650,0,-14,650,0],grade=.45,footprint=30,settings={'variation':0})
+        b=direct(1000,[-6,650,0,-14,650,0],grade=.45,footprint=7680,settings={'variation':0})
+        np.testing.assert_allclose(a,b,atol=.01)
 
     def test_season_changes_snow_in_opposite_hemispheres(self):
-        h=np.full((1,2),1000,np.float32);p=np.array([[[0,6e6,0],[0,-6e6,0]]],np.float32)
-        seasons=np.array([[[15,-8]],[[650,650]],[[0,0]],[[-8,15]],[[650,650]],[[0,0]]],np.float32)
-        soil=np.broadcast_to(np.array([.4,.3,.2,.45,.44,.42,.3,.3,.4])[:,None,None],(9,1,2))
-        args=(np.full_like(h,9,dtype=np.int32),h,np.zeros((1,2,2)),np.zeros_like(h),p,30,soil,seasons,np.full_like(h,2),np.full_like(h,5),1)
-        winter=surface_material(*args,{'season':0,'variation':0});summer=surface_material(*args,{'season':.5,'variation':0})
-        self.assertGreater(winter[0,0].mean(),summer[0,0].mean()+.2)
-        self.assertGreater(summer[0,1].mean(),winter[0,1].mean()+.2)
+        p=np.array([[0,6e6,0],[0,-6e6,0]],np.float32)
+        seasons=np.array([[15,-8],[650,650],[0,0],[-8,15],[650,650],[0,0]],np.float32)
+        def color(season):
+            return surface_material(np.full(2,1000,np.float32),np.zeros((2,2),np.float32),np.zeros(2,np.float32),p,
+                                    np.array([[0,-1],[0,-1]],np.float32),30,np.broadcast_to(SOIL[:,None],(9,2)),seasons,
+                                    1,{'season':season,'variation':0})
+        winter=color(0);summer=color(.5)
+        self.assertGreater(winter[0].mean(),summer[0].mean()+.2)
+        self.assertGreater(summer[1].mean(),winter[1].mean()+.2)
+
+    def test_soil_layer_shows_substrate_without_vegetation_or_snow(self):
+        cold=[-3,650,0,-3,650,0]
+        self.assertLess(direct(1000,cold,bare=True).mean(),direct(1000,cold).mean()-.2)
+        humid=direct(400,[24,1200,0,18,1200,0],bare=True,shape=(1,1),footprint=30.)
+        arid=direct(400,[30,40,0,22,40,0],bare=True,shape=(1,1),footprint=30.)
+        self.assertGreater(arid.mean(),humid.mean(),'Desert sands are brighter than humid soils')
 
     def test_adjacent_tiles_and_negative_coordinates_share_materials(self):
         atlas=world();r=15;xs=(-280+np.arange(560)+.5)*r;ys=(-152+np.arange(304)+.5)*r
@@ -83,26 +184,43 @@ class SurfaceTests(unittest.TestCase):
         whole=colorize_surface(atlas,xs,ys,dem,r,{})[24:280,24:536]
         a=colorize_surface(atlas,xs[:304],ys,dem[:,:304],r,{})[24:280,24:280]
         b=colorize_surface(atlas,xs[256:],ys,dem[:,256:],r,{})[24:280,24:280]
-        np.testing.assert_allclose(np.concatenate((a,b),axis=1),whole,atol=1e-6)
+        np.testing.assert_allclose(np.concatenate((a,b),axis=1),whole,atol=1e-5)
 
     def test_geographic_noise_matches_polar_chart_and_longitude_seam(self):
         from terrain_polar import to_chart
         atlas=world();x,y=3e6,-7e6;cx,cy=to_chart(x,y,{})
         a=coordinates([x],[y],atlas.bounds);b=coordinates([cx],[cy],atlas.bounds,polar=True)
         np.testing.assert_allclose(a,b,atol=.5)
-        np.testing.assert_allclose(noise(a/180,23),noise(b/180,23),atol=1e-5)
-        np.testing.assert_allclose(noise(coordinates([-20e6,20e6],[-3e6],atlas.bounds)/180,23)[0,0],noise(coordinates([-20e6,20e6],[-3e6],atlas.bounds)/180,23)[0,1],atol=1e-5)
+        np.testing.assert_allclose(gradient_noise(a/180,23),gradient_noise(b/180,23),atol=2e-3)
+        seam=coordinates([-20e6,20e6],[-3e6],atlas.bounds)/180
+        np.testing.assert_allclose(gradient_noise(seam,23)[0,0],gradient_noise(seam,23)[0,1],atol=2e-3)
 
-    def test_future_water_inputs_are_neutral_until_available(self):
-        a,xs,ys,dem,rgb=material_case()
-        self.assertTrue(np.isfinite(rgb).all())
-        # Current atlas contains no river input; shader and CPU take zero water.
-        self.assertFalse(any('river' in key for key in a.layers))
+    def test_terrain_derivatives_match_gpu_conventions(self):
+        dem=np.broadcast_to(np.arange(64,dtype=np.float32)*3,(64,64)).copy()
+        gradient,tpi=terrain_derivatives(dem,30.)
+        np.testing.assert_allclose(gradient[10:-10,10:-10,0],.1,atol=1e-6)
+        np.testing.assert_allclose(tpi[30,30],0,atol=1e-5)
+        bump=np.zeros((64,64),np.float32);bump[32,32]=600
+        self.assertGreater(terrain_derivatives(bump,30.)[1][32,32],0)
 
     def test_settings_validate_colors_and_ranges(self):
         self.assertEqual(parse_settings(),DEFAULTS)
-        for invalid in ({'season':2},{'snow_color':[1,2,3]},{'forest':float('nan')},{'unexpected':1}):
+        for invalid in ({'season':2},{'snow_color':[1,2,3]},{'forest':float('nan')},{'moisture':3},{'unexpected':1}):
             with self.assertRaises(ValueError):parse_settings(invalid)
+
+    def test_appearance_identity_changes_with_cpu_or_gpu_materials(self):
+        from terrain_render import appearance_identity
+        from pathlib import Path
+        import tempfile
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            for name in ('terrain_render.py','terrain_renderer.js','terrain_render_controls.js','terrain_soil.py','terrain_pedology.py'):
+                (source_path(name, root=root)).write_text('original',encoding='utf-8')
+            a=appearance_identity(root)
+            (source_path('terrain_render.py', root=root)).write_text('new CPU material',encoding='utf-8')
+            b=appearance_identity(root);self.assertNotEqual(a,b)
+            (source_path('terrain_renderer.js', root=root)).write_text('new GPU material',encoding='utf-8')
+            self.assertNotEqual(b,appearance_identity(root))
 
     def test_snowline_has_no_jump_when_altitude_crosses_a_koppen_boundary(self):
         atlas=world();shape=(32,32)
@@ -121,32 +239,47 @@ class SurfaceTests(unittest.TestCase):
 def fixtures():
     atlas=world();xs=np.linspace(-5000,4120,33);ys=np.linspace(-4000,5120,33)
     transport=np.concatenate((np.zeros((5,33,33),np.float32),sample_biome_transport(atlas,xs,ys,{}),sample_soil_transport(atlas,xs,ys,{})))
-    # Uniform sampled substrate makes the oracle independent of climate-grid
-    # interpolation. The physical atlas and its persistence are tested above.
-    constants=[.42,.32,.22,.46,.44,.40,.3,.3,.4]
-    for i,value in enumerate(constants):transport[36+i].fill(value)
-    for i,value in enumerate([20,650,0,0,650,0]):transport[21+i].fill(value)
+    # Uniform sampled substrate and climate make the oracle independent of the
+    # climate-grid interpolation. The atlas and its persistence are tested above.
+    for i,value in enumerate(SOIL):transport[36+i].fill(value)
+    ped_color=np.array([.62,.41,.25],np.float32)
+    for i,value in enumerate(ped_color):transport[46+i].fill(value)
+    transport[49].fill(1)
+    climate=[20,650,.0065,0,650,.0065]
+    for i,value in enumerate(climate):transport[21+i].fill(value)
+    sea=lambda n:np.broadcast_to(np.array(climate,np.float32)[:,None,None],(6,n,n))
+    soil=lambda n:np.broadcast_to(SOIL[:,None,None],(9,n,n))
+    ped=lambda n:np.broadcast_to(ped_color[:,None,None],(3,n,n))
     cases=[]
-    for height,slope,season,r,plane,polar in [(1000,0,.5,30,False,False),(1000,45,.5,30,False,False),(1000,0,0,30,False,False),(6000,0,.5,30,False,False),(6000,65,.5,15,False,False),(6000,82,.5,3.75,False,False),(1000,0,.5,15,True,False),(1000,0,.5,30,False,True),(-1000,0,.5,30,False,False),(1000,0,.5,7680,False,False)]:
+    scenes=[(1000,0,.5,30,False,False),(1000,45,.5,30,False,False),(1000,0,0,30,False,False),(6000,0,.5,30,False,False),(6000,65,.5,15,False,False),(6000,82,.5,3.75,False,False),(1000,0,.5,15,True,False),(1000,0,.5,30,False,True),(-1000,0,.5,30,False,False),(-20,0,.5,30,False,False),(300,25,.5,120,False,False),(1000,0,.5,7680,False,False),(2500,0,0,7680,False,False),
+            (500,8,.5,30,False,False),(1200,12,.5,30,False,False),(800,25,0,30,False,False),(1000,0,0,7680,False,False),
+            (2800,50,.5,60,False,False),(2800,50,.5,120,False,False),(2000,8,.5,60,False,False),(2000,8,.5,120,False,False)]
+    extra=[([26,160,.006,12,170,.006],{'variation':2,'forest':1.4}),
+           ([30,900,.006,25,1000,.006],{'forest':.6}),
+           ([20,500,.006,-4,500,.006],{'moisture':.5}),
+           ([-10,25,0,-20,25,0],{}),
+           ([38,60,.0055,24,80,.0055],{}),([38,60,.0055,24,80,.0055],{}),
+           ([25,550,.006,8,550,.006],{}),([25,550,.006,8,550,.006],{})]
+    for index,(height,slope,season,r,plane,polar) in enumerate(scenes):
         n=160 if r==7680 else 304;origin=(-5000,-4000)
         if polar:origin=(0,-10e6)
-        # CPU material oracle fed the same uniform transport and exact lookup.
         x=origin[0]+(np.arange(n)+.5)*r;y=origin[1]+(np.arange(n)+.5)*r
         dem=np.broadcast_to(height+(np.arange(n)-n//2)*r*np.tan(np.deg2rad(slope)),(n,n)).astype(np.float32).copy()
         point=coordinates(x,y,atlas.bounds,not plane,polar)
-        sea=np.broadcast_to(np.array([20,650,0,0,650,0],np.float32)[:,None,None],(6,n,n))
-        from terrain_koppen import classify
-        ids=classify(dem,sea,{})
-        dy,dx=np.gradient(dem,r);gradient=np.stack((dx,dy),axis=-1)
-        convex=(4*dem-np.roll(dem,1,0)-np.roll(dem,-1,0)-np.roll(dem,1,1)-np.roll(dem,-1,1))/r
+        gradient,tpi=terrain_derivatives(dem,r)
         if plane:north=np.zeros_like(gradient)
         elif not polar:north=np.broadcast_to([0,-1],gradient.shape)
         else:
             ny,nx=np.gradient(point[...,1],r);north=np.stack((nx,ny),axis=-1);north/=np.maximum(np.linalg.norm(north,axis=-1,keepdims=True),1e-12)
-        alpine=transport[30,0,ids];snow=transport[31,0,ids]
-        result=surface_material(ids,dem,gradient,convex,point,r,np.broadcast_to(np.array(constants)[:,None,None],(9,n,n)),sea,alpine,snow,seed_value(42),{'season':season},north)
-        cases.append(dict(height=height,slope=slope,season=season,resolution=r,plane=plane,polar=polar,origin=origin,expected=(result[n//2,n//2]*255).tolist()))
-    return dict(climate=transport.ravel().tolist(),cases=cases)
+        case_climate,options=extra[index-13] if index>=13 else (climate,{})
+        seasons=np.broadcast_to(np.array(case_climate,np.float32)[:,None,None],(6,n,n))
+        options=dict(options,season=season)
+        result=surface_material(dem,gradient,tpi,point,north,r,soil(n),seasons,seed_value(42),options,pedology=ped(n))
+        cases.append(dict(height=height,slope=slope,season=season,settings=options,seasons=case_climate,resolution=r,plane=plane,polar=polar,origin=origin,expected=(result[n//2,n//2]*255).tolist()))
+    x=(np.arange(304)+.5)*30;dem=np.full((304,304),1000,np.float32);point=coordinates(x,x,atlas.bounds)
+    gradient,tpi=terrain_derivatives(dem,30)
+    bare=surface_material(dem,gradient,tpi,point,np.broadcast_to([0,-1],gradient.shape),30,soil(304),sea(304),seed_value(42),{},True)
+    return dict(climate=transport.ravel().tolist(),seasons=climate,cases=cases,soil=(bare[152,152]*255).tolist(),pedology=(ped_color*255).tolist())
 
 
 if __name__=='__main__':

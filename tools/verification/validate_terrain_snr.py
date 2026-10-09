@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import argparse
 from pathlib import Path
 import json
@@ -69,7 +71,7 @@ with torch.inference_mode():
         assert case['regional_snr']['cached_policies']>0
         assert not np.array_equal(elevations[case['name']],elevations['neutral'])
     report['passed']=True
-report['source_sha256']={p:hashlib.sha256((server.ROOT/p).read_bytes()).hexdigest() for p in
+report['source_sha256']={p:hashlib.sha256((source_path(p, root=server.ROOT)).read_bytes()).hexdigest() for p in
     ('terrain_inference.py','terrain_snr.py','terrain_generation.py','terrain_cuda_graphs.py','terrain_nn_constants.py','tools/verification/validate_terrain_snr.py')}
 out=Path(args.output);out.parent.mkdir(parents=True,exist_ok=True)
 out.write_text(json.dumps(report,indent=2),encoding='utf-8')

@@ -12,6 +12,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import gc
 import hashlib
 import json
@@ -105,7 +107,7 @@ def main(path):
     report=dict(model_revision=MODEL_REVISION,torch=str(torch.__version__),gpu=torch.cuda.get_device_name(),
                 scope='Prepared real inputs; excludes production dependency scheduling, I/O and fusion',
                 gpu_before=gpu_snapshot(),single={},mixed={})
-    report['source_sha256']={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in
+    report['source_sha256']={name:hashlib.sha256((source_path(name, root=ROOT)).read_bytes()).hexdigest() for name in
         ('tools/benchmarks/benchmark_model_streams.py','terrain_inference.py','terrain_coarse_streams.py','terrain_cuda_graphs.py')}
     def save():path.write_text(json.dumps(report,indent=2),encoding='utf-8')
     save()

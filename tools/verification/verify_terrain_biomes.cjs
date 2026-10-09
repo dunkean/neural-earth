@@ -1,5 +1,6 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Real WebGPU pixel parity against the CPU biome implementation and UI routing.
 const assert=require('node:assert/strict'),fs=require('node:fs'),http=require('node:http'),path=require('node:path');
 const {execFileSync}=require('node:child_process');
@@ -9,7 +10,7 @@ const koppenFixtures=JSON.parse(execFileSync(path.join(NEURAL_EARTH_ROOT,'.venv/
 (async()=>{
   const server=http.createServer((req,res)=>{
     res.setHeader('Content-Type',req.url.endsWith('.js')?'application/javascript':'text/html');
-    res.end(req.url==='/terrain_renderer.js'?fs.readFileSync(path.join(NEURAL_EARTH_ROOT,'terrain_renderer.js')):
+    res.end(req.url==='/terrain_renderer.js'?readRepositoryFile(path.join(NEURAL_EARTH_ROOT,'terrain_renderer.js')):
       '<canvas id="map"></canvas><script>window.biomeTestLight=0;window.TerrainLighting={vectors:()=>[window.biomeTestLight,.35,1,1,-.5,-.5,.70710678,0]};</script><script src="/terrain_renderer.js"></script>');
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let browser;

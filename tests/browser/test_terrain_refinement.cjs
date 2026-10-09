@@ -1,13 +1,14 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Partial coverage must not schedule an expensive redundant ancestor.
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const script=fs.readFileSync('index.html','utf8').split('<script>')[1].split('</script>')[0];
+const script=readRepositoryFile('index.html','utf8').split('<script>')[1].split('</script>')[0];
 const prefix=script.slice(0,script.indexOf("view.addEventListener('wheel'"));
 function createContext(search){return vm.createContext({URLSearchParams,AbortController,performance,Map,Set,Math,Date,
  location:{search},crypto:require('node:crypto').webcrypto,
  document:{getElementById:()=>({checked:false,dataset:{},options:[],getContext:()=>({})})},
- window:{TerrainLOD:require(NEURAL_EARTH_ROOT + '/terrain_lod.js')},TerrainLighting:{get:()=>({})},devicePixelRatio:1,
+ window:{TerrainLOD:require(NEURAL_EARTH_ROOT + '/web/terrain_lod.js')},TerrainLighting:{get:()=>({})},devicePixelRatio:1,
  setTimeout:()=>1,clearTimeout:()=>{},requestAnimationFrame:()=>1});}
 const context=createContext('?coarse_prepare=0&latent_geometry=2');
 vm.runInContext(prefix,context);
@@ -54,7 +55,7 @@ const geometry1=vm.createContext({URLSearchParams,AbortController,performance,Ma
  location:{search:'?coarse_prepare=0&latent_geometry=1'},crypto:require('node:crypto').webcrypto,
  document:{getElementById:()=>({checked:false,dataset:{},options:[],getContext:()=>({})})},
  history:{replaceState(a,b,url){geometry1.savedURL=url}},
- window:{TerrainLOD:require(NEURAL_EARTH_ROOT + '/terrain_lod.js')},TerrainLighting:{get:()=>({}),serialize:()=>''},devicePixelRatio:1,
+ window:{TerrainLOD:require(NEURAL_EARTH_ROOT + '/web/terrain_lod.js')},TerrainLighting:{get:()=>({}),serialize:()=>''},devicePixelRatio:1,
  setTimeout:()=>1,clearTimeout:()=>{},requestAnimationFrame:()=>1});
 vm.runInContext(prefix,geometry1);
 vm.runInContext(`world={seed:'42',world_profile:'natural',generation_profile:'natural',cache_profile:'test',world_bounds:[-20e6,-10e6,20e6,10e6]};

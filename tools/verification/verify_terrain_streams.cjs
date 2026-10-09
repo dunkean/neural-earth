@@ -1,5 +1,6 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 const assert=require('node:assert/strict'),fs=require('node:fs');
 const {chromium}=require('E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
 (async()=>{
@@ -9,7 +10,7 @@ const {chromium}=require('E:/TerrainDiffusionRuntime/ui-test/node_modules/playwr
   page.on('pageerror',error=>errors.push(error.message));
   await page.route('http://stream-test.local/**',route=>route.fulfill({contentType:'text/html',body:'<div id="paneRendering"></div>'}));
   await page.goto('http://stream-test.local/?coarse_streams=8');
-  await page.addScriptTag({content:fs.readFileSync('terrain_inference_controls.js','utf8')});
+  await page.addScriptTag({content:readRepositoryFile('terrain_inference_controls.js','utf8')});
   await page.evaluate(()=>{
    window.calls=[];window.setting=4;window.rejectSetting=false;
    window.controls=TerrainInferenceControls.mount({fetchSettings:async(url,options)=>{

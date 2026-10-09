@@ -1,5 +1,6 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Real GPU oracle, material reset and coarse-frame completion benchmark.
 const assert=require('node:assert/strict'),fs=require('node:fs'),http=require('node:http'),path=require('node:path');
 const {execFileSync}=require('node:child_process');
@@ -8,7 +9,7 @@ const fixtures=JSON.parse(execFileSync(path.join(NEURAL_EARTH_ROOT,'.venv/Script
 (async()=>{
   const server=http.createServer((req,res)=>{
     res.setHeader('Content-Type',req.url.endsWith('.js')?'application/javascript':'text/html');
-    res.end(req.url.endsWith('.js')?fs.readFileSync(path.join(NEURAL_EARTH_ROOT,req.url)):'<meta charset="utf-8"><div id="controls"></div><canvas id="map"></canvas><script>window.TerrainLighting={vectors:()=>[0,.35,1,1,-.5,-.5,.70710678,0]};</script><script src="/terrain_render_controls.js"></script><script src="/terrain_renderer.js"></script>');
+    res.end(req.url.endsWith('.js')?readRepositoryFile(path.join(NEURAL_EARTH_ROOT,req.url)):'<meta charset="utf-8"><div id="controls"></div><canvas id="map"></canvas><script>window.TerrainLighting={vectors:()=>[0,.35,1,1,-.5,-.5,.70710678,0]};</script><script src="/terrain_render_controls.js"></script><script src="/terrain_renderer.js"></script>');
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let browser;
   try{
@@ -28,7 +29,8 @@ const fixtures=JSON.parse(execFileSync(path.join(NEURAL_EARTH_ROOT,'.venv/Script
       }
       renderer.setMode('render');
       for(const [i,c] of fixtures.cases.entries()){
-        renderer.setRenderSettings({...TerrainRender.defaults(),season:c.season});
+        renderer.setRenderSettings({...TerrainRender.defaults(),...c.settings});
+        for(const [i,v] of c.seasons.entries())climate.fill(v,(21+i)*33*33,(22+i)*33*33);
         const coarse=c.resolution===7680,n=coarse?160:304,dem=new Float32Array(n*n);
         for(let y=0;y<n;y++)for(let x=0;x<n;x++)dem[y*n+x]=c.height+(x-n/2)*c.resolution*Math.tan(c.slope*Math.PI/180);
         climate[45*33*33+4]=c.plane?0:1;climate[45*33*33+5]=c.polar?1:0;
@@ -42,12 +44,16 @@ const fixtures=JSON.parse(execFileSync(path.join(NEURAL_EARTH_ROOT,'.venv/Script
         }renderer.deleteTile('case');
       }
       climate[45*33*33+4]=1;climate[45*33*33+5]=0;
+      for(const [i,v] of fixtures.seasons.entries())climate.fill(v,(21+i)*33*33,(22+i)*33*33);
       renderer.setRenderSettings(TerrainRender.defaults());renderer.setMode('soil');
       renderer.uploadTile('soil',new Float32Array(304*304).fill(1000),{climate});
       const soil=await read(renderer.tiles.get('soil').color,256,128,128);
+      renderer.setMode('pedology');
+      renderer.draw([{key:'soil',lod:0,x:0,y:0,width:256,height:256}],{width:256,height:256,dpr:1});
+      const pedology=await read(renderer.tiles.get('soil').color,256,128,128);
       // Recolor cached geometry, including seasonal and exact color reset.
       let changes=0;TerrainRender.mount(document.getElementById('controls'),()=>{changes++;renderer.setRenderSettings(TerrainRender.get());});
-      for(const [key,value] of [['season',0],['variation',2],['forest',.2],['rock_slope',65],['snow',.3]]){
+      for(const [key,value] of [['season',0],['variation',2],['forest',.2],['moisture',-.5],['rock_slope',65],['snow',.3]]){
         const input=document.getElementById('render_'+key);input.value=value;input.dispatchEvent(new Event('input'));
       }
       for(const key of ['vegetation_tint','rock_tint','snow_color']){const input=document.getElementById('render_'+key);input.value='#aa1122';input.dispatchEvent(new Event('input'));}
@@ -76,12 +82,13 @@ const fixtures=JSON.parse(execFileSync(path.join(NEURAL_EARTH_ROOT,'.venv/Script
       const mountain=new Float32Array(304*304);
       for(let y=0;y<304;y++)for(let x=0;x<304;x++)mountain[y*304+x]=1200+3800*Math.exp(-((x-190)**2+(y-125)**2)/4200)+180*Math.sin(x*.09)*Math.cos(y*.07);
       renderer.uploadTile('visual',mountain,{climate,origin:[-5000,-4000]});renderer.draw([{key:'visual',lod:0,x:0,y:0,width:768,height:768}],{width:768,height:768,dpr:1});
-      await renderer.device.queue.onSubmittedWorkDone();if(failure)throw Error(failure);window.renderTestRenderer=renderer;return{pixels,soil,changed,reset,exact,afterReset,changes,bench};
+      await renderer.device.queue.onSubmittedWorkDone();if(failure)throw Error(failure);window.renderTestRenderer=renderer;return{pixels,soil,pedology,changed,reset,exact,afterReset,changes,bench};
     },{fixtures});
     for(const [i,c] of fixtures.cases.entries())report.pixels[i].forEach((v,k)=>assert(Math.abs(v-c.expected[k])<=2,`Render case ${i}: GPU ${report.pixels[i]} CPU ${c.expected}`));
-    report.soil.forEach((v,k)=>assert(Math.abs(v-[.42,.32,.22][k]*255)<=1));
-    assert.deepEqual(report.reset,{season:.5,variation:1,forest:1,rock_slope:40,snow:1,vegetation_tint:[1,1,1],rock_tint:[1,1,1],snow_color:[.94,.96,.97]});
-    assert.deepEqual(report.exact,{vegetation_tint:[1,1,1],rock_tint:[1,1,1],snow_color:[.94,.96,.97]});assert.equal(report.changes,9);assert.deepEqual(errors,[]);
+    report.soil.forEach((v,k)=>assert(Math.abs(v-fixtures.soil[k])<=2,`Soil: GPU ${report.soil} CPU ${fixtures.soil}`));
+    report.pedology.forEach((v,k)=>assert(Math.abs(v-fixtures.pedology[k])<=1,`Pedology: GPU ${report.pedology} CPU ${fixtures.pedology}`));
+    assert.deepEqual(report.reset,{season:.5,variation:1,forest:1,moisture:0,rock_slope:40,snow:1,vegetation_tint:[1,1,1],rock_tint:[1,1,1],snow_color:[.94,.96,.97]});
+    assert.deepEqual(report.exact,{vegetation_tint:[1,1,1],rock_tint:[1,1,1],snow_color:[.94,.96,.97]});assert.equal(report.changes,10);assert.deepEqual(errors,[]);
     await page.locator('#map').screenshot({path:path.join(NEURAL_EARTH_ROOT,'output/render-material-gpu-test.png')});
     await page.evaluate(()=>window.renderTestRenderer.dispose());
     console.log(JSON.stringify({ok:true,cases:report.pixels.length,soil:report.soil,resetExactColors:true,benchCompletion:report.bench}));

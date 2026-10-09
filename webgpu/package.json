@@ -1,9 +1,9 @@
 {
-  "name": "terrain-diffusion-webgpu-probe",
+  "name": "neural-earth-webgpu-probe",
   "private": true,
   "type": "module",
   "version": "0.1.0",
-  "description": "Pinned ONNX Runtime WebGPU feasibility probe for Terrain Diffusion 30 m",
+  "description": "Pinned ONNX Runtime WebGPU feasibility probe for Neural Earth using Terrain Diffusion 30 m",
   "dependencies": {
     "onnxruntime-web": "1.30.0"
   },

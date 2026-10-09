@@ -113,4 +113,4 @@ Colors, classification thresholds, altitude lines and transition settings are ex
 
 ## Implementation
 
-See [terrain_biomes.py](../terrain_biomes.py), [Köppen classification](../native/orogen/vendor/koppen.js), and [climate defaults](../native/orogen/climate-parameters.json).
+See [terrain_biomes.py](../backend/terrain_biomes.py), [Köppen classification](../native/orogen/vendor/koppen.js), and [climate defaults](../native/orogen/climate-parameters.json).

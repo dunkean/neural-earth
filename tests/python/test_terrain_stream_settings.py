@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import ast
 from collections import OrderedDict
 from pathlib import Path
@@ -37,7 +39,7 @@ class StreamSettingsTests(unittest.TestCase):
         namespace=dict(app=app,jsonify=jsonify,request=request,gpu_lock=threading.RLock(),
             coarse_stream_setting=setting,shared_pipeline=world,background_world=world,
             worlds=OrderedDict(a=world),preview_worlds={},polar_worlds={})
-        source=(_REPO_ROOT / 'terrain_server.py')
+        source=(source_path('terrain_server.py', root=_REPO_ROOT))
         tree=ast.parse(source.read_text(encoding='utf-8'))
         node=next(n for n in tree.body if getattr(n,'name',None)=='inference_stream_settings')
         exec(compile(ast.Module(body=[node],type_ignores=[]),str(source),'exec'),namespace)

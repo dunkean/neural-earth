@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import ast
 import json
 from pathlib import Path
@@ -45,7 +47,7 @@ class GenerationSessionTests(unittest.TestCase):
             json=json,
             register_generation=lambda base,settings:base,metadata=self.metadata)
         names={'generation_run','world_info','coarse_prepare','finish_generation','suspend_terrain_admission'}
-        tree=ast.parse(Path('terrain_server.py').read_text(encoding='utf-8'))
+        tree=ast.parse(source_path('terrain_server.py').read_text(encoding='utf-8'))
         exec(compile(ast.Module(body=[n for n in tree.body if getattr(n,'name',None) in names],
                               type_ignores=[]),'terrain_server.py','exec'),namespace)
         self.fake_stages=SimpleNamespace(run_generation=self.run_stage)

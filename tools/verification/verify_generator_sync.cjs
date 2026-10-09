@@ -1,5 +1,6 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
 
 const fs=require('node:fs'),assert=require('node:assert/strict');
@@ -13,12 +14,12 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
 
  await page.route('https://lod.test/**',async route=>{const u=new URL(route.request().url());
 
- if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync(root+'/index.html','utf8')});
+ if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:readRepositoryFile(root+'/index.html','utf8')});
 
  if(u.pathname==='/terrain_renderer.js')return route.fulfill({contentType:'application/javascript',body:'window.createTerrainRenderer=async()=>({available:false,clear(){},draw(){},deleteTile(){},getStats(){return{}}})'});
 
- if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+fs.readFileSync('terrain_styles.json','utf8')+';\n'+fs.readFileSync('terrain_style_rendering.js','utf8')});
- if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(root+u.pathname,'utf8')});
+ if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+readRepositoryFile('terrain_styles.json','utf8')+';\n'+readRepositoryFile('terrain_style_rendering.js','utf8')});
+ if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:readRepositoryFile(root+u.pathname,'utf8')});
 
  if(u.pathname==='/api/generation/run'){
   const data=route.request().postDataJSON();generationRequests.push(data);
@@ -52,7 +53,7 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
  assert.equal(await page.locator('#controls > #climatePanel, #controls > #noisePanel').count(),0);
  const before=worldRequests.length;
 
- await page.getByRole('button',{name:'Tectonique',exact:true}).click();
+ await page.getByRole('button',{name:'Tectonic',exact:true}).click();
 
  assert.equal(await page.inputValue('#generatorType'),'orogen');
 
@@ -71,7 +72,7 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
  assert.equal(await page.inputValue('#climateSource'),'orogen');
  assert.equal(await page.locator('#climateSource option').count(),1);
  await page.click('#tabErosion');
- assert.deepEqual(await page.locator('#reliefPipeline option').allTextContents(),['Désactivée','Orogen · GPU','Orogen · CPU','City · GPU']);
+ assert.deepEqual(await page.locator('#reliefPipeline option').allTextContents(),['None','Orogen · GPU','Orogen · CPU','City · GPU']);
  await page.selectOption('#reliefPipeline','orogen-gpu');
  assert.equal(await page.evaluate(()=>generationControls.read().orogen_gpu_erosion),true);
  assert.equal(await page.evaluate(()=>generationControls.read().relief_pipeline),'orogen');
@@ -109,7 +110,7 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
  await page.fill('#snrDriver0','3');
  await page.fill('#snrLatitudeGain','4');
  await page.selectOption('#snrDetailMode','per-lod');
- await page.locator('#noisePanel .advancedSettings > summary').filter({hasText:'Amplitude des détails par LOD'}).click();
+ await page.locator('#noisePanel .advancedSettings > summary').filter({hasText:'Per-LOD detail amplitude'}).click();
  await page.fill('#snrLod5','0.25');
  await page.screenshot({path:'tmp/settings-noise-desktop.png'});
 
@@ -147,10 +148,10 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
  assert.equal(generationRequests.at(-1).stage,'erosion');
  assert.equal(await page.inputValue('#reliefPipeline'),'orogen-gpu');
  await page.click('#tabRelief');await page.click('#generateRelief');
- await page.waitForFunction(()=>document.getElementById('generationDraftStatus').textContent.startsWith('Relief généré'));
+ await page.waitForFunction(()=>document.getElementById('generationDraftStatus').textContent.startsWith('Relief generated'));
  assert.equal(generationRequests.at(-1).stage,'relief');
  await page.click('#applyGeneration');
- await page.waitForFunction(()=>document.getElementById('generationDraftStatus').textContent==='Relief, érosion et climat générés.');
+ await page.waitForFunction(()=>document.getElementById('generationDraftStatus').textContent==='Relief, erosion and climate generated.');
  assert.equal(generationRequests.at(-1).stage,'all','Settings general button runs all three stages');
  await page.click('#saveGenerationA');
  await page.locator('#renderPanel > summary').click();await page.click('#tabSnr');
@@ -204,10 +205,10 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
  await page.locator('#renderPanel').evaluate(el=>el.open=false);
  await page.locator('#generationPanel').evaluate(el=>el.open=true);
  failNextGeneration=true;await page.click('#resetGeneration');
- await page.waitForFunction(()=>document.getElementById('generationDraftStatus').textContent==='Paramètres réinitialisés ; génération non appliquée.');
+ await page.waitForFunction(()=>document.getElementById('generationDraftStatus').textContent==='Settings reset; generation was not applied.');
  await assertReset();
  await page.click('#resetGeneration');
- await page.waitForFunction(()=>document.getElementById('generationDraftStatus').textContent==='Tous les paramètres de génération sont réinitialisés.');
+ await page.waitForFunction(()=>document.getElementById('generationDraftStatus').textContent==='All generation settings have been reset.');
  await assertReset();
  const resetRequest=generationRequests.at(-1);assert.equal(resetRequest.stage,'all');
  assert.deepEqual(resetRequest.settings,baseline,'Reset sends every canonical default');

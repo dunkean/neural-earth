@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 from dataclasses import asdict
 import hashlib
 import json
@@ -42,7 +44,7 @@ def main():
         finite = bool(np.isfinite(before).all() and np.isfinite(after).all())
         error = float(np.max(np.abs(before - after)))
         positive_denominator = bool(np.all(after[-1] > 0))
-        sources = {name: hashlib.sha256((_REPO_ROOT / name).read_bytes()).hexdigest()
+        sources = {name: hashlib.sha256((source_path(name, root=_REPO_ROOT)).read_bytes()).hexdigest()
                    for name in ('terrain_coarse.py', 'terrain_window_scheduler.py',
                                 'terrain_inference.py', 'tools/verification/verify_coarse_persistence.py')}
         report = {'world_hash': manifest['world_hash'], 'first_step': first_step,

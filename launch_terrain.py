@@ -26,7 +26,7 @@ def alive():
 
 if not alive():
     with open(root / 'server.log', 'a', encoding='utf-8') as out, open(root / 'server-error.log', 'a', encoding='utf-8') as err:
-        subprocess.Popen([sys.executable, '-u', str(root / 'terrain_server.py')], cwd=root,
+        subprocess.Popen([sys.executable, '-u', str(root / 'backend' / 'terrain_server.py')], cwd=root,
                          stdout=out, stderr=err, creationflags=subprocess.CREATE_NO_WINDOW)
     for _ in range(120):
         if alive():
@@ -36,4 +36,4 @@ if not alive():
         raise SystemExit('Server failed to start. See server-error.log.')
 if not args.no_open:
     webbrowser.open(url)
-print('Terrain Diffusion available: ' + url)
+print('Neural Earth available: ' + url)

@@ -12,6 +12,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import argparse
 import hashlib
 import json
@@ -242,7 +244,7 @@ def main():
         parser.error('Unique stream counts 1/2/4/8/16 including 1, positive repeats and graph budget required')
     args.output = args.output.resolve()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    sources = [ROOT/name for name in ('terrain_coarse_streams.py','tools/benchmarks/benchmark_coarse_streams.py',
+    sources = [source_path(name, root=ROOT) for name in ('terrain_coarse_streams.py','tools/benchmarks/benchmark_coarse_streams.py',
         'terrain_inference.py','terrain_coarse_graph.py','terrain_cuda_graphs.py','terrain_nn_constants.py',
         'terrain_cuda_kernels.py','terrain_snr.py')]
     report = dict(status='running', method='Offline prepared-input coarse solver only, BF16 batch1; CPU conditioning/noise, persistence, HTTP and serving excluded. Weighted-window mode includes denormalization/weighting. Graph warmup excluded; pools co-resident; alternating variant order. Desktop and other-process GPU load uncontrolled. No server writes or production cache writes.',

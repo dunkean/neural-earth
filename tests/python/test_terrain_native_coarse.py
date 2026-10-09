@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import ast
 from collections import OrderedDict
 from contextlib import nullcontext
@@ -68,7 +70,7 @@ class NativeCoarseTests(unittest.TestCase):
                     'climate':np.zeros((5,len(y),len(x)),np.float32)}
         ns=dict(app=app,np=np,torch=torch,Response=Response,jsonify=jsonify,request=request,
             native_coarse=native,VERSION='natural-v1',PROFILE='test',NATIVE=30,CLIMATE_SIZE=33,
-            WORLD_BOUNDS=self.bounds,generation_profile=lambda:'natural',
+            WORLD_BOUNDS=self.bounds,profile_bounds=lambda profile:self.bounds,generation_profile=lambda:'natural',
             world_manifest=lambda *args:{},world_identity=lambda m:'identity',
             _tile_coordinates=lambda seed,lod,tx,ty:(seed,lod,int(tx),int(ty)),
             native_coarse_ready=lambda *args:state['ready'],
@@ -76,11 +78,12 @@ class NativeCoarseTests(unittest.TestCase):
             nullcontext=nullcontext,measured_lock=lambda *args:nullcontext(),gpu_lock=None,
             time=time,jobs=SimpleNamespace(submit=submit,check_current_interest=lambda:None),
             conditioning_preview=preview,get_world=lambda *args:None,
+            transport_climate=lambda seed,profile,x,y,climate:climate,
             sample_coarse_climate=lambda w,x,y,check:np.zeros((5,len(y),len(x)),np.float32),
             tile_relief_stats=lambda *args:{},_session=lambda x:x,
             _tile_headers=lambda response,report,hit:(response.headers.update({'Stage':report['stage'],'Cache':str(hit)}) or response),
             JobCancelled=type('JobCancelled',(Exception,),{}),QueueFull=type('QueueFull',(Exception,),{}))
-        source=ast.parse(Path('terrain_server.py').read_text(encoding='utf-8'))
+        source=ast.parse(source_path('terrain_server.py').read_text(encoding='utf-8'))
         selected=[node for node in source.body if isinstance(node,ast.FunctionDef) and node.name in ('native_coarse_key','native_coarse_tile')]
         exec(compile(ast.Module(body=selected,type_ignores=[]),'terrain_server.py','exec'),ns)
         client=app.test_client();url='/coarse/natural-v1/42/-1/0.bin?profile=test'

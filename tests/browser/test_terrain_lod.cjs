@@ -1,7 +1,7 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const assert=require('node:assert/strict');
-const {plan,refinementLod,MAX_LOD,MAX_METRES_PER_PIXEL}=require(NEURAL_EARTH_ROOT + '/terrain_lod.js');
+const {plan,refinementLod,MAX_LOD,MAX_METRES_PER_PIXEL}=require(NEURAL_EARTH_ROOT + '/web/terrain_lod.js');
 const parent={key:'parent',lod:3,tx:-1,ty:-1};
 const fine={key:'historic',lod:0,tx:-1,ty:-1};
 const exact={key:'exact',lod:2,tx:-1,ty:-1};

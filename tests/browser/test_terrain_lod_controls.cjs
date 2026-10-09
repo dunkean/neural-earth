@@ -1,13 +1,14 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const html=fs.readFileSync('index.html','utf8'),script=html.split('<script>')[1].split('</script>')[0];
+const html=readRepositoryFile('index.html','utf8'),script=html.split('<script>')[1].split('</script>')[0];
 const elements=new Map(),drawCalls=[];
 const canvasContext=new Proxy({}, {get(target,key){return target[key]??((...args)=>drawCalls.push([key,...args]));}});
 const context=vm.createContext({URLSearchParams,AbortController,performance,Map,Set,Math,Date,
  location:{search:''},crypto:require('node:crypto').webcrypto,
  document:{getElementById(id){if(!elements.has(id))elements.set(id,{checked:id==='prefetch',value:id==='refinementDepth'?'0':id==='seaMaxLod'?'9':id==='cacheLodGap'?'3':'',dataset:{},options:[],getContext:()=>canvasContext});return elements.get(id)}},
- window:{TerrainLOD:require(NEURAL_EARTH_ROOT + '/terrain_lod.js'),TerrainRender:{serialize:()=> '{}',get:()=>({})}},TerrainLOD:require(NEURAL_EARTH_ROOT + '/terrain_lod.js'),devicePixelRatio:1,setTimeout:()=>1,clearTimeout(){},requestAnimationFrame:()=>1});
+ window:{TerrainLOD:require(NEURAL_EARTH_ROOT + '/web/terrain_lod.js'),TerrainRender:{serialize:()=> '{}',get:()=>({})}},TerrainLOD:require(NEURAL_EARTH_ROOT + '/web/terrain_lod.js'),devicePixelRatio:1,setTimeout:()=>1,clearTimeout(){},requestAnimationFrame:()=>1});
 vm.runInContext(script.slice(0,script.indexOf("view.addEventListener('wheel'")),context);
 const run=code=>vm.runInContext(code,context);
 run(`world={seed:'42',generation_profile:'natural',cache_profile:'test',world_bounds:[-20e6,-10e6,20e6,10e6]};

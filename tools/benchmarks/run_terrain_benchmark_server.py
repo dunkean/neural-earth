@@ -10,7 +10,10 @@ _activate_repository()
 import argparse,sys
 from pathlib import Path
 parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--source-dir');parser.add_argument('--port',type=int,default=8766);parser.add_argument('--prewarm-base',action='store_true');args=parser.parse_args()
-if args.source_dir:sys.path.insert(0,str(Path(args.source_dir).resolve()))
+if args.source_dir:
+    source_root = Path(args.source_dir).resolve()
+    source_modules = source_root / "backend" if (source_root / "backend").is_dir() else source_root
+    sys.path.insert(0, str(source_modules))
 import torch
 import terrain_server as server
 with server.gpu_lock,torch.inference_mode():

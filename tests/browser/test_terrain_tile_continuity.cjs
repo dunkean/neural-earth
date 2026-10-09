@@ -1,5 +1,6 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Real client/coverage/renderer, held network packets during coarse promotion.
 const assert=require('node:assert/strict'),fs=require('node:fs');
 const {chromium}=require('E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
@@ -12,9 +13,9 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4n
   let holdCoarse=true,releaseCoarse=[],holdOverview=true,releaseOverview=[],preparations=[];
   await page.route('https://continuity.test/**',async route=>{
    const u=new URL(route.request().url());
-   if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync('index.html','utf8')});
-   if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+fs.readFileSync('terrain_styles.json','utf8')+';\n'+fs.readFileSync('terrain_style_rendering.js','utf8')});
-   if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(u.pathname.slice(1),'utf8')});
+   if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:readRepositoryFile('index.html','utf8')});
+   if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+readRepositoryFile('terrain_styles.json','utf8')+';\n'+readRepositoryFile('terrain_style_rendering.js','utf8')});
+   if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:readRepositoryFile(u.pathname.slice(1),'utf8')});
    if(u.pathname==='/api/inference/streams')return route.fulfill({json:{coarse:4,options:[1,2,4,8,16]}});
    if(u.pathname==='/api/world')return route.fulfill({json:{seed:'42',version:'natural-v1',world_profile:'natural',generation_profile:'natural',cache_profile:'test',world_identity:'test',world_bounds:[-20e6,-10e6,20e6,10e6],overview_bounds:[-20e6,-10e6,20e6,10e6],overview:'/overview.png',gpu:'GPU fixture'}});
    if(u.pathname==='/api/view')return route.fulfill({json:{accepted:true}});

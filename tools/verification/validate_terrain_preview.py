@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import argparse,hashlib,json,time
 from pathlib import Path
 import numpy as np
@@ -56,6 +58,6 @@ with torch.inference_mode():
                    native_first_seconds=baseline_seconds,native_after_isolated_preview_seconds=final_seconds)
         entry['passed']=all(equal+replay_equal) and entry['finite'];report['cases'].append(entry);print(json.dumps(entry),flush=True)
 report['passed']=all(c['passed'] for c in report['cases'])
-report['source_sha256']={p:hashlib.sha256((server.ROOT/p).read_bytes()).hexdigest() for p in ('terrain_server.py','terrain_inference.py','terrain_nn_constants.py','tools/verification/validate_terrain_preview.py')}
+report['source_sha256']={p:hashlib.sha256((source_path(p, root=server.ROOT)).read_bytes()).hexdigest() for p in ('terrain_server.py','terrain_inference.py','terrain_nn_constants.py','tools/verification/validate_terrain_preview.py')}
 output=Path(args.output);output.parent.mkdir(parents=True,exist_ok=True);output.write_text(json.dumps(report,indent=2))
 if not report['passed']:raise SystemExit('Preview fidelity gate failed')

@@ -1,8 +1,9 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
-const context=vm.createContext({window:{TerrainStyles:JSON.parse(fs.readFileSync('terrain_styles.json','utf8'))},Float32Array,Math,Number});
-vm.runInContext(fs.readFileSync('terrain_style_rendering.js','utf8'),context);
+const context=vm.createContext({window:{TerrainStyles:JSON.parse(readRepositoryFile('terrain_styles.json','utf8'))},Float32Array,Math,Number});
+vm.runInContext(readRepositoryFile('terrain_style_rendering.js','utf8'),context);
 const {buildContours}=context.window.TerrainStyleRendering;
 const rendering=context.window.TerrainStyleRendering;
 assert.equal(rendering.get().density,25);

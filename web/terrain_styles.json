@@ -1,0 +1,286 @@
+{
+  "parchment": {
+    "label": "Parchment",
+    "paper": "#eee2c3",
+    "ink": "#4e3b28",
+    "seaFill": "#bccbc8",
+    "contour": "#8a6b47",
+    "shade": 0.9,
+    "hatch": 0.0,
+    "grain": 0.022,
+    "contourOpacity": 0.5,
+    "contourIndexW": 1.9,
+    "hypso": [
+      [
+        0.0,
+        "#f0e5c8"
+      ],
+      [
+        0.35,
+        "#e6d6ae"
+      ],
+      [
+        0.7,
+        "#d6c091"
+      ],
+      [
+        1.0,
+        "#c2a875"
+      ]
+    ]
+  },
+  "atlas": {
+    "label": "Atlas",
+    "paper": "#f4f1e8",
+    "ink": "#33404a",
+    "seaFill": "#8fc0e2",
+    "contour": "#8b5a3c",
+    "shade": 1.05,
+    "hatch": 0.0,
+    "grain": 0.0,
+    "contourOpacity": 0.55,
+    "contourIndexW": 1.9,
+    "hypso": [
+      [
+        0.0,
+        "#a8c98d"
+      ],
+      [
+        0.12,
+        "#c2d798"
+      ],
+      [
+        0.32,
+        "#e4d9a2"
+      ],
+      [
+        0.52,
+        "#d9bd8b"
+      ],
+      [
+        0.72,
+        "#bb9675"
+      ],
+      [
+        0.88,
+        "#d6cdc6"
+      ],
+      [
+        1.0,
+        "#f6f6f6"
+      ]
+    ]
+  },
+  "watabou": {
+    "label": "Classic (Watabou)",
+    "paper": "#f4f2ec",
+    "ink": "#1d1d1d",
+    "seaFill": "#b8cad6",
+    "contour": "#9c988c",
+    "shade": 0.07,
+    "hatch": 0.0,
+    "grain": 0.0,
+    "contourOpacity": 0.4,
+    "contourIndexW": 1.5,
+    "hypso": [
+      [
+        0.0,
+        "#f4f2ec"
+      ],
+      [
+        1.0,
+        "#efece4"
+      ]
+    ]
+  },
+  "engraving": {
+    "label": "Engraving",
+    "paper": "#ede2c6",
+    "ink": "#33261a",
+    "seaFill": "#e4dbc0",
+    "contour": "#6b5238",
+    "shade": 0.42,
+    "hatch": 0.9,
+    "grain": 0.03,
+    "contourOpacity": 0.4,
+    "contourIndexW": 1.6,
+    "hypso": [
+      [
+        0.0,
+        "#eee4c9"
+      ],
+      [
+        0.5,
+        "#e8dcbb"
+      ],
+      [
+        1.0,
+        "#e0d1ac"
+      ]
+    ]
+  },
+  "cadastre": {
+    "label": "Cadastral",
+    "paper": "#f3ecd8",
+    "ink": "#1f1c1e",
+    "seaFill": "#c6dced",
+    "contour": "#a59b84",
+    "shade": 0.05,
+    "hatch": 0.0,
+    "grain": 0.012,
+    "contourOpacity": 0.4,
+    "contourIndexW": 1.4,
+    "hypso": [
+      [
+        0.0,
+        "#f3ecd8"
+      ],
+      [
+        1.0,
+        "#efe6cf"
+      ]
+    ]
+  },
+  "blueprint": {
+    "label": "Blueprint",
+    "paper": "#12356a",
+    "ink": "#e6efff",
+    "seaFill": "#0d2a56",
+    "contour": "#8fb0e4",
+    "shade": 0.55,
+    "hatch": 0.0,
+    "grain": 0.01,
+    "contourOpacity": 0.5,
+    "contourIndexW": 1.7,
+    "hypso": [
+      [
+        0.0,
+        "#143a72"
+      ],
+      [
+        0.5,
+        "#184280"
+      ],
+      [
+        1.0,
+        "#1e4d92"
+      ]
+    ]
+  },
+  "illuminated": {
+    "label": "Illuminated",
+    "paper": "#f2e4bc",
+    "ink": "#3a2418",
+    "seaFill": "#3b64ac",
+    "contour": "#a2703c",
+    "shade": 0.5,
+    "hatch": 0.0,
+    "grain": 0.02,
+    "contourOpacity": 0.45,
+    "contourIndexW": 1.6,
+    "hypso": [
+      [
+        0.0,
+        "#f4e8c4"
+      ],
+      [
+        0.4,
+        "#ecd9a4"
+      ],
+      [
+        0.75,
+        "#dcc085"
+      ],
+      [
+        1.0,
+        "#c9a46a"
+      ]
+    ]
+  },
+  "topographic": {
+    "label": "Topographic",
+    "paper": "#f6f4ea",
+    "ink": "#262626",
+    "seaFill": "#a9d9ef",
+    "contour": "#b8753a",
+    "shade": 0.75,
+    "hatch": 0.0,
+    "grain": 0.0,
+    "contourOpacity": 0.75,
+    "contourIndexW": 2.1,
+    "hypso": [
+      [
+        0.0,
+        "#f5f3e6"
+      ],
+      [
+        0.5,
+        "#efebd9"
+      ],
+      [
+        1.0,
+        "#e6e0c8"
+      ]
+    ]
+  },
+  "night": {
+    "label": "Night",
+    "paper": "#0c111f",
+    "ink": "#d8dcc8",
+    "seaFill": "#060a14",
+    "contour": "#4a5c88",
+    "shade": 1.5,
+    "hatch": 0.0,
+    "grain": 0.0,
+    "contourOpacity": 0.35,
+    "contourIndexW": 1.6,
+    "hypso": [
+      [
+        0.0,
+        "#10182b"
+      ],
+      [
+        0.5,
+        "#16203a"
+      ],
+      [
+        1.0,
+        "#202c4a"
+      ]
+    ]
+  },
+  "copernicus": {
+    "label": "DEM · Copernicus (Rust)",
+    "paper": "#f6f4ea",
+    "ink": "#262626",
+    "seaFill": "#a9d9ef",
+    "contour": "#b8753a",
+    "shade": 0,
+    "hatch": 0.0,
+    "grain": 0,
+    "contourOpacity": 0.75,
+    "contourIndexW": 2.1,
+    "hypso": [
+      [
+        0,
+        "#00a046"
+      ],
+      [
+        0.25,
+        "#ffe600"
+      ],
+      [
+        0.5,
+        "#eb2314"
+      ],
+      [
+        0.75,
+        "#808080"
+      ],
+      [
+        1,
+        "#ffffff"
+      ]
+    ]
+  }
+}

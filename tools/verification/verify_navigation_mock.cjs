@@ -1,5 +1,6 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Browser UX tests use mocked geography/transport and a fake renderer.
 // No neural inference or hardware GPU work takes place.
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
@@ -8,7 +9,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4n
 const physical=new Float32Array(304*304+5*33*33);
 physical.fill(1000,0,304*304);
 for(let plane=0;plane<5;plane++)physical.fill([20,1500,1000,50,-.0065][plane],304*304+plane*33*33,304*304+(plane+1)*33*33);
-const heightBody=Buffer.from(physical.buffer),html=fs.readFileSync('index.html','utf8'),lodScript=fs.readFileSync('terrain_lod.js','utf8'),controlsScript=fs.readFileSync('terrain_generation_controls.js','utf8');
+const heightBody=Buffer.from(physical.buffer),html=readRepositoryFile('index.html','utf8'),lodScript=readRepositoryFile('terrain_lod.js','utf8'),controlsScript=readRepositoryFile('terrain_generation_controls.js','utf8');
 const gpuStub=`window.fakeUploads=[];window.createTerrainRenderer=async(canvas,options)=>{await new Promise(r=>window.resolveGPUStub=r);const tiles=new Map();options.onStatus?.('webgpu');return{available:true,status:'webgpu',uploadTile(k,h,o){if(o.climate?.length!==5*33*33)throw Error('Climate packet missing');window.fakeUploads.push({key:k,mode:o.mode,climateWidth:o.climateWidth,climateLength:o.climate.length});tiles.set(k,h);return true},hasTile(k){return tiles.has(k)},deleteTile(k){tiles.delete(k)},clear(){tiles.clear()},draw(rects){window.fakeDraw=rects;this.lastDrawnRects=rects.filter(r=>tiles.has(r.key));return true},getStats(){return{status:'webgpu',tiles:tiles.size,bytes:tiles.size*653588}}}}`;
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 async function settled(page,after=-1){
@@ -18,7 +19,7 @@ async function settled(page,after=-1){
 (async()=>{
   const reportPath=process.env.NAVIGATION_MOCK_REPORT||'E:/TerrainDiffusionRuntime/terrestrial-bootstrap-runtime/generation-controls-browser.json';
   fs.mkdirSync(path.dirname(reportPath),{recursive:true});
-  const harness=fs.readFileSync(__filename),harnessSnapshot=reportPath.replace(/\.json$/, '-harness.cjs');
+  const harness=readRepositoryFile(__filename),harnessSnapshot=reportPath.replace(/\.json$/, '-harness.cjs');
   fs.writeFileSync(harnessSnapshot,harness);
   const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--disable-gpu']});
@@ -31,7 +32,7 @@ async function settled(page,after=-1){
       if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:html});
       if(u.pathname==='/terrain_renderer.js')return route.fulfill({contentType:'application/javascript',body:gpuStub});
       if(u.pathname==='/terrain_lod.js')return route.fulfill({contentType:'application/javascript',body:lodScript});
-      if(u.pathname==='/terrain_map_tools.js')return route.fulfill({contentType:'application/javascript',body:fs.readFileSync('terrain_map_tools.js','utf8')});
+      if(u.pathname==='/terrain_map_tools.js')return route.fulfill({contentType:'application/javascript',body:readRepositoryFile('terrain_map_tools.js','utf8')});
       if(u.pathname==='/terrain_generation_controls.js')return route.fulfill({contentType:'application/javascript',body:controlsScript});
       if(u.pathname==='/api/world'){
         if(rejectNextWorld){rejectNextWorld=false;return route.fulfill({status:400,json:{error:'Settings rejected for this test'}});}
@@ -197,10 +198,10 @@ async function settled(page,after=-1){
     const controlsScreenshot=reportPath.replace(/\.json$/,'-ui.png');await page.screenshot({path:controlsScreenshot});
     const generationControls={draftDoesNotGenerate:true,inactiveControlsDisabled:true,failedApplyShowsError:true,failedCompareKeepsState:true,sourcePresetTransport:true,customLabelsDistinguishReference:true,allDownstreamUseInternalIdentity:true,cameraPreserved:true,settingsChangeIdentity:true,compareAB:true,urlReloadReproducesSettings:true,seedRetainsSettings:true,resetRestoresBaseline:true,shareURL};
     const report={passed:true,browser:browser.version(),gpuUsed:false,nnInferencePerformed:false,api:'fully mocked',preparationPolicy,
-      generationControls,controlsScreenshot,controlsSourceSha256:sha(fs.readFileSync('terrain_generation_controls.js')),
-      htmlSha256:sha(fs.readFileSync('index.html')),harnessSha256:sha(harness),harnessSnapshot,
-      htmlBeforePolicySha256:sha(fs.readFileSync('E:/TerrainDiffusionRuntime/terrestrial-bootstrap-runtime/index-before-manual-world-preparation.html')),
-      harnessUnchangedDuringRun:sha(fs.readFileSync(__filename))===sha(harness),
+      generationControls,controlsScreenshot,controlsSourceSha256:sha(readRepositoryFile('terrain_generation_controls.js')),
+      htmlSha256:sha(readRepositoryFile('index.html')),harnessSha256:sha(harness),harnessSnapshot,
+      htmlBeforePolicySha256:sha(readRepositoryFile('E:/TerrainDiffusionRuntime/terrestrial-bootstrap-runtime/index-before-manual-world-preparation.html')),
+      harnessUnchangedDuringRun:sha(readRepositoryFile(__filename))===sha(harness),
       wideViewport:[5760,3240],native:{camera:nativeState.camera,cacheBytes:nativeState.cache.bytes},final:{camera:state.camera,profile:state.profile,mode:state.mode,rendered:state.rendered},requests:requests.length,cameraPosts:epochs.length};
     fs.writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');
     console.log(JSON.stringify(report,null,2));

@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import ast
 from contextlib import nullcontext
 import io
@@ -89,13 +91,13 @@ class BiomeTileRenderingTests(unittest.TestCase):
                 SimpleNamespace(bounds=(-1,-1,1,1),width=2,height=2,layers={'koppen':np.full((2,2),9)}),
                 np.linspace(-.5,.5,len(xs)),np.linspace(-.5,.5,len(ys)),{}),
             JobCancelled=JobCancelled, QueueFull=QueueFull)
-        tree = ast.parse((ROOT / 'terrain_server.py').read_text(encoding='utf-8'))
+        tree = ast.parse((source_path('terrain_server.py', root=ROOT)).read_text(encoding='utf-8'))
         names = {'display_mode', '_tile_coordinates', 'height_tile', 'tile',
                  'render_elevation', '_tile_headers', 'transport_climate', 'physical_koppen_colors'}
         nodes = [node for node in tree.body if getattr(node, 'name', None) in names]
         self.assertEqual({node.name for node in nodes}, names)
         exec(compile(ast.Module(body=nodes, type_ignores=[]),
-                     str(ROOT / 'terrain_server.py'), 'exec'), self.namespace)
+                     str(source_path('terrain_server.py', root=ROOT)), 'exec'), self.namespace)
 
     def physical_tile(self, seed, lod, tx, ty, **options):
         stage = {9:'conditioning-preview', 4:'coarse', 0:'decoder', -1:'decoder-refinement'}[lod]
@@ -142,11 +144,11 @@ class BiomeTileRenderingTests(unittest.TestCase):
                 response = client.get(f'/height/natural-v1/42/{lod}/0/0.bin?profile=fixture&mode=orogen-biomes&climate=1')
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.headers['X-Terrain-Climate-Width'], '33')
-                self.assertEqual(response.headers['X-Terrain-Climate-Layers'], '46')
+                self.assertEqual(response.headers['X-Terrain-Climate-Layers'], '50')
                 values = np.frombuffer(response.data, dtype='<f4')
                 np.testing.assert_array_equal(values[:304*304], self.elevations[lod].ravel())
                 np.testing.assert_array_equal(values[304*304:304*304+5*33*33], self.climate.ravel())
-                self.assertEqual(values.size,304*304+46*33*33)
+                self.assertEqual(values.size,304*304+50*33*33)
         self.diagnostic.assert_not_called()
 
     def test_koppen_routes_through_current_terrain_at_every_lod(self):
@@ -160,7 +162,7 @@ class BiomeTileRenderingTests(unittest.TestCase):
                 np.testing.assert_array_equal(pixels[128,230],(KOPPEN_COLORS[30]*255).astype(np.uint8))
             response=self.app.test_client().get(f'/height/natural-v1/42/{lod}/0/0.bin?profile=fixture&mode=orogen-koppen&climate=1')
             self.assertEqual(response.status_code,200)
-            self.assertEqual(response.headers['X-Terrain-Climate-Layers'],'46')
+            self.assertEqual(response.headers['X-Terrain-Climate-Layers'],'50')
         self.diagnostic.assert_not_called()
 
     def test_invalid_render_settings_do_not_generate_terrain(self):
@@ -246,12 +248,12 @@ class DiagnosticTileRenderingTests(unittest.TestCase):
             geometry_heightmap=lambda atlas, _: atlas,
             profile_bounds=lambda _: self.atlas.bounds,
             render_orogen_layer=render)
-        tree = ast.parse((ROOT / 'terrain_server.py').read_text(encoding='utf-8'))
+        tree = ast.parse((source_path('terrain_server.py', root=ROOT)).read_text(encoding='utf-8'))
         names = {'orogen_diagnostic_tile', '_tile_headers'}
         nodes = [node for node in tree.body if getattr(node, 'name', None) in names]
         self.assertEqual({node.name for node in nodes}, names)
         exec(compile(ast.Module(body=nodes, type_ignores=[]),
-                     str(ROOT / 'terrain_server.py'), 'exec'), self.namespace)
+                     str(source_path('terrain_server.py', root=ROOT)), 'exec'), self.namespace)
         provider = SimpleNamespace(get_heightmap=lambda *args, **kwargs: self.atlas)
         active = patch.dict(sys.modules, terrain_orogen=provider)
         active.start()
@@ -305,6 +307,15 @@ class DiagnosticTileRenderingTests(unittest.TestCase):
         self.assertEqual(response.headers['X-Terrain-Halo'], '24')
         coords = (-256 + np.arange(-24, 280) + .5) * 15360
         np.testing.assert_array_equal(actual, self.atlas.sample_height_m(coords, coords))
+
+    def test_pedology_binary_is_source_only_with_gpu_composition_fields(self):
+        with self.app.test_request_context('/?profile=fixture&world_identity=fixture'):
+            response=self.namespace['orogen_diagnostic_tile'](42,9,-1,-1,'orogen','pedology',binary=True)
+        self.assertEqual(response.headers['X-Terrain-Climate-Layers'],'50')
+        values=np.frombuffer(response.data,dtype='<f4')
+        self.assertEqual(values.size,304*304+50*65*65)
+        display=values[304*304:].reshape(50,65,65)
+        self.assertTrue(np.isfinite(display).all());self.assertGreater(display[46:49].max(),.2)
 
 
 if __name__ == '__main__':

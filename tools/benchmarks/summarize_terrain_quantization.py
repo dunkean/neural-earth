@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import argparse
 import json
 from pathlib import Path
@@ -127,7 +129,7 @@ def main():
         'trt-qdq-attempt2/build.json','trt-qdq-attempt2/layers.json','trt-fp32/build.json',
         'trt-qdq-attempt2.log','trt-fp32.log']
     report = dict(role=ROLE, runtime_enabled=False, state='complete', verdict='rejected-keep-quantization-off',
-        producer_sha=sha_file(__file__), evidence={name:sha_file(root/name) for name in receipts},
+        producer_sha=sha_file(__file__), evidence={name:sha_file(source_path(name, root=root)) for name in receipts},
         integer_gpu_execution_proven=bool(int8_convs and integer_kernels),
         integer_coverage=dict(int8_convolutions=len(int8_convs),
             convolution_family_layers=len(convs), layers=len(layers), actual_unique_cuda_kernels=len(kernels),

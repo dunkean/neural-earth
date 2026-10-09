@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import json
 import hashlib
 from pathlib import Path
@@ -23,7 +25,7 @@ def _sources():
     root = _REPO_ROOT
     names = ('terrain_inference.py', 'terrain_window_scheduler.py',
              'terrain_coarse.py', 'tools/verification/verify_terrain_windows.py')
-    return {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in names}
+    return {name: hashlib.sha256((source_path(name, root=root)).read_bytes()).hexdigest() for name in names}
 
 
 def _nodes(tensor):

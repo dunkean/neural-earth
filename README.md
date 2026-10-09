@@ -139,6 +139,8 @@ Terrain and climate target worldbuilding plausibility. Biomes and materials are 
 
 ## Documentation and credits
 
+Runtime modules live in `backend/`, browser assets in `web/`, automated tests in `tests/`, and verification/benchmark tools in `tools/`. The root contains startup scripts, dependencies and project metadata.
+
 - [Installation and troubleshooting](docs/installation.md)
 - [Architecture and neural generation](docs/architecture.md)
 - [Layers](docs/layers.md), [biomes](docs/biomes.md) and [materials](docs/materials.md)

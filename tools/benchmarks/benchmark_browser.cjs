@@ -1,5 +1,6 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Hardware browser measurement of camera work, display cadence, and coverage.
 // GPU execution and presentation latency are not timed here.
 const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
@@ -233,8 +234,8 @@ const cacheCounts = responses => responses.reduce((counts, response) => {
     const status = await (await page.request.get('http://127.0.0.1:8765/api/status')).json();
     const implementationSha256 = Object.fromEntries(
       ['index.html', 'terrain_lod.js', 'terrain_renderer.js', 'tools/benchmarks/benchmark_browser.cjs']
-        .map(name => [name, crypto.createHash('sha256').update(fs.readFileSync(name)).digest('hex')]));
-    const screenshotSha256 = path => crypto.createHash('sha256').update(fs.readFileSync(path)).digest('hex');
+        .map(name => [name, crypto.createHash('sha256').update(readRepositoryFile(name)).digest('hex')]));
+    const screenshotSha256 = path => crypto.createHash('sha256').update(readRepositoryFile(path)).digest('hex');
     const report = { scenarios, errors, transport, status, preflight_status: preflightStatus,
       renderer_adapter_info: rendererAdapterInfo,
       screenshots: { native: { path: nativeScreenshot, sha256: screenshotSha256(nativeScreenshot) },

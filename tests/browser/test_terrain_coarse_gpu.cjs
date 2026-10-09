@@ -1,9 +1,10 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Real WebGPU shader and camera integration; no checkpoint/network inference.
 const assert=require('node:assert/strict'),fs=require('node:fs');
 const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
-const {sampleHeight}=require(NEURAL_EARTH_ROOT + '/terrain_map_tools.js');
+const {sampleHeight}=require(NEURAL_EARTH_ROOT + '/web/terrain_map_tools.js');
 assert.equal(sampleHeight({heights:new Float32Array(16).fill(-10),heightOptions:{width:4,halo:1,encoding:'signed-sqrt'},b:[0,0,2,2]},{x:1,y:1}),-100);
 (async()=>{
   const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--enable-unsafe-webgpu']});
@@ -13,9 +14,9 @@ assert.equal(sampleHeight({heights:new Float32Array(16).fill(-10),heightOptions:
     const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM0LJrHwMDAxAAGAA7JAUW48M0QAAAAAElFTkSuQmCC','base64');
     await page.route('https://coarse.test/**',async route=>{
       const u=new URL(route.request().url());
-      if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync('index.html','utf8')});
-      if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+fs.readFileSync('terrain_styles.json','utf8')+';\n'+fs.readFileSync('terrain_style_rendering.js','utf8')});
-      if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(u.pathname.slice(1),'utf8')});
+      if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:readRepositoryFile('index.html','utf8')});
+      if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+readRepositoryFile('terrain_styles.json','utf8')+';\n'+readRepositoryFile('terrain_style_rendering.js','utf8')});
+      if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:readRepositoryFile(u.pathname.slice(1),'utf8')});
       if(u.pathname==='/api/world')return route.fulfill({json:{version:'natural-v1',cache_profile:'test',world_identity:'test-world',world_profile:'natural',generation_profile:'natural',seed:u.searchParams.get('seed'),orogen_layers:{'orogen-biomes':'Adaptive Orogen biomes'},world_bounds:[-2e6,-1e6,2e6,1e6],overview_bounds:[-2e6,-1e6,2e6,1e6],overview:'/overview.png',gpu:'GPU fixture'}});
       if(u.pathname==='/api/view'){subscriptions.push(route.request().postDataJSON());return route.fulfill({json:{accepted:true}})}
       if(u.pathname==='/api/status')return route.fulfill({json:{scheduler:{queued:0,computing:0,encoding:0}}});

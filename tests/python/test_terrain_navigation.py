@@ -7,6 +7,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 import importlib
 import json
 from collections import OrderedDict
@@ -32,7 +34,7 @@ class DiskCacheTests(unittest.TestCase):
             root=Path(temporary)
             names=['natural--g'+'a'*24,'natural--g'+'b'*24]
             for name in names:
-                p=root/name/'physical-v1'/'42'/'0'/'0_0.npy'
+                p=source_path(name, root=root)/'physical-v1'/'42'/'0'/'0_0.npy'
                 p.parent.mkdir(parents=True)
                 p.write_bytes(b'payload')
             cache=TerrainDiskCache(root,'v',budget_bytes=100,grace_seconds=60)
@@ -197,7 +199,7 @@ class ProtocolTests(unittest.TestCase):
         terrain_app.load_pipeline=lambda seed:None
         inference=ModuleType('terrain_inference')
         inference.VERSION='test-v1'
-        inference.choose_profile=lambda:SimpleNamespace(name='test',gpu_windows=True,latent_batch=16)
+        inference.choose_profile=lambda:SimpleNamespace(name='test',gpu_windows=True,latent_batch=16,coarse_streams=1)
         inference.inference_status=lambda world:None
         # Restore only the two stubs; removing newly imported Torch modules would
         # make a subsequent import reinitialize native operators in the process.
@@ -413,7 +415,35 @@ class ProtocolTests(unittest.TestCase):
             self.assertTrue(np.all(np.frombuffer(fresh.data,dtype='<f4')==2.))
             self.assertEqual(compute.call_count,2)
 
+    def test_material_revision_invalidates_images_but_reuses_physical_overview(self):
+        from PIL import Image
+        import io
+        self.server.physical_overview.cache_clear()
+        self.addCleanup(self.server.physical_overview.cache_clear)
+        values={'elev':np.ones((2,2),np.float32),'climate':np.zeros((5,2,2),np.float32)}
+        def albedo(*args,**kwargs):
+            value=.25 if self.server.APPEARANCE_IDENTITY=='review-a' else .75
+            return np.full((2,2,3),value,np.float32)
+        with patch.object(self.server,'metadata',return_value={'overview_bounds':[-20e6,-10e6,20e6,10e6],'world_identity':'same-neural-world'}),\
+             patch.object(self.server,'conditioning_preview',return_value=values) as physical,\
+             patch.object(self.server,'biome_atlas',return_value=(object(),{})),\
+             patch.object(self.server,'colorize_surface',side_effect=albedo) as material,\
+             patch.object(self.server,'APPEARANCE_IDENTITY','review-a'):
+            def image():
+                response=self.client.get('/api/overview/natural-v1/9394.png?mode=soil&world_profile=orogen')
+                self.assertEqual(response.status_code,200)
+                with Image.open(io.BytesIO(response.data)) as png:result=np.asarray(png).copy()
+                response.close();return result
+            before=image();np.testing.assert_array_equal(image(),before)
+            with patch.object(self.server,'APPEARANCE_IDENTITY','review-b'):
+                after=image()
+            self.assertGreater(after.mean(),before.mean())
+            self.assertEqual(physical.call_count,1)
+            self.assertEqual(material.call_count,2)
+
     def test_overview_identity_receipts_are_per_display_mode(self):
+        self.server.physical_overview.cache_clear()
+        self.addCleanup(self.server.physical_overview.cache_clear)
         current={'identity':'native-a'}
         def metadata(*args):
             return {'overview_bounds':[-20e6,-10e6,20e6,10e6],
@@ -429,10 +459,10 @@ class ProtocolTests(unittest.TestCase):
                     response=self.client.get(f'/api/overview/natural-v1/9393.png?mode={mode}')
                     self.assertEqual(response.status_code,200)
                     response.close()
-            self.assertEqual(compute.call_count,4)
+            self.assertEqual(compute.call_count,2,'Display modes share the physical overview for each identity')
             cached=self.client.get('/api/overview/natural-v1/9393.png?mode=biomes')
             cached.close()
-            self.assertEqual(compute.call_count,4)
+            self.assertEqual(compute.call_count,2)
     def test_latent_preview_has_distinct_subscription_cache_and_sampling_grid(self):
         h=np.full((176,176),7.,np.float32);c=np.zeros((5,33,33),np.float32)
         preview=object();native=object()
@@ -502,17 +532,18 @@ class ProtocolTests(unittest.TestCase):
             ensure.assert_not_called()
 
     def test_latent_preview_grid_matches_parent_crop_including_negative_coordinates(self):
+        world=SimpleNamespace(_terrain_generation_settings={})
         def field(world,xs,ys,source):
             self.assertEqual(source,'latent')
             return (xs[None,:]*.01+ys[:,None]*.02).astype(np.float32)
         with patch.object(self.server,'sample_field',side_effect=field), \
              patch.object(self.server,'sample_coarse_climate',return_value=np.zeros((5,33,33),np.float32)):
-            full=self.server.sample_elevation(object(),3,-1,-1)[0]
+            full=self.server.sample_elevation(world,3,-1,-1)[0]
             full=self.server.gaussian_filter(full,.65,mode='reflect').astype(np.float32)
             for lod in (1,2):
                 count=2**(3-lod);inner=256//count
                 for x,y in ((0,0),(count-1,count-1)):
-                    patch_height,_,_=self.server.sample_latent_preview(object(),lod,-count+x,-count+y)
+                    patch_height,_,_=self.server.sample_latent_preview(world,lod,-count+x,-count+y)
                     np.testing.assert_array_equal(patch_height[24:-24,24:-24],full[24+y*inner:24+(y+1)*inner,24+x*inner:24+(x+1)*inner])
 
     def test_optional_base_prewarm_failure_is_reported_without_discarding_model(self):
@@ -524,6 +555,27 @@ class ProtocolTests(unittest.TestCase):
         self.assertFalse(result['fully_warmed'])
         self.assertIn('injected allocation failure',result['error'])
         self.assertEqual(result['warmup_cuda_forward_calls'],dict.fromkeys(self.server.gpu_calls,0))
+
+    def test_all_graph_families_prepared_by_default_and_partial_failure_reported(self):
+        world=SimpleNamespace(base_model=object(),decoder_model=object(),decoder_tile_size=512)
+        ready=dict(enabled=True,fully_warmed=True)
+        with patch('terrain_inference.set_coarse_streams') as streams, \
+             patch('terrain_inference.prewarm_coarse_graphs',return_value=ready) as coarse, \
+             patch.object(self.server,'warm_base_forms',return_value=ready) as base, \
+             patch('terrain_cuda_graphs.prewarm_decoder_form',return_value=ready) as decoder, \
+             patch.dict('os.environ',{'TERRAIN_PREWARM_BASE':'1'}):
+            result=self.server.warm_graphs(world)
+            self.assertTrue(result['fully_warmed'])
+            self.assertEqual(set(result['models']),{'coarse','base','decoder'})
+            streams.assert_called_once_with(world,self.server.coarse_stream_setting['coarse'])
+            coarse.assert_called_once_with(world);base.assert_called_once_with(world)
+            decoder.assert_called_once_with(world.decoder_model,512)
+            coarse.side_effect=RuntimeError('capture refused')
+            result=self.server.warm_graphs(world)
+            self.assertFalse(result['fully_warmed'])
+            self.assertEqual(result['models']['coarse']['state'],'failed')
+            self.assertTrue(result['models']['decoder']['fully_warmed'])
+            self.assertNotIn('warming_model',self.server.preload_state)
 
     def test_preview_worlds_have_isolated_bounded_stores_and_close_before_eviction(self):
         made=[]
@@ -641,6 +693,7 @@ class ProtocolTests(unittest.TestCase):
             def __init__(self):
                 self.closed=False
                 self._terrain_coarse_preparation=SimpleNamespace(
+                    prioritize=lambda *args:None,
                     step=lambda world,**kw:{'complete_windows':1,'total_windows':2})
             def empty_cache(self):pass
             def close(self):self.closed=True
@@ -664,7 +717,7 @@ class ProtocolTests(unittest.TestCase):
 
     def test_clipped_ready_coordinates_are_used_for_elevation(self):
         preparation=SimpleNamespace(ready_for_samples=lambda *args,**kw:True)
-        world=SimpleNamespace(_terrain_coarse_preparation=preparation)
+        world=SimpleNamespace(_terrain_coarse_preparation=preparation,_terrain_world_profile='natural')
         seen=[]
         def field(world,xs,ys,source):
             seen.append((xs.copy(),ys.copy()))
@@ -675,8 +728,9 @@ class ProtocolTests(unittest.TestCase):
             _,_,stage=self.server.sample_physical(world,1,'natural',7,-21,-21)
         self.assertEqual(stage,'coarse')
         self.assertEqual(len(seen),1)
-        self.assertGreaterEqual(seen[0][0].min(),self.server.WORLD_BOUNDS[0]/self.server.NATIVE)
-        self.assertGreaterEqual(seen[0][1].min(),self.server.WORLD_BOUNDS[1]/self.server.NATIVE)
+        bounds=self.server.profile_bounds('natural')
+        self.assertGreaterEqual(seen[0][0].min(),bounds[0]/self.server.NATIVE)
+        self.assertGreaterEqual(seen[0][1].min(),bounds[1]/self.server.NATIVE)
 
     def test_global_area_mean_is_physical_and_bounded_at_world_edge(self):
         import terrain_window_scheduler

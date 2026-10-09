@@ -1,8 +1,9 @@
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
+const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Regression: camera LOD9 / depth2 must finish LOD7 without resurfacing LOD4.
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
-const script=fs.readFileSync('index.html','utf8').split('<script>')[1].split('</script>')[0];
+const script=readRepositoryFile('index.html','utf8').split('<script>')[1].split('</script>')[0];
 const elements=new Map(),drawCalls=[];
 const canvas=new Proxy({}, {get:(target,key)=>target[key]??((...args)=>drawCalls.push([key,...args]))});
 const context=vm.createContext({URLSearchParams,AbortController,performance,Map,Set,Math,Date,
@@ -10,7 +11,7 @@ const context=vm.createContext({URLSearchParams,AbortController,performance,Map,
  document:{getElementById(id){if(!elements.has(id))elements.set(id,{checked:['grid','renderSea'].includes(id),
   value:id==='refinementDepth'?'2':id==='cacheLodGap'?'3':id==='seaMaxLod'?'9':'',
   dataset:{},options:[],getContext:()=>canvas,setAttribute(){}});return elements.get(id)}},
- window:{TerrainLOD:require(NEURAL_EARTH_ROOT + '/terrain_lod.js')},TerrainLOD:require(NEURAL_EARTH_ROOT + '/terrain_lod.js'),TerrainLighting:{get:()=>({})},devicePixelRatio:1,
+ window:{TerrainLOD:require(NEURAL_EARTH_ROOT + '/web/terrain_lod.js')},TerrainLOD:require(NEURAL_EARTH_ROOT + '/web/terrain_lod.js'),TerrainLighting:{get:()=>({})},devicePixelRatio:1,
  setTimeout:()=>1,clearTimeout(){},requestAnimationFrame:()=>1});
 vm.runInContext(script.slice(0,script.indexOf("view.addEventListener('wheel'")),context);
 const run=code=>vm.runInContext(code,context);

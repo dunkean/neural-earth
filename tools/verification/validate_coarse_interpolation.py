@@ -13,6 +13,8 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+
 
 import argparse
 import ast
@@ -30,7 +32,7 @@ from scipy.ndimage import gaussian_filter, map_coordinates
 
 ROOT=_REPO_ROOT
 RUNTIME=Path('E:/TerrainDiffusionRuntime/inference-engine-20261008/lod4-interpolation')
-IMAGES=ROOT/'docs/performance_x5/lod4-images'
+IMAGES=ROOT/'output/coarse-interpolation'
 TILE,HALO,LOD,STEP,NATIVE,COARSE_STRIDE=256,24,4,16,30,256
 
 
@@ -61,7 +63,7 @@ def sample_function(field,row0,col0):
     Extract just this function's AST to avoid terrain_server's CUDA/server
     initialization. Its interpolation/formula code is not duplicated here.
     """
-    path=ROOT/'terrain_server.py'
+    path=source_path('terrain_server.py', root=ROOT)
     tree=ast.parse(path.read_text(encoding='utf-8'))
     node=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='sample_field')
     requests=[]
@@ -329,7 +331,7 @@ def main():
         print(json.dumps(dict(status='self-test-pass',max_seam_error_m=result['max_seam_error_m'],gpu=False)))
         return
     args.output.mkdir(parents=True,exist_ok=False)
-    report=dict(status='running',sources={name:sha(ROOT/name) for name in
+    report=dict(status='running',sources={name:sha(source_path(name, root=ROOT)) for name in
         ('tools/verification/validate_coarse_interpolation.py','terrain_interpolation.py','terrain_server.py','tools/benchmarks/render_inference_comparisons.py')})
     save(args.output/'report.json',report)
     try:
