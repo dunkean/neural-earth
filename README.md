@@ -114,6 +114,9 @@ le relief appris dans la silhouette initiale.
   calcule LOD 4, puis LOD 3. Les tiles arrivent progressivement à l'écran.
 - La fenêtre **Rendering** regroupe les options de rendu. **Render** lance une progression
   unique jusqu'au LOD choisi, sans modifier le zoom ; bouger la caméra annule ce choix.
+  **Cache autorisé (Go)** règle le budget des tuiles du navigateur et du rendu GPU,
+  à **2 Go par défaut**. Il est conservé dans les liens (`cache_gib`) et limite
+  la profondeur effective du raffinement.
   **Cache · LOD gap** autorise par défaut 3 niveaux d'écart : un cache LOD 3 peut
   s'afficher depuis LOD 6. À 0, aucun historique plus fin n’est conservé ; les parents plus grossiers disponibles restent utilisables.
   Le raffinement continu et le rendu manuel font progresser ce LOD de rendu.

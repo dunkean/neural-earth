@@ -42,14 +42,14 @@ run(`tiles.clear();cacheBytes=0;inflight.clear();ready(taskFor(9,0,0,0));
 assert(run('queue.some(t=>t.prefetch&&!t.refinementAhead)'));
 assert(run('queue.some(t=>t.lod===8&&t.refinementAhead)'));
 
-// GPU depth2 exceeds the former 192MiB cap. Keep parents and every completed
+// GPU depth2 fits a configured 384MiB cap. Keep parents and every completed
 // child until all 256 visible LOD7 cells are ready; evict unrelated history.
 run(`tiles.clear();cacheBytes=0;inflight.clear();visiblePlan=[];$('prefetch').checked=false;
  renderer={available:true,deleteTile(){}};$('gpuRender').checked=true;
- W=1024;H=1024;cx=0;cy=0;
+ MAX_BYTES=.375*GIB;W=1024;H=1024;cx=0;cy=0;
  for(let i=0;i<300;i++)ready(taskFor(4,100+i,100,0));
  for(let y=-2;y<2;y++)for(let x=-2;x<2;x++)ready(taskFor(9,x,y,0));refresh();evict()`);
-assert(run('tileCacheBudget()>MAX_BYTES'));
+assert.equal(run('tileCacheBudget()'),run('MAX_BYTES'));
 assert.equal(run('renderer.maxBytes'),run('tileCacheBudget()'),'GPU textures must share the working-set reservation');
 let batches=0;
 while(!run('refinementProgress().complete')&&batches++<20){
@@ -61,11 +61,11 @@ assert(batches<20,'all batches must finish');
 assert(run('refinementProgress().complete'));
 assert.equal(run('refinementProgress().target'),7);
 assert.equal(run('refinementProgress().stages.at(-1).ready'),256);
-assert(run('cacheBytes>MAX_BYTES&&cacheBytes<=tileCacheBudget()'));
+assert(run('cacheBytes>192*1024**2&&cacheBytes<=tileCacheBudget()'));
 assert(run('[...tiles.values()].filter(t=>t.lod===4).length<300'),'evict unrelated history before the working chain');
 assert.equal(run('[...tiles.values()].filter(t=>t.lod>=7).length'),336);
 run("$('refinementDepth').value='14';refresh()");
 assert(run('refinementPolicy().budgetLimited'));
-assert(run('refinementPolicy().cacheBytes<=1024*1024**2'));
+assert.equal(run('refinementPolicy().cacheBytes'),run('MAX_BYTES'));
 assert.match(run('refinementProgress().text'),/limite mémoire/);
 console.log('LOD9 depth2 finishes LOD7, stable grid, persistent progress, prefetch and bounded cache: OK');

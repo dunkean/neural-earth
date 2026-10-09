@@ -28,7 +28,7 @@ assert.equal(distanceLabel(1500),'1.50 km');
       const u = new URL(route.request().url()); requests.push(u.pathname);
       if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:fs.readFileSync('index.html','utf8')});
       if(u.pathname==='/terrain_renderer.js')return route.fulfill({contentType:'application/javascript',body:gpuStub});
-      if(['/terrain_lod.js','/terrain_generation_controls.js','/terrain_map_tools.js','/terrain_toolbar.js'].includes(u.pathname))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(u.pathname.slice(1),'utf8')});
+      if(['/terrain_lighting.js','/terrain_globe.js','/terrain_lod.js','/terrain_generation_controls.js','/terrain_map_tools.js','/terrain_toolbar.js'].includes(u.pathname))return route.fulfill({contentType:'application/javascript',body:fs.readFileSync(u.pathname.slice(1),'utf8')});
       if(u.pathname==='/api/generation/run'){const data=route.request().postDataJSON();return route.fulfill({json:{world_profile:data.profile,generation_settings:data.settings}});}
       if(u.pathname==='/api/world'){if(pauseWorld)await new Promise(resolve=>releaseWorld=resolve);return route.fulfill({json:{version:'natural-v1',cache_profile:'mock',world_profile:u.searchParams.get('world_profile'),generation_profile:u.searchParams.get('world_profile'),seed:u.searchParams.get('seed'),world_bounds:[-500000,-250000,500000,250000],overview_bounds:[-500000,-250000,500000,250000],overview:'/overview.png',gpu:'Mock GPU',generation_schema:{properties:JSON.parse(fs.readFileSync('native/orogen/climate-parameters.json','utf8'))}}});}
       if(u.pathname==='/api/status')return route.fulfill({json:{scheduler:{queued:0,computing,encoding:0}}});
@@ -58,7 +58,20 @@ assert.equal(distanceLabel(1500),'1.50 km');
     assert.equal(await page.locator('#renderSea').isChecked(),false);
     assert.equal(await page.locator('#seaMaxLod').inputValue(),'9');
     assert.equal(await page.locator('#cacheLodGap').inputValue(),'3');
-    for(const id of ['renderSea','seaMaxLod','cacheLodGap','forcedLod','gpuRender','refinementDepth','prefetch']){
+    assert.equal(await page.locator('#cacheBudgetGiB').inputValue(),'2');
+    assert.equal(await page.evaluate(()=>terrainDebug.snapshot().cache.budget),2*1024**3);
+    await page.locator('#cacheBudgetGiB').fill('0.375');
+    await page.locator('#cacheBudgetGiB').dispatchEvent('change');
+    assert.equal(await page.evaluate(()=>terrainDebug.snapshot().cache.budget),.375*1024**3);
+    assert.equal(await page.evaluate(()=>new URLSearchParams(location.search).get('cache_gib')),'0.375');
+    await page.locator('#cacheBudgetGiB').fill('');
+    await page.locator('#cacheBudgetGiB').dispatchEvent('change');
+    assert.equal(await page.locator('#cacheBudgetGiB').inputValue(),'0.375');
+    await page.reload();await settle();
+    assert.equal(await page.locator('#cacheBudgetGiB').inputValue(),'0.375');
+    assert.equal(await page.evaluate(()=>terrainDebug.snapshot().cache.budget),.375*1024**3);
+    await page.locator('#renderPanel > summary').click();
+    for(const id of ['renderSea','seaMaxLod','cacheLodGap','cacheBudgetGiB','forcedLod','gpuRender','refinementDepth','prefetch']){
       assert.equal(await page.locator('#'+id).isVisible(),true);
       assert.equal(await page.locator('#'+id).evaluate(el=>!!el.closest('#renderPanel')),true);
     }
@@ -151,7 +164,7 @@ assert.equal(distanceLabel(1500),'1.50 km');
     await page.locator('#measureDistance').click(); await page.mouse.move(x,y); await page.mouse.down(); await page.mouse.move(x+120,y+90); await page.mouse.up();
     const screenshot = path.join(os.tmpdir(),'infinite-map-tools.png');
     await page.screenshot({path:screenshot});
-    await page.locator('#renderPanel').evaluate(el=>el.open=true);await page.locator('#layerPanel > summary').click();await page.locator('[data-mode=snr-elevation]').click();await settle();
+    await page.locator('#mapMode').selectOption('snr-elevation',{force:true});await settle();
     assert.equal(await page.evaluate(()=>terrainDebug.snapshot().backend),'png');
     await page.mouse.move(x,y);await page.waitForTimeout(150);
     assert.equal(snrHeightRequests,0,'SNR display and hover must not request NN terrain');
