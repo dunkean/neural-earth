@@ -50,7 +50,7 @@ Or use `start-neural-earth.cmd`. Open **http://127.0.0.1:8765**. Logs are `serve
 
 ## Optional dependencies
 
-The default Tectonic source needs Node.js, without npm installation. **Custom → Continental atlas** additionally needs Rust/Cargo and this pinned sibling source:
+The default Tectonic source needs Node.js, without npm installation. **Custom â†’ Continental atlas** additionally needs Rust/Cargo and this pinned sibling source:
 
 ```powershell
 git clone https://github.com/dunkean/world-builder-rs.git ../world-builder-rs
@@ -76,4 +76,4 @@ Orogen GPU switches are off by default and can fall back to CPU. Parallel propag
 - **Slow navigation:** reduce visible extent, refinement depth and streams. Begin with four coarse streams. Browser cache budget limits tile/texture storage, rather than all server VRAM.
 - **Source changes during runtime:** restart the server. Generator identities deliberately detect modifications to imported sources.
 
-Run GPU verification with the server stopped to avoid device contention. See [development](../CONTRIBUTING.md).
+Run GPU verification with the server stopped to avoid device contention.

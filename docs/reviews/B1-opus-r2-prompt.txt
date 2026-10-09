@@ -1,7 +1,0 @@
-Review the completed terrain audit implementation block B1.
-Read docs/ASTRA_TERRAIN_AUDIT.md and docs/AUDIT_IMPLEMENTATION.md, then inspect these files and their tests: terrain_macro.py terrain_manifest.py terrain_reference.py docs/reference_corpus.json test_terrain_macro.py docs/MACRO_IMPLEMENTATION.md docs/reviews/B1-correction-r1.md plus B1 previous reviews. Code review corrections r1. 32 actual v2NN artifacts historical in E:/TerrainDiffusionRuntime/reference-b1r1 were explicitly refused attestation because serverchangedmidrun. Freshattestedrunaftercorefreeze pending. Review provenance and physicallycoherent A1/support, matchedfootprints, diagnostic visuals. Don'tcertifyfinalrunpending orvisualgate; determine codeacceptedwithlimitations vsconcrete remainingdefects..
-The product priority is credible terrain and fast NN navigation down to 30m/pixel; procedural engine integration is a later phase.
-Read-only review. Do not edit files or run commands. Do not spawn subagents.
-Find concrete correctness, determinism, dependency/fusion, physical-unit, cache identity, bounds, memory, numerical fidelity or misleading validation problems.
-Report severity P0/P1/P2, file and line, reproduction and specific proposed fix. Distinguish proven defects from missing evidence; do not certify visual quality or performance without measurements.
-Evaluate fit to this block; do not demand unrelated research/other phases. Finish with ACCEPT / ACCEPT WITH LIMITATIONS / CHANGES REQUIRED and outstanding gates.

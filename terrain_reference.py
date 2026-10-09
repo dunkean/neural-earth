@@ -23,7 +23,7 @@ ABLATIONS = ("A0",)
 from terrain_manifest import (MODEL_ROOT, build_manifest, verify_manifest_files,
                               world_identity, write_manifest)
 
-CORPUS_PATH = Path(__file__).resolve().parent / "docs/reference_corpus.json"
+CORPUS_PATH = Path(__file__).resolve().parent / "tests/fixtures/reference_corpus.json"
 PALETTE_STOPS = [(-8000, (7, 20, 52)), (-4000, (20, 53, 110)),
                  (-500, (68, 132, 169)), (-1, (151, 199, 208)),
                  (0, (231, 220, 168)), (200, (110, 151, 80)),

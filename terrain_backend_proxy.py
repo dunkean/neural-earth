@@ -142,7 +142,7 @@ class ReferenceWorker:
         self.log_path.parent.mkdir(parents=True,exist_ok=True)
         self.log=self.log_path.open('ab',buffering=0)
         try:
-            self.process=subprocess.Popen([sys.executable,str(ROOT/'run_terrain_benchmark_server.py'),'--port','8766'],
+            self.process=subprocess.Popen([sys.executable,str(ROOT/'tools/benchmarks/run_terrain_benchmark_server.py'),'--port','8766'],
                 cwd=str(ROOT),env=child_environment(self.token,os.getpid()),stdin=subprocess.DEVNULL,
                 stdout=self.log,stderr=subprocess.STDOUT,close_fds=True,
                 creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0) if os.name=='nt' else 0)
