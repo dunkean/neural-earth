@@ -813,6 +813,52 @@ Le coarse8 actuel construit son scheduler sur CPU : son micro-benchmark publie
 le temps eager et indique explicitement CUDA Graphs indisponible. Les mesures
 physiques des poids n'ont pas changé. **33 tests de distillation passent.**
 
+### Mesures complètes et optimisation d'inférence
+
+Le benchmark précédent est maintenant complet sur les deux GPU
+(`bench/decoded-bundle/summary.json`). Médianes, mondes frais, dépendances hors
+chronomètre, features/transferts compris :
+
+| Étape / surface | 4090 teacher → élève | Gain | 5090 teacher → élève | Gain |
+| --- | --- | --- | --- | --- |
+| Base / 2048² latents | 16,226 → 2,539 s | ×6,39 | 12,839 → 2,119 s | ×6,06 |
+| Coarse / 128² cellules | 0,304 → 1,264 s | ×0,24 | 0,285 → 1,231 s | ×0,23 |
+| Decoder / 1024² pixels | 0,337 → 0,294 s | ×1,15 | 0,245 → 0,290 s | ×0,85 |
+
+Ces chiffres montrent des limites réelles : le coarse8 eager est plus lent que
+le teacher à 20 étapes capturées, et la construction CPU des entrées pénalise
+le decoder. La taille réduite des poids n'assure pas à elle seule l'accélération.
+Les essais base192 et contrôle128 ont démarré après ces mesures ; leurs 20000
+pas sont en cours, sans génération de nouveaux targets.
+
+Optimisation désormais en validation : assemblage des entrées directement sur
+le GPU en conservant le bruit et la trigonométrie CPU identiques ; nearest
+upsampling et remplissage des canaux constants sur GPU. Le coarse précharge
+ses seuls sigma d'entrée sur GPU, conserve les coefficients du scheduler sur
+CPU et utilise les caches de constantes exacts du runtime. Sa capture complète
+est partagée entre mondes empruntant les mêmes poids.
+
+`eval/coarse-capture-exact.json` vérifie **six fenêtres de validation**, eager
+optimisé et graph replay contre l'ancienne implémentation archivée : **écart
+maximal 0**. Les entrées base et decoder CPU/GPU sont également identiques sur
+ces six cas. **35 tests CPU passent.** Le code teacher et `features.py` sont
+inchangés ; données et états d'entraînement restent compatibles.
+
+La preuve physique complète est ordonnancée dans `optimized-baseline-physical`,
+après les deux entraînements et les diagnostics du contrôle128 : **14 + 24
+vues** comparées à celles du bundle précédent, puis **huit vues de raccords**.
+`verify_equivalence.py` refuse les différences de poids, de référence ou de
+cas couverts. L'inspection du 192 attend cette preuve ; benchmarks du 192,
+du bundle128 optimisé et du contrôle128 s'enchaînent ensuite avec les deux GPU
+libres. Les anciens chiffres restent des mesures de la version précédente.
+
+Galerie des deux bases128, avec coarse8 et decoder200k constants :
+`eval/review-base-before-width/index.html`, **48 vues**. Le passage couplé20000
+réintroduit du relief mais amplifie trop le grain sur certaines plaines
+(pente ×4,56, bande la plus fine ×12,63 sur `temperate-plain-42-159--112` LOD0).
+Le parent100k reste préservé comme alternative plus lisse. **15 checkpoints
+figés** sont inventoriés dans `ckpt/candidates/inventory.json`.
+
 ## Préparation du 2026-10-10 — en attente du top
 
 La passation a été reçue en texte dans la conversation. Les performances de la

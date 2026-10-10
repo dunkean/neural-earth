@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import torch
 from torch import nn
@@ -34,6 +35,13 @@ class CoarseSolver(nn.Module):
         cfg = json.loads((source/'config.json').read_text())
         self.delta_ratio = cfg['coarse_stds'][1] / cfg['coarse_stds'][0]
 
+    def prepare_capture(self, *, exact_kernels=False, attention_backend='reference'):
+        from terrain_nn_constants import prepare_constants
+        # Reuse the runtime's exact constant caches for this separate network.
+        prepare_constants(SimpleNamespace(device=next(self.net.parameters()).device,
+            coarse_model=self.net, base_model=nn.Identity(), decoder_model=nn.Identity()),
+            exact_kernels=exact_kernels, attention_backend=attention_backend)
+
     def forward(self, features):
         # Autocast changes FP32 scalar/embedding operations inside this solver:
         # measured 20-step error was ~16 m, versus ~0.21 m without it on a
@@ -53,6 +61,17 @@ class CoarseSolver(nn.Module):
         dtype = torch.bfloat16 if features.device.type == 'cuda' else torch.float32
         scheduler = EDMDPMSolverMultistepScheduler(sigma_min=.002, sigma_max=80, sigma_data=.5)
         scheduler.set_timesteps(self.steps)
+        input_sigmas = scheduler.sigmas
+        if features.is_cuda:
+            # Keep scheduler coefficients on CPU to preserve their arithmetic.
+            # Only the network's sigma inputs already used CUDA in the original
+            # path. Prepare their identical copies before graph capture.
+            key = (features.device, self.steps)
+            cached = self.__dict__.get('_input_sigma_cache')
+            if cached is None or cached[0] != key:
+                cached = (key, scheduler.sigmas.to(features.device))
+                self.__dict__['_input_sigma_cache'] = cached
+            input_sigmas = cached[1]
         sample = features[:, :6].to(dtype) * scheduler.sigmas[0]
         condition = features[:, 6:11].to(dtype)
         labels = [features[:, i, 0, 0].to(dtype) for i in range(11, 16)]
@@ -61,8 +80,7 @@ class CoarseSolver(nn.Module):
         # still reach the FP32 masters, including through all solver evaluations.
         state = {name: value.to(dtype) for name, value in
                  list(self.net.named_parameters()) + list(self.net.named_buffers())}
-        for t, sigma in zip(scheduler.timesteps, scheduler.sigmas):
-            sigma = sigma.to(features.device)
+        for t, sigma in zip(scheduler.timesteps, input_sigmas):
             inputs = torch.cat((scheduler.precondition_inputs(sample, sigma), condition), dim=1).to(dtype)
             noise_labels = scheduler.trigflow_precondition_noise(sigma.view(-1)).to(dtype).expand(features.shape[0])
             result = torch.func.functional_call(self.net, state, (inputs,),

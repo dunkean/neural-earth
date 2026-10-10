@@ -3,17 +3,80 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import MethodType
+import threading
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from infinite_tensor import InfiniteTensor, TensorWindow
 
-from distill.features import base_features, coarse_features, decoder_features
+from distill.features import COND_MEANS, COND_STDS, noise, phase
 from distill.student import load_student
 
 
 def normalized(value):
     return (value[:-1]/value[-1:].clamp_min(1e-12)).float()
+
+
+def base_inputs(coarse, coarse_y, coarse_x, seed, y, x, size, histogram, device):
+    """Assemble the CPU feature schema directly on the inference device."""
+    if y % 32 or x % 32 or size % 32:
+        raise ValueError('Base inputs must align to the 32-latent coarse grid.')
+    cy, cx = y//32-int(coarse_y), x//32-int(coarse_x)
+    field = torch.as_tensor(coarse, dtype=torch.float32)[:, cy:cy+size//32, cx:cx+size//32]
+    if field.shape != (6, size//32, size//32):
+        raise ValueError('Stored conditioning does not cover the requested halo.')
+    # Retain the original CPU normalization and trigonometric arithmetic.
+    field = (field-torch.from_numpy(COND_MEANS)[:, None, None])/torch.from_numpy(COND_STDS)[:, None, None]
+    inputs = torch.zeros(32, size, size, device=device, dtype=torch.float32)
+    inputs[:5].copy_(noise(seed+5819, y, x, size, size, 5))
+    inputs[5:10].copy_(noise(seed+5820, y, x, size, size, 5))
+    inputs[10:16].copy_(F.interpolate(field[None].to(device), size=(size, size), mode='nearest')[0])
+    inputs[16].fill_((1-.66)/.47)
+    inputs[17:21].copy_(phase(y, x, size, size))
+    inputs[21:26].copy_(torch.as_tensor(histogram, dtype=torch.float32).to(device)[:, None, None])
+    return inputs
+
+
+def decoder_inputs(latents, seed, y, x, size, device):
+    inputs = torch.zeros(16, size, size, device=device, dtype=torch.float32)
+    inputs[:1].copy_(noise(seed+5819, y, x, size, size, 1, tile=size))
+    fields = torch.as_tensor(latents, dtype=torch.float32, device=device)
+    inputs[1:5].copy_(F.interpolate(fields[None], size=(size, size), mode='nearest')[0])
+    return inputs
+
+
+def coarse_graph_forward(model, inputs):
+    """Share a bounded whole-solver capture across worlds borrowing this model."""
+    if not inputs.is_cuda or torch.is_grad_enabled():
+        return model(inputs)
+    lock = model.__dict__.setdefault('_distill_graph_lock', threading.Lock())
+    with lock:
+        key = (tuple(inputs.shape), tuple(inputs.stride()), inputs.dtype, inputs.device,
+               tuple((id(p), p._version) for p in model.parameters()))
+        cached = model.__dict__.get('_distill_coarse_graph')
+        if cached is None or cached[0] != key:
+            model.__dict__.pop('_distill_coarse_graph', None)
+            cached = None
+            static = inputs.clone()
+            stream = torch.cuda.Stream(device=inputs.device)
+            stream.wait_stream(torch.cuda.current_stream(inputs.device))
+            with torch.cuda.stream(stream):
+                for _ in range(3):
+                    reference = model(static)
+            torch.cuda.current_stream(inputs.device).wait_stream(stream)
+            graph = torch.cuda.CUDAGraph()
+            with torch.cuda.graph(graph, stream=stream, capture_error_mode='thread_local'):
+                output = model(static)
+            graph.replay()
+            if not torch.equal(reference, output):
+                raise RuntimeError('Coarse student graph differs from its eager output.')
+            cached = (key, graph, static, output)
+            model.__dict__['_distill_coarse_graph'] = cached
+        _, graph, static, output = cached
+        static.copy_(inputs)
+        graph.replay()
+        return output.clone()
 
 
 def install(world, checkpoints, tile_size=512):
@@ -28,6 +91,10 @@ def install(world, checkpoints, tile_size=512):
             model, checkpoint = load_student(path, world.device)
         if model.config.stage != stage:
             raise ValueError(f'{path}: expected {stage}, found {model.config.stage}.')
+        if stage == 'coarse' and model.config.solver_steps and torch.device(world.device).type == 'cuda':
+            profile = getattr(world, '_terrain_profile', None)
+            model.solver.prepare_capture(exact_kernels=getattr(profile, 'exact_kernels', False),
+                                         attention_backend=getattr(profile, 'attention_backend', 'reference'))
         students[stage] = model
     world._distill_students = students
     world._distill_counts = {stage: dict(calls=0, output_pixels=0) for stage in students}
@@ -36,7 +103,7 @@ def install(world, checkpoints, tile_size=512):
         model = students[stage]
         inputs = features[None].to(world.device)
         with torch.autocast('cuda', dtype=torch.bfloat16):
-            output = model(inputs)[0].float()
+            output = (coarse_graph_forward(model, inputs) if stage == 'coarse' else model(inputs))[0].float()
         if not torch.isfinite(output).all():
             raise FloatingPointError(f'Non-finite {stage} student output.')
         world._distill_counts[stage]['calls'] += 1
@@ -52,8 +119,8 @@ def install(world, checkpoints, tile_size=512):
                 for (_, iy, ix), condition in zip(ctxs, conditions):
                     y, x = iy*tile_size-halo, ix*tile_size-halo
                     field = normalized(condition).cpu().numpy()
-                    features = base_features(field, y//32, x//32, self.seed, y, x,
-                                             total, self.kwargs['histogram_raw'])
+                    features = base_inputs(field, y//32, x//32, self.seed, y, x,
+                                           total, self.kwargs['histogram_raw'], self.device)
                     pred = forward('base', features)[:, halo:halo+tile_size, halo:halo+tile_size]
                     self._distill_counts['base']['output_pixels'] += tile_size**2
                     outputs.append(torch.cat([pred, pred.new_ones(1, tile_size, tile_size)]))
@@ -91,7 +158,11 @@ def install(world, checkpoints, tile_size=512):
                     prepared = _coarse_batch(self, [ctx], scheduler, weight, t_cond, labels, 1, prepare_only=True)
                     condition = prepared.conditions[0][0].float().cpu().numpy()
                     scalars = np.array([float(v[0]) for v in prepared.conditions[1:]], np.float32)
-                    features = coarse_features(condition, scalars, self.seed, ctx[1]*48, ctx[2]*48)
+                    # Preserve the prepared BF16 conditions and scalar values.
+                    features = torch.zeros(16, 64, 64, device=self.device, dtype=torch.float32)
+                    features[:6].copy_(noise(self.seed+1, ctx[1]*48, ctx[2]*48, 64, 64, 6))
+                    features[6:11].copy_(torch.as_tensor(condition, device=self.device))
+                    features[11:].copy_(torch.as_tensor(scalars, device=self.device)[:, None, None])
                     pred = forward('coarse', features)*stds+means
                     self._distill_counts['coarse']['output_pixels'] += 64**2
                     outputs.append(torch.cat([pred*weight[None], weight[None]]))
@@ -112,8 +183,8 @@ def install(world, checkpoints, tile_size=512):
             def predict(ctxs, latents):
                 outputs = []
                 for ctx, latent in zip(ctxs, latents):
-                    features = decoder_features(normalized(latent)[:4].cpu(), self.seed,
-                                                ctx[1]*stride, ctx[2]*stride, size)
+                    features = decoder_inputs(normalized(latent)[:4], self.seed,
+                                              ctx[1]*stride, ctx[2]*stride, size, self.device)
                     pred = forward('decoder', features)
                     self._distill_counts['decoder']['output_pixels'] += size**2
                     outputs.append(torch.cat([pred*weight[None], weight[None]]))

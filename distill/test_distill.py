@@ -11,7 +11,8 @@ import torch
 
 from distill.common import atomic_json, atomic_write, HOLDOUT_SEEDS
 from distill.dataset import StepBatches
-from distill.features import base_features, noise
+from distill.features import base_features, decoder_features, noise
+from distill.inference import base_inputs, decoder_inputs
 from distill.jobs import proc_identity
 from distill.resume_teacher import validate_resume_plan
 from distill.student import Student, StudentConfig, load_student
@@ -26,6 +27,7 @@ from distill.export import export_bundle
 from distill.decoded_loss import PairedCrops, decode, reconstructed_height
 from distill.benchmark_candidates import wait_seam_diagnostic
 from distill.bench_pipeline import StageCount, release_counter_graphs
+from distill.verify_equivalence import compare as compare_physical_optimization
 
 
 class DistillationTests(unittest.TestCase):
@@ -126,6 +128,41 @@ class DistillationTests(unittest.TestCase):
         a = base_features(coarse, -8, -8, 9001, -128, -128, 256, [0]*5)
         b = base_features(coarse, -8, -8, 9001, -64, -64, 256, [0]*5)
         torch.testing.assert_close(a[:, 64:, 64:], b[:, :192, :192], rtol=0, atol=0)
+
+    def test_inference_feature_assembly_preserves_training_schema_exactly(self):
+        coarse = np.random.default_rng(8).normal(size=(6, 16, 16)).astype(np.float32)
+        for y, x in [(-128, -64), (64, 32), (100000000, -100000000)]:
+            args = (coarse, y//32, x//32, 8173, y, x, 128, [.1, .2, .3, .4, .5])
+            torch.testing.assert_close(base_inputs(*args, 'cpu'), base_features(*args), rtol=0, atol=0)
+        latents = torch.randn(4, 64, 64)
+        for y, x in [(-384, 384), (768, -768)]:
+            torch.testing.assert_close(decoder_inputs(latents, 8173, y, x, 512, 'cpu'),
+                                       decoder_features(latents, 8173, y, x), rtol=0, atol=0)
+
+    def test_optimization_equivalence_requires_same_weights_and_complete_arrays(self):
+        with tempfile.TemporaryDirectory() as directory:
+            before, after = [Path(directory)/n for n in ('before', 'after')]
+            fingerprint = {n:n+'-sha' for n in ('base', 'coarse', 'decoder')}
+            report = dict(gpu='gpu', torch='version', sites=['site'], source_digests={},
+                          checkpoint_digests={'student_all':fingerprint},
+                          variants={'student_all':[dict(site='site', lod=0)]})
+            key = 'student_all|site|0'
+            for path in (before, after):
+                path.mkdir()
+                atomic_json(path/'report.json', report)
+                np.savez(path/'arrays.npz', **{key:np.zeros((4, 4), np.float32)})
+            self.assertTrue(compare_physical_optimization(before, after)['exact_passed'])
+            np.savez(after/'arrays.npz', **{key:np.ones((4, 4), np.float32)})
+            self.assertFalse(compare_physical_optimization(before, after)['exact_passed'])
+            atomic_json(after/'report.json', report | dict(checkpoint_digests={
+                'student_all':fingerprint | dict(base='different-sha')}))
+            with self.assertRaises(ValueError):
+                compare_physical_optimization(before, after)
+            atomic_json(after/'report.json', report)
+            np.savez(after/'arrays.npz', **{key:np.zeros((4, 4), np.float32),
+                                          'student_all|extra|0':np.zeros((4, 4), np.float32)})
+            with self.assertRaises(ValueError):
+                compare_physical_optimization(before, after)
 
     def test_student_valid_halo_removes_tile_boundary_effects(self):
         torch.manual_seed(17)
