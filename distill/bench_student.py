@@ -6,12 +6,14 @@ implementation. Full-model FP8 is only claimed when a real backend is installed.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import io
 import json
 from pathlib import Path
 
 import torch
 
-from distill.common import DATA, atomic_json, external_path
+from distill.common import DATA, REPO, atomic_json, external_path
 from distill.student import load_student
 
 
@@ -82,8 +84,9 @@ def main():
     if not args.fp8_only:
         if not args.checkpoint:
             parser.error('--checkpoint is required unless --fp8-only.')
+        payload = args.checkpoint.read_bytes()
         with torch.inference_mode(False):
-            model, saved = load_student(args.checkpoint, 'cuda')
+            model, saved = load_student(io.BytesIO(payload), 'cuda')
         stage = model.config.stage
         tile = args.tile if stage == 'base' else (64 if stage == 'coarse' else 512)
         halo = model.halo if stage == 'base' else 0
@@ -92,6 +95,10 @@ def main():
             parser.error('Tile does not satisfy model alignment.')
         report.update(stage=stage, step=saved['step'], tile=tile, halo=halo,
                       params=sum(p.numel() for p in model.parameters()), checkpoint=str(args.checkpoint.resolve()))
+        report['checkpoint_digest'] = hashlib.sha256(payload).hexdigest()
+        report['student_source_digests'] = {
+            'code:'+name: hashlib.sha256((REPO/name).read_bytes()).hexdigest()
+            for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py')}
         for channels_last in (False, True):
             model.to(memory_format=torch.channels_last if channels_last else torch.contiguous_format)
             inputs = torch.randn(args.batch, model.config.in_channels, total, total, device='cuda')

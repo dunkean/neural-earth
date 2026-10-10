@@ -154,10 +154,17 @@ préparation ci-dessous sont conservées comme historique ; les jobs ont reçu l
   arrêt sur erreur. `check_dataset.py` : audit complet des triples et de la
   séparation par monde. `evaluate.py` : refuse une acceptation sans les 14 cas,
   les seuils physiques, la vitesse sur même carte et la vérification des joints.
-- [x] Onze tests dédiés : bruit/crops négatifs, features globales, invariance
+- [x] `check_seams.py` : champs calculés en une grande tuile et plusieurs
+  petites tuiles sur les mêmes features, mesure des écarts aux joints et à
+  l'intérieur. La revue des planches physiques reste explicitement en attente.
+  Benchmarks, joints et revue visuelle doivent porter les mêmes empreintes de
+  poids et de code que les évaluations physiques ; un benchmark au pas 0
+  ne peut pas accepter un checkpoint entraîné.
+- [x] Douze tests dédiés : bruit/crops négatifs, features globales, invariance
   avec halo, échantillonnage repris, losses masquées/gradients finis, écriture
   interrompue, identité des processus, précision des sorties sous autocast,
-  supervision du relief coarse et refus d'une validation incomplète.
+  supervision du relief coarse, refus d'une validation incomplète et rejet
+  des preuves issues d'autres poids ou sans revue des joints.
 
 Le masque du conditionnement base upstream est constant (ones), ce n'est pas
 un masque terre/mer ; `histogram_raw` est un vecteur de cinq valeurs. Les données
@@ -202,6 +209,9 @@ l'entraînement pendant que le reste du dataset est généré.
   d'évaluation (4090).
 - [ ] Vérification/captures des joints, benchmarks BF16 finaux sur les deux
   cartes et mesure du coût réel de construction des entrées.
+  Le CLI de jointures est vérifié sur deux crops et un petit réseau à tête
+  non nulle sous autocast CPU : écart max 0. Cette fixture au pas 0 n'est pas
+  une preuve pour les checkpoints entraînés ni pour cuDNN.
 - [ ] Checkpoints sélectionnés immuables, tableaux et planches finaux, branche
   poussée à jour. Le but reste actif : **aucun modèle accepté à ce stade**.
 
@@ -227,6 +237,13 @@ python -m distill.jobs start teacher-main --gpu 0 -- python -m distill.teacher \
 
 # Après avoir constaté que le coordinateur est terminal/manquant :
 python -m distill.jobs start training-workflow --gpu cpu -- python -m distill.run_training
+
+# Après sélection d'un candidat base immuable, GPU 0 libre :
+CUDA_VISIBLE_DEVICES=0 python -m distill.check_seams \
+  --checkpoint ~/data/distill/ckpt/base/best.pt \
+  --output ~/data/distill/eval/base-seams.json
+# Ce rapport reste passed=false jusqu'à la revue des planches physiques.
+# La revue doit enregistrer leurs checkpoint_digests exacts sous visual_review.
 ```
 
 Les logs sont sous `~/data/distill/jobs/<nom>/output.log`, les checkpoints sous

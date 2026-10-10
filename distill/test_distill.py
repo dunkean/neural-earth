@@ -12,7 +12,7 @@ from distill.features import base_features, noise
 from distill.jobs import proc_identity
 from distill.student import Student, StudentConfig
 from distill.train import coarse_delta_loss, losses
-from distill.evaluate import audit
+from distill.evaluate import artifact_audit, audit
 
 
 class DistillationTests(unittest.TestCase):
@@ -128,6 +128,22 @@ class DistillationTests(unittest.TestCase):
         report['variants']['student'].pop()
         with self.assertRaises(ValueError):
             audit(report, 'student')
+
+    def test_acceptance_rejects_mismatched_weights_and_unreviewed_seams(self):
+        sources = {'code:'+name: 'source-hash' for name in
+                   ('distill/student.py', 'distill/features.py', 'distill/inference.py')}
+        fingerprint = dict(base='trained-model', coarse='coarse-model', decoder='decoder-model', **sources)
+        report = dict(gpu='gpu', checkpoint_digests=dict(student_all=fingerprint))
+        benchmark = dict(gpu='gpu', step=100, checkpoint_digest='trained-model', student_source_digests=sources)
+        seams = dict(gpu='gpu', split='val', rows=[dict(passed=True)]*12,
+                     numerical_passed=True, checkpoint_digest='trained-model', student_source_digests=sources,
+                     visual_review=dict(passed=True, checkpoint_digests=fingerprint))
+        self.assertTrue(artifact_audit(report, 'student_all', benchmark, seams)['passed'])
+        benchmark['checkpoint_digest'] = 'architecture-only'
+        self.assertFalse(artifact_audit(report, 'student_all', benchmark, seams)['passed'])
+        benchmark['checkpoint_digest'] = 'trained-model'
+        seams['visual_review'] = dict(passed=False)
+        self.assertFalse(artifact_audit(report, 'student_all', benchmark, seams)['passed'])
 
 
 if __name__ == '__main__':

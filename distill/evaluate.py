@@ -13,8 +13,6 @@ import json
 import math
 from pathlib import Path
 
-import numpy as np
-
 from distill.common import atomic_json, external_path
 
 
@@ -78,6 +76,27 @@ def speed_audit(base_path, student_path, minimum=10.):
                 note='Field ratio includes overlap/two passes; excludes feature construction and I/O.')
 
 
+def artifact_audit(report, variant, benchmark, seams):
+    """Bind all evidence to the same models/code; a timing fixture is not a candidate."""
+    fingerprint = report.get('checkpoint_digests', {}).get(variant, {})
+    sources = {key: value for key, value in fingerprint.items() if key.startswith('code:')}
+    visual = seams.get('visual_review', {})
+    checks = dict(
+        physical_weights_present=bool(fingerprint.get('base')) and len(sources) == 3,
+        benchmark_weights=bool(fingerprint.get('base')) and benchmark.get('checkpoint_digest') == fingerprint.get('base'),
+        benchmark_code=bool(sources) and benchmark.get('student_source_digests') == sources,
+        benchmark_trained=benchmark.get('step', 0) > 0,
+        benchmark_gpu=bool(report.get('gpu')) and benchmark.get('gpu') == report.get('gpu'),
+        seams_weights=bool(fingerprint.get('base')) and seams.get('checkpoint_digest') == fingerprint.get('base'),
+        seams_code=bool(sources) and seams.get('student_source_digests') == sources,
+        seams_gpu=bool(report.get('gpu')) and seams.get('gpu') == report.get('gpu'),
+        seams_validation=seams.get('split') == 'val' and len(seams.get('rows', [])) >= 12,
+        seams_numerical=seams.get('numerical_passed') is True and all(row.get('passed') is True for row in seams.get('rows', [])),
+        seams_visual=visual.get('passed') is True and visual.get('checkpoint_digests') == fingerprint,
+    )
+    return dict(checks=checks, passed=all(checks.values()))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--report', type=Path, required=True)
@@ -92,7 +111,10 @@ def main():
     result['speed'] = (speed_audit(args.base_benchmark, args.student_benchmark)
                        if args.base_benchmark and args.student_benchmark else dict(passed=False, reason='not measured'))
     result['seams'] = json.loads(args.seams.read_text()) if args.seams else dict(passed=False, reason='not verified')
-    result['accepted'] = result['physical_passed'] and result['speed']['passed'] and result['seams'].get('passed', False)
+    benchmark = json.loads(args.student_benchmark.read_text()) if args.student_benchmark else {}
+    result['artifacts'] = artifact_audit(json.loads(args.report.read_text()), args.variant, benchmark, result['seams'])
+    result['accepted'] = (result['physical_passed'] and result['speed']['passed'] and
+                          result['seams'].get('passed', False) and result['artifacts']['passed'])
     atomic_json(external_path(args.output), result)
     print(json.dumps(dict(variant=args.variant, physical_passed=result['physical_passed'],
                          accepted=result['accepted'], failing_sites=sum(not r['passed'] for r in result['rows']))))
