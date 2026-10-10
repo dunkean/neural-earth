@@ -129,6 +129,31 @@ def shore_distance(height, resolution):
     return distance_transform_edt(~sea,sampling=spacing).astype(F)
 
 
+def openness_probes(resolution):
+    """Sample offsets around a shore sample: two rings of 12 at about 150 and
+    300 m, kept within 2-20 samples (the GPU tile halo is 24)."""
+    radius = min(max(300./float(resolution),2.),20.)
+    probes = []
+    for ring,rad in enumerate((radius*.5,radius)):
+        for k in range(12):
+            a = np.float32(2*np.pi/12)*np.float32(k+.25+.5*ring)
+            probes.append((int(np.round(np.float32(np.cos(a))*np.float32(rad))),
+                           int(np.round(np.float32(np.sin(a))*np.float32(rad)))))
+    return probes
+
+
+def shore_openness(height, resolution):
+    """Share of the probes around each sample that fall in the sea: about half
+    on an open coast, near zero beside a pond. Indices clamp at the edges."""
+    height = np.asarray(height)
+    sea = np.atleast_2d(height<0).astype(F)
+    step = resolution if np.isscalar(resolution) else max(resolution)
+    ny,nx = sea.shape[-2:]; out = np.zeros(sea.shape,F); probes = openness_probes(step)
+    for dx,dy in probes:
+        out += sea[...,np.clip(np.arange(ny)+dy,0,ny-1),:][...,np.clip(np.arange(nx)+dx,0,nx-1)]
+    return (out/F(len(probes))).reshape(height.shape)
+
+
 def coast_band(shore, width, fp):
     """Fraction of a sample covered by the strip within ``width`` of the sea:
     the shoreline lies half a sample from the first land centre, so a beach
@@ -137,12 +162,12 @@ def coast_band(shore, width, fp):
 
 
 def surface_material(height, gradient, tpi, point, north, footprint, soil, seasons,
-                     salt, settings=None, bare=False, pedology=None, shore=None):
+                     salt, settings=None, bare=False, pedology=None, shore=None, openness=None):
     """Satellite-like albedo. ``seasons`` are sea-level ts, ps, lapse_s, tw, pw, lapse_w.
 
     ``bare`` returns the substrate (soil + exposed bedrock) used by the Soil layer.
-    ``shore`` (metres to the sea, see ``shore_distance``) is derived from
-    ``height`` when omitted.
+    ``shore`` (metres to the sea, see ``shore_distance``) and ``openness``
+    (see ``shore_openness``) are derived from ``height`` when omitted.
     """
     s = parse_settings(settings)
     var, forest_amount, rock_tan = F(s['variation']), F(s['forest']), F(np.tan(np.deg2rad(s['rock_slope'])))
@@ -244,13 +269,17 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
     woods = cover(np.clip(trees,0,1),patch,.65*float(var))
     color = mix(color,canopy,woods)
     flats = (1-smooth(1.5,6,height))*(1-smooth(.05,.2,grade))
-    # Beaches: a strip along the sea, 25-280 m wide by coast stretch, kept
-    # as area coverage so wide ones stay visible at 240 m samples. Low flats
-    # behind it (estuary and river bars) stay as darker, wetter sediment.
+    # Beaches: an intermittent strip along open water, up to ~190 m wide by
+    # coast stretch with a ragged inner edge, kept as area coverage so wide
+    # ones stay visible at 240 m samples. Ponds and narrow inlets (little
+    # water around) get none. Low flats behind it (estuary and river bars)
+    # stay as darker, wetter sediment.
     shore = shore_distance(height,fp) if shore is None else np.asarray(shore,F)
+    openness = shore_openness(height,fp) if openness is None else np.asarray(openness,F)
     reach = fbm(point,20000.,3,fp,salt+7)
-    width = F(25)+F(255)*smooth(-.4,.6,reach[0]*np.sqrt(reach[1]))
-    beach = coast_band(shore,width,fp)*(1-smooth(4,12,height))*(1-smooth(.2,.5,grade))
+    stretch = F(.65)*reach[0]*np.sqrt(reach[1])+F(.5)*patch[0]*np.sqrt(patch[1])
+    width = F(140)*smooth(-.15,.75,stretch)*smooth(.15,.4,openness)*(1+F(.35)*fine[0]*np.sqrt(fine[1]))
+    beach = coast_band(shore,np.minimum(width,F(20*fp)),fp)*(1-smooth(4,12,height))*(1-smooth(.2,.5,grade))
     # Sediment follows the coast's geology: pale quartz or golden sand by
     # province, coral sand in the tropics, and local stone on cool or rugged
     # coasts. Summer warmth, not winter frost, distinguishes cold shingle
@@ -323,7 +352,8 @@ def colorize_surface(world,xs,ys,elevation,resolution,generation_settings,settin
     if not spherical:north.fill(0)
     shore = shore_distance(elevation,resolution)
     return material(elevation,gradient,tpi,point,north,step,soil,seasons,
-                    seed_value(getattr(getattr(world,'source',world),'seed',0)),settings,mode=='soil',pedology,shore)
+                    seed_value(getattr(getattr(world,'source',world),'seed',0)),settings,mode=='soil',pedology,
+                    shore,shore_openness(elevation,resolution))
 
 
 def material(*args):

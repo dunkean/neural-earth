@@ -150,7 +150,7 @@ class SurfaceTests(unittest.TestCase):
 
     def test_beaches_vary_by_coast_but_stay_mostly_light(self):
         # Shore sample of 200 coasts around the planet, temperate climate.
-        rng=np.random.default_rng(1);shore=[]
+        rng=np.random.default_rng(1);shore=[];present=[]
         x=(np.arange(8)+.5)*30-60;shape=(1,8)
         h=np.where(x<0,-5.,1.).astype(np.float32)[None]
         seasons=np.broadcast_to(np.float32(TEMPERATE).reshape(6,1,1),(6,*shape))
@@ -160,13 +160,28 @@ class SurfaceTests(unittest.TestCase):
             c=6.37e6*np.array([np.cos(lat)*np.cos(lon),np.sin(lat),np.cos(lat)*np.sin(lon)])
             t=np.cross(c,[0,1,0]);t/=np.linalg.norm(t)
             p=(c+x[:,None]*t).astype(np.float32)[None]
-            rgb=surface_material(h,np.zeros((*shape,2),np.float32),np.zeros(shape,np.float32),p,
-                                 np.broadcast_to(np.float32([0,-1]),(*shape,2)),30.,soil,seasons,seed_value(42),{'variation':0})
-            shore.append(rgb[0,2])
-        shore=np.array(shore);lum=shore@[.2126,.7152,.0722]
+            rgb,sheltered=(surface_material(h,np.zeros((*shape,2),np.float32),np.zeros(shape,np.float32),p,
+                                 np.broadcast_to(np.float32([0,-1]),(*shape,2)),30.,soil,seasons,seed_value(42),{'variation':0},
+                                 openness=o) for o in (None,np.zeros(shape,np.float32)))
+            shore.append(rgb[0,2]);present.append(np.abs(rgb[0,2]-sheltered[0,2]).max()>.02)
+        # Beaches are intermittent: some open coasts end in vegetation or flats.
+        self.assertTrue(.35<np.mean(present)<.85,'beaches line part of the open coasts')
+        shore=np.array(shore)[np.array(present)];lum=shore@[.2126,.7152,.0722]
         self.assertGreater((lum>.6).mean(),.5,'most beaches are light sand')
         self.assertGreater(((shore[:,0]-shore[:,2]>.25)&(lum>.5)).mean(),.1,'some are golden')
         self.assertTrue(.02<(lum<.35).mean()<.15,'dark volcanic beaches are present but rare')
+
+    def test_ponds_get_no_beach_ring(self):
+        # A 45 m pond in a 1 m lowland plain: land around it keeps its colour.
+        n=48;x=(np.arange(n)+.5)*15
+        p=np.zeros((n,n,3),np.float32);p[...,0]=6.3e6;p[...,1]=x[:,None];p[...,2]=x[None]+2e5
+        seasons=np.broadcast_to(np.float32(TEMPERATE).reshape(6,1,1),(6,n,n))
+        soil=np.broadcast_to(SOIL.reshape(9,1,1),(9,n,n))
+        plain=np.ones((n,n),np.float32);pond=plain.copy();pond[23:26,23:26]=-1
+        rgb=[surface_material(h,np.zeros((n,n,2),np.float32),np.zeros((n,n),np.float32),p,
+                              np.broadcast_to(np.float32([0,-1]),(n,n,2)),15.,soil,seasons,seed_value(42),{'variation':0})
+             for h in (plain,pond)]
+        np.testing.assert_allclose(rgb[1][pond>=0],rgb[0][pond>=0],atol=1e-6)
 
     def coastal_palette(self,climate,footprint,*,grade=0.,tpi=0.,settings=None):
         # The same 200 geographic coasts at each LOD and in each climate.

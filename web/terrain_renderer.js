@@ -127,7 +127,7 @@
     }
     // Climate: sea-level seasonal temperatures/lapse and seasonal precipitation.
     // bare=true returns the substrate shown by the Soil layer.
-    fn surfaceMaterial(height:f32,gradient:vec2<f32>,tpi:f32,point:vec3<f32>,north:vec2<f32>,footprint:f32,soil:vec3<f32>,pedology:vec3<f32>,substrateRock:vec3<f32>,sandFraction:f32,ts0:f32,ps:f32,ls:f32,tw0:f32,pw:f32,lw:f32,bare:bool,shore:f32)->vec3<f32>{
+    fn surfaceMaterial(height:f32,gradient:vec2<f32>,tpi:f32,point:vec3<f32>,north:vec2<f32>,footprint:f32,soil:vec3<f32>,pedology:vec3<f32>,substrateRock:vec3<f32>,sandFraction:f32,ts0:f32,ps:f32,ls:f32,tw0:f32,pw:f32,lw:f32,bare:bool,shore:f32,openness:f32)->vec3<f32>{
       let season=params.render0.x;let variation=params.render0.y;let forestAmount=params.render0.z;let rockTan=params.render0.w;
       let snowAmount=params.render1.x;let moisture=params.render1.y;
       let salt=u32(surfaceMeta(6));let fp=footprint;let phase=surfaceSeason();let h=max(height,0.);
@@ -212,11 +212,12 @@
       let woods=surfaceCover(clamp(trees,0.,1.),grove,.65*variation);
       color=surfaceMix(color,canopy,woods);
       let flats=(1.-sstep(1.5,6.,height))*(1.-sstep(.05,.2,grade));
-      // Beaches: a 25-280 m strip along the sea as area coverage (visible at
-      // 240 m samples); low flats behind it stay as wetter river/estuary bars.
+      // Beaches: an intermittent strip along open water (none beside ponds), up to
+      // ~190 m wide with a ragged inner edge, as area coverage (visible at 240 m
+      // samples); low flats behind it stay as wetter river/estuary bars.
       let reach=surfaceFbm(point,20000.,3,fp,salt+7u);
-      let width=25.+255.*sstep(-.4,.6,reach.x*sqrt(reach.y));
-      let beach=clamp((width-shore+fp)/fp,0.,1.)*(1.-sstep(4.,12.,height))*(1.-sstep(.2,.5,grade));
+      let width=140.*sstep(-.15,.75,.65*reach.x*sqrt(reach.y)+.5*grove.x*sqrt(grove.y))*sstep(.15,.4,openness)*(1.+.35*fine.x*sqrt(fine.y));
+      let beach=clamp((min(width,20.*fp)-shore+fp)/fp,0.,1.)*(1.-sstep(4.,12.,height))*(1.-sstep(.2,.5,grade));
       // Sediment follows the coast's geology: quartz or golden sand by province,
       // tropical coral sand, and local stone on cool or rugged coasts. Summer
       // warmth preserves sandy continental coasts despite their winter frost.
@@ -264,10 +265,11 @@
     ${materialShader.replaceAll('PTYPE','i32')}
     // Metres to the nearest sea sample (terrain_render.shore_distance), searched
     // in square rings until no closer sample can remain; only low land needs it.
+    // Beaches reach 189 m (and at most 20 samples): farther sea is irrelevant.
     fn shoreDistance(p:vec2<i32>,height:f32,r:f32)->f32{
       var best=1e9;
       if(height<0.||height>=12.){return best;}
-      let last=vec2<i32>(textureDimensions(elevation))-1;let reach=min(24,i32(ceil((320.+r)/r)));
+      let last=vec2<i32>(textureDimensions(elevation))-1;let reach=min(21,i32(ceil((190.+r)/r)));
       for(var k=1;k<=reach;k++){
         if(f32(k)*r>best){break;}
         for(var i=-k;i<=k;i++){
@@ -279,15 +281,26 @@
       }
       return best;
     }
+    // Sea share of terrain_render.openness_probes around a shore sample.
+    fn shoreOpenness(p:vec2<i32>,shore:f32,r:f32)->f32{
+      if(shore>=190.+r){return 0.;}
+      let last=vec2<i32>(textureDimensions(elevation))-1;let radius=clamp(300./r,2.,20.);var sea=0.;
+      for(var k=0;k<24;k++){
+        let a=6.2831853/12.*(f32(k%12)+.25+.5*f32(k/12));let o=vec2<i32>(round(vec2<f32>(cos(a),sin(a))*radius*select(.5,1.,k>=12)));
+        if(textureLoad(elevation,clamp(p+o,vec2<i32>(0),last),0).r<0.){sea+=1.;}
+      }
+      return sea/24.;
+    }
     fn renderSurface(p:vec2<i32>,height:f32)->vec3<f32>{
       // Derivatives match terrain_render.terrain_derivatives: central gradient and
       // the difference of the two Gaussian scales already used for hillshade.
       let local=vec2<f32>(p);let r=params.resolution;let blur=textureLoad(blurred,p,0).rg;
       let gradient=vec2<f32>(textureLoad(elevation,p+vec2<i32>(1,0),0).r-textureLoad(elevation,p-vec2<i32>(1,0),0).r,
         textureLoad(elevation,p+vec2<i32>(0,1),0).r-textureLoad(elevation,p-vec2<i32>(0,1),0).r)*.5/r;
+      let shore=shoreDistance(p,height,r);
       return surfaceMaterial(height,gradient,(blur.g-blur.r)/(6.*r),surfacePoint(local,params.style.xy,r),surfaceNorth(local,params.style.xy,r),r,
         vec3<f32>(clim(p,36),clim(p,37),clim(p,38)),surfacePedology(p),vec3<f32>(clim(p,39),clim(p,40),clim(p,41)),clim(p,42),
-        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.mode == -4.,shoreDistance(p,height,r));
+        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.mode == -4.,shore,shoreOpenness(p,shore,r));
     }
     fn shade(d:vec2<f32>) -> f32 {
       // Same directional light/vertical exaggeration as upstream relief_map.py.
@@ -567,17 +580,26 @@
       // Box mips approximate the Gaussian relief position of fine tiles.
       let tpi=(height-heightAt(p,3.))/(6.*r);
       let point=surfacePoint(p,params.style.xy,r);
-      // Coarse samples are at least hundreds of metres: two rings reach any beach.
-      var shore=1e9;
+      // Same sea distance and openness as the fine tiles (shoreDistance and
+      // shoreOpenness), on the coarse grid.
+      var shore=1e9;var openness=0.;
       if(height>=0.&&height<12.){
-        for(var j=-2;j<=2;j++){for(var i=-2;i<=2;i++){
+        let reach=min(21,i32(ceil((190.+r)/r)));
+        for(var j=-reach;j<=reach;j++){for(var i=-reach;i<=reach;i++){
           let o=vec2<f32>(f32(i),f32(j));
-          if(heightAt(p+o,0.)<0.){shore=min(shore,length(o)*r);}
+          if(length(o)*r<shore&&heightAt(p+o,0.)<0.){shore=length(o)*r;}
         }}
+      }
+      if(shore<190.+r){
+        let radius=clamp(300./r,2.,20.);
+        for(var k=0;k<24;k++){
+          let a=6.2831853/12.*(f32(k%12)+.25+.5*f32(k/12));
+          if(heightAt(p+round(vec2<f32>(cos(a),sin(a))*radius*select(.5,1.,k>=12)),0.)<0.){openness+=1./24.;}
+        }
       }
       let land=surfaceMaterial(max(height,.5),gradient,tpi,point,surfaceNorth(p,params.style.xy,r),r,
         vec3<f32>(clim(p,36),clim(p,37),clim(p,38)),surfacePedology(p),vec3<f32>(clim(p,39),clim(p,40),clim(p,41)),clim(p,42),
-        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.field.z == -4.,shore);
+        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.field.z == -4.,shore,openness);
       textureStore(albedo,vec2<i32>(id.xy),vec4<f32>(land,surfaceSeaIce(point,clim(p,21),clim(p,24),r)));
     }`;
 
