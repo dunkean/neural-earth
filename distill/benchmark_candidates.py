@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -16,7 +17,33 @@ import sys
 
 from distill.common import REPO, atomic_json, external_path
 from distill.export import export_bundle
+from distill.jobs import state
 from distill.run_training import wait_job
+
+
+def wait_seam_diagnostic(name, report_path):
+    """A completed numerical rejection is evidence; a crashed check is not."""
+    try:
+        wait_job(name)
+    except RuntimeError:
+        from distill.common import DATA
+        job = state(DATA/'jobs'/name)
+        path = Path(report_path)
+        if job['live'] or job.get('returncode') != 1 or not path.exists():
+            raise
+        report = json.loads(path.read_text())
+        sources = {'code:'+name: hashlib.sha256((REPO/name).read_bytes()).hexdigest()
+                   for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py')}
+        if (path.stat().st_mtime < job['started_at'] or report.get('stage') != 'base' or
+                report.get('numerical_passed') is not False or len(report.get('rows', [])) != 12 or
+                report.get('student_source_digests') != sources):
+            raise
+        for row in report['rows']:
+            if not isinstance(row.get('passed'), bool) or not all(
+                    math.isfinite(row.get(key, float('nan')))
+                    for key in ('max_abs', 'mean_abs', 'max_jump_error')):
+                raise
+        print(f'NUMERICAL REJECTION {name}: retained in {path}; benchmarks still needed.', flush=True)
 
 
 def main():
@@ -24,12 +51,15 @@ def main():
     for stage in ('base', 'coarse', 'decoder'):
         parser.add_argument('--'+stage+'-inspection', type=Path, required=True)
     parser.add_argument('--wait-job', nargs='+', default=[])
+    parser.add_argument('--wait-seam', nargs=2, action='append', default=[], metavar=('JOB', 'REPORT'))
     parser.add_argument('--gpus', nargs='+', type=int, choices=(0, 1), default=[0, 1])
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     output = external_path(args.output)
     for name in args.wait_job:
         wait_job(name)
+    for name, path in args.wait_seam:
+        wait_seam_diagnostic(name, path)
     paths, digests = {}, {}
     for stage in ('base', 'coarse', 'decoder'):
         inspection = json.loads(getattr(args, stage+'_inspection').read_text())

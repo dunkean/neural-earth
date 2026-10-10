@@ -733,6 +733,10 @@ mesure où une dépendance manquante serait calculée dans la zone chronométré
 Features, transferts et blending de l'étage restent inclus. Ces chiffres ne sont
 pas encore disponibles et ne représentent pas le temps d'une vue complète.
 La mesure n'enregistre aucun graphe d'autograd.
+Un contrôle CUDA des joints terminé avec un rejet numérique conserve son
+rapport et permet quand même les mesures de vitesse : ce rejet ne devient pas
+une validation. Un crash, un rapport incomplet ou antérieur au job bloque la
+coordination. Ce comportement est testé ; 31 tests de distillation passent.
 
 ## Préparation du 2026-10-10 — en attente du top
 

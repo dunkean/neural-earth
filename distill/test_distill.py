@@ -4,6 +4,7 @@ import hashlib
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 import torch
@@ -23,12 +24,39 @@ from distill.widen import expand_state, expanded_config
 from distill.check_physical_seams import partition_stats
 from distill.export import export_bundle
 from distill.decoded_loss import PairedCrops, decode, reconstructed_height
+from distill.benchmark_candidates import wait_seam_diagnostic
 
 
 class DistillationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         torch.set_num_threads(2)
+
+    def test_seam_rejection_can_be_benchmarked_but_crash_or_stale_report_cannot(self):
+        from distill.common import REPO
+        import os
+        import time
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'seams.json'
+            sources = {'code:'+name: hashlib.sha256((REPO/name).read_bytes()).hexdigest()
+                       for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py')}
+            report = dict(stage='base', numerical_passed=False, student_source_digests=sources,
+                          rows=[dict(passed=False, max_abs=.001, mean_abs=.0001, max_jump_error=.001)]*12)
+            atomic_json(path, report)
+            job = dict(live=False, returncode=1, started_at=time.time()-1)
+            with patch('distill.benchmark_candidates.wait_job', side_effect=RuntimeError('check failed')), \
+                 patch('distill.benchmark_candidates.state', return_value=job):
+                wait_seam_diagnostic('seams', path)
+                job['returncode'] = -9
+                with self.assertRaises(RuntimeError):
+                    wait_seam_diagnostic('seams', path)
+                job['returncode'] = 1
+                os.utime(path, (0, 0))
+                with self.assertRaises(RuntimeError):
+                    wait_seam_diagnostic('seams', path)
+                atomic_json(path, report | dict(rows=report['rows'][:11]))
+                with self.assertRaises(RuntimeError):
+                    wait_seam_diagnostic('seams', path)
 
     def test_global_noise_is_independent_of_negative_crop_partition(self):
         for seed in (9281, 9282):
