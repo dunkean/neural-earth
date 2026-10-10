@@ -50,7 +50,22 @@ antérieure (`optimized-bundle-physical{,-rare}/optimization-equivalence.json`) 
 ses huit contrôles de raccords sont également à écart maximal zéro. La preuve
 du parent128 initial est maintenant acquise également : ses **38 vues** sont
 identiques à celles d'avant optimisation et ses **huit raccords froids** ont
-un écart maximal nul, halos compris. Le candidat192 est en cours d'inspection.
+un écart maximal nul, halos compris. Le candidat192 a terminé son inspection
+individuelle et celle du bundle (14 + 24 vues) ; ses huit raccords physiques
+froids sont également exacts. Les deux diagnostics base128/192 à tailles de
+convolution différentes restent des rejets numériques BF16 documentés, sans
+invalider l'identité des tuiles physiques à découpage global fixe.
+
+Le passage 192 n'apporte pas de gain de qualité régulier sur les cas critiques
+face au contrôle128 à budget égal : la plaine tempérée très plate reste trop
+granuleuse (pente ×5,04 et bande fine ×15,47 contre ×5,12/×16,04 au contrôle),
+la seconde côte humide atteint 71,95 m de MAE et 12,04 % de désaccord terre/mer
+(contrôle : 69,84 m / 11,80 %). Certaines plaines désertiques s'améliorent, mais
+cela ne justifie pas de prolonger aveuglément ni de passer à 256 canaux. Le
+parent128 initial demeure un compromis plus lisse à examiner. Aucun de ces
+candidats n'est présenté comme ayant satisfait tous les seuils stricts.
+Les **18 checkpoints immuables** sont vérifiés dans l'inventaire, dont les
+15 anciens aux SHA inchangés. Les chronométrages finaux sont en cours.
 
 Objectif initial : remplacer le base model à 2 étapes (254 M paramètres) par un élève une passe ×10 plus rapide, dans la tolérance BF16/FP32.
 
