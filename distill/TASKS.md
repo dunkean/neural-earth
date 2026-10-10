@@ -559,6 +559,19 @@ proxy +32 % au pas 10000 : reprise propre, optimiseur/RNG conservés, meilleur
 score réinitialisé pour le nouvel objectif. Les seuils d'acceptation physiques
 restent inchangés.
 
+État après élargissement : le base 96 a terminé ses 300000 pas ; le base 128
+reprend son EMA du **pas 295000**, SHA source
+`1dee59a036d36fd1f297f3cc08906b0b730cfd68baa48139da372592c5b220b8`.
+Les premiers checkpoints du nouveau run contiennent sa propre state AdamW et
+la policy rare, avec epsilon compensé 7,5e-7. Les inspections suivantes sont
+enchaînées par des jobs tmux durables : `coarse-solver4-inspection`, puis
+`decoder-followup` (reprise decoder 150000→200000 sur la **4090** libérée),
+`decoder-full-inspection`, et `base128-inspection` après la fin du base sur 5090.
+Le coordinateur principal attend le même handle decoder et ne crée pas un
+second entraînement. Chaque inspection utilise 14 vues historiques + les
+24 vues de la banque rare complète ; un succès de processus ne vaut toujours
+pas acceptation physique.
+
 ```bash
 python -m distill.rare_cases survey ~/data/distill/eval/rare-proposals.json --count 12
 python tools/verification/compare_base_variants.py run ~/data/distill/eval/rare-teacher-survey \

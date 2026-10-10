@@ -52,7 +52,7 @@ def wait_dataset(root, minimum, full=False):
         time.sleep(60)
 
 
-def train(name, stage, dataset, output, steps, width, batch, size=None, overfit=False):
+def train(name, stage, dataset, output, steps, width, batch, size=None, overfit=False, gpu=1):
     current = state(DATA/'jobs'/name)
     if current['live']:
         wait_job(name)
@@ -91,7 +91,7 @@ def train(name, stage, dataset, output, steps, width, batch, size=None, overfit=
     if saved:
         command.extend(['--resume', str(latest), '--allow-data-growth'])
     print(json.dumps(dict(starting=name, stage=stage, steps=steps, resume_step=saved['step'] if saved else 0)), flush=True)
-    subprocess.run([sys.executable, '-m', 'distill.jobs', 'start', name, '--gpu', '1', '--', *command], cwd=REPO, check=True)
+    subprocess.run([sys.executable, '-m', 'distill.jobs', 'start', name, '--gpu', str(gpu), '--', *command], cwd=REPO, check=True)
     wait_job(name)
     completed = json.loads(status_path.read_text())
     if completed.get('status') != 'complete' or completed.get('step', 0) < steps:
