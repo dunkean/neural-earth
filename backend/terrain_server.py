@@ -1393,6 +1393,8 @@ def _shutdown_for_restart():
         if worker is not None:
             worker.close()
         physical_delivery.flush()
+        import terrain_array_io
+        terrain_array_io.flush(timeout=120)
     finally:
         os._exit(0)
 
@@ -2389,6 +2391,10 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=8765)
     arguments = parser.parse_args()
     RESTART_COMMAND = [sys.executable, '-u', str(Path(__file__).resolve()), *sys.argv[1:]]
+    import terrain_array_io
+    # Generated atlases and stages reach the disk after the response; this
+    # process serves them from memory meanwhile and flushes before exiting.
+    terrain_array_io.deferred = True
     wait_for_replaced_server(arguments.port)
     if os.environ.get('TERRAIN_PRELOAD_MODELS', '1') == '1':
         preload_devices(gpu_plan['devices'])

@@ -2,7 +2,7 @@
 
 **Render** combines soil, vegetation, exposed rock, water and snow on the current physical DEM. **Soils** shows shaded substrate and exposed rock. **Pedology** shows the regional soil composition of the source world, without vegetation, snow, lighting or contours.
 
-Regional provinces use an approximately 200 km grid, combining geographic noise with climate and elevation. Sandy, calcareous, clay-rich, ferrallitic, organic, podzolic and mineral mixtures provide smooth substrate colors. This is a procedural appearance model, rather than a soil survey or geochemical simulation.
+Regional provinces are evaluated at half the source atlas resolution (about 40 km on the default world) from climate (moisture index, warmth, frost), regional relief (ruggedness, altitude, lowland basins) and parent-material noise, then resampled bilinearly. Soils use the same mixtures for sand, clay and humus; exposed-rock tint varies with parent noise and climate. Sandy, calcareous, clay-rich, ferrallitic, organic, podzolic and mineral mixtures provide smooth substrate colors. This is a procedural appearance model, rather than a soil survey or geochemical simulation.
 
 Vegetation responds to aridity, season and the temperature-dependent tree line. Valleys favor moisture and small stands; ridges tend to remain exposed. Slope and terrain position control rock exposure. Snow responds to temperature, precipitation, sun exposure and slope retention; water color follows depth and seasonal sea ice.
 

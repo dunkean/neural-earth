@@ -26,7 +26,7 @@ EXTRA = {
     'orogen-biomes': ('biomes', 'Biomes · classification and altitude following terrain LOD'),
     'render': ('surface', 'Render · vegetation, substrate, rock and seasonal snow'),
     'soil': ('substrate', 'Soils · soil and exposed rock on terrain'),
-    'pedology': ('pedology', 'Pedology · soil provinces on a 200 km grid: sandy, calcareous, clay-rich, ferrallitic, organic, podzolic, mineral'),
+    'pedology': ('pedology', 'Pedology · regional soil provinces from climate, relief and parent rock: sandy, calcareous, clay-rich, ferrallitic, organic, podzolic, mineral'),
     'orogen-koppen': ('koppen', 'Köppen following terrain LOD and altitude'),
     'orogen-temperature-summer': ('temperature_summer', 'Northern summer temperature · -45 to +45 °C'),
     'orogen-temperature-winter': ('temperature_winter', 'Northern winter temperature · -45 to +45 °C'),

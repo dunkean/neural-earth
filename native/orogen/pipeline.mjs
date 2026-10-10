@@ -24,7 +24,11 @@ function save(result){
  const oceans=new Set(result.plateIsOcean);fields.crust=Float32Array.from(result.r_plate,id=>oceans.has(id)?1:0);
  const manifest={numRegions:result.numRegions,fields:{},timing:result._pipelineTiming,params:result._params,
   elevationTiming:result._timing,postTiming:result._postTiming};
- for(const [key,value]of Object.entries(fields)){if(!ArrayBuffer.isView(value))continue;const v=Float32Array.from(value);fs.writeFileSync(`${dir}/${key}.f32`,Buffer.from(v.buffer));manifest.fields[key]=v.length;}
+ // One float32 file in manifest order: per-field files cost more to create and scan than to write.
+ const views=Object.entries(fields).filter(([,value])=>ArrayBuffer.isView(value));
+ const all=new Float32Array(views.reduce((total,[,value])=>total+value.length,0));let at=0;
+ for(const [key,value]of views){all.set(value,at);at+=value.length;manifest.fields[key]=value.length;}
+ fs.writeFileSync(`${dir}/fields.f32`,Buffer.from(all.buffer,all.byteOffset,all.byteLength));
  fs.writeFileSync(`${dir}/graph.json`,JSON.stringify(manifest));
 }
 globalThis.self={postMessage(result){

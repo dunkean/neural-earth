@@ -9,7 +9,7 @@ import numpy as np
 
 NAMES = ('soil_red', 'soil_green', 'soil_blue', 'rock_red', 'rock_green',
          'rock_blue', 'soil_sand', 'soil_clay', 'soil_humus')
-VERSION = 'substrate-v1'
+VERSION = 'substrate-v2-pedology'
 TRANSPORT_LAYERS = 50
 
 
@@ -52,31 +52,10 @@ def coordinates(xs, ys, bounds, spherical=True, polar=False):
 
 
 def generate_soil(height, layers, seed, bounds, spherical=True):
-    h,w = height.shape
-    x0,y0,x1,y1 = bounds
-    p = coordinates(x0+(np.arange(w)+.5)*(x1-x0)/w,
-                    y0+(np.arange(h)+.5)*(y1-y0)/h,bounds,spherical)
-    salt = seed_value(seed)
-    region = noise(p/350000, salt)
-    local = noise(p/85000+17, salt+31)
-    ts = np.asarray(layers.get('temperature_summer',np.full_like(height,.65))) * 90-45
-    tw = np.asarray(layers.get('temperature_winter',np.full_like(height,.45))) * 90-45
-    rain = (np.asarray(layers.get('precip_summer',np.full_like(height,.5)))+
-            np.asarray(layers.get('precip_winter',np.full_like(height,.5))))*1000
-    wet = np.clip(rain/2200,0,1)
-    warm = np.clip(((ts+tw)*.5+5)/30,0,1)
-    uplift = np.clip(layers.get('uplift',np.zeros_like(height))*2,0,1)
-    sand = .15+.8*(1-wet)*warm+.25*region
-    clay = .2+.45*wet*warm+.25*(1-region)
-    humus = .05+.65*wet*np.clip((np.maximum(ts,tw)+5)/20,0,1)*np.clip(1-height/5500,0,1)
-    fractions = np.stack((sand,clay,humus),axis=-1)
-    fractions /= fractions.sum(axis=-1,keepdims=True)
-    soil = fractions @ np.array([[.64,.53,.36],[.43,.30,.21],[.22,.20,.14]],np.float32)
-    iron = np.clip(.15+.55*region+.18*warm-.25*uplift,0,1)[...,None]
-    rock = np.array([.43,.44,.42])*(1-iron)+np.array([.56,.40,.29])*iron
-    rock *= (.9+.2*local)[...,None]
-    values = np.concatenate((soil,rock,fractions),axis=-1).astype(np.float32)
-    return {name:values[...,i] for i,name in enumerate(NAMES)}
+    # One coarse model shared with Pedology; see terrain_pedology.
+    from terrain_pedology import generate_substrate
+    result = generate_substrate(height, layers, seed, bounds, spherical)
+    return {name: result[name] for name in NAMES}
 
 
 def soil_atlas(world, settings):

@@ -15,23 +15,27 @@ def rasterize(points, triangles, nearest, xyz, fields, device):
     inverse=torch.linalg.inv(matrices)
     fan=torch.as_tensor(fan,device=device)
     names=list(fields); data=torch.as_tensor(np.stack([fields[k] for k in names],axis=1),device=device)
-    outputs={k:np.empty(len(xyz),np.float32) for k in names}
     categorical={'plates','crust','boundaries','koppen','superPlates'}
-    fallback=0
+    nearest_only=torch.as_tensor([k in categorical or k.startswith('koppen_color_') for k in names],device=device)
+    # Fields stay resident and transfer once; per-chunk, per-field copies
+    # each synchronized the device.
+    projected=torch.empty((len(names),len(xyz)),dtype=data.dtype,device=device)
+    fallback=torch.zeros((),dtype=torch.int64,device=device)
     with torch.inference_mode():
         for start in range(0,len(xyz),32768):
             end=min(start+32768,len(xyz));q=torch.as_tensor(xyz[start:end],device=device)
             neighbors=torch.as_tensor(nearest[start:end],device=device); n=neighbors[:,0]; candidates=fan[neighbors].reshape(end-start,-1)
             weights=(inverse[candidates.clamp_min(0)]*q[:,None,None,:]).sum(dim=-1)
-            score=weights.min(dim=-1).values;score[candidates<0]=-torch.inf
+            score=weights.min(dim=-1).values.masked_fill_(candidates<0,-torch.inf)
             chosen=score.argmax(dim=1);row=torch.arange(end-start,device=device)
-            valid=score[row,chosen]>=-1e-4;fallback+=int((~valid).sum())
+            valid=score[row,chosen]>=-1e-4;fallback+=(~valid).sum()
             w=weights[row,chosen];w=w.clamp_min(0);w=w/w.sum(dim=1,keepdim=True)
             t=tri[candidates[row,chosen].clamp_min(0)]
             result=(data[t]*w[:,:,None]).sum(dim=1)
-            result[~valid]=data[n[~valid]]
-            for i,key in enumerate(names):
-                value=data[n,i] if key in categorical or key.startswith('koppen_color_') else result[:,i]
-                outputs[key][start:end]=value.cpu().numpy()
+            nearest_value=data[n]
+            result=torch.where(valid[:,None],result,nearest_value)
+            projected[:,start:end]=torch.where(nearest_only,nearest_value,result).T
+        projected=projected.cpu().numpy()
     torch.cuda.synchronize(device)
-    return outputs,fallback
+    projected.flags.writeable=False
+    return dict(zip(names,projected)),int(fallback)

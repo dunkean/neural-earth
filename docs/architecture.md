@@ -4,6 +4,8 @@
 
 `backend/terrain_generation.py` normalizes settings. `backend/terrain_orogen_stages.py` retains relief, erosion and climate as immutable stage artifacts. Orogen's bundled graph algorithms run through Node; CUDA rasterizes spherical triangles into a 2,048 × 1,024 atlas. Optional CUDA acceleration and City wgpu erosion are separate choices.
 
+A stage's raster projection, hashing and saving run on a worker while Node computes the next stage. The server writes stage and atlas files after responding (`backend/terrain_array_io.py`), serves them from memory meanwhile, and flushes before exiting. Recent stage artifacts stay in memory while their files are unchanged.
+
 The spherical world uses an equirectangular map: width `pi × diameter`, height `pi × diameter / 2`. The default diameter is `40,000 / pi` km. Longitude wraps. A planar world is a finite square whose side is the diameter, with Cartesian distances and no globe view. Selecting planar geometry does not replace Orogen's spherical tectonic construction with a new planar tectonic model.
 
 The optional World Builder bridge samples a native cube-sphere CPU atlas, then produces a 1,024 × 512 raster. Separate area-weighted quantile transforms match positive land heights and ocean depths to ETOPO distributions. They preserve sign and rank without copying Earth's geographic locations. Native candidates are selected deterministically for the requested continent layout; receipts distinguish requested and selected seeds.

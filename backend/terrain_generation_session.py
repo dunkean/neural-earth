@@ -90,6 +90,11 @@ def generation_scope(token):
         _current.token = previous
 
 
+def current_generation():
+    """The token to re-enter with generation_scope on a worker thread."""
+    return getattr(_current, 'token', None)
+
+
 def check_generation():
     token = getattr(_current, 'token', None)
     if token is not None:
