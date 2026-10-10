@@ -268,13 +268,19 @@ def sheet(output):
         colour = np.where((e > 0)[..., None], [200, 185, 150], [120, 150, 190]) / 255.0
         return (colour * (0.25 + 0.75 * light[..., None]) * 255).astype(np.uint8)
     for label, group in (('land', names[:3]), ('holdout', names[3:])):
+        rows = [(name, lod) for name in group for lod in LODS
+                if any(f'{variant}|{name}|{lod}' in arrays for variant in variants)]
+        path = output / f'sheet-{label}.png'
+        if not rows:
+            path.unlink(missing_ok=True)
+            continue
         size, pad, head = 304, 6, 22
-        image = Image.new('RGB', (len(variants) * (size + pad) + 160, len(group) * len(LODS) * (size + pad) + head),
+        image = Image.new('RGB', (len(variants) * (size + pad) + 160, len(rows) * (size + pad) + head),
                           (25, 25, 25))
         draw = ImageDraw.Draw(image)
         for c, variant in enumerate(variants):
             draw.text((160 + c * (size + pad) + 4, 4), variant, fill=(255, 255, 255))
-        for row, (name, lod) in enumerate((n, l) for n in group for l in LODS):
+        for row, (name, lod) in enumerate(rows):
             y = head + row * (size + pad)
             draw.text((4, y + size // 2), f'{name[:20]}\nLOD {lod}', fill=(255, 255, 255))
             for c, variant in enumerate(variants):
@@ -282,7 +288,7 @@ def sheet(output):
                 if key in arrays:
                     image.paste(Image.fromarray(shade(arrays[key], 30 * 2**lod, 3 if lod == 3 else 1.5)),
                                 (160 + c * (size + pad), y))
-        image.save(output / f'sheet-{label}.png')
+        image.save(path)
     # Text/table equivalent for the rendered physical comparison sheets.
     with (output / 'sheet-summary.csv').open('w', newline='') as handle:
         fields = ['variant', 'site', 'lod', 'mae_m', 'coast', 'slope_mean_deg', 'slope_p90_deg',
