@@ -1,4 +1,4 @@
-"""Coastal noise, parent means and tile seams in the sub-native cascade."""
+"""Coastal noise, parent consistency, grid lattices, slope-guided detail and tile seams in sub-native refinement."""
 
 from pathlib import Path as _BootstrapPath
 import sys as _bootstrap_sys
@@ -13,17 +13,19 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
 sys.path.insert(0, str(_REPO_ROOT / 'terrain-diffusion'))
-from terrain_refinement import sample_refined
+from terrain_refinement import MIN_LOD, _kernel, _procedural_detail, _slope_cap, sample_refined
 
 
 class DetailField:
-    def __init__(self, device, *, smooth=False):
+    def __init__(self, device, *, smooth=False, zero=False):
         self.device = device
         self.smooth = smooth
+        self.zero = zero
 
     def __getitem__(self, key):
         _, rows, cols = key
@@ -33,6 +35,8 @@ class DetailField:
         detail = torch.where((xx + yy) % 2 == 0, 3., -3.)
         if self.smooth:
             detail = .6*detail + torch.sin(.71*xx + .37*yy) + .8*torch.cos(.29*xx - .53*yy)
+        if self.zero:
+            detail = torch.zeros_like(detail)
         return torch.stack((detail, torch.ones_like(detail)))
 
 
@@ -53,7 +57,7 @@ class CoastalRefinementTests(unittest.TestCase):
             with patch('terrain_refinement._detail_field', return_value=DetailField(device)):
                 for height in (-1., -.1, -.001, 0., .001, .1, 1.):
                     world = self.world(device, lambda y, x: torch.tensor(height, device=device))
-                    for level in (1, 2, 3):
+                    for level in range(1, -MIN_LOD+1):
                         with self.subTest(device=device, height=height, lod=-level):
                             actual = sample_refined(world, level, -16, -16, 16, 16)
                             self.assertTrue(torch.isfinite(actual).all())
@@ -63,30 +67,90 @@ class CoastalRefinementTests(unittest.TestCase):
                                 self.assertTrue((actual * height > 0).all())
                                 self.assertGreater(actual.std().item(), 0, 'Keep fine detail above/below sea level')
 
-    def test_each_level_preserves_parent_means_away_from_the_native_coast(self):
+    def test_each_level_keeps_its_parent_at_coarser_scales(self):
+        smooth = lambda y, x: 1000 + 50*torch.sin(.37*x + .11*y) + 30*torch.cos(.23*y - .41*x)
+        ramp = lambda y, x: (x + .3) * .05 + y * .003
         for device in self.devices():
-            world = self.world(device, lambda y, x: (x + .3) * .05 + y * .003)
-            with patch('terrain_refinement._detail_field', return_value=DetailField(device, smooth=True)):
-                for level in (1, 2, 3):
-                    with self.subTest(device=device, lod=-level):
-                        extent = 8*2**(level-1)
-                        parent = sample_refined(world, level-1, -extent, -extent, extent, extent)
-                        child = sample_refined(world, level, -2*extent, -2*extent, 2*extent, 2*extent)
-                        means = F.avg_pool2d(child[None, None], 2)[0, 0]
-                        # The native coastal band deliberately relaxes mean
-                        # offsets; compare conservative blocks further inland.
-                        columns = torch.arange(-extent, extent, device=device)
-                        outside = (columns.div(2**(level-1), rounding_mode='floor').abs() >= 3)
-                        self.assertTrue(outside.any())
-                        torch.testing.assert_close(means[:, outside], parent[:, outside], rtol=2e-6, atol=1e-7)
-                        self.assertTrue((child < 0).any())
-                        self.assertTrue((child > 0).any())
+            for name, heights in (('coastal ramp', ramp), ('smooth relief', smooth)):
+                world = self.world(device, heights)
+                with patch('terrain_refinement._detail_field', return_value=DetailField(device, smooth=True)):
+                    for level in range(1, -MIN_LOD+1):
+                        with self.subTest(device=device, terrain=name, lod=-level):
+                            parent = sample_refined(world, level-1, -32, -32, 32, 32).double()
+                            child = sample_refined(world, level, -64, -64, 64, 64).double()
+                            added = child - parent.repeat_interleave(2, 0).repeat_interleave(2, 1)
+                            # Each level adds its own octave; 8x8-parent-cell
+                            # means must not move by more than a fraction of it.
+                            # Near sea level the sign-keeping soft limit is not
+                            # additive across octaves, so the coast allows more.
+                            coarse = F.avg_pool2d(parent[None, None], 8) - F.avg_pool2d(child[None, None], 16)
+                            limit = .35 if name == 'coastal ramp' else .1
+                            self.assertLess(coarse.abs().max().item(), limit * added.std().item())
+                            if name == 'coastal ramp':
+                                self.assertTrue((child < 0).any())
+                                self.assertTrue((child > 0).any())
+            # Inland and without decoder detail, the spline reproduces a linear surface.
+            world = self.world(device, lambda y, x: 100 + (x + .3) * .05 + y * .003)
+            with patch('terrain_refinement._detail_field', return_value=DetailField(device, zero=True)):
+                for level in range(1, -MIN_LOD+1):
+                    child = sample_refined(world, level, -32, -32, 32, 32)
+                    centres = (torch.arange(-32, 32, device=device).double() + .5) / 2**level - .5
+                    expected = 100 + (centres[None, :] + .3) * .05 + centres[:, None] * .003
+                    torch.testing.assert_close(child.double(), expected, rtol=0, atol=2e-5)
+
+    def test_smooth_native_terrain_shows_no_source_grid_lattice(self):
+        # Bilinear and block-mean cascades concentrated curvature on the 30 m
+        # grid (phase ratio ~2 at LOD -3), a lattice that hillshading reveals.
+        smooth = lambda y, x: 1000 + 50*torch.sin(.37*x + .11*y) + 30*torch.cos(.23*y - .41*x)
+        for device in self.devices():
+            world = self.world(device, smooth)
+            with patch('terrain_refinement._detail_field', return_value=DetailField(device, zero=True)):
+                z = sample_refined(world, 3, -64, -64, 64, 64).double()
+            curvature = (z[2:, 1:-1] + z[:-2, 1:-1] + z[1:-1, 2:] + z[1:-1, :-2] - 4*z[1:-1, 1:-1]).abs()
+            phase = (torch.arange(-63, 63, device=device) % 8)
+            for axis in (0, 1):
+                profile = torch.stack([(curvature[phase == k] if axis == 0 else curvature[:, phase == k]).mean()
+                                       for k in range(8)])
+                with self.subTest(device=device, axis=axis):
+                    self.assertLess((profile.max() / profile.min()).item(), 1.1)
+
+    def test_procedural_detail_follows_slopes_and_is_isotropic_on_flats(self):
+        # Below LOD -1, sparse-convolution octaves elongate down steep slopes
+        # at 7.5 m and lose any preferred direction at metre scale.
+        for name, heights in (('slope', lambda y, x: 1000 + 15*x + 0*y),
+                              ('flat', lambda y, x: 1000 + 0*x + 0*y)):
+            world = self.world('cpu', heights)
+            with patch('terrain_refinement._detail_field', return_value=DetailField('cpu', smooth=True)):
+                ratios = {}
+                for level in (2, 6):
+                    detail = _procedural_detail(world, level, -128, -128, 128, 128)
+                    ratios[level] = (detail.diff(dim=0).std() / detail.diff(dim=1).std()).item()
+            with self.subTest(terrain=name):
+                if name == 'slope':
+                    self.assertGreater(ratios[2], 1.3)
+                    self.assertLess(ratios[6], ratios[2])
+                else:
+                    for ratio in ratios.values():
+                        self.assertAlmostEqual(ratio, 1, delta=.1)
+
+    @unittest.skipUnless(torch.cuda.is_available(), 'CUDA only')
+    def test_cuda_kernels_match_the_pytorch_fallback_exactly(self):
+        if _kernel('octave', 'cuda') is None:
+            self.skipTest('CuPy kernels unavailable')
+        world = self.world('cuda', lambda y, x: 1000 + 15*torch.sin(.3*x) + 9*torch.cos(.2*y))
+        with patch('terrain_refinement._detail_field', return_value=DetailField('cuda', smooth=True)):
+            for level in range(1, -MIN_LOD+1):
+                fused = sample_refined(world, level, -37, 21, 19, 90)
+                with patch('terrain_refinement._kernel', return_value=None):
+                    loop = sample_refined(world, level, -37, 21, 19, 90)
+                with self.subTest(lod=-level):
+                    torch.testing.assert_close(fused, loop, rtol=0, atol=0)
 
     def test_adjacent_unaligned_reads_match_a_single_read(self):
         for device in self.devices():
             world = self.world(device, lambda y, x: (x + .3) * .05 + y * .003)
             with patch('terrain_refinement._detail_field', return_value=DetailField(device, smooth=True)):
-                for level in (1, 2, 3):
+                for level in range(1, -MIN_LOD+1):
                     full = sample_refined(world, level, -15, -17, 17, 15)
                     left = sample_refined(world, level, -15, -17, 17, -1)
                     right = sample_refined(world, level, -15, -1, 17, 15)
@@ -101,7 +165,7 @@ class CoastalRefinementTests(unittest.TestCase):
             with patch('terrain_refinement._detail_field', return_value=DetailField(device, smooth=True)):
                 for sign in (-1, 1):
                     world = self.world(device, lambda y, x: sign * torch.where((x//2 + y//3) % 2 == 0, .001, 12.))
-                    for level in (1, 2, 3):
+                    for level in range(1, -MIN_LOD+1):
                         with self.subTest(device=device, sign=sign, lod=-level):
                             actual = sample_refined(world, level, -17, -15, 15, 17)
                             self.assertTrue((actual * sign > 0).all())
@@ -115,54 +179,100 @@ class CoastalRefinementTests(unittest.TestCase):
                 detail.assert_not_called()
                 torch.testing.assert_close(native, torch.full_like(native, height), rtol=0, atol=0)
                 child = sample_refined(world, 1, -16, -16, 16, 16)
-                old_amplitude = 3 * height**.5 * world.kwargs['residual_std']
+                # The coast limit leaves high ground alone; only the slope cap applies.
+                raw = 3 * height**.5 * world.kwargs['residual_std']
+                old_amplitude = raw / (1 + (raw/_slope_cap(1))**2)**.5
                 actual_amplitude = (child-height).abs().max().item()
+                # Signed-sqrt composition adds the second-order (ds)^2 term.
                 self.assertGreater(actual_amplitude / old_amplitude, .99)
-                self.assertLessEqual(actual_amplitude, old_amplitude)
+                self.assertLessEqual(actual_amplitude, old_amplitude * (1 + 1e-3))
 
-    def test_mixed_neighbours_still_refine_the_coast_inside_a_parent_cell(self):
+    def test_a_land_parent_cell_holds_both_land_and_sea_at_fine_levels(self):
         for device in self.devices():
             world = self.world(device, lambda y, x: (x + .1) * .05)
             with patch('terrain_refinement._detail_field', return_value=DetailField(device)):
-                # Parent column zero is positive; its west neighbour is sea.
-                parent = sample_refined(world, 0, 0, 0, 1, 1)
-                child = sample_refined(world, 1, 0, 0, 2, 2)
-                self.assertGreater(parent.item(), 0)
-                self.assertTrue((child[:, 0] < 0).all())
-                self.assertTrue((child[:, 1] > 0).all())
-                torch.testing.assert_close(child.mean(), parent.squeeze())
+                # Native cell (0, 0) is land; its west neighbour is sea.
+                self.assertGreater(sample_refined(world, 0, 0, 0, 1, 1).item(), 0)
+                block = sample_refined(world, 3, 0, 0, 8, 8)
+                self.assertTrue((block < 0).any())
+                self.assertTrue((block > 0).any())
 
-    def test_irregular_coast_follows_native_surface_without_new_pixel_islands(self):
+    def coast_checks(self, actual, signed_distance, tolerance):
+        """Sign follows the reference away from its coast; no islands or lakes appear."""
+        from scipy import ndimage
+        land = (actual >= 0).cpu().numpy()
+        distance = signed_distance.cpu().numpy()
+        far = abs(distance) > tolerance
+        self.assertTrue(((distance >= 0) == land)[far].all())
+        for mask in (land, ~land):
+            labels, count = ndimage.label(mask)
+            sizes = np.bincount(labels.ravel())[1:]
+            self.assertEqual(count, 1)
+
+    def centres(self, level, start, stop, device):
+        return (torch.arange(start, stop, device=device).double() + .5) / 2**level - .5
+
+    def test_irregular_coast_stays_near_the_native_coast_without_new_islands_or_lakes(self):
         for device in self.devices():
-            # A connected diagonal coastline, with strongly varying heights.
-            # Conservative 2x2 offsets previously detached pixels along it.
+            # A diagonal coastline with strongly varying heights on both sides.
             heights = lambda y, x: (x+y+.2)*torch.where((x//2+y//3)%2 == 0, .01, 12.)
             world = self.world(device, heights)
-            native = world.get(-10, -10, 10, 10, with_climate=False)['elev']
             with patch('terrain_refinement._detail_field', return_value=DetailField(device, smooth=True)):
-                for level in (1, 2, 3):
+                for level in range(1, -MIN_LOD+1):
                     scale = 2**level
                     actual = sample_refined(world, level, -8*scale, -8*scale, 8*scale, 8*scale)
-                    reference = F.interpolate(native[None, None], scale_factor=scale,
-                                              mode='bilinear', align_corners=False)[0, 0]
-                    reference = reference[2*scale:-2*scale, 2*scale:-2*scale]
+                    c = self.centres(level, -8*scale, 8*scale, device)
                     with self.subTest(device=device, lod=-level):
-                        self.assertTrue(torch.equal(actual >= 0, reference >= 0))
+                        self.coast_checks(actual, (c[None, :] + c[:, None] + .2) / 2**.5, 1.5)
+
+    def test_raster_staircase_coast_becomes_straight(self):
+        # Land 3 m beside sea at -1 cm along a diagonal of whole cells: the 30 m
+        # raster previously showed as one-cell steps at every fine level.
+        for device in self.devices():
+            world = self.world(device, lambda y, x: torch.where(x + 2*y >= 0, 3., -.01))
+            with patch('terrain_refinement._detail_field', return_value=DetailField(device, zero=True)),                     patch('terrain_refinement.COAST_ANGLE', 0.):
+                for level in range(1, -MIN_LOD+1):
+                    scale = 2**level
+                    land = sample_refined(world, level, -8*scale, -8*scale, 8*scale, 8*scale) >= 0
+                    # First land column of each row, against a straight-line fit.
+                    edge = land.double().argmax(dim=1).double() / scale
+                    rows = torch.arange(len(edge), device=device).double() / scale
+                    inside = (edge > 2) & (edge < 14)
+                    a = torch.stack((rows[inside], torch.ones_like(rows[inside])), 1)
+                    fit = torch.linalg.lstsq(a.cpu(), edge[inside].cpu()[:, None]).solution
+                    residual = edge[inside].cpu() - (a.cpu() @ fit)[:, 0]
+                    with self.subTest(device=device, lod=-level):
+                        self.assertLess(residual.std().item(), .06)
+
+    def test_detail_never_moves_the_coastline(self):
+        # The coast is the zero line of the base: strong decoder and
+        # procedural detail leave every pixel on the same side.
+        for device in self.devices():
+            heights = lambda y, x: (x+y+.2)*torch.where((x//2+y//3)%2 == 0, .01, 12.)
+            world = self.world(device, heights)
+            for level in range(1, -MIN_LOD+1):
+                scale = 2**level
+                read = lambda: sample_refined(world, level, -8*scale, -8*scale, 8*scale, 8*scale)
+                with patch('terrain_refinement._detail_field', return_value=DetailField(device, smooth=True)):
+                    detailed = read()
+                with patch('terrain_refinement._detail_field', return_value=DetailField(device, zero=True)):
+                    bare = read()
+                with self.subTest(device=device, lod=-level):
+                    self.assertTrue(torch.equal(detailed >= 0, bare >= 0))
 
     def test_native_coast_is_stable_at_far_and_negative_coordinates(self):
         for device in self.devices():
             for origin in (-100000003, 100000003):
                 world = self.world(device, lambda y, x: (x-origin+.2)*.05)
                 with patch('terrain_refinement._detail_field', return_value=DetailField(device)):
-                    for level in (1, 2, 3):
+                    for level in range(1, -MIN_LOD+1):
                         scale = 2**level
                         start = origin*scale
-                        actual = sample_refined(world, level, -2*scale, start-2*scale,
-                                                2*scale, start+2*scale)
-                        columns = torch.arange(-2*scale, 2*scale, device=device)
-                        reference = ((columns.float()+.5)/scale-.5+.2)*.05
+                        actual = sample_refined(world, level, -4*scale, start-4*scale,
+                                                4*scale, start+4*scale)
+                        c = self.centres(level, -4*scale, 4*scale, device)
                         with self.subTest(device=device, origin=origin, lod=-level):
-                            self.assertTrue(torch.equal(actual >= 0, (reference >= 0)[None].expand_as(actual)))
+                            self.coast_checks(actual, (c[None, :] + .2).expand_as(actual), 1.)
 
 
 if __name__ == '__main__':

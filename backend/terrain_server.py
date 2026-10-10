@@ -1873,10 +1873,11 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
             report.update(generation_profile=wp,neural_chart='polar' if polar else None,climate_width=CLIMATE_SIZE,climate_height=CLIMATE_SIZE)
             report.update(world_identity=world_identity(world_manifest(seed,wp)),
                           source_kind='experimental-neural-refinement' if stage=='decoder-refinement' else 'conditioning-input' if stage=='conditioning-preview' else 'learned-approximation' if stage in ('coarse','coarse-area-mean','latent') else 'native-dem-reduction',
-                           exact_final_mip=stage=='final-dem-mip',height_filter='native-bilinear-coast+interior-parent-mean-preserving-decoder-cascade' if stage=='decoder-refinement' else 'block-mean-native' if stage=='final-dem-mip' else 'coarse-physical-area-mean+gaussian-sigma-0.65px' if stage=='coarse-area-mean' else f'coarse-{"monotone-cubic" if coarse_interpolation=="monotone" else "bilinear"}+gaussian-sigma-0.65px' if stage=='coarse' and lod==4 else 'conditioning-preview+gaussian-sigma-0.65px' if stage=='conditioning-preview' else 'source-approximation+gaussian-sigma-0.65px' if stage in ('coarse','latent') else 'native')
+                           exact_final_mip=stage=='final-dem-mip',height_filter=('signed-sqrt-cubic-bspline+smoothed-coast+decoder-half-band-bspline-octave'+('+procedural-sparse-convolution-octaves' if lod < -1 else '')) if stage=='decoder-refinement' else 'block-mean-native' if stage=='final-dem-mip' else 'coarse-physical-area-mean+gaussian-sigma-0.65px' if stage=='coarse-area-mean' else f'coarse-{"monotone-cubic" if coarse_interpolation=="monotone" else "bilinear"}+gaussian-sigma-0.65px' if stage=='coarse' and lod==4 else 'conditioning-preview+gaussian-sigma-0.65px' if stage=='conditioning-preview' else 'source-approximation+gaussian-sigma-0.65px' if stage in ('coarse','latent') else 'native')
             if stage=='decoder-refinement':
                 report.update(refinement_level=-lod, refinement_version=REFINEMENT_VERSION,
-                              checkpoint_resolution=NATIVE, detail_amplitude_scale=0.5**(-lod))
+                              checkpoint_resolution=NATIVE, detail_amplitude_scale=0.5,
+                              procedural_octaves=max(0, -lod-1))
             report['climate_source']='conditioning-input' if stage=='conditioning-preview' else 'learned-coarse'
             return elevation,climate,report
     def finalize(value):

@@ -4,12 +4,12 @@ window.TerrainLighting=(()=>{
   const limits={strength:[0,1,.01],ambient:[0,1,.01],contrast:[.1,3,.05],exaggeration:[0,20,.1],azimuth:[0,360,1],altitude:[5,90,1]};
   let settings={global:{...defaults},lods:{}},sync=()=>{};
   function normalize(value){const result={...defaults};for(const [key,[min,max]]of Object.entries(limits)){const v=value?.[key];if(Number.isFinite(v))result[key]=Math.max(min,Math.min(max,v));}return result;}
-  try{const saved=JSON.parse(new URLSearchParams(location.search).get('lighting')||'null');if(saved){settings.global=normalize(saved.global);for(const [lod,value]of Object.entries(saved.lods||{}))if(Number.isInteger(Number(lod))&&lod>=-3&&lod<=11)settings.lods[lod]=normalize(value);}}catch(_){}
+  try{const saved=JSON.parse(new URLSearchParams(location.search).get('lighting')||'null');if(saved){settings.global=normalize(saved.global);for(const [lod,value]of Object.entries(saved.lods||{}))if(Number.isInteger(Number(lod))&&lod>=-6&&lod<=11)settings.lods[lod]=normalize(value);}}catch(_){}
   function get(lod){return {...(settings.lods[lod]||settings.global)};}
   function vectors(lod){const s=get(lod),az=s.azimuth*Math.PI/180,alt=s.altitude*Math.PI/180;return [s.strength,s.ambient,s.contrast,s.exaggeration/6,Math.sin(az)*Math.cos(alt),-Math.cos(az)*Math.cos(alt),Math.sin(alt),0];}
   function mount(container,onChange){
     const field=document.createElement('fieldset');field.id='lightingSettings';
-    field.innerHTML='<legend>Lighting</legend><label>Settings <select id="lightingScope"><option value="global">Global · all LODs</option>'+Array.from({length:15},(_,i)=>`<option value="${i-3}">LOD ${i-3}</option>`).join('')+'</select></label><label id="lightingInheritLabel">Inherit global settings <input id="lightingInherit" type="checkbox"></label><div class="lightingControls"></div><div class="panelActions"><button type="button" id="lightingFlat">No shadows</button><button type="button" id="lightingSoft">Soft</button><button type="button" id="lightingReset">Default</button></div><small>Changes apply immediately. Each LOD can use its own lighting, including 3, 2, 1 and 0. The globe adds spherical lighting to the global layer.</small>';
+    field.innerHTML='<legend>Lighting</legend><label>Settings <select id="lightingScope"><option value="global">Global · all LODs</option>'+Array.from({length:18},(_,i)=>`<option value="${i-6}">LOD ${i-6}</option>`).join('')+'</select></label><label id="lightingInheritLabel">Inherit global settings <input id="lightingInherit" type="checkbox"></label><div class="lightingControls"></div><div class="panelActions"><button type="button" id="lightingFlat">No shadows</button><button type="button" id="lightingSoft">Soft</button><button type="button" id="lightingReset">Default</button></div><small>Changes apply immediately. Each LOD can use its own lighting, including 3, 2, 1 and 0. The globe adds spherical lighting to the global layer.</small>';
     container.append(field);
     const scope=field.querySelector('#lightingScope'),inherit=field.querySelector('#lightingInherit'),controls=field.querySelector('.lightingControls'),inputs={};
     const labels={strength:'Shadow strength',ambient:'Ambient light',contrast:'Shadow contrast',exaggeration:'Lighting relief',azimuth:'Sun azimuth (°)',altitude:'Sun altitude (°)'};
@@ -19,5 +19,5 @@ window.TerrainLighting=(()=>{
     for(const [id,value]of [['lightingFlat',{...defaults,strength:0}],['lightingSoft',{...defaults,strength:.45,ambient:.65,contrast:.7}],['lightingReset',defaults]])field.querySelector('#'+id).onclick=()=>{if(scope.value==='global')settings.global={...value};else settings.lods[scope.value]={...value};sync();onChange();};
     sync();
   }
-  return {get,vectors,mount,set(value){settings={global:normalize(value?.global),lods:{}};for(const [lod,s]of Object.entries(value?.lods||{}))if(Number.isInteger(Number(lod))&&lod>=-3&&lod<=11)settings.lods[lod]=normalize(s);sync();},serialize:()=>JSON.stringify(settings)};
+  return {get,vectors,mount,set(value){settings={global:normalize(value?.global),lods:{}};for(const [lod,s]of Object.entries(value?.lods||{}))if(Number.isInteger(Number(lod))&&lod>=-6&&lod<=11)settings.lods[lod]=normalize(s);sync();},serialize:()=>JSON.stringify(settings)};
 })();
