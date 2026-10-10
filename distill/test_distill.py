@@ -1,6 +1,7 @@
 """Regression tests for field invariance, deterministic resume and masked losses."""
 from pathlib import Path
 import hashlib
+import json
 import tempfile
 import unittest
 
@@ -21,6 +22,7 @@ from distill.coarse_solver import CoarseSolver
 from distill.widen import expand_state, expanded_config
 from distill.check_physical_seams import partition_stats
 from distill.export import export_bundle
+from distill.decoded_loss import PairedCrops, decode, reconstructed_height
 
 
 class DistillationTests(unittest.TestCase):
@@ -324,6 +326,54 @@ class DistillationTests(unittest.TestCase):
             torch.save(saved, sources['base'])
             with self.assertRaises(ValueError):
                 export_bundle(sources, root/'bundle')
+
+    def test_decoded_supervision_backpropagates_into_latents_with_decoder_frozen(self):
+        decoder = Student(StudentConfig('decoder', 16, 2, (1,))).eval().requires_grad_(False)
+        torch.nn.init.normal_(decoder.head.weight, std=.03)
+        latents = torch.randn(1, 5, 64, 64, requires_grad=True)
+        output = decode(decoder, latents, torch.randn(1, 1, 512, 512))
+        output.square().mean().backward()
+        self.assertTrue(torch.isfinite(latents.grad).all())
+        self.assertGreater(float(latents.grad[:, :4].abs().sum()), 0.)
+        self.assertEqual(float(latents.grad[:, 4].abs().sum()), 0.)
+        self.assertTrue(all(p.grad is None for p in decoder.parameters()))
+
+    def test_reconstructed_height_keeps_metres_and_lowfrequency_gradients(self):
+        latents = torch.zeros(1,5,64,64)
+        latents[:,4] = (2.+31.4)/38.6
+        latents.requires_grad_(True)
+        height = reconstructed_height(torch.zeros(1,1,512,512), latents)
+        torch.testing.assert_close(height, torch.full_like(height, 4.), rtol=1e-5, atol=1e-5)
+        height.mean().backward()
+        self.assertTrue(torch.isfinite(latents.grad).all())
+        self.assertGreater(float(latents.grad[:,4].abs().sum()), 0.)
+
+    def test_paired_dataset_keeps_negative_coordinates_and_rejects_changed_latents(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root/'base').mkdir(); (root/'decoder').mkdir()
+            name = 'train-0000000.npz'
+            meta = dict(y=-96, x=96, seed=10000, split='train', coarse_y=-4, coarse_x=2)
+            target = np.random.default_rng(2).normal(size=(5, 256, 256)).astype(np.float16)
+            coarse = np.zeros((6, 20, 20), np.float32)
+            np.savez(root/'base'/name, metadata=json.dumps(meta), target=target, mask=np.ones((1,256,256)),
+                     coarse=coarse, histogram=np.zeros(5))
+            dmeta = dict(y=-768, x=768, seed=10000, split='train')
+            def write_decoder(latents):
+                np.savez(root/'decoder'/name, metadata=json.dumps(dmeta), latents=latents,
+                         target=np.zeros((1,512,512)), mask=np.ones((1,512,512)))
+            write_decoder(target[:4,:64,:64])
+            audit = root/'audit.json'
+            atomic_json(audit, dict(dataset=str(root), mismatches=[], rows=[dict(file=name, seed=10000,
+                        split='train', latent_pair_exact=True)]))
+            paired = PairedCrops(root, 'train', 32, audit)
+            inputs, actual, _, gaussian, _, _ = paired[0]
+            self.assertEqual(inputs.shape, (32,128,128))
+            torch.testing.assert_close(actual, torch.from_numpy(target[:,:64,:64].astype(np.float32)), rtol=0, atol=0)
+            torch.testing.assert_close(gaussian, noise(15819,-768,768,512,512,1,tile=512), rtol=0, atol=0)
+            write_decoder(np.zeros((4,64,64), np.float16))
+            with self.assertRaises(ValueError):
+                paired[0]
 
     def test_rare_bank_excludes_training_worlds_and_cannot_replace_original_bank(self):
         self.assertFalse(additional_evidence({}, 'student_all')['passed'])

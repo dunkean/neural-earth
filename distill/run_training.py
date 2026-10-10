@@ -52,7 +52,7 @@ def wait_dataset(root, minimum, full=False):
         time.sleep(60)
 
 
-def train(name, stage, dataset, output, steps, width, batch, size=None, overfit=False, gpu=1):
+def train(name, stage, dataset, output, steps, width, batch, size=None, overfit=False, gpu=1, lr=None):
     current = state(DATA/'jobs'/name)
     if current['live']:
         wait_job(name)
@@ -69,6 +69,8 @@ def train(name, stage, dataset, output, steps, width, batch, size=None, overfit=
                '--workers', '2', '--eval-every', '5000', '--save-seconds', '120']
     if size:
         command.extend(['--train-size', str(size)])
+    if lr is not None:
+        command.extend(['--lr', str(lr)])
     if overfit:
         command.append('--overfit')
     if stage == 'base' and not overfit:

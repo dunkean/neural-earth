@@ -647,6 +647,52 @@ Premier export **provisoire**, sans acceptation :
 Poids FP32 : base 53,35 Mo, coarse 11,22 Mo, decoder 13,36 Mo ; manifest avec
 SHA de chaque source et fichier. Les checkpoints complets/RNG restent conservés.
 
+### Supervision du base à travers le decoder
+
+Inspection base 128 intermédiaire, EMA **45000**, SHA
+`d2a91c5167fe0bfab21c4c35351248fbfc4b76f852af7077e38c9ec5968c07ca` :
+les détails des côtes rares LOD 0 restent trop faibles (~0,08–0,18× de puissance
+sur la première côte humide). L'élargissement seul apporte peu de progrès
+visible à ce stade ; l'entraînement latent ne suffit pas à garantir le rendu.
+
+Audit en lecture seule : **2129 crops train et 41 val** contiennent exactement
+la fenêtre decoder 512² dans le début du champ base 256² (origines alignées
+sur 48 latents, donc aussi 96 compte tenu du pas 32). Les quatre latents stockés
+dans les deux fichiers sont **identiques sur les 2170 paires**, sans nouveau
+target teacher et sans les cinq seeds réservées. Rapport
+`eval/paired-decoder-coverage.json`. Couverture proxy du sous-ensemble train :
+130 plaines arides, 97 tempérées, 33 côtes humides, 35 transitions basses.
+
+`distill/decoded_loss.py` ajoute une phase séparée : base sur un cœur 64 + halo,
+decoder élève figé, loss sur son résiduel et sa reconstruction intérieure en
+mètres (Laplacien du teacher, bord de 64 pixels exclu). La MAE relative utilise
+une échelle minimale de 5 m pour ne pas écraser les plaines derrière les reliefs
+montagneux ; les cinq bandes physiques sont aussi supervisées. Cette hauteur
+reste un **proxy de fenêtre non blendée**, pas la mesure finale du pipeline.
+Le coût d'inférence et le champ récepteur du base sont inchangés.
+
+Smoke GPU 32 pas puis reprise de 8 pas réussis dans `ckpt/base-decoded-smoke` :
+gradients/losses finis, état AdamW de 57 paramètres restauré, decoder/audit/loss
+restaurés sans répéter leurs flags. **30 tests passent**, dont gradients vers
+les latents sans modifier le decoder, gradients du canal LF en mètres,
+coordonnées négatives et rejet d'une paire teacher modifiée. Ce smoke utilise
+base 45000 / decoder 145000 ; il n'est pas un candidat validé.
+
+Jobs durables : `base-decoded-followup` attend l'inspection base 128 complète,
+puis initialise un nouveau trial depuis les **EMA figées du base 128 et du decoder 200000**
+et entraîne `train-base-decoded` sur 20000 pas (LR 1e-4, batch 1). Sampling rare
+75/25 recalculé sur les paires, les 41 val restent séparées. Source, decoder,
+audit et provenance sont copiés ; nouvel optimiseur explicite, futures reprises
+avec ses propres états/RNG. `base-decoded-inspection` produira les 38 mesures
+physiques usuelles avant de choisir un meilleur compromis visuel.
+
+Decoder 200000 terminé, candidat du **pas 200000**, SHA
+`3a6303b22b45af0c62f9ea4bd81957699823d245caa77f62c4895d8c4bf57e10`.
+MAE LOD 0 historique 0,449–3,872 m, rare 0,119–2,287 m ; 2/7 historiques
+passent tous les seuils stricts, 0/12 rares (au moins un défaut de distribution
+ou local par cas). Les deux versions 145000/200000 restent conservées pour
+comparaison du rendu. Rapports `eval/decoder-full-pilot{,-rare}`.
+
 ```bash
 python -m distill.rare_cases survey ~/data/distill/eval/rare-proposals.json --count 12
 python tools/verification/compare_base_variants.py run ~/data/distill/eval/rare-teacher-survey \

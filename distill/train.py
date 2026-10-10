@@ -125,7 +125,8 @@ def centre(prediction, target):
 
 
 @torch.no_grad()
-def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_scaling=None, extra_files=()):
+def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_scaling=None, extra_files=(), decoder=None,
+             decoded_weights=(.02, .05)):
     was_training = model.training
     model.eval()
     totals = dict(mse=0., gradient=0., spectral=0., slope_ratio=0., spectrum_ratio=0.)
@@ -135,6 +136,10 @@ def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_s
     coarse_mae = 0.
     if spectral_band_weight:
         totals['spectral_bands'] = 0.
+    if decoder is not None:
+        totals['decoded_loss'] = 0.
+        totals['decoded_mse'] = 0.
+        totals['decoded_height_mae_m_proxy'] = 0.
     count = min(count, len(dataset))
     # Cover the sorted validation index range, rather than only its first profile.
     indices = torch.linspace(0, len(dataset)-1, count).round().long().tolist()
@@ -144,7 +149,8 @@ def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_s
     indices = sorted(set(indices) | {lookup[name] for name in extra_files})
     count = len(indices)
     for index in indices:
-        inputs, target, mask = dataset[index]
+        sample = dataset[index]
+        inputs, target, mask = sample[:3]
         inputs, target, mask = (v[None].to(device) for v in (inputs, target, mask))
         with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == 'cuda'):
             pred = centre(model(inputs), target)
@@ -152,6 +158,14 @@ def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_s
         for key, value in values.items():
             totals[key] += float(value)/count
         p, t = pred.float(), target.float()
+        if decoder is not None:
+            from distill.decoded_loss import paired_loss
+            gaussian, residual, residual_mask = (v[None].to(device) for v in sample[3:])
+            with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == 'cuda'):
+                _, decoded_values = paired_loss(decoder, pred, target, gaussian, residual, residual_mask,
+                                                *decoded_weights, spectral_band_weight)
+            for key, value in decoded_values.items():
+                totals[key] += float(value)/count
         if spectral_band_weight:
             totals['spectral_bands'] += float(spectral_band_loss(p, t, mask))/count
         channel_mse += (((p-t).square()*mask).sum((0, 2, 3))/mask.sum().clamp_min(1))/count
@@ -218,11 +232,14 @@ def main():
     parser.add_argument('--allow-data-growth', action='store_true')
     parser.add_argument('--sample-weights', type=str, help='Frozen train-only sampling policy JSON.')
     parser.add_argument('--allow-sampling-change', action='store_true')
+    parser.add_argument('--paired-decoder', type=str, help='Frozen decoder checkpoint for an aligned base fine-tuning trial.')
+    parser.add_argument('--paired-audit', type=str, help='Read-only audit of existing aligned base/decoder crops.')
+    parser.add_argument('--decoder-loss-weight', type=float, default=0.)
     parser.add_argument('--cpu', action='store_true')
     args = parser.parse_args()
     if min(args.steps, args.batch, args.eval_every, args.val_count) < 1 or args.workers < 0:
         parser.error('Positive steps/batch/evaluation intervals and nonnegative workers required.')
-    if args.height_weight <= 0 or args.lr <= 0 or min(args.spectral_weight, args.spectral_band_weight, args.gradient_weight, args.coarse_delta_weight, args.height_mae_weight) < 0:
+    if args.height_weight <= 0 or args.lr <= 0 or min(args.spectral_weight, args.spectral_band_weight, args.gradient_weight, args.coarse_delta_weight, args.height_mae_weight, args.decoder_loss_weight) < 0:
         parser.error('Positive height weight/LR and nonnegative spectral/gradient weights required.')
     device = torch.device('cpu' if args.cpu else 'cuda:0')
     torch.set_num_threads(8)
@@ -234,6 +251,16 @@ def main():
     dataset_root = external_path(args.dataset)
     output.mkdir(parents=True, exist_ok=True)
     saved = torch.load(args.resume, map_location='cpu', weights_only=True) if args.resume else None
+    if saved and saved.get('paired_decoder') and args.paired_decoder is None:
+        args.paired_decoder = saved['paired_decoder']['path']
+        args.paired_audit = saved['arguments']['paired_audit']
+        args.decoder_loss_weight = saved['arguments']['decoder_loss_weight']
+        if args.train_size is None:
+            args.train_size = saved['arguments']['train_size']
+    if args.paired_decoder and (args.stage != 'base' or args.train_size != 64 or args.decoder_loss_weight <= 0):
+        parser.error('Paired supervision requires base, train-size 64 and a positive decoder loss weight.')
+    if args.decoder_loss_weight and not args.paired_decoder:
+        parser.error('Supply the frozen paired decoder for decoded loss.')
     if saved:
         if saved['arguments']['seed'] != args.seed:
             raise ValueError('Sampler seed differs from the resumed checkpoint.')
@@ -250,13 +277,26 @@ def main():
             config = replace(config, solver_steps=args.coarse_solver_steps)
     model = Student(config).to(device)
     halo = model.halo if args.stage == 'base' else 0
-    train = Crops(dataset_root, args.stage, halo=halo, train_size=args.train_size)
+    decoder, decoder_fingerprint, paired_audit = None, None, None
+    if args.paired_decoder:
+        import hashlib
+        from distill.decoded_loss import PairedCrops, frozen_decoder
+        if not args.paired_audit:
+            parser.error('Paired supervision requires its alignment audit.')
+        decoder, decoder_fingerprint = frozen_decoder(args.paired_decoder, device)
+        paired_audit = hashlib.sha256(Path(args.paired_audit).read_bytes()).hexdigest()
+        if saved and (saved.get('paired_decoder') != decoder_fingerprint or saved.get('paired_audit') != paired_audit):
+            raise ValueError('Paired decoder/audit changed; initialize a separate trial.')
+        train = PairedCrops(dataset_root, 'train', halo, args.paired_audit)
+        validation = PairedCrops(dataset_root, 'val', halo, args.paired_audit)
+    else:
+        train = Crops(dataset_root, args.stage, halo=halo, train_size=args.train_size)
+        validation = Crops(dataset_root, args.stage, 'val', halo=halo,
+                           train_size=args.train_size, overfit=args.overfit)
     coarse_scaling = None
     if args.stage == 'coarse':
         with np.load(train.paths[0], allow_pickle=False) as sample:
             coarse_scaling = [sample['output_means'].tolist(), sample['output_stds'].tolist()]
-    validation = Crops(dataset_root, args.stage, 'val', halo=halo,
-                       train_size=args.train_size, overfit=args.overfit)
     # The exact list is checkpointed. Appending new data requires explicit admission.
     files = [path.name for path in train.paths]
     manifest = json.loads((dataset_root/'manifest.json').read_text())
@@ -303,6 +343,7 @@ def main():
                   saved['arguments'].get('spectral_band_weight', 0.) != args.spectral_band_weight or
                   saved['arguments'].get('gradient_weight', .05) != args.gradient_weight or
                   saved['arguments'].get('spectral_weight', .02) != args.spectral_weight or
+                  saved['arguments'].get('decoder_loss_weight', 0.) != args.decoder_loss_weight or
                   saved.get('sampling_policy') != sampling_policy):
         # A new target crop changes the validation footprint. Do not compare its
         # best score to the old crop's score; retain model/optimizer/EMA states.
@@ -318,6 +359,7 @@ def main():
                 resume=str(args.resume) if args.resume else None), start_step=start,
                 training_crops=len(train), validation_crops=len(validation), halo=halo,
                 sampling_policy=sampling_policy,
+                paired_decoder=decoder_fingerprint, paired_audit=paired_audit,
                 parameters=sum(p.numel() for p in model.parameters())))
 
     def checkpoint(name='latest.pt'):
@@ -328,6 +370,9 @@ def main():
                      dict(dataset=str(args.dataset), output=str(output), resume=str(args.resume) if args.resume else None))
         state['seed_plan'] = seed_plan
         state['sampling_policy'] = sampling_policy
+        if decoder_fingerprint:
+            state['paired_decoder'] = decoder_fingerprint
+            state['paired_audit'] = paired_audit
         if saved and saved.get('warm_start'):
             state['warm_start'] = saved['warm_start']
         if device.type == 'cuda':
@@ -338,10 +383,10 @@ def main():
     channel_weights = ([1., 1., 1., 1., args.height_weight] if args.stage == 'base' else
                        [args.height_weight, args.height_weight, 1., 1., 1., 1.] if args.stage == 'coarse' else [1.])
     try:
-        for inputs, target, mask in loader:
+        for batch in loader:
             if STOP:
                 break
-            inputs, target, mask = (v.to(device, non_blocking=True) for v in (inputs, target, mask))
+            inputs, target, mask = (v.to(device, non_blocking=True) for v in batch[:3])
             warmup = min(1000, max(1, args.steps//20))
             progress = max(0, (step-warmup)/max(1, args.steps-warmup))
             rate = args.lr*min(1, (step+1)/warmup)*(.1+.9*(1+math.cos(math.pi*progress))/2)
@@ -355,6 +400,13 @@ def main():
                     band_error = spectral_band_loss(prediction, target, mask)
                     loss = loss + args.spectral_band_weight*band_error
                     values['spectral_bands'] = band_error
+                if decoder is not None:
+                    from distill.decoded_loss import paired_loss
+                    gaussian, residual, residual_mask = (v.to(device, non_blocking=True) for v in batch[3:])
+                    decoded_loss, decoded_values = paired_loss(decoder, prediction, target, gaussian, residual, residual_mask,
+                                                               args.spectral_weight, args.gradient_weight, args.spectral_band_weight)
+                    loss += args.decoder_loss_weight*decoded_loss
+                    values.update(decoded_values)
                 if args.stage == 'coarse' and args.coarse_delta_weight:
                     delta_loss = coarse_delta_loss(prediction.float(), target, mask)
                     loss = loss + args.coarse_delta_weight*delta_loss
@@ -385,7 +437,8 @@ def main():
                 print(json.dumps(item), flush=True)
             if step % args.eval_every == 0 or step == args.steps:
                 last_validation = validate(ema, validation, device, args.val_count, args.spectral_band_weight,
-                                           coarse_scaling, rare_validation_files)
+                                           coarse_scaling, rare_validation_files, decoder,
+                                           (args.spectral_weight, args.gradient_weight))
                 weighted_mse = sum(w*v for w, v in zip(channel_weights, last_validation['channel_mse']))/sum(channel_weights)
                 score = weighted_mse+args.gradient_weight*last_validation['gradient']+args.spectral_weight*last_validation['spectral']
                 score += args.spectral_band_weight*last_validation.get('spectral_bands', 0.)
@@ -394,6 +447,8 @@ def main():
                     score += args.height_mae_weight*last_validation['coarse_height_mae_m_proxy']/100
                 if args.stage == 'base':
                     score += args.height_mae_weight*last_validation['lowfreq_height_mae_m_proxy']/100
+                if decoder is not None:
+                    score += args.decoder_loss_weight*last_validation['decoded_loss']
                 item = dict(step=step, validation=last_validation, score=score,
                             elapsed_seconds=time.monotonic()-run_started)
                 append_json(output/'validation.jsonl', item)
