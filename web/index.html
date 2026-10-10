@@ -471,12 +471,13 @@ async function initializeWorld(){
  if(location.protocol==='file:'){$('status').textContent='Run start-terrain.cmd: continuous generation requires the local server.';return}
  const params=new URLSearchParams(location.search);
  try{
-  const {preferences,firstLaunch}=await window.TerrainGenerationControls?.initializePreferences()||{preferences:{},firstLaunch:false};
+  const {preferences,firstLaunch,resetErosion}=await window.TerrainGenerationControls?.initializePreferences()||{preferences:{},firstLaunch:false};
   const stored=preferences.generation,localReload=history.state?.terrainLocal===true;
   selectedProfile=(localReload||!params.has('profile'))&&WORLD_PROFILES.includes(stored?.profile)?stored.profile:WORLD_PROFILES.includes(params.get('profile'))?params.get('profile'):'orogen';
   // Reloading this tab restores local edits; a newly opened shared link keeps its settings.
   let settings=(localReload||!params.has('profile')&&!params.has('generation'))&&stored?.profile===selectedProfile?{...generationControls?.defaults(selectedProfile),...stored.settings}:params.has('generation')?JSON.parse(params.get('generation')):generationControls?.defaults(selectedProfile);
   if(firstLaunch)settings=window.TerrainGenerationControls.withGpu(settings,preferences.gpuAcceleration);
+  else if(resetErosion)settings={...settings,relief_pipeline:'orogen',orogen_gpu_erosion:preferences.gpuAcceleration};
   if(typeof preferences.rendering?.gpuRender==='boolean')$('gpuRender').checked=preferences.rendering.gpuRender;
   if(typeof preferences.rendering?.coarseGpu==='boolean')$('coarseGpu').checked=preferences.rendering.coarseGpu;
   if(!firstLaunch&&params.has('coarse_gpu'))$('coarseGpu').checked=params.get('coarse_gpu')!=='0';

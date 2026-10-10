@@ -19,17 +19,25 @@ window.TerrainGenerationControls=(()=>{
     savePreferences({generation:{profile,settings:local}});
   }
   function withGpu(settings,enabled){
-    return {...settings,...Object.fromEntries([...gpuFields.map(([key])=>key),'orogen_gpu_erosion'].map(key=>[key,enabled]))};
+    return {...settings,relief_pipeline:'orogen',...Object.fromEntries([...gpuFields.map(([key])=>key),'orogen_gpu_erosion'].map(key=>[key,enabled]))};
   }
   async function initializePreferences(){
     let preferences=localPreferences();
-    if(typeof preferences.gpuAcceleration==='boolean')return {preferences,firstLaunch:false};
+    if(typeof preferences.gpuAcceleration==='boolean'){
+      const resetErosion=preferences.erosionDefaultsVersion!==1;
+      if(resetErosion){
+        preferences={...preferences,erosionDefaultsVersion:1};
+        if(preferences.generation)preferences.generation={...preferences.generation,settings:{...preferences.generation.settings,relief_pipeline:'orogen',orogen_gpu_erosion:preferences.gpuAcceleration}};
+        savePreferences(preferences);
+      }
+      return {preferences,firstLaunch:false,resetErosion};
+    }
     const dialog=document.createElement('dialog');dialog.id='gpuWelcome';
     dialog.innerHTML='<form method="dialog"><h2>Enable GPU acceleration?</h2><p>Enable all GPU options for Orogen relief, propagation, erosion, climate and projection, plus map rendering?</p><p>Orogen acceleration uses NVIDIA CUDA. Map rendering uses WebGPU. You can adjust each option later in Settings and Rendering. Your choices are saved on this browser.</p><div class="panelActions"><button value="no" autofocus>Use CPU options</button><button value="yes">Enable GPU acceleration</button></div></form>';
     document.body.append(dialog);
     const enabled=await new Promise(resolve=>{dialog.addEventListener('close',()=>resolve(dialog.returnValue==='yes'),{once:true});dialog.showModal()});
     dialog.remove();
-    preferences={...preferences,gpuAcceleration:enabled,rendering:{gpuRender:enabled,coarseGpu:enabled}};
+    preferences={...preferences,gpuAcceleration:enabled,erosionDefaultsVersion:1,rendering:{gpuRender:enabled,coarseGpu:enabled}};
     savePreferences(preferences);
     return {preferences,firstLaunch:true};
   }
@@ -40,7 +48,7 @@ window.TerrainGenerationControls=(()=>{
     const propertyDefaults=Object.fromEntries(Object.entries(schema?.properties||{}).filter(([,spec])=>spec.default!==undefined).map(([key,spec])=>[key,clone(spec.default)]));
     if(schema?.defaults_by_profile?.[profile])return withGpu({...propertyDefaults,...clone(schema.defaults_by_profile[profile]),climate_source:'orogen'},localPreferences().gpuAcceleration===true);
     const natural=profile==='natural';
-    return {...propertyDefaults,world_diameter_km:40000/Math.PI,world_topology:"sphere",...withGpu({},localPreferences().gpuAcceleration===true),...Object.fromEntries(cityFields.map(([key,label,min,max,step,value])=>[key,value])),height_source:natural?'natural':profile==='orogen'?'orogen':'native',climate_source:'orogen',relief_pipeline:profile==='orogen'?'orogen':'original',
+    return {...propertyDefaults,world_diameter_km:40000/Math.PI,world_topology:"sphere",...withGpu({},localPreferences().gpuAcceleration===true),...Object.fromEntries(cityFields.map(([key,label,min,max,step,value])=>[key,value])),height_source:natural?'natural':profile==='orogen'?'orogen':'native',climate_source:'orogen',relief_pipeline:'orogen',
       continental_style:profile.startsWith('terrestrial-')?profile.slice(12):profile==='orogen'?'continents':'earthlike',
       continental_strength:.8,macro_scale_km:600,frequency_mult:[1,1,1,1,1],
       octaves:[4,2,4,4,4],cond_snr:natural?[.5,.5,.5,.5,.5]:[.05,.5,.5,.5,.5],drop_water_pct:.5,

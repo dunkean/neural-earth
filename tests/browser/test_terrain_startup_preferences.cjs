@@ -98,6 +98,40 @@ const storageKey='neural-earth-preferences-v1';
    await page.waitForFunction(()=>world?.seed==='42');
    assert.equal(worldRequests.at(-1).profile,'natural');
    assert.equal(worldRequests.at(-1).settings.orogen_detail,20000);
+
+   // Every UI profile defaults to active Orogen erosion, using the saved GPU answer.
+   const defaults=await page.evaluate(()=>['orogen','natural','terrestrial-earthlike'].map(profile=>generationControls.defaults(profile)));
+   for(const settings of defaults){assert.equal(settings.relief_pipeline,'orogen');assert.equal(settings.orogen_gpu_erosion,enabled);}
+
+   // Repair the old stored None setting, including the old URL still open in that browser.
+   const legacy={...schema.defaults_by_profile.orogen,relief_pipeline:'original',orogen_gpu_erosion:!enabled};
+   await page.evaluate(({key,enabled,settings})=>localStorage.setItem(key,JSON.stringify({gpuAcceleration:enabled,generation:{profile:'orogen',settings}})),{key:storageKey,enabled,settings:legacy});
+   await page.goto('https://startup.test/?profile=orogen&generation='+encodeURIComponent(JSON.stringify(legacy)));
+   await page.waitForFunction(()=>world?.seed==='42');
+   assert.equal(await page.locator('#gpuWelcome').count(),0,'Existing GPU answer is retained');
+   assert.equal(worldRequests.at(-1).settings.relief_pipeline,'orogen','Old None erosion is repaired');
+   assert.equal(worldRequests.at(-1).settings.orogen_gpu_erosion,enabled);
+   assert.equal(await page.inputValue('#reliefPipeline'),enabled?'orogen-gpu':'orogen');
+   assert.equal(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)).erosionDefaultsVersion,storageKey),1);
+
+   // The repair is one-time: a later explicit choice to disable erosion still persists.
+   await page.locator('#generationPanel > summary').click();
+   await page.locator('#tabErosion').click();
+   await page.selectOption('#reliefPipeline','original');
+   await page.reload();
+   await page.waitForFunction(()=>world?.seed==='42');
+   assert.equal(worldRequests.at(-1).settings.relief_pipeline,'original');
+   assert.equal(await page.inputValue('#reliefPipeline'),'original');
+
+   // First-launch links with another generator and None also activate CPU/GPU erosion.
+   await page.evaluate(key=>localStorage.removeItem(key),storageKey);
+   await page.goto('https://startup.test/?profile=natural&generation='+encodeURIComponent(JSON.stringify(linked)));
+   await page.locator('#gpuWelcome').waitFor({state:'visible'});
+   await page.locator('#gpuWelcome button[value='+(enabled?'yes':'no')+']').click();
+   await page.waitForFunction(()=>world?.seed==='42');
+   assert.equal(worldRequests.at(-1).settings.relief_pipeline,'orogen');
+   assert.equal(worldRequests.at(-1).settings.orogen_gpu_erosion,enabled);
+   assert.equal(await page.inputValue('#reliefPipeline'),enabled?'orogen-gpu':'orogen');
    assert.deepEqual(errors,[]);
    await context.close();
   }
