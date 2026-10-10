@@ -304,6 +304,11 @@ def sheet(output):
             info = site_info[name]
             caption = (f"{info['kind']}\nseed {info['seed']}\nLOD {lod}\nx {info['x']:.0f}\ny {info['y']:.0f}"
                        if 'kind' in info else f'{name[:20]}\nLOD {lod}')
+            if info.get('climate_archetype'):
+                caption = info['climate_archetype'] + '\n' + caption
+            if info.get('conditioning'):
+                climate = info['conditioning']
+                caption += f"\nT {climate['temp']:.1f} C\nP {climate['rain']:.0f} mm"
             draw.text((4, y + size // 2), caption, fill=(255, 255, 255))
             for c, variant in enumerate(variants):
                 key = f'{variant}|{name}|{lod}'
@@ -313,13 +318,18 @@ def sheet(output):
         image.save(path)
     # Text/table equivalent for the rendered physical comparison sheets.
     with (output / 'sheet-summary.csv').open('w', newline='') as handle:
-        fields = ['variant', 'site', 'lod', 'mae_m', 'coast', 'slope_mean_deg', 'slope_p90_deg',
+        fields = ['variant', 'site', 'lod', 'climate_archetype', 'conditioning_temperature_c',
+                  'precipitation_mm', 'mae_m', 'coast', 'slope_mean_deg', 'slope_p90_deg',
                   *[f'psd_band_{i}' for i in range(5)], 'error']
         writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
         for variant, rows in report['variants'].items():
             for row in rows:
+                info = site_info[row['site']]
                 writer.writerow(dict(variant=variant, site=row['site'], lod=row['lod'],
+                    climate_archetype=info.get('climate_archetype'),
+                    conditioning_temperature_c=info.get('conditioning', {}).get('temp'),
+                    precipitation_mm=info.get('conditioning', {}).get('rain'),
                     mae_m=row.get('vs_reference', {}).get('mae'), coast=row.get('vs_reference', {}).get('coast'),
                     slope_mean_deg=row.get('slope_mean'), slope_p90_deg=row.get('slope_p90'),
                     error=row.get('error', ''), **{f'psd_band_{i}': v for i, v in enumerate(row.get('psd', []))}))

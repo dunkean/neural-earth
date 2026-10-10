@@ -1,5 +1,6 @@
 """Regression tests for field invariance, deterministic resume and masked losses."""
 from pathlib import Path
+import hashlib
 import tempfile
 import unittest
 
@@ -14,7 +15,7 @@ from distill.resume_teacher import validate_resume_plan
 from distill.student import Student, StudentConfig
 from distill.train import coarse_delta_loss, coarse_height_mae, losses, lowfreq_height_mae, spectral_band_loss
 from distill.evaluate import artifact_audit, audit, pipeline_speed_audit
-from distill.rare_cases import additional_evidence, load_sites, local_errors, qualifies, sampling_policy, KINDS
+from distill.rare_cases import additional_evidence, augment, load_sites, local_errors, qualifies, sampling_policy, KINDS
 from distill.common import source_digest
 from distill.coarse_solver import CoarseSolver
 from distill.widen import expand_state, expanded_config
@@ -251,6 +252,8 @@ class DistillationTests(unittest.TestCase):
                     land_height_p90=80., coast_complexity=0.,
                     land_largest_component_fraction=1., sea_largest_component_fraction=1.)
         self.assertTrue(qualifies('desert-plain', flat, climate))
+        self.assertFalse(qualifies('desert-plain', flat, climate | dict(temp=5.), 'warm-arid'))
+        self.assertTrue(qualifies('desert-plain', flat, dict(rain=200., temp=25.), 'warm-arid'))
         self.assertFalse(qualifies('desert-plain', flat | dict(slope_land_p90=12.), climate))
         self.assertFalse(qualifies('low-plain-sea', flat, climate))
         coast = flat | dict(land=.5, coast_complexity=3.)
@@ -286,6 +289,27 @@ class DistillationTests(unittest.TestCase):
                 load_sites(path)
         with self.assertRaises(ValueError):
             audit(dict(sites=[dict(name='plain')]), 'student')
+
+    def test_warm_plain_augmentation_preserves_each_original_rare_site(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            original, addition, output = [root / (name+'.json') for name in ('original', 'addition', 'complete')]
+            sites = [dict(name=kind, seed=101, kind=kind, x=0., y=0.) for kind in KINDS]
+            warm = [dict(name=kind+'-warm', seed=202, kind=kind, x=10., y=10., climate_archetype=archetype)
+                    for kind, archetype in [('desert-plain', 'warm-arid'), ('temperate-plain', 'mild-temperate')]]
+            base = dict(frozen=True, teacher_sources=source_digest())
+            atomic_json(original, base | dict(sites=sites))
+            atomic_json(addition, base | dict(sites=warm))
+            augment(original, addition, output)
+            self.assertEqual(load_sites(output), sites+warm)
+            parents = {str(p.resolve()): hashlib.sha256(p.read_bytes()).hexdigest() for p in (original, addition)}
+            atomic_json(output, base | dict(sites=sites[1:]+warm, parent_banks=parents))
+            rejected = additional_evidence({}, 'student_all', output, root/'unused')
+            self.assertFalse(rejected['passed'])
+            self.assertIn('original rare cases', rejected['reason'])
+            atomic_json(output, base | dict(sites=sites+warm, parent_banks=parents))
+            atomic_json(original, base | dict(sites=sites[1:]))
+            self.assertIn('missing or changed', additional_evidence({}, 'student_all', output, root/'unused')['reason'])
 
     def test_acceptance_rejects_mismatched_weights_and_unreviewed_seams(self):
         sources = {'code:'+name: 'source-hash' for name in

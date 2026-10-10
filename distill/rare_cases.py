@@ -70,7 +70,7 @@ def score(kind, stats):
     return None
 
 
-def survey(output, count=8):
+def survey(output, count=8, warm_plains=False):
     from terrain_conditioning import make_conditioning_factory, WORLD_BOUNDS
     x0, y0, x1, y1 = WORLD_BOUNDS
     # One global sample per world; at 30.72 km spacing the arrays stay small.
@@ -92,6 +92,9 @@ def survey(output, count=8):
             'wet-complex-coast': (lm > .1) & (lm < .9) & (rain > 1200),
             'low-plain-sea': (lm > .1) & (lm < .9),
         }
+        if warm_plains:
+            masks['desert-plain'] &= (temp >= 15) & (rain < 250)
+            masks['temperate-plain'] &= temp >= 10
         for kind, mask in masks.items():
             mask[:2] = mask[-2:] = False
             mask[:, :2] = mask[:, -2:] = False
@@ -109,8 +112,16 @@ def survey(output, count=8):
                 offsets = np.linspace(-SPAN / 2, SPAN / 2, 17)
                 stats = field_stats(factory.sample(cx + offsets, cy + offsets))
                 value = score(kind, stats)
+                archetype = ('warm-arid' if kind == 'desert-plain' else 'mild-temperate'
+                             if kind == 'temperate-plain' else None) if warm_plains else None
+                if archetype == 'warm-arid' and stats is not None and not (stats['temp'] >= 15 and stats['rain'] < 250):
+                    value = None
+                if archetype == 'mild-temperate' and stats is not None and stats['temp'] < 10:
+                    value = None
                 if value is not None:
-                    pools[kind].append(dict(name=f'{kind}-{seed}-{tx}-{ty}', kind=kind, seed=seed,
+                    prefix = kind + ('-' + archetype if archetype else '')
+                    pools[kind].append(dict(name=f'{prefix}-{seed}-{tx}-{ty}', kind=kind, seed=seed,
+                                           climate_archetype=archetype,
                                            profile=profile, x=cx, y=cy, conditioning=stats, selection_score=value))
         print(json.dumps(dict(seed=seed, profile=profile, proposed={k: len(v) for k, v in pools.items()})), flush=True)
     selected = []
@@ -148,8 +159,12 @@ def relief_stats(e, lod):
                 sea_largest_component_fraction=largest_fraction(~land))
 
 
-def qualifies(kind, stats, conditioning):
+def qualifies(kind, stats, conditioning, archetype=None):
     s, c = stats, conditioning
+    if archetype == 'warm-arid' and not (c['temp'] >= 15 and c['rain'] < 250):
+        return False
+    if archetype == 'mild-temperate' and not (10 <= c['temp'] < 22):
+        return False
     if kind in ('desert-plain', 'temperate-plain'):
         climate = c['rain'] < 350 if kind == 'desert-plain' else 400 < c['rain'] < 1800 and 0 < c['temp'] < 22
         return climate and s['land'] > .95 and s['land_height_std'] < 100 and s['slope_land_p90'] < 5
@@ -178,7 +193,7 @@ def freeze(proposals, evaluation, output, per_kind=1):
                 stats = {str(lod): relief_stats(arrays[f"reference|{site['name']}|{lod}"], lod) for lod in (3, 0)}
                 # Plains must be flat at both scales; both views of a coast must
                 # contain sea and land. An offshore LOD 0 cannot validate a coast.
-                if all(qualifies(kind, stats[str(lod)], site['conditioning']) for lod in (3, 0)):
+                if all(qualifies(kind, stats[str(lod)], site['conditioning'], site.get('climate_archetype')) for lod in (3, 0)):
                     value = (-sum(s['coast_complexity'] for s in stats.values()) if kind == 'wet-complex-coast'
                              else sum(s['land_height_std'] for s in stats.values()))
                     candidates.append((value, site | dict(teacher_relief=stats)))
@@ -193,6 +208,27 @@ def freeze(proposals, evaluation, output, per_kind=1):
     output = external_path(output)
     if output.exists() and json.loads(output.read_text()) != payload:
         raise ValueError('A frozen bank is immutable; write a separately named bank for a changed definition.')
+    atomic_json(output, payload)
+
+
+def augment(original, addition, output):
+    base = json.loads(Path(original).read_text())
+    extra = json.loads(Path(addition).read_text())
+    if not base['frozen'] or not extra['frozen']:
+        raise ValueError('Augment only frozen teacher-qualified banks.')
+    sites = load_sites(original)
+    warm = [s for s in load_sites(addition) if s.get('climate_archetype') in ('warm-arid', 'mild-temperate')]
+    if {s.get('climate_archetype') for s in warm} != {'warm-arid', 'mild-temperate'}:
+        raise ValueError('Both warm arid and mild temperate plains are required.')
+    if {s['name'] for s in sites} & {s['name'] for s in warm}:
+        raise ValueError('An augmentation must add distinct cases without replacing old sites.')
+    payload = dict(schema=1, frozen=True, teacher_sources=source_digest(),
+                   selection='Immutable original rare bank plus teacher-qualified warmer plains; no student-driven selection.',
+                   parent_banks={str(Path(p).resolve()): hashlib.sha256(Path(p).read_bytes()).hexdigest()
+                                 for p in (original, addition)}, sites=sites+warm)
+    output = external_path(output)
+    if output.exists() and json.loads(output.read_text()) != payload:
+        raise ValueError('A frozen augmented bank is immutable.')
     atomic_json(output, payload)
 
 
@@ -235,7 +271,7 @@ def audit(manifest_path, evaluation, variant, output):
         for site in sites:
             for lod in (3, 0):
                 stats = relief_stats(arrays[f"reference|{site['name']}|{lod}"], lod)
-                if not qualifies(site['kind'], stats, site['conditioning']):
+                if not qualifies(site['kind'], stats, site['conditioning'], site.get('climate_archetype')):
                     raise ValueError(f"{site['name']} LOD {lod}: teacher does not qualify for this rare category.")
         for row in result['rows']:
             name, lod = row['site'], row['lod']
@@ -261,6 +297,23 @@ def audit(manifest_path, evaluation, variant, output):
 def additional_evidence(report, variant, manifest_path=None, evaluation=None):
     if manifest_path is None or evaluation is None:
         return dict(passed=False, reason='Frozen rare-case evaluation not supplied.')
+    sites = load_sites(manifest_path)
+    if not {'warm-arid', 'mild-temperate'}.issubset({s.get('climate_archetype') for s in sites}):
+        return dict(passed=False, reason='Warm arid and mild temperate plains must supplement the original rare cases.')
+    # Check the saved parents too: adding warm cases must not silently discard
+    # an original difficult coast or plain, even if all four kind labels remain.
+    parents = json.loads(Path(manifest_path).read_text()).get('parent_banks', {})
+    original_preserved = False
+    for parent, digest in parents.items():
+        path = Path(parent)
+        if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+            return dict(passed=False, reason='A frozen parent bank is missing or changed.')
+        parent_sites = load_sites(path)
+        if all(s.get('climate_archetype') is None for s in parent_sites):
+            original_preserved = ({s['kind'] for s in parent_sites} == set(KINDS) and
+                                  all(s in sites for s in parent_sites))
+    if not original_preserved:
+        return dict(passed=False, reason='The original rare cases must remain intact in the augmented bank.')
     from tempfile import TemporaryDirectory
     # Compute from raw arrays/report instead of trusting a separately edited
     # acceptance JSON. The temporary audit stays outside the repository.
@@ -348,6 +401,7 @@ def main():
     scan = sub.add_parser('survey')
     scan.add_argument('output', type=Path)
     scan.add_argument('--count', type=int, default=8)
+    scan.add_argument('--warm-plains', action='store_true')
     select = sub.add_parser('freeze')
     select.add_argument('proposals', type=Path)
     select.add_argument('evaluation', type=Path)
@@ -365,9 +419,13 @@ def main():
     balance.add_argument('coverage', type=Path)
     balance.add_argument('output', type=Path)
     balance.add_argument('--rare-fraction', type=float, default=.25)
+    extend = sub.add_parser('augment')
+    extend.add_argument('original', type=Path)
+    extend.add_argument('addition', type=Path)
+    extend.add_argument('output', type=Path)
     args = parser.parse_args()
     if args.command == 'survey':
-        survey(args.output, args.count)
+        survey(args.output, args.count, args.warm_plains)
     elif args.command == 'freeze':
         freeze(args.proposals, args.evaluation, args.output, args.per_kind)
     elif args.command == 'audit':
@@ -375,8 +433,10 @@ def main():
         print(json.dumps(dict(physical_passed=result['physical_passed'], accepted=False)))
     elif args.command == 'coverage':
         coverage(args.dataset, args.output)
-    else:
+    elif args.command == 'sampling-policy':
         sampling_policy(args.coverage, args.output, args.rare_fraction)
+    else:
+        augment(args.original, args.addition, args.output)
 
 
 if __name__ == '__main__':

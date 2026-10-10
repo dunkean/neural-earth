@@ -402,6 +402,28 @@ cas « transition » sur la géométrie du teacher uniquement, avant toute analy
 des erreurs élèves. Le rapport provisoire est conservé sous `rare-student-pilot`.
 La banque finale ne sera plus modifiée en fonction des résultats élèves.
 
+Complément climatique figé : `eval/rare-sites-complete.json` conserve **les huit
+lieux ci-dessus**, et ajoute deux plaines arides chaudes et deux plaines tempérées
+douces, soit **12 lieux / 24 vues**. Les premiers déserts avaient une température
+de -1,9 à 4,9 °C et les plaines tempérées de 3 à 4,9 °C. Une seconde prospection
+teacher seule (`warm-plain-proposals.json`, 96 vues dans `warm-teacher-survey`)
+a qualifié les ajouts aux deux LODs, sans regarder les erreurs des élèves :
+
+| Ajout | Température | Précipitations | Écart-type terrestre LOD 3 / 0 | Pente p90 LOD 3 / 0 |
+| --- | --- | --- | --- | --- |
+| Désert seed 202, (28, 63) | 15,9 °C | 121 mm | 11,5 / 4,6 m | 1,28 / 1,28° |
+| Désert seed 202, (-275, 55) | 24,1 °C | 211 mm | 11,9 / 5,0 m | 1,29 / 4,32° |
+| Plaine tempérée seed 42, (37, -78) | 15,2 °C | 570 mm | 8,4 / 4,3 m | 1,03 / 1,64° |
+| Plaine tempérée seed 42, (27, -86) | 11,9 °C | 512 mm | 11,8 / 4,3 m | 1,19 / 0,70° |
+
+Les coordonnées sont celles des tuiles LOD 3. Les parents figés et leurs SHA
+sont enregistrés dans la banque augmentée ; l'acceptation vérifie aussi leur
+intégrité et la conservation de chaque ancien lieu. L'inspecteur utilise cette
+banque complète par défaut. Les planches et leur CSV indiquent température,
+précipitations et variante climatique. Aucun de ces mondes réservés ne sert à
+l'entraînement. **25 tests passent**, dont conservation des anciens lieux et
+rejet d'un parent modifié.
+
 Premier audit de cette banque avec les trois candidats précédents : aucun base
 ou coarse ne passe les 16 vues. Le base lisse particulièrement les plaines et
 les côtes au LOD 0 ; le coarse peut déplacer des rivages entiers. Le decoder

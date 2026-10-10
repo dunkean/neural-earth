@@ -23,7 +23,7 @@ def main():
     parser.add_argument('--checkpoint-dir', type=Path, help='Separate architecture trial directory.')
     parser.add_argument('--interim', action='store_true', help='Inspect a frozen best checkpoint during training; no completion claim.')
     parser.add_argument('--tag', required=True)
-    parser.add_argument('--rare-manifest', type=Path, default=DATA/'eval/rare-sites-coherent.json')
+    parser.add_argument('--rare-manifest', type=Path, default=DATA/'eval/rare-sites-complete.json')
     args = parser.parse_args()
     directory = external_path(args.checkpoint_dir or DATA/'ckpt'/args.stage)
     status = json.loads((directory/'status.json').read_text())
