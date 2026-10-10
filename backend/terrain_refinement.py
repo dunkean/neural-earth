@@ -6,8 +6,10 @@ levels would feed it latents stretched beyond its training distribution, so
 LOD -2 to -6 add deterministic procedural octaves instead: sparse convolution
 of zero-mean kernels, partly elongated down steep slopes, scaled from the local
 roughness of the decoder and native octaves and rougher on steep and convex
-ground. All surfaces are continuous functions of position, sampled directly
-at the requested spacing: hillshading shows no grid of the 30 m source or of
+ground. Finer octaves gather in patches set by a low-frequency noise and the
+relief, with heavy-tailed weights, so metre-scale grain is not uniform. All
+surfaces are continuous functions of position, sampled directly at the
+requested spacing: hillshading shows no grid of the 30 m source or of
 coarser levels. Composition happens in the checkpoint's signed-sqrt height.
 Near sea level a smoothed base gives one coastline free of the 30 m raster,
 the same at every level up to a turn of a few degrees; detail never flips
@@ -25,7 +27,7 @@ from infinite_tensor import InfiniteTensor, TensorWindow
 from terrain_diffusion.inference.world_pipeline import linear_weight_window
 from terrain_diffusion.scheduler.dpmsolver import EDMDPMSolverMultistepScheduler
 
-VERSION = 'decoder-v8-signed-sqrt-coast'
+VERSION = 'decoder-v9-patchy-detail'
 MIN_LOD = -6
 # Finest level whose octave comes from the decoder; finer ones are procedural.
 DECODER_LEVELS = 1
@@ -55,8 +57,8 @@ SMOOTH_RADIUS = 4
 # p(v) = (1-26v^2+65v^4)(1-v^2)^4 and q(u) = (1-u^2)^4. Both have two
 # vanishing moments (power ~k^4 near zero), so coarser features stay in
 # place, and peak at 2.83 cells: the octave between this grid's and its
-# parent's Nyquist. Slopes favour oriented kernels at the coarser octaves
-# only; metre-scale debris has no preferred direction. Only polynomials,
+# parent's Nyquist. Slopes favour oriented kernels at the two coarsest
+# octaves only: finer, they combed slopes like fur. Only polynomials,
 # division and square roots: results do not depend on tile shape.
 RADIAL_RADIUS = 3.66
 ACROSS_RADIUS = 3.55
@@ -73,6 +75,16 @@ NATIVE_SHARE = .3
 # Soft cap on each octave's RMS slope, decoder octave included: a cliff's
 # decoder ringing must not become a comb of metre-high ribs.
 SLOPE_CAP = .4
+# Patches. Finer octaves are not everywhere: a value noise of PATCH_NOISE
+# octaves (spacing in native cells, weight), shared by every octave, plus a
+# relief term (steep and convex ground) decides where they keep their
+# amplitude. Octave o loses up to PATCH_CUT[o-1] of it elsewhere, so metre-
+# scale grain gathers in rocky patches instead of covering slopes like skin.
+PATCH_NOISE = ((4., .55), (1.7, .3), (.7, .15))
+PATCH_LOW, PATCH_HIGH = -.05, .3
+PATCH_CUT = (.3, .55, .75, .88, .92)
+# Share of heavy-tailed (cubed uniform) impulse weights per octave.
+TAIL = (0., .25, .5, .8, 1.)
 # Coastline. Within COAST_NEAR native cells of sea level the base comes from
 # signed-sqrt heights smoothed by COAST_SMOOTH and a cubic B-spline (sigma ~0.9
 # cell), fading to the exact spline by COAST_FAR cells. That zero line is one
@@ -259,6 +271,28 @@ def _uniform(h, stream):
     return (_hash(h + stream) & 0xffffff).double() / 2**24
 
 
+def _value_noise(seed, y, x, spacing, stream):
+    """Value noise in [-1, 1] with C1 interpolation on a lattice of `spacing` native cells."""
+    gy, gx = y / spacing, x / spacing
+    iy, ix = gy.floor(), gx.floor()
+    fy, fx = gy - iy, gx - ix
+    sy, sx = fy*fy*(3 - 2*fy), fx*fx*(3 - 2*fx)
+    r, c = iy.long() & _MASK, ix.long() & _MASK
+    corner = lambda dr, dc: 2*_uniform(_hash(_hash(seed ^ ((r + dr) & _MASK)) ^ ((c + dc) & _MASK)), stream) - 1
+    v00, v01, v10, v11 = corner(0, 0), corner(0, 1), corner(1, 0), corner(1, 1)
+    top = v00 + (v01 - v00)*sx
+    bottom = v10 + (v11 - v10)*sx
+    return top + (bottom - top)*sy
+
+
+def _patch_noise(seed, y, x):
+    total = None
+    for k, (spacing, weight) in enumerate(PATCH_NOISE):
+        term = weight * _value_noise(seed, y, x, spacing, 11 + k)
+        total = term if total is None else total + term
+    return total
+
+
 def _slope_cap(source):
     """Amplitude whose octave at 2.83 cells of level `source` has RMS slope SLOPE_CAP."""
     return SLOPE_CAP * 2**1.5 * (30 / 2**source) / (2*math.pi)
@@ -342,15 +376,19 @@ def _impulses(world, source, a0, b0, a1, b1, fields, origin):
     device = world.device
     octave = source - DECODER_LEVELS
     seed = (int(getattr(world, 'seed', 0)) * 1000003 + source * 7919) & _MASK
-    orient = max(0., .6 - .2*(octave-1))
+    orient = max(0., .6 - .35*(octave-1))
+    patch_seed = _hash_int((int(getattr(world, 'seed', 0)) * 1000003 + 4241) & _MASK)
+    cut = PATCH_CUT[octave-1]
+    tail = TAIL[octave-1]
     gentle, steep_decay = 2**(-HURST_GENTLE*octave), 2**(-HURST_STEEP*octave)
     kernel = _kernel('impulses', device)
     if kernel is not None:
         out = torch.empty((7, a1 - a0, b1 - b0), device=device, dtype=torch.float32)
         fields = [f.contiguous() for f in fields]
         _launch(kernel, out.shape[1:], *fields, np.int32(fields[0].shape[1]), np.int64(a0), np.int64(b0),
-                np.int32(a1 - a0), np.int32(b1 - b0), np.uint64(_hash_int(seed)), float(2**source),
+                np.int32(a1 - a0), np.int32(b1 - b0), np.uint64(_hash_int(seed)), np.uint64(patch_seed), float(2**source),
                 float(origin[0]), float(origin[1]), orient, gentle, steep_decay, _slope_cap(source),
+                cut, PATCH_LOW, PATCH_HIGH, *[float(v) for o in PATCH_NOISE for v in o], tail,
                 ACROSS_RADIUS, ALONG_GAIN - 1, 3**.5, (RADIAL_RADIUS**2 * _RADIAL_POWER)**.5, _ORIENTED_POWER, out)
         return list(out)
     a = torch.arange(a0, a1, device=device, dtype=torch.int64)[:, None]
@@ -359,21 +397,29 @@ def _impulses(world, source, a0, b0, a1, b1, fields, origin):
     jy, jx = _uniform(h, 1), _uniform(h, 2)
     # Impulse positions on the native grid, relative to the field origin.
     scale = 2**source
-    y = (a.double() + jy) / scale - origin[0]
-    x = (b.double() + jx) / scale - origin[1]
+    py, px = (a.double() + jy) / scale, (b.double() + jx) / scale
+    y, x = py - origin[0], px - origin[1]
     gy, gx, curvature, roughness = _bilinear(fields, y, x)
     slope = (gy*gy + gx*gx).sqrt()
     dy, dx = gy / (slope + 1e-12), gx / (slope + 1e-12)
-    # Some oriented kernels on slopes at 7.5 m, none from 0.94 m: metre-scale
-    # debris has no preferred direction.
-    oriented = _uniform(h, 3) < _smoothstep(.02, .15, slope) * orient
-    along = ACROSS_RADIUS * (1 + (ALONG_GAIN-1)*_smoothstep(.05, .4, slope))
+    # Some oriented kernels on slopes at 7.5 m and 3.75 m, none from 1.9 m:
+    # metre-scale debris has no preferred direction.
     steep = _smoothstep(.15, .7, slope)
+    # Rocky patches: noise, raised on steep and convex ground. Outside them
+    # finer octaves fade, and so do gullies and ribs down the slope.
+    presence = _smoothstep(PATCH_LOW, PATCH_HIGH, _patch_noise(patch_seed, py, px) + (.1*steep - .2*curvature))
+    gain = 1 - cut*(1 - presence)
+    oriented = _uniform(h, 3) < _smoothstep(.02, .15, slope) * orient * gain
+    along = ACROSS_RADIUS * (1 + (ALONG_GAIN-1)*_smoothstep(.05, .4, slope))
     decay = (1-steep)*gentle + steep*steep_decay
     # Valleys (positive Laplacian) stay smoother than ridges and convex slopes.
     amplitude = roughness * decay * (1 - .4*curvature)
-    amplitude = _soft_cap(amplitude, _slope_cap(source))
-    weight = amplitude * (3**.5 * (2*_uniform(h, 5) - 1))
+    # After the cap: rough ground mostly sits at it, which made it uniform.
+    amplitude = _soft_cap(amplitude, _slope_cap(source)) * gain
+    # Heavy-tailed weights at fine octaves: a few distinct bumps among many
+    # faint ones rather than an even grain; unit RMS at either end.
+    s = 2*_uniform(h, 5) - 1
+    weight = amplitude * ((1 - tail)*(3**.5*s) + tail*(7**.5*(s*s*s)))
     radial = torch.where(oriented, 0., weight / (RADIAL_RADIUS**2 * _RADIAL_POWER)**.5)
     weight = torch.where(oriented, weight / (along * ACROSS_RADIUS * _ORIENTED_POWER).sqrt(), 0.)
     return [v.float() for v in (jy, jx, dy, dx, 1 / along, weight, radial)]
@@ -408,6 +454,21 @@ __device__ double smooth(double low, double high, double x) {
   double t = (x - low) / (high - low); t = t < 0. ? 0. : (t > 1. ? 1. : t);
   return t*t*(3. - 2.*t);
 }
+__device__ double noise(u64 seed, double y, double x, double spacing, u64 stream) {
+  const u64 M = 0xffffffffULL;
+  double gy = y / spacing, gx = x / spacing;
+  double iy = floor(gy), ix = floor(gx);
+  double fy = gy - iy, fx = gx - ix;
+  double sy = fy*fy*(3. - 2.*fy), sx = fx*fx*(3. - 2.*fx);
+  u64 r = (u64)(long long)iy & M, c = (u64)(long long)ix & M;
+  double v00 = 2.*uniform(mix(mix(seed ^ (r & M)) ^ (c & M)), stream) - 1.;
+  double v01 = 2.*uniform(mix(mix(seed ^ (r & M)) ^ ((c + 1) & M)), stream) - 1.;
+  double v10 = 2.*uniform(mix(mix(seed ^ ((r + 1) & M)) ^ (c & M)), stream) - 1.;
+  double v11 = 2.*uniform(mix(mix(seed ^ ((r + 1) & M)) ^ ((c + 1) & M)), stream) - 1.;
+  double top = v00 + (v01 - v00)*sx;
+  double bottom = v10 + (v11 - v10)*sx;
+  return top + (bottom - top)*sy;
+}
 __device__ double sample(const double* f, int fw, long long iy, long long ix, double fy, double fx) {
   double top = f[iy*fw + ix]*(1. - fx) + f[iy*fw + ix + 1]*fx;
   double bottom = f[(iy + 1)*fw + ix]*(1. - fx) + f[(iy + 1)*fw + ix + 1]*fx;
@@ -415,8 +476,9 @@ __device__ double sample(const double* f, int fw, long long iy, long long ix, do
 }
 extern "C" __global__ void impulses(
     const double* gy_f, const double* gx_f, const double* curv_f, const double* rough_f, int fw,
-    long long a0, long long b0, int na, int nb, u64 seed, double scale, double oy0, double ox0,
-    double orient, double gentle, double steep_decay, double cap, double across, double along_gain,
+    long long a0, long long b0, int na, int nb, u64 seed, u64 patch_seed, double scale, double oy0, double ox0,
+    double orient, double gentle, double steep_decay, double cap, double cut, double patch_low, double patch_high,
+    double s0, double w0, double s1, double w1, double s2, double w2, double tail, double across, double along_gain,
     double sqrt3, double radial_norm, double oriented_power, float* out) {
   int j = blockIdx.x*blockDim.x + threadIdx.x, i = blockIdx.y*blockDim.y + threadIdx.y;
   if (i >= na || j >= nb) return;
@@ -424,7 +486,8 @@ extern "C" __global__ void impulses(
   long long a = a0 + i, b = b0 + j;
   u64 h = mix(mix(seed ^ ((u64)a & M)) ^ ((u64)b & M));
   double jy = uniform(h, 1), jx = uniform(h, 2);
-  double y = ((double)a + jy) / scale - oy0 - .5, x = ((double)b + jx) / scale - ox0 - .5;
+  double py = ((double)a + jy) / scale, px = ((double)b + jx) / scale;
+  double y = py - oy0 - .5, x = px - ox0 - .5;
   double iy = floor(y), ix = floor(x), fy = y - iy, fx = x - ix;
   double gy = sample(gy_f, fw, (long long)iy, (long long)ix, fy, fx);
   double gx = sample(gx_f, fw, (long long)iy, (long long)ix, fy, fx);
@@ -432,14 +495,20 @@ extern "C" __global__ void impulses(
   double roughness = sample(rough_f, fw, (long long)iy, (long long)ix, fy, fx);
   double slope = sqrt(gy*gy + gx*gx);
   double dy = gy / (slope + 1e-12), dx = gx / (slope + 1e-12);
-  bool oriented = uniform(h, 3) < smooth(.02, .15, slope) * orient;
-  double along = across * (1. + along_gain*smooth(.05, .4, slope));
   double steep = smooth(.15, .7, slope);
+  double patch = w0*noise(patch_seed, py, px, s0, 11);
+  patch = patch + w1*noise(patch_seed, py, px, s1, 12);
+  patch = patch + w2*noise(patch_seed, py, px, s2, 13);
+  double presence = smooth(patch_low, patch_high, patch + (.1*steep - .2*curvature));
+  double gain = 1. - cut*(1. - presence);
+  bool oriented = uniform(h, 3) < smooth(.02, .15, slope) * orient * gain;
+  double along = across * (1. + along_gain*smooth(.05, .4, slope));
   double decay = (1. - steep)*gentle + steep*steep_decay;
   double amplitude = roughness * decay * (1. - .4*curvature);
   double ratio = amplitude / cap;
-  amplitude = amplitude / sqrt(1. + ratio*ratio);
-  double weight = amplitude * (sqrt3 * (2.*uniform(h, 5) - 1.));
+  amplitude = amplitude / sqrt(1. + ratio*ratio) * gain;
+  double s = 2.*uniform(h, 5) - 1.;
+  double weight = amplitude * ((1. - tail)*(sqrt3*s) + tail*(2.6457513110645907*(s*s*s)));
   long long n = (long long)na*nb, k = (long long)i*nb + j;
   out[k] = (float)jy; out[n + k] = (float)jx; out[2*n + k] = (float)dy; out[3*n + k] = (float)dx;
   out[4*n + k] = (float)(1. / along);
