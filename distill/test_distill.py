@@ -19,6 +19,7 @@ from distill.rare_cases import additional_evidence, augment, load_sites, local_e
 from distill.common import source_digest
 from distill.coarse_solver import CoarseSolver
 from distill.widen import expand_state, expanded_config
+from distill.check_physical_seams import partition_stats
 
 
 class DistillationTests(unittest.TestCase):
@@ -275,6 +276,23 @@ class DistillationTests(unittest.TestCase):
         self.assertGreater(result['coast_300m']['pixels'], 0)
         self.assertGreater(result['axis_error']['column_mean_std_m'], 0)
 
+    def test_final_terrain_partition_detects_horizontal_and_vertical_cracks(self):
+        size, halo = 32, 8
+        y, x = np.indices((2*size+2*halo,)*2)
+        field = (x*.5 + y*.2 - 25).astype(np.float32)
+        full = field[halo:halo+2*size, halo:halo+2*size]
+        tiles = {(y,x):field[y*size:y*size+size+2*halo, x*size:x*size+size+2*halo].copy()
+                 for y in range(2) for x in range(2)}
+        values, mosaic = partition_stats(full, tiles, halo)
+        np.testing.assert_array_equal(mosaic, full)
+        self.assertEqual(values['max_jump_error_m'], 0.)
+        self.assertEqual(values['overlap_max_m'], 0.)
+        tiles[(0, 1)][halo:halo+size, halo] += 2
+        tiles[(1, 0)][halo, halo:halo+size] -= 3
+        values, _ = partition_stats(full, tiles, halo)
+        self.assertGreaterEqual(values['max_jump_error_m'], 3.)
+        self.assertGreaterEqual(values['overlap_max_m'], 3.)
+
     def test_rare_bank_excludes_training_worlds_and_cannot_replace_original_bank(self):
         self.assertFalse(additional_evidence({}, 'student_all')['passed'])
         with tempfile.TemporaryDirectory() as directory:
@@ -313,7 +331,7 @@ class DistillationTests(unittest.TestCase):
 
     def test_acceptance_rejects_mismatched_weights_and_unreviewed_seams(self):
         sources = {'code:'+name: 'source-hash' for name in
-                   ('distill/student.py', 'distill/features.py', 'distill/inference.py')}
+                   ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py')}
         fingerprint = dict(base='trained-model', coarse='coarse-model', decoder='decoder-model', **sources)
         report = dict(gpu='gpu', checkpoint_digests=dict(student_all=fingerprint))
         benchmark = dict(gpu='gpu', step=100, checkpoint_digest='trained-model', student_source_digests=sources)
@@ -322,6 +340,9 @@ class DistillationTests(unittest.TestCase):
                      visual_review=dict(passed=True, checkpoint_digests=fingerprint))
         pipeline = dict(benchmark)
         self.assertTrue(artifact_audit(report, 'student_all', benchmark, seams, pipeline)['passed'])
+        old_fingerprint = {k:v for k,v in fingerprint.items() if k != 'code:distill/coarse_solver.py'}
+        self.assertFalse(artifact_audit(dict(report, checkpoint_digests=dict(student_all=old_fingerprint)),
+                                      'student_all', benchmark, seams, pipeline)['passed'])
         benchmark['checkpoint_digest'] = 'architecture-only'
         self.assertFalse(artifact_audit(report, 'student_all', benchmark, seams, pipeline)['passed'])
         benchmark['checkpoint_digest'] = 'trained-model'

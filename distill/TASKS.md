@@ -9,6 +9,13 @@ qualité : coarse, base, decoder**. Adapter les tâches contre-productives, évi
 la surveillance coûteuse, anticiper les interruptions et les reprises. Aucun
 checkpoint n'est accepté sur la seule base d'une loss d'entraînement.
 
+Précision utilisateur en cours de travail : conserver plusieurs bons compromis,
+les erreurs peuvent être acceptables selon le **look and feel** ; vérifier
+soigneusement la continuité entre tuiles. Les seuils initiaux restent des
+diagnostics publiés, sans présenter leur échec comme une interdiction de montrer
+ou de choisir un candidat. Conserver les checkpoints figés et les mesures à
+côté des images ; distinguer sélection visuelle/pratique et acceptation stricte.
+
 ## Contexte
 
 Lis d'abord le doc de passation : [Neural Earth — handoff accélération du base model](https://claude.ai/code/artifact/0bd29cbe-5009-4628-845e-4fed483653ba). Il contient les mesures, les variantes déjà rejetées et le raisonnement ; ce doc-ci n'est que la liste d'exécution.
@@ -571,6 +578,31 @@ Le coordinateur principal attend le même handle decoder et ne crée pas un
 second entraînement. Chaque inspection utilise 14 vues historiques + les
 24 vues de la banque rare complète ; un succès de processus ne vaut toujours
 pas acceptation physique.
+
+### Continuité du terrain final et conservation des alternatives
+
+`distill/check_physical_seams.py` complète le test local du halo du base :
+quatre tuiles viewer voisines (256 + halo 24), demandées en ordre inversé, sont
+comparées à une grande requête du même terrain dans un **autre monde neuf**.
+Les trois étages peuvent être remplacés ensemble. Le test mesure aussi les
+pixels communs des halos, les erreurs de saut aux raccords horizontaux et
+verticaux et les différences de signe terre/mer. Il produit les hauteurs brutes,
+les vues grande requête / mosaïque / erreur en mètres et un tableau CSV.
+
+Smoke teacher sur la transition très basse seed 202, (-240, 0), réussi aux
+LOD 3/0 (`eval/physical-seam-teacher-smoke`) : **halos voisins identiques** aux
+deux échelles. LOD 0 : différence max avec la grande requête 3,58e-5 m.
+LOD 3 : MAE 0,108 m, max 4,29 m et écart de saut max 0,498 m avec la grande
+requête ; ce comportement du teacher est mesuré séparément des joints des
+élèves, plutôt que de supposer une identité entre toutes les tailles de requête.
+**26 tests passent**, dont détection de fissures synthétiques sur les deux axes.
+L'audit des artefacts attend maintenant les quatre sources student/solveur,
+comme les empreintes des rapports, au lieu du compte historique de trois.
+
+Huit alternatives sont déjà figées sous `ckpt/candidates/`, avec inventaire
+SHA/config/pas dans `inventory.json`. Ajouts conservés pour comparaison :
+base 96 EMA 295000 et base 128 EMA 20000. Cela ne les déclare pas acceptés ;
+les futurs meilleurs checkpoints ne peuvent pas écraser ces copies.
 
 ```bash
 python -m distill.rare_cases survey ~/data/distill/eval/rare-proposals.json --count 12

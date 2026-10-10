@@ -127,10 +127,12 @@ def artifact_audit(report, variant, benchmark, seams, pipeline=None):
     """Bind all evidence to the same models/code; a timing fixture is not a candidate."""
     fingerprint = report.get('checkpoint_digests', {}).get(variant, {})
     sources = {key: value for key, value in fingerprint.items() if key.startswith('code:')}
+    required_sources = {'code:'+name for name in
+                        ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py')}
     visual = seams.get('visual_review', {})
     pipeline = pipeline or {}
     checks = dict(
-        physical_weights_present=bool(fingerprint.get('base')) and len(sources) == 3,
+        physical_weights_present=bool(fingerprint.get('base')) and set(sources) == required_sources,
         benchmark_weights=bool(fingerprint.get('base')) and benchmark.get('checkpoint_digest') == fingerprint.get('base'),
         benchmark_code=bool(sources) and benchmark.get('student_source_digests') == sources,
         benchmark_trained=benchmark.get('step', 0) > 0,
