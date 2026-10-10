@@ -194,6 +194,14 @@ l'entraînement pendant que le reste du dataset est généré.
   dans `student`, appels coarse remplacés dans `student_coarse`. Les checkpoints
   smoke testés sont **rejetés pour qualité** : MAE ~95 m et ~223 m,
   vs étalon ~7 m. Résultats dans `~/data/distill/eval/hook-check/`.
+- [x] Diagnostic coarse principal vers 50000 pas sur ce même holdout :
+  MAE **168,54 m**, contre 7,21 m pour FP32/BF16, côte modifiée sur 12,50 %
+  des pixels. Ce candidat reste rejeté malgré sa petite loss latente. Le
+  checkpoint évalué est figé par empreinte dans
+  `~/data/distill/eval/coarse-pilot/report.json`. Le test partageait la 5090
+  avec l'entraînement : ses temps ne sont pas des benchmarks. La génération
+  continue ; réévaluer après exposition au dataset complet avant d'accepter
+  la capacité ou de prolonger aveuglément cette recette.
 - [x] Borne architecture base96, **poids non entraînés, mesure de coût seulement** :
   512² utiles + halo 192 → entrée 896² ; 47,244 ms (graph, channels_last) sur
   4090, 0,738 ms par surface 64², ~19,05× vs huit forwards teacher BF16.
