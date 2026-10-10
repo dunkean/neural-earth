@@ -11,7 +11,7 @@ from distill.dataset import StepBatches
 from distill.features import base_features, noise
 from distill.jobs import proc_identity
 from distill.student import Student, StudentConfig
-from distill.train import losses
+from distill.train import coarse_delta_loss, losses
 from distill.evaluate import audit
 
 
@@ -71,6 +71,31 @@ class DistillationTests(unittest.TestCase):
         loss, _ = losses(prediction, torch.randn_like(prediction), torch.ones(1, 1, 32, 32))
         loss.backward()
         self.assertTrue(torch.isfinite(prediction.grad).all())
+
+    def test_coarse_relief_loss_distinguishes_offset_from_relief_change(self):
+        target = torch.zeros(1, 6, 8, 8)
+        mask = torch.ones(1, 1, 8, 8)
+        common_offset = target.clone()
+        common_offset[:, :2] = .01
+        self.assertEqual(float(coarse_delta_loss(common_offset, target, mask)), 0.)
+        changed_relief = common_offset.clone().requires_grad_()
+        changed_relief = changed_relief + torch.tensor([.01, 0., 0., 0., 0., 0.]).view(1, 6, 1, 1)
+        value = coarse_delta_loss(changed_relief, target, mask)
+        self.assertGreater(float(value.detach()), .04)
+        gradients, = torch.autograd.grad(value, changed_relief)
+        self.assertTrue(torch.isfinite(gradients).all())
+        self.assertLess(float((gradients[:, 0]+gradients[:, 1]).abs().max()), 1e-7)
+
+    def test_autocast_preserves_output_precision_and_backward(self):
+        model = Student(StudentConfig('coarse', 16, 2, (1,)))
+        torch.nn.init.normal_(model.head.weight, std=.1)
+        with torch.autocast(device_type='cpu', dtype=torch.bfloat16):
+            prediction = model(torch.randn(1, 16, 32, 32))
+            loss = prediction.square().mean()
+        self.assertEqual(prediction.dtype, torch.float32)
+        loss.backward()
+        self.assertTrue(all(torch.isfinite(parameter.grad).all()
+                            for parameter in model.parameters() if parameter.grad is not None))
 
     def test_atomic_writer_preserves_previous_checkpoint_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:

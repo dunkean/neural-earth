@@ -106,7 +106,11 @@ class Student(nn.Module):
         for skip, block in zip(reversed(skips), self.decoders):
             x = F.interpolate(x, scale_factor=2, mode='nearest')
             x = block(torch.cat([x, skip], dim=1))
-        return self.head(x) + self.direct(original)
+        # Blended teacher fields have more precision than a single BF16 window.
+        # A BF16 output head alone imposes an avoidable quantization floor on
+        # mean/p5 and low-frequency altitude. Keep just these cheap 1x1 heads FP32.
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            return self.head(x.float()) + self.direct(original.float())
 
 
 def defaults(stage, width=None):

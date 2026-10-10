@@ -59,6 +59,15 @@ def losses(prediction, target, mask, spectral_weight=.02, gradient_weight=.05, c
         mse=mse, gradient=gradient, spectral=spectral)
 
 
+def coarse_delta_loss(prediction, target, mask):
+    # Dataset output uses the same ~39.74 scale for mean and p5. The teacher's
+    # mean-minus-p5 channel has scale ~1.77: supervise this smaller difference
+    # explicitly instead of losing it inside two almost identical height maps.
+    factor = 39.741999742263 / 1.7681844104569366
+    delta = ((prediction[:, 0]-prediction[:, 1]).float()-(target[:, 0]-target[:, 1]))*factor
+    return (delta.square()*mask[:, 0]).sum()/mask.sum().clamp_min(1)
+
+
 def centre(prediction, target):
     hy, hx = ((prediction.shape[-2]-target.shape[-2])//2,
               (prediction.shape[-1]-target.shape[-1])//2)
@@ -74,6 +83,7 @@ def validate(model, dataset, device, count=12):
     totals = dict(mse=0., gradient=0., spectral=0., slope_ratio=0., spectrum_ratio=0.)
     channel_mse = torch.zeros(model.config.out_channels, device=device)
     height_mae = 0.
+    delta_mse = 0.
     count = min(count, len(dataset))
     # Cover the sorted validation index range, rather than only its first profile.
     indices = torch.linspace(0, len(dataset)-1, count).round().long().tolist()
@@ -93,6 +103,8 @@ def validate(model, dataset, device, count=12):
             pp, tt = p[:, 4]*38.6-31.4, t[:, 4]*38.6-31.4
             delta = (pp.sign()*pp.square()-tt.sign()*tt.square()).abs()
             height_mae += float((delta*mask[:, 0]).sum()/mask.sum().clamp_min(1))/count
+        elif model.config.stage == 'coarse':
+            delta_mse += float(coarse_delta_loss(p, t, mask))/count
         slope_p = p.diff(dim=-1).square().mean()+p.diff(dim=-2).square().mean()
         slope_t = t.diff(dim=-1).square().mean()+t.diff(dim=-2).square().mean()
         totals['slope_ratio'] += float((slope_p/slope_t.clamp_min(1e-8)).sqrt())/count
@@ -103,6 +115,8 @@ def validate(model, dataset, device, count=12):
     totals['channel_mse'] = channel_mse.cpu().tolist()
     if model.config.stage == 'base':
         totals['lowfreq_height_mae_m_proxy'] = height_mae
+    elif model.config.stage == 'coarse':
+        totals['mean_minus_p5_mse'] = delta_mse
     return totals
 
 
@@ -135,13 +149,14 @@ def main():
     parser.add_argument('--gradient-weight', type=float, default=.05)
     parser.add_argument('--height-weight', type=float, default=4.,
                         help='Relative MSE weight for base lowfreq / coarse mean+p5 channels.')
+    parser.add_argument('--coarse-delta-weight', type=float, default=.25)
     parser.add_argument('--overfit', action='store_true')
     parser.add_argument('--allow-data-growth', action='store_true')
     parser.add_argument('--cpu', action='store_true')
     args = parser.parse_args()
     if min(args.steps, args.batch, args.eval_every, args.val_count) < 1 or args.workers < 0:
         parser.error('Positive steps/batch/evaluation intervals and nonnegative workers required.')
-    if args.height_weight <= 0 or args.lr <= 0 or min(args.spectral_weight, args.gradient_weight) < 0:
+    if args.height_weight <= 0 or args.lr <= 0 or min(args.spectral_weight, args.gradient_weight, args.coarse_delta_weight) < 0:
         parser.error('Positive height weight/LR and nonnegative spectral/gradient weights required.')
     device = torch.device('cpu' if args.cpu else 'cuda:0')
     torch.set_num_threads(8)
@@ -192,7 +207,8 @@ def main():
         raise ValueError('Target --steps is smaller than the resumed optimizer step.')
     best = saved.get('best_score', float('inf')) if saved else float('inf')
     if saved and (saved['arguments'].get('train_size') != args.train_size or
-                  saved['arguments'].get('height_weight', 1.) != args.height_weight):
+                  saved['arguments'].get('height_weight', 1.) != args.height_weight or
+                  saved['arguments'].get('coarse_delta_weight', 0.) != args.coarse_delta_weight):
         # A new target crop changes the validation footprint. Do not compare its
         # best score to the old crop's score; retain model/optimizer/EMA states.
         best = float('inf')
@@ -235,6 +251,10 @@ def main():
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == 'cuda'):
                 prediction = centre(model(inputs), target)
                 loss, values = losses(prediction, target, mask, args.spectral_weight, args.gradient_weight, channel_weights)
+                if args.stage == 'coarse' and args.coarse_delta_weight:
+                    delta_loss = coarse_delta_loss(prediction.float(), target, mask)
+                    loss = loss + args.coarse_delta_weight*delta_loss
+                    values['mean_minus_p5'] = delta_loss
             if not torch.isfinite(loss):
                 raise FloatingPointError(f'Non-finite training loss at step {step}.')
             loss.backward()
@@ -255,6 +275,8 @@ def main():
                 last_validation = validate(ema, validation, device, args.val_count)
                 weighted_mse = sum(w*v for w, v in zip(channel_weights, last_validation['channel_mse']))/sum(channel_weights)
                 score = weighted_mse+.05*last_validation['gradient']+.02*last_validation['spectral']
+                if args.stage == 'coarse':
+                    score += args.coarse_delta_weight*last_validation['mean_minus_p5_mse']
                 item = dict(step=step, validation=last_validation, score=score,
                             elapsed_seconds=time.monotonic()-run_started)
                 append_json(output/'validation.jsonl', item)

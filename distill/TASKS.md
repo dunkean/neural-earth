@@ -21,7 +21,8 @@ Lis d'abord le doc de passation : [Neural Earth — handoff accélération du ba
 
 ## Phase 0 — environnement
 
-Rien n'est installé : pas de venv, checkpoint absent du cache Hugging Face.
+Installation vérifiée : venv et checkpoint épinglé présents. Les commandes
+ci-dessous servent à réinstaller sur une machine neuve.
 
 ```bash
 cd ~/self/neural-earth
@@ -132,6 +133,10 @@ préparation ci-dessous sont conservées comme historique ; les jobs ont reçu l
   batch/crop déterministes par numéro de pas, diagnostics par canal et composante
   d'altitude. Pondérer davantage les canaux d'altitude évite de sélectionner
   un modèle sur les seuls canaux latents du decoder.
+- [x] Têtes de sortie 1×1 en FP32, reste du réseau sous autocast BF16 : éviter
+  un plancher de quantification sur les champs fusionnés. Loss supplémentaire
+  sur moyenne–p5 du coarse, normalisée à l'échelle de cette différence ; arrêt
+  propre et reprise du coarse au pas 27518 pour appliquer cette recette.
 - [x] `bench_student.py` : eager/CUDA Graphs BF16, coût du halo inclus, borne
   GEMM FP8 séparée. Pas de prétention de convolution FP8 sans backend dédié.
 - [x] `inference.py` et variantes `student`, `student_coarse`, `student_decoder`,
@@ -149,9 +154,10 @@ préparation ci-dessous sont conservées comme historique ; les jobs ont reçu l
   arrêt sur erreur. `check_dataset.py` : audit complet des triples et de la
   séparation par monde. `evaluate.py` : refuse une acceptation sans les 14 cas,
   les seuils physiques, la vitesse sur même carte et la vérification des joints.
-- [x] Neuf tests dédiés : bruit/crops négatifs, features globales, invariance
+- [x] Onze tests dédiés : bruit/crops négatifs, features globales, invariance
   avec halo, échantillonnage repris, losses masquées/gradients finis, écriture
-  interrompue, identité des processus et refus d'une validation incomplète.
+  interrompue, identité des processus, précision des sorties sous autocast,
+  supervision du relief coarse et refus d'une validation incomplète.
 
 Le masque du conditionnement base upstream est constant (ones), ce n'est pas
 un masque terre/mer ; `histogram_raw` est un vecteur de cinq valeurs. Les données
@@ -168,7 +174,12 @@ l'entraînement pendant que le reste du dataset est généré.
   Ce n'est pas une acceptation physique. Le coarse principal a un champ
   récepteur agrandi pour couvrir toute la fenêtre 64².
 - [x] Arrêt/reprise réel base au pas 9092, sauvegarde des 57 états optimiseur
-  et RNG, reprise confirmée au pas suivant. Smoke base total prévu : 20000 pas.
+  et RNG, reprise confirmée au pas suivant. Smoke base terminé à 20000 pas,
+  MSE ~0,0191 : le sur-apprentissage n'a pas atteint une erreur proche de zéro.
+  Ce résultat impose une investigation de capacité/apprentissage si les
+  entraînements principaux échouent ; il ne constitue pas une validation.
+- [x] Smoke decoder terminé à 10000 pas : MSE ~0,0113, ratio pente ~1,120,
+  ratio puissance ~1,001. Les pentes restent hors tolérance : non accepté.
 - [x] Arrêt/reprise réel teacher principal après 673 triples, conservation
   vérifiée par SHA-256 sur des cibles existantes. Aucun crop durable ne doit
   être régénéré à la reprise.
@@ -181,8 +192,9 @@ l'entraînement pendant que le reste du dataset est généré.
   4090, 0,738 ms par surface 64², ~19,05× vs huit forwards teacher BF16.
   Entrées CPU et I/O exclus. Cela ne prouve ni la qualité ni le débit de la
   pipeline réelle ; la mesure finale avec les checkpoints retenus reste requise.
+  Mesure antérieure à l'ajout des têtes FP32, donc à refaire avec le modèle final.
 - [ ] Dataset principal : 20000 triples sur GPU 0 dans `tmux`.
-- [ ] Smoke decoder, puis entraînements principaux sur GPU 1 : premier passage
+- [ ] Entraînements principaux sur GPU 1 : coarse en cours, premier passage
   sur le dataset disponible, reprise explicite avec les exemples ajoutés,
   entraînements finaux sur le jeu complet.
 - [ ] Audit complet des 20000 triples, qualité des trois modèles séparément
@@ -192,6 +204,11 @@ l'entraînement pendant que le reste du dataset est généré.
   cartes et mesure du coût réel de construction des entrées.
 - [ ] Checkpoints sélectionnés immuables, tableaux et planches finaux, branche
   poussée à jour. Le but reste actif : **aucun modèle accepté à ce stade**.
+
+Commit local initial : `0c6215f`. Push tenté vers `dunkean/neural-earth` :
+GitHub renvoie 403, compte `GBeurier` sans accès en écriture. Aucun fork ni
+changement de dépôt distant effectué ; destination autorisée demandée à
+l'utilisateur. Cette limitation de livraison n'arrête pas les calculs locaux.
 
 ### Commandes de reprise et inspection espacée
 
