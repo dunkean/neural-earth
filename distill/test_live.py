@@ -48,11 +48,11 @@ class LiveModelTests(unittest.TestCase):
 
     def test_coarse_four_is_optional_and_keeps_other_choices(self):
         root = Path(self.directory.name)
-        self.assertNotIn('solver4', catalog(root)['coarse'])
+        self.assertNotIn('solver4', catalog(root, bundled_root=root/'bundled')['coarse'])
         path = root/'live/weights/coarse4/coarse.pt'
         path.parent.mkdir(parents=True)
         path.write_bytes(b'fixed-four-step-export')
-        options = catalog(root)
+        options = catalog(root, bundled_root=root/'bundled')
         selection = dict(self.selection, coarse='solver4')
         self.assertEqual(validate_selection(selection, options), selection)
         self.assertEqual(options['coarse']['solver4']['path'], str(path))
@@ -71,16 +71,45 @@ class LiveModelTests(unittest.TestCase):
     def test_fresh_config_uses_coarse_four_original_base_and_distilled_decoder(self):
         root = self.install_review_exports()
         path = root/'new-config.json'
-        models = LiveModels(path, catalog(root))
+        models = LiveModels(path, catalog(root, bundled_root=root/'bundled'))
         self.assertEqual(models.selection, DEFAULT_SELECTION)
         self.assertEqual(json.loads(path.read_text())['selection'], DEFAULT_SELECTION)
-        self.assertEqual(prepare_config(path, catalog(root)), models.config)
+        self.assertEqual(prepare_config(path, catalog(root, bundled_root=root/'bundled')), models.config)
 
     def test_missing_default_export_fails_without_writing_config(self):
         path = Path(self.directory.name)/'new-config.json'
         with self.assertRaisesRegex(ValueError, 'Missing default model exports:.*coarse/solver4'):
-            prepare_config(path, catalog(self.directory.name))
+            prepare_config(path, catalog(self.directory.name, bundled_root=Path(self.directory.name)/'bundled'))
         self.assertFalse(path.exists())
+
+    def test_short_coarse_options_preserve_the_four_step_default(self):
+        root = self.install_review_exports()
+        for evaluations in (2, 1):
+            path = root/f'live/weights/coarse{evaluations}/coarse.pt'
+            path.parent.mkdir(parents=True)
+            path.write_bytes(f'fixed-{evaluations}-step-export'.encode())
+        options = catalog(root, bundled_root=root/'bundled')
+        self.assertIn('solver2', options['coarse'])
+        self.assertIn('solver1', options['coarse'])
+        models = LiveModels(root/'new-config.json', options)
+        self.assertEqual(models.selection, DEFAULT_SELECTION)
+        for evaluations in (2, 1):
+            selection = dict(DEFAULT_SELECTION, coarse=f'solver{evaluations}')
+            models.save_request(dict(selection=selection))
+            self.assertEqual(LiveModels(models.path, options).selection, selection)
+
+    def test_bundled_weights_work_without_the_external_training_directory(self):
+        root = Path(self.directory.name)
+        bundled = root/'bundled'
+        bundled.mkdir()
+        for name in ('coarse8', 'coarse4', 'decoder'):
+            (bundled/(name+'.pt')).write_bytes(name.encode())
+        options = catalog(root/'empty-data', bundled_root=bundled)
+        models = LiveModels(root/'new-config.json', options)
+        self.assertEqual(models.selection, DEFAULT_SELECTION)
+        self.assertEqual(options['coarse']['solver4']['path'], str(bundled/'coarse4.pt'))
+        self.assertEqual(options['decoder']['distilled200k']['path'], str(bundled/'decoder.pt'))
+        self.assertEqual(set(options['base']), {'teacher'})
 
     def test_base_exports_are_never_selectable(self):
         root = self.install_review_exports()
@@ -88,7 +117,7 @@ class LiveModelTests(unittest.TestCase):
             path = root/f'final/weights/candidate-{number}/base.pt'
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b'retired-base')
-        options = catalog(root)
+        options = catalog(root, bundled_root=root/'bundled')
         self.assertEqual(set(options['base']), {'teacher'})
         with self.assertRaises(ValueError):
             validate_selection(dict(DEFAULT_SELECTION, base='initial128'), options)
@@ -99,7 +128,7 @@ class LiveModelTests(unittest.TestCase):
             with self.subTest(choice=choice):
                 atomic_json(self.path, dict(selection=dict(DEFAULT_SELECTION, base=choice),
                                            revision='old', reset='keep-cache-namespace'))
-                models = LiveModels(self.path, catalog(root))
+                models = LiveModels(self.path, catalog(root, bundled_root=root/'bundled'))
                 self.assertEqual(models.selection, DEFAULT_SELECTION)
                 self.assertEqual(models.config['reset'], 'keep-cache-namespace')
                 self.assertNotEqual(models.config['revision'], 'old')

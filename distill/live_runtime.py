@@ -15,15 +15,21 @@ DEFAULT_SELECTION = dict(coarse='solver4', base='teacher', decoder='distilled200
 RETIRED_BASE_CHOICES = {'initial128', 'coupled128', 'refined128', 'refined192'}
 
 
-def catalog(root=DATA):
+def catalog(root=DATA, bundled_root=REPO/'distill/weights'):
     weights = Path(root)/'final/weights'
+    def weight_path(name, fallback):
+        bundled = Path(bundled_root)/name
+        return bundled if bundled.is_file() else fallback
+
     specifications = {
         'coarse': [
-            ('solver8', 'Distillé · 8 étapes', weights/'candidate-1/coarse.pt'),
-            ('solver4', 'Distillé · 4 étapes', Path(root)/'live/weights/coarse4/coarse.pt'),
+            ('solver8', 'Distillé · 8 étapes', weight_path('coarse8.pt', weights/'candidate-1/coarse.pt')),
+            ('solver4', 'Distillé · 4 étapes', weight_path('coarse4.pt', Path(root)/'live/weights/coarse4/coarse.pt')),
+            ('solver2', 'Distillé · 2 étapes · essai', weight_path('coarse2.pt', Path(root)/'live/weights/coarse2/coarse.pt')),
+            ('solver1', 'Distillé · 1 étape · essai', weight_path('coarse1.pt', Path(root)/'live/weights/coarse1/coarse.pt')),
         ],
         'base': [],
-        'decoder': [('distilled200k', 'Distillé · 13 Mo', weights/'candidate-1/decoder.pt')],
+        'decoder': [('distilled200k', 'Distillé · 13 Mo', weight_path('decoder.pt', weights/'candidate-1/decoder.pt'))],
     }
     result = {}
     for stage, entries in specifications.items():

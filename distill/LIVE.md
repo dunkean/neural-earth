@@ -4,14 +4,23 @@ Le serveur de revue utilise le viewer existant, avec un menu **NN** dans la barr
 du haut. Au premier lancement, les choix sont **coarse distillé 4 étapes,
 base original et decoder distillé**. Coarse et decoder peuvent être comparés
 à leurs modèles d'origine ; coarse8 reste disponible si son export existe.
+Coarse **2 étapes · essai** et **1 étape · essai** sont proposés lorsque leurs
+exports existent sous `live/weights/coarse2/coarse.pt` et
+`live/weights/coarse1/coarse.pt`. Ils partent des poids du coarse4, avec
+5 000 étapes d'entraînement supplémentaires chacun. Seuls chargement,
+sortie finie et équivalence export/CUDA Graph sont contrôlés ; l'utilisateur
+juge leur qualité dans l'app. Leur disponibilité ne change pas le défaut coarse4.
 Les bases distillés rejetés ne figurent plus dans le menu ni dans l'API.
 Une ancienne configuration qui les sélectionnait est migrée vers le base original,
 sans modifier coarse, decoder ou le reset. Les autres choix sauvegardés sont
 conservés au redémarrage. Les choix sont communs aux onglets de ce serveur.
 
-Les poids restent hors Git. Pour un nouveau checkout, placer les deux exports
-vérifiés dans les chemins suivants (relatifs à `DISTILL_ROOT`, par défaut
-`~/data/distill`) avant le premier lancement :
+Les poids coarse8, coarse4 et decoder sont inclus dans Git, à la demande de
+l'utilisateur, sous `distill/weights/`. Le catalogue les utilise en priorité.
+Le manifest enregistre leur provenance, leurs SHA256 et la révision du teacher.
+Aucun poids de base distillé n'est inclus. Les checkpoints d'entraînement et
+les données restent hors Git. Si les exports inclus sont absents, ces chemins
+externes restent utilisables (relatifs à `DISTILL_ROOT`, par défaut `~/data/distill`) :
 
 - `live/weights/coarse4/coarse.pt` : coarse à 4 étapes, checkpoint 50 000.
 - `final/weights/candidate-1/decoder.pt` : decoder distillé, checkpoint 200 000.
