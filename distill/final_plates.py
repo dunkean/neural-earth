@@ -24,7 +24,9 @@ from tools.verification.compare_base_variants import describe, errors
 
 
 KINDS = {'desert-plain': 'Plaine désertique', 'wet-complex-coast': 'Côte humide découpée',
-         'low-plain-sea': 'Plaine basse / mer', 'temperate-plain': 'Plaine tempérée'}
+         'low-plain-sea': 'Plaine basse / mer', 'temperate-plain': 'Plaine tempérée',
+         'mountains-snow': 'Montagnes enneigées', 'mountains-arid': 'Relief aride',
+         'historical-coast': 'Côte du site historique'}
 
 
 def load_bank(directory):
@@ -62,6 +64,19 @@ def validate_banks(banks):
                 raise ValueError('Reference physical terrains differ across candidates.')
 
 
+def combine_banks(first, extra):
+    report, fields, sources = first
+    addition, added_fields, added_sources = extra
+    for key in ('gpu', 'lods', 'checkpoint_digests', 'teacher_sources', 'tile_size', 'halo'):
+        if report[key] != addition[key]:
+            raise ValueError('Additional plate bank differs: '+key)
+    if set(fields) & set(added_fields):
+        raise ValueError('Additional plate bank duplicates an existing view.')
+    merged = dict(report, sites=report['sites']+addition['sites'], rows=report['rows']+addition['rows'],
+                  site_manifest_digest=[report['site_manifest_digest'], addition['site_manifest_digest']])
+    return merged, fields | added_fields, dict(primary=sources, additional=added_sources)
+
+
 def error_rgb(delta, scale):
     normalized = np.clip(delta/scale, -1, 1)[..., None]
     neutral = np.full((*delta.shape, 3), 235.)
@@ -70,12 +85,16 @@ def error_rgb(delta, scale):
     return (neutral+(target-neutral)*np.abs(normalized)).astype(np.uint8)
 
 
-def build(candidates, output):
+def build(candidates, output, additional=None):
     if not candidates or len({label for label, _ in candidates}) != len(candidates):
         raise ValueError('Provide distinct candidate labels.')
     output = external_path(output)
     output.mkdir(parents=True, exist_ok=True)
     banks = [load_bank(directory) for _, directory in candidates]
+    if additional is not None:
+        if len(additional) != len(banks):
+            raise ValueError('Provide one additional bank per candidate, in the same order.')
+        banks = [combine_banks(bank, load_bank(directory)) for bank, directory in zip(banks, additional)]
     validate_banks(banks)
     font = ImageFont.truetype('DejaVuSans.ttf', 20)
     small = ImageFont.truetype('DejaVuSans.ttf', 16)
@@ -156,8 +175,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--candidate', nargs=2, action='append', required=True, metavar=('LABEL','SEAM_DIR'))
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--additional-seam-dir', nargs='+', type=Path)
     args=parser.parse_args()
-    print(json.dumps(build(args.candidate, args.output)))
+    print(json.dumps(build(args.candidate, args.output, args.additional_seam_dir)))
 
 
 if __name__=='__main__':

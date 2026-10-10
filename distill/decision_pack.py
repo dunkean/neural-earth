@@ -84,18 +84,32 @@ def read_speed(label, directory, shared, seam):
     return result
 
 
-def build(candidates, shared, output):
+def build(candidates, shared, output, additional=None):
     output=external_path(output)
     output.mkdir(parents=True,exist_ok=True)
     quality,speed,sizes,sources=[],[],[],[]
     galleries=[]
     for index,(label,seam_dir,prefix,bench_dir) in enumerate(candidates):
         seam=json.loads((Path(seam_dir)/'report.json').read_text())
+        evidence=output/'evidence'/f'candidate-{index+1}'
+        evidence.mkdir(parents=True,exist_ok=True)
+        shutil.copy2(Path(seam_dir)/'report.json',evidence/'cold-tiles.json')
         for suffix in ('','-rare'):
             directory=Path(str(prefix)+suffix)
             quality.extend(read_quality(label,directory,seam))
             galleries.append(directory)
+            shutil.copy2(directory/'report.json',evidence/('quality-rare.json' if suffix else 'quality-historical.json'))
+            if (directory/'optimization-equivalence.json').exists():
+                shutil.copy2(directory/'optimization-equivalence.json',evidence/('equivalence-rare.json' if suffix else 'equivalence-historical.json'))
         speed.extend(read_speed(label,bench_dir,shared,seam))
+        for stage in ('base','coarse','decoder'):
+            root=Path(bench_dir) if stage=='base' else Path(shared)
+            for gpu in (0,1):
+                shutil.copy2(root/f'{stage}-stage-gpu{gpu}.json',evidence/f'{stage}-stage-gpu{gpu}.json')
+        if additional is not None:
+            if len(additional)!=len(candidates):
+                raise ValueError('One additional cold-tile bank per candidate is required.')
+            shutil.copy2(Path(additional[index])/'report.json',evidence/'cold-tiles-historical.json')
         weights=Path(bench_dir)/'weights'
         manifest=json.loads((weights/'manifest.json').read_text())
         if any(manifest['sources'][stage]['sha256'] != seam['checkpoint_digests'][stage] for stage in ('base','coarse','decoder')):
@@ -111,11 +125,13 @@ def build(candidates, shared, output):
                 weight_elements=artifact['tensor_elements'],fp32_bytes=artifact['bytes'],fp32_mb=artifact['bytes']/1e6,
                 path=str(target.relative_to(output)/path.name),sha256=artifact['sha256']))
         shutil.copy2(weights/'manifest.json',target/'manifest.json')
-        sources.append(dict(label=label,seam=str(seam_dir),quality=str(prefix),benchmark=str(bench_dir),digests=seam['checkpoint_digests']))
+        sources.append(dict(label=label,seam=str(seam_dir),quality=str(prefix),benchmark=str(bench_dir),digests=seam['checkpoint_digests'],
+            historical_cold_tiles=str(additional[index]) if additional is not None else None,
+            evidence=str(evidence.relative_to(output))))
     save_csv(output/'quality-all-sites.csv',quality)
     save_csv(output/'performance.csv',speed)
     save_csv(output/'model-sizes.csv',sizes)
-    plates([(c[0],c[1]) for c in candidates],output/'plates')
+    plates([(c[0],c[1]) for c in candidates],output/'plates',additional)
     count=gallery(galleries,output/'gallery')
     atomic_json(output/'manifest.json',dict(candidates=sources,gallery_views=count,accepted=False,
         performance_scope='Each neural stage separately; dependencies prefetched. Not end-to-end viewer latency.',
@@ -143,8 +159,9 @@ def main():
     parser.add_argument('--candidate',nargs=4,action='append',required=True,metavar=('LABEL','SEAM_DIR','QUALITY_PREFIX','BENCH_DIR'))
     parser.add_argument('--shared-bench',type=Path,required=True)
     parser.add_argument('--output',type=Path,required=True)
+    parser.add_argument('--additional-seam-dir',nargs='+',type=Path)
     args=parser.parse_args()
-    print(json.dumps(build(args.candidate,args.shared_bench,args.output)))
+    print(json.dumps(build(args.candidate,args.shared_bench,args.output,args.additional_seam_dir)))
 
 
 if __name__=='__main__':

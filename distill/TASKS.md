@@ -9,7 +9,11 @@ contrastés, bonne qualité d'image, métriques permettant de choisir. Ne pas
 publier de planches intermédiaires. `final_plates.py` prépare huit planches
 PNG/PDF à partir des champs physiques **512² natifs**, quatre catégories
 critiques × LOD 3/0, mêmes cadrages/lumière, détails centraux et erreurs
-signées avec une échelle commune par vue. Les CSV constituent l'alternative
+signées avec une échelle commune par vue. Deux lieux historiques supplémentaires,
+montagnes enneigées et relief aride, sont désormais ordonnancés après les
+chronométrages, sur les mêmes poids : **12 planches** au total. Leur capture
+utilise les coordonnées et le seed42 réservés de `screenshots.json`, sans
+changer ni requalifier la banque rare. Les CSV constituent l'alternative
 textuelle. `decision_pack.py` réunit aussi les 38 vues de chaque candidat,
 un comparateur interactif, les exports EMA et les performances par étape.
 Il refuse d'associer des images, joints, exports ou chronométrages portant
@@ -25,6 +29,9 @@ preuves du contrôle initial à 32 étapes restent archivées sous
 `eval/*-initial32`. Rien n'est promu sur la seule loss. Les 38 tests dédiés
 passent, dont le refus d'un checkpoint smoke dans une comparaison `latest`
 à budget égal et le refus de planches utilisant des références différentes.
+Le contrôle des banques supplémentaires porte ce total à **39 tests** et
+refuse des poids différents ou une vue dupliquée. Le dossier final conserve
+également une copie des rapports JSON complets sous `evidence/`.
 
 La chaîne durable vérifie successivement contrôle 128, équivalence physique
 des optimisations sur les deux anciens bases, essai 192, puis chronométrages
@@ -41,7 +48,9 @@ sur la seule durée d'entraînement. Le bundle128 couplé sous l'inférence
 optimisée est **identique octet pour octet sur ses 38 vues** à la version
 antérieure (`optimized-bundle-physical{,-rare}/optimization-equivalence.json`) ;
 ses huit contrôles de raccords sont également à écart maximal zéro. La preuve
-du parent128 initial et les mesures du 192 restent en cours.
+du parent128 initial est maintenant acquise également : ses **38 vues** sont
+identiques à celles d'avant optimisation et ses **huit raccords froids** ont
+un écart maximal nul, halos compris. Le candidat192 est en cours d'inspection.
 
 Objectif initial : remplacer le base model à 2 étapes (254 M paramètres) par un élève une passe ×10 plus rapide, dans la tolérance BF16/FP32.
 

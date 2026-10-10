@@ -20,10 +20,28 @@ from PIL import Image, ImageDraw
 from scipy.ndimage import gaussian_filter
 import torch
 
-from distill.common import DATA, REPO, atomic_json, atomic_write, external_path, source_digest
+from distill.common import DATA, REPO, REVISION, atomic_json, atomic_write, external_path, source_digest
 from distill.inference import install
 from distill.rare_cases import KINDS, load_sites
 from distill.student import load_student
+
+
+def historical_sites(names):
+    """Use the unchanged held-out screenshot coordinates, not student-selected views."""
+    path = REPO/'docs/images/screenshots.json'
+    source = json.loads(path.read_text())
+    if source['modelRevision'] != REVISION:
+        raise ValueError('Historical sites refer to a different teacher revision.')
+    kinds = {'snow': 'mountains-snow', 'desert': 'mountains-arid', 'coast': 'historical-coast'}
+    result = []
+    for name in names:
+        item = source['sites'][name]
+        if int(item['seed']) != 42:
+            raise ValueError('Historical screenshot world must remain held out.')
+        result.append(dict(name=name, seed=42, profile='orogen', x=item['x'], y=item['y'],
+            kind=kinds[name], conditioning=dict(temp=item['source_summer_temperature_c'],
+                                               rain=item['source_annual_rain_mm'])))
+    return result, path
 
 
 def partition_stats(full, tiles, halo=24):
@@ -97,18 +115,28 @@ def main():
     parser.add_argument('--decoder', type=Path)
     parser.add_argument('--site-manifest', type=Path, default=DATA/'eval/rare-sites-complete.json')
     parser.add_argument('--sites', nargs='+', help='Otherwise one site per category; prefer warmer plains.')
+    parser.add_argument('--historical-sites', nargs='+', choices=('snow', 'desert', 'coast'),
+                        help='Capture the original held-out screenshot locations instead of the rare bank.')
     parser.add_argument('--lods', nargs='+', type=int, choices=(0, 3), default=[3, 0])
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     paths = {k:v for k,v in dict(base=args.base, coarse=args.coarse, decoder=args.decoder).items() if v}
     if paths and set(paths) != {'base', 'coarse', 'decoder'}:
         parser.error('Supply all three candidate stages together, or run teacher only.')
-    sites = load_sites(args.site_manifest)
+    if args.historical_sites and args.sites:
+        parser.error('Choose historical sites or names from the rare bank.')
+    if args.historical_sites:
+        if len(set(args.historical_sites)) != len(args.historical_sites):
+            parser.error('Historical site names must be distinct.')
+        sites, manifest_path = historical_sites(args.historical_sites)
+    else:
+        sites = load_sites(args.site_manifest)
+        manifest_path = args.site_manifest
     if args.sites:
         if set(args.sites) - {s['name'] for s in sites}:
             parser.error('Unknown site in the frozen bank.')
         sites = [s for s in sites if s['name'] in args.sites]
-    else:
+    elif not args.historical_sites:
         selected = []
         for kind in KINDS:
             choices = [s for s in sites if s['kind'] == kind]
@@ -126,7 +154,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     report = dict(gpu=torch.cuda.get_device_name(), sites=sites, lods=args.lods, rows=[],
                   checkpoint_digests=fingerprint, teacher_sources=source_digest(),
-                  site_manifest_digest=hashlib.sha256(args.site_manifest.read_bytes()).hexdigest(),
+                  site_manifest_digest=hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
                   fresh_world_per_partition=True, fresh_world_per_viewer_tile=True,
                   tile_size=256, halo=24, accepted=False,
                   visual_review=dict(passed=False, reason='Review whole/tiled physical images before selection.'))

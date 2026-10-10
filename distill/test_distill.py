@@ -616,6 +616,21 @@ class FinalEvidenceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_banks([bank, (report, {('site', 0, 'reference'): changed}, {})])
 
+    def test_extra_plate_bank_requires_same_weights_and_new_views(self):
+        from distill.final_plates import combine_banks
+        report = dict(gpu='same', lods=[0, 3], checkpoint_digests={'base':'trained'},
+                      teacher_sources={'teacher':'same'}, tile_size=256, halo=24,
+                      sites=[{'name':'plain'}], rows=[], site_manifest_digest='rare-bank')
+        first = (report, {('plain',0,'reference'):np.zeros((4,4))}, {})
+        extra_report = dict(report, sites=[{'name':'snow'}], site_manifest_digest='original-sites')
+        extra = (extra_report, {('snow',0,'reference'):np.zeros((4,4))}, {})
+        merged = combine_banks(first, extra)
+        self.assertEqual(len(merged[0]['sites']), 2)
+        with self.assertRaises(ValueError):
+            combine_banks(first, first)
+        with self.assertRaises(ValueError):
+            combine_banks(first, (dict(extra_report, checkpoint_digests={'base':'other'}),extra[1],{}))
+
 
 if __name__ == '__main__':
     unittest.main()
