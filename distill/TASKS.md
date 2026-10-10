@@ -360,6 +360,70 @@ prolonger après les mesures physiques. Un arrêt du coordinateur laisse les job
 teacher/trainer indépendants en tmux ; inspecter et arrêter aussi leurs handles
 si une pause globale est demandée.
 
+## Cas rares ajoutés le 2026-10-10
+
+À la demande de l'utilisateur, l'acceptation exige désormais aussi une banque
+supplémentaire : plaine désertique, côte humide très découpée, transition plaine
+très basse/mer et grande plaine tempérée. Les sept lieux historiques et leurs
+14 mesures restent obligatoires. Plusieurs holdouts historiques sont en mer,
+et le site « désert » comporte des montagnes : ils ne suffisent pas à couvrir
+ces cas particuliers.
+
+`distill/rare_cases.py` propose des lieux à partir du conditionnement physique
+de cinq mondes **déjà exclus de l'entraînement**, puis vérifie le relief du
+teacher aux deux LODs avant de figer les coordonnées. Aucun élève n'intervient
+dans la sélection. Une plaine doit avoir une dispersion des hauteurs terrestres
+<100 m et une pente terrestre p90 <5°, une côte doit contenir terre et mer aux
+deux échelles ; terre et mer doivent chacune avoir au moins 75 % de leurs pixels
+dans une composante connexe pour la transition très basse (un semis de flaques
+près de zéro ne suffit pas). Les précipitations et la complexité du rivage distinguent les
+côtes humides, et le p90 terrestre <100 m distingue la transition très basse.
+Des lieux proches sont écartés pendant la proposition. Si un type manque, la
+sélection échoue et doit être élargie ; aucun cas n'est rebaptisé pour passer.
+
+La comparaison accepte `--site-manifest` dans un dossier séparé, refuse les
+élèves sur une banque non figée et refuse de reprendre sur des lieux différents.
+Les planches utilisent les lieux enregistrés dans le rapport, avec leur table
+CSV. L'audit supplémentaire reprend les seuils physiques historiques et mesure
+aussi MAE/p99 et inversions terre/mer sur les terres 0–20 m, 0–100 m et une
+bande de 300 m autour du rivage. La dispersion des erreurs moyennes par ligne
+et colonne sert de diagnostic du quadrillage signalé par l'utilisateur.
+Ces erreurs locales sont comparées au FP32 base du **même lieu et même GPU**.
+L'acceptation finale exige cette preuve avec les mêmes poids, sources et GPU
+que la banque historique : `--rare-manifest ... --rare-evaluation ...`.
+
+96 mesures teacher ont qualifié les propositions sans erreur. La banque finale
+`eval/rare-sites-coherent.json` contient deux lieux par type, soit 16 vues.
+Plaines : p90 des pentes ~0,27–1,28°, dispersion terrestre ~2,3–11,8 m.
+Transition mer : p90 de hauteur terrestre <22 m aux deux échelles. Une première
+banque `rare-sites.json` reste archivée comme diagnostic : l'un de ses rivages
+très proches de zéro était un semis de flaques au LOD 0. Il a été écarté du
+cas « transition » sur la géométrie du teacher uniquement, avant toute analyse
+des erreurs élèves. Le rapport provisoire est conservé sous `rare-student-pilot`.
+La banque finale ne sera plus modifiée en fonction des résultats élèves.
+
+```bash
+python -m distill.rare_cases survey ~/data/distill/eval/rare-proposals.json --count 12
+python tools/verification/compare_base_variants.py run ~/data/distill/eval/rare-teacher-survey \
+  --variants reference --site-manifest ~/data/distill/eval/rare-proposals.json
+python -m distill.rare_cases freeze ~/data/distill/eval/rare-proposals.json \
+  ~/data/distill/eval/rare-teacher-survey ~/data/distill/eval/rare-sites-coherent.json --per-kind 2
+# Évaluer ensuite reference/fp32base/student_* sur rare-sites-coherent.json dans un autre dossier.
+```
+
+Decoder élargi à 150000 pas : les 14 mesures physiques sont complètes dans
+`eval/decoder-expanded-pilot`. L'EMA retenue est celle du **pas 145000**, figée
+dans `ckpt/candidates/decoder-expanded-step145000-b855d345a369.pt`.
+Aux sept LOD 0 : MAE 0,476–4,115 m, pentes moyenne/p90 dans ±5 % partout ;
+deux lieux passent aussi les cinq bandes spectrales, cinq restent hors tolérance
+(notamment côte ~0,76× et snow ~1,12×). Les sept LOD 3 conservent le teacher.
+Le decoder n'est donc pas accepté. Planches et CSV mis à jour dans ce dossier.
+
+Diagnostic FP32 **coarse** sur la 4090, 14 lieux : MAE 11,64–41,89 m dans
+`eval/precision-coarse-4090`. Cela confirme une sensibilité numérique de ce
+teacher à 20 étapes ; les erreurs du coarse distillé précédent (jusqu'à 247 m)
+restent trop élevées. Cette mesure ne modifie aucun seuil d'acceptation.
+
 ## Préparation du 2026-10-10 — en attente du top
 
 La passation a été reçue en texte dans la conversation. Les performances de la

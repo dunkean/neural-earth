@@ -27,12 +27,20 @@ def audit(report, variant, baseline='fp32base'):
     expected = {(site['name'], lod) for site in report['sites'] for lod in (3, 0)}
     if len(expected) != 14:
         raise ValueError('Acceptance requires all seven sites at both LODs.')
+    return audit_cases(report, variant, baseline)
+
+
+def audit_cases(report, variant, baseline='fp32base'):
+    """Same physical gates for an explicitly supplied additional case bank."""
+    expected = {(site['name'], lod) for site in report['sites'] for lod in (3, 0)}
+    if not expected or len(expected) != 2 * len(report['sites']):
+        raise ValueError('Sites must be nonempty and uniquely named.')
     indexed = {}
     for name in ('reference', baseline, variant):
         rows = report.get('variants', {}).get(name, [])
         table = {(r['site'], r['lod']): r for r in rows}
-        if len(rows) != 14 or set(table) != expected or any('error' in row for row in rows):
-            raise ValueError(f'{name}: complete successful 7-site × 2-LOD evidence is required.')
+        if len(rows) != len(expected) or set(table) != expected or any('error' in row for row in rows):
+            raise ValueError(f'{name}: complete successful site × 2-LOD evidence is required.')
         indexed[name] = table
     results = []
     for key in sorted(expected):
@@ -149,9 +157,14 @@ def main():
     parser.add_argument('--student-benchmark', type=Path)
     parser.add_argument('--pipeline-benchmark', type=Path)
     parser.add_argument('--seams', type=Path)
+    parser.add_argument('--rare-manifest', type=Path)
+    parser.add_argument('--rare-evaluation', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
-    result = audit(json.loads(args.report.read_text()), args.variant, args.baseline)
+    report = json.loads(args.report.read_text())
+    result = audit(report, args.variant, args.baseline)
+    from distill.rare_cases import additional_evidence
+    result['rare_cases'] = additional_evidence(report, args.variant, args.rare_manifest, args.rare_evaluation)
     result['speed'] = (speed_audit(args.base_benchmark, args.student_benchmark)
                        if args.base_benchmark and args.student_benchmark else dict(passed=False, reason='not measured'))
     result['seams'] = json.loads(args.seams.read_text()) if args.seams else dict(passed=False, reason='not verified')
@@ -161,7 +174,7 @@ def main():
     result['artifacts'] = artifact_audit(json.loads(args.report.read_text()), args.variant, benchmark, result['seams'], pipeline)
     result['accepted'] = (result['physical_passed'] and result['speed']['passed'] and
                           result['seams'].get('passed', False) and result['artifacts']['passed'] and
-                          result['pipeline_speed']['passed'])
+                          result['pipeline_speed']['passed'] and result['rare_cases']['passed'])
     atomic_json(external_path(args.output), result)
     print(json.dumps(dict(variant=args.variant, physical_passed=result['physical_passed'],
                          accepted=result['accepted'], failing_sites=sum(not r['passed'] for r in result['rows']))))

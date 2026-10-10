@@ -41,7 +41,10 @@ HOLDOUT = [dict(seed=101, profile='natural', tx=17, ty=-23),
            dict(seed=404, profile='terrestrial-archipelago', tx=-7, ty=24)]
 
 
-def sites():
+def sites(manifest=None):
+    if manifest is not None:
+        from distill.rare_cases import load_sites
+        return load_sites(manifest)
     shots = json.loads((REPO_ROOT / 'docs/images/screenshots.json').read_text(encoding='utf-8'))
     result = [dict(name=name, seed=int(s['seed']), profile='orogen', x=s['x'], y=s['y'])
               for name, s in shots['sites'].items()]
@@ -118,7 +121,7 @@ def describe(e, lod):
 
 @torch.inference_mode()
 def run(output, variants, *, student=None, coarse_student=None, decoder_student=None,
-        site_names=None, lods=LODS, resume=True):
+        site_names=None, lods=LODS, resume=True, site_manifest=None):
     from dataclasses import replace
     from terrain_app import load_pipeline
     from terrain_diffusion.inference.world_pipeline import WorldPipeline
@@ -126,7 +129,10 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
     import terrain_server as server
     server.existing_final_mip = lambda *unused: None
     output.mkdir(parents=True, exist_ok=True)
-    site_list = sites()
+    site_list = sites(site_manifest)
+    if site_manifest is not None and any(v.startswith('student') for v in variants):
+        if not json.loads(Path(site_manifest).read_text())['frozen']:
+            raise ValueError('Freeze teacher-qualified rare sites before evaluating a student.')
     loaded = load_pipeline(site_list[0]['seed'])
     config = {k: v for k, v in dict(loaded.config).items() if not k.startswith('_')}
     unwrap = lambda m: m.model if hasattr(m, '_buckets') else m
@@ -137,6 +143,13 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
         sites=site_list, gpu=torch.cuda.get_device_name(), torch=torch.__version__, variants={},
         note='Fresh in-memory worlds; seconds are indicative when another GPU process runs.')
     arrays = dict(np.load(arrays_path)) if arrays_path.exists() else {}
+    if report['sites'] != site_list:
+        raise ValueError('Evaluation sites differ from the saved report; use a new output directory.')
+    if site_manifest is not None:
+        manifest_digest = hashlib.sha256(Path(site_manifest).read_bytes()).hexdigest()
+        if report.get('site_manifest_digest', manifest_digest) != manifest_digest:
+            raise ValueError('Site manifest changed since this report; use a new output directory.')
+        report['site_manifest_digest'] = manifest_digest
     if report['gpu'] != torch.cuda.get_device_name():
         raise ValueError('Evaluation GPU differs from the saved report; use a new output directory.')
     sources = {name: hashlib.sha256((REPO_ROOT / name).read_bytes()).hexdigest() for name in
@@ -259,7 +272,7 @@ def sheet(output):
     arrays = np.load(output / 'arrays.npz')
     report = json.loads((output / 'report.json').read_text())
     variants = list(report['variants'])
-    names = [s['name'] for s in sites()]
+    names = [s['name'] for s in report['sites']]
     def shade(e, spacing, exaggeration):
         gy, gx = np.gradient(e.astype(np.float64) * exaggeration, spacing)
         slope, aspect = np.arctan(np.hypot(gx, gy)), np.arctan2(-gx, gy)
@@ -267,7 +280,13 @@ def sheet(output):
                         np.cos(np.radians(45)) * np.sin(slope) * np.cos(np.radians(315) - aspect), 0, 1)
         colour = np.where((e > 0)[..., None], [200, 185, 150], [120, 150, 190]) / 255.0
         return (colour * (0.25 + 0.75 * light[..., None]) * 255).astype(np.uint8)
-    for label, group in (('land', names[:3]), ('holdout', names[3:])):
+    site_info = {s['name']: s for s in report['sites']}
+    if report.get('site_manifest_digest'):
+        kinds = list(dict.fromkeys(s['kind'] for s in report['sites']))
+        groups = [('rare-' + kind, [s['name'] for s in report['sites'] if s['kind'] == kind]) for kind in kinds]
+    else:
+        groups = [('land', names[:3]), ('holdout', names[3:])]
+    for label, group in groups:
         rows = [(name, lod) for name in group for lod in LODS
                 if any(f'{variant}|{name}|{lod}' in arrays for variant in variants)]
         path = output / f'sheet-{label}.png'
@@ -282,7 +301,10 @@ def sheet(output):
             draw.text((160 + c * (size + pad) + 4, 4), variant, fill=(255, 255, 255))
         for row, (name, lod) in enumerate(rows):
             y = head + row * (size + pad)
-            draw.text((4, y + size // 2), f'{name[:20]}\nLOD {lod}', fill=(255, 255, 255))
+            info = site_info[name]
+            caption = (f"{info['kind']}\nseed {info['seed']}\nLOD {lod}\nx {info['x']:.0f}\ny {info['y']:.0f}"
+                       if 'kind' in info else f'{name[:20]}\nLOD {lod}')
+            draw.text((4, y + size // 2), caption, fill=(255, 255, 255))
             for c, variant in enumerate(variants):
                 key = f'{variant}|{name}|{lod}'
                 if key in arrays:
@@ -312,12 +334,14 @@ def main():
     parser.add_argument('--coarse-student', type=Path)
     parser.add_argument('--decoder-student', type=Path)
     parser.add_argument('--sites', nargs='+')
+    parser.add_argument('--site-manifest', type=Path, help='Additional held-out case bank, in a separate report.')
     parser.add_argument('--lods', nargs='+', type=int, choices=LODS, default=list(LODS))
     parser.add_argument('--fresh', action='store_true', help='Recompute requested rows instead of resuming them.')
     args = parser.parse_args()
     if args.command == 'run':
         run(args.output, args.variants, student=args.student, coarse_student=args.coarse_student,
-            decoder_student=args.decoder_student, site_names=args.sites, lods=args.lods, resume=not args.fresh)
+            decoder_student=args.decoder_student, site_names=args.sites, lods=args.lods,
+            resume=not args.fresh, site_manifest=args.site_manifest)
     else:
         sheet(args.output)
 

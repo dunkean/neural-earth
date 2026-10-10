@@ -14,6 +14,8 @@ from distill.resume_teacher import validate_resume_plan
 from distill.student import Student, StudentConfig
 from distill.train import coarse_delta_loss, coarse_height_mae, losses, lowfreq_height_mae, spectral_band_loss
 from distill.evaluate import artifact_audit, audit, pipeline_speed_audit
+from distill.rare_cases import additional_evidence, load_sites, local_errors, qualifies
+from distill.common import source_digest
 
 
 class DistillationTests(unittest.TestCase):
@@ -176,6 +178,48 @@ class DistillationTests(unittest.TestCase):
         report['variants']['student'].pop()
         with self.assertRaises(ValueError):
             audit(report, 'student')
+
+    def test_rare_cases_require_actual_plain_and_coast_at_each_scale(self):
+        climate = dict(rain=200., temp=15.)
+        flat = dict(land=1., land_height_std=30., slope_land_p90=2.,
+                    land_height_p90=80., coast_complexity=0.,
+                    land_largest_component_fraction=1., sea_largest_component_fraction=1.)
+        self.assertTrue(qualifies('desert-plain', flat, climate))
+        self.assertFalse(qualifies('desert-plain', flat | dict(slope_land_p90=12.), climate))
+        self.assertFalse(qualifies('low-plain-sea', flat, climate))
+        coast = flat | dict(land=.5, coast_complexity=3.)
+        self.assertTrue(qualifies('low-plain-sea', coast, climate))
+        self.assertFalse(qualifies('low-plain-sea', coast | dict(sea_largest_component_fraction=.1), climate))
+        self.assertFalse(qualifies('wet-complex-coast', coast, climate))
+        self.assertTrue(qualifies('wet-complex-coast', coast, dict(rain=1500., temp=15.)))
+
+    def test_local_coast_metrics_expose_small_lowland_errors(self):
+        ref = np.full((32, 32), 500., dtype=np.float32)
+        self.assertEqual(local_errors(ref, ref, 0)['coast_300m']['pixels'], 0)
+        ref[:, :2] = -1.
+        ref[:, 2:4] = 1.
+        candidate = ref.copy()
+        candidate[:, 2:4] = -1.
+        result = local_errors(candidate, ref, 0)
+        self.assertEqual(result['low_land_0_20m']['mae_m'], 2.)
+        self.assertEqual(result['low_land_0_20m']['sign_flip'], 1.)
+        self.assertGreater(result['coast_300m']['pixels'], 0)
+        self.assertGreater(result['axis_error']['column_mean_std_m'], 0)
+
+    def test_rare_bank_excludes_training_worlds_and_cannot_replace_original_bank(self):
+        self.assertFalse(additional_evidence({}, 'student_all')['passed'])
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'sites.json'
+            site = dict(name='plain', seed=101, kind='desert-plain', x=0., y=0.)
+            manifest = dict(teacher_sources=source_digest(), sites=[site])
+            atomic_json(path, manifest)
+            self.assertEqual(load_sites(path), [site])
+            manifest['sites'][0]['seed'] = 10001
+            atomic_json(path, manifest)
+            with self.assertRaises(ValueError):
+                load_sites(path)
+        with self.assertRaises(ValueError):
+            audit(dict(sites=[dict(name='plain')]), 'student')
 
     def test_acceptance_rejects_mismatched_weights_and_unreviewed_seams(self):
         sources = {'code:'+name: 'source-hash' for name in
