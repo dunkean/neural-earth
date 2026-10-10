@@ -425,23 +425,26 @@ l'entraînement pendant que le reste du dataset est généré.
   bandes PSD .05 appliquées aussi au base, pour restaurer les gradients des
   quatre canaux de détail. Essai CUDA de 32 pas réussi dans
   `ckpt/base-balance-smoke`, aucun checkpoint principal modifié.
-- [ ] Entraînements principaux sur GPU 1 : les trois passages initiaux à 100000
-  pas sont terminés. Dès 8192 crops train disponibles, passages intermédiaires
-  coarse 200000, base 200000 (crop 256 et nouvelle loss hauteur), decoder
-  150000 (nouvelle loss PSD), pour utiliser la 5090 pendant la génération.
-  Chaque liste reste figée et les ajouts sont explicitement admis. Les passages
-  finaux coarse 300000 / base 400000 / decoder 200000 exigent toujours le jeu
-  complet audité ; validation physique finale toujours requise.
-- [ ] Qualité des trois modèles séparément et ensemble, sur 7 sites × LOD 3/0,
-  avec un étalon BF16/FP32 sur la carte
-  d'évaluation (4090).
-- [ ] Vérification/captures des joints, benchmarks BF16 finaux sur les deux
-  cartes et mesure du coût réel de construction des entrées.
-  Le CLI de jointures est vérifié sur deux crops et un petit réseau à tête
-  non nulle sous autocast CPU : écart max 0. Cette fixture au pas 0 n'est pas
-  une preuve pour les checkpoints entraînés ni pour cuDNN.
-- [ ] Checkpoints sélectionnés immuables, tableaux et planches finaux, branche
-  poussée à jour. Le but reste actif : **aucun modèle accepté à ce stade**.
+- [x] Trois familles entraînées et reprises sur le jeu complet audité. Le
+  calendrier initial de passages automatiques est remplacé par les essais
+  mesurés décrits ci-dessus : coarse à huit étapes, base128 initial/couplé et
+  contrôle128/192 à budget égal, decoder200k. Les variantes antérieures restent
+  figées ; les prolongations sans bénéfice de qualité sont évitées.
+- [x] Évaluation des trois modèles séparément et ensemble, sur 7 sites × LOD3/0
+  et la banque rare complète, avec étalon BF16/FP32 mesuré sur la 4090.
+  **Mesurer n'est pas accepter** : les seuils stricts restent non satisfaits.
+- [x] Joints physiques vérifiés sur les modèles entraînés : 72 vues froides,
+  deux axes et halos partagés, écart nul à découpage global512 fixe. Les rejets
+  numériques BF16 lors d'un changement de taille de convolution sont conservés.
+- [x] Benchmarks BF16 complets sur les deux cartes, construction des entrées
+  et transferts inclus, mêmes poids que les évaluations, système au repos.
+- [x] Checkpoints et exports immuables, tableaux, 18 planches et comparateur
+  final vérifiés dans `~/data/distill/final/`.
+- [ ] Choix pratique de l'utilisateur sur le look and feel et les erreurs des
+  côtes basses ; aucune acceptation stricte ni intégration par défaut au runtime.
+- [ ] Branche poussée à jour : accès GitHub en écriture manquant, archive Git
+  locale fournie pour la livraison. Le but reste actif tant que la publication
+  demandée et le choix de qualité restent à résoudre.
 
 Commit local initial : `0c6215f`. Push tenté vers `dunkean/neural-earth` :
 GitHub renvoie 403, compte `GBeurier` sans accès en écriture. Aucun fork ni
