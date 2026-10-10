@@ -527,10 +527,21 @@ def warm_graphs(world, *, coarse=True, state=None, runtime=None):
     from terrain_cuda_graphs import prewarm_decoder_form
     state = preload_state if state is None else state
     set_coarse_streams(world, coarse_stream_setting['coarse'])
-    stages = [('coarse', lambda: prewarm_coarse_graphs(world))] if coarse else []
+    # A selected student replaces its teacher stage everywhere: capture the
+    # student's graphs instead, and none of the teacher's it will never replay.
+    selection = (live_models().selection if os.environ.get('TERRAIN_DISTILL_LIVE', '1') == '1'
+                 else dict(coarse='teacher', base='teacher', decoder='teacher'))
+    def students(stage):
+        return lambda: live_models().prewarm(world, (stage,),
+            coarse_streams=coarse_stream_setting['coarse']).get(stage, dict(enabled=False))
+    stages = []
+    if coarse:
+        stages.append(('coarse', students('coarse') if selection['coarse'] != 'teacher'
+                       else lambda: prewarm_coarse_graphs(world)))
     if os.environ.get('TERRAIN_PREWARM_BASE', '1') == '1':
         stages.append(('base', lambda: warm_base_forms(world)))
-    stages.append(('decoder', lambda: prewarm_decoder_form(world.decoder_model, world.decoder_tile_size)))
+    stages.append(('decoder', students('decoder') if selection['decoder'] != 'teacher'
+                   else lambda: prewarm_decoder_form(world.decoder_model, world.decoder_tile_size)))
     results = {}
     for name, prepare in stages:
         if runtime is not None:

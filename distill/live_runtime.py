@@ -92,9 +92,9 @@ class LiveModels:
                          for stage, key in self.selection.items()},
             code={name: hashlib.sha256((REPO/'distill'/name).read_bytes()).hexdigest() for name in files})
 
-    def install(self, world):
+    def students(self, device):
+        """Selected students resident on ``device``, shared by all its worlds."""
         import torch
-        from distill.inference import install
         from distill.student import load_student
         models = {}
         with self.lock:
@@ -102,19 +102,31 @@ class LiveModels:
                 if choice == 'teacher':
                     continue
                 option = self.options[stage][choice]
-                key = (str(world.device), stage, choice)
+                key = (str(device), stage, choice)
                 if key not in self.models:
                     payload = Path(option['path']).read_bytes()
                     if hashlib.sha256(payload).hexdigest() != option['sha256']:
                         raise ValueError('Model export changed since server startup; restart the review server.')
                     with torch.inference_mode(False):
-                        model, _ = load_student(io.BytesIO(payload), world.device)
+                        model, _ = load_student(io.BytesIO(payload), device)
                     if model.config.stage != stage:
                         raise ValueError('Model export stage differs from selected stage.')
                     self.models[key] = model.requires_grad_(False)
                 models[stage] = self.models[key]
+        return models
+
+    def install(self, world):
+        from distill.inference import install
+        models = self.students(world.device)
         if models:
             install(world, models, tile_size=512)
+
+    def prewarm(self, world, stages, *, coarse_streams=1):
+        """Capture the selected students' graphs; teacher stages they replace need none."""
+        from distill.inference import prewarm
+        models = {stage: model for stage, model in self.students(world.device).items() if stage in stages}
+        return prewarm(models, world.device, getattr(world, '_terrain_profile', None),
+                       decoder_size=world.decoder_tile_size, coarse_streams=coarse_streams)
 
     def public(self):
         return dict(selection=self.selection, revision=self.config['revision'],
