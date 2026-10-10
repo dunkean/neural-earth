@@ -144,6 +144,11 @@ préparation ci-dessous sont conservées comme historique ; les jobs ont reçu l
   des deux côtés, warmup exclu et trois répétitions. Refus explicite d'une carte
   occupée, vérifié sur la 4090 pendant la génération. L'acceptation exige aussi
   ≥10× sur cette mesure complète du base, pas seulement une borne de convolutions.
+  L'inventaire est pris avant l'initialisation CUDA : ici WSL attribue le même
+  PID à des workers différents sur les deux cartes. Une mesure provisoire avec
+  l'autre GPU actif est permise explicitement, signalée dans le rapport, et ne
+  peut pas accepter le modèle (CPU partagé). Les mesures finales exigent les
+  deux cartes libres.
 - [x] `inference.py` et variantes `student`, `student_coarse`, `student_decoder`,
   `student_all` dans l'outil existant. Base sans blending ; coarse remplace les
   20 pas du solveur d'une fenêtre ; decoder remplace sa fenêtre 512/384.
@@ -236,12 +241,18 @@ l'utilisateur. Cette limitation de livraison n'arrête pas les calculs locaux.
 
 ### Commandes de reprise et inspection espacée
 
-Transition temporaire prévue après le coarse initial : le coordinateur
-`training-workflow` a été arrêté volontairement (code −15), le trainer coarse
-continue. Le job **`architecture-pipeline`** attend sa fin réelle (100000 pas),
-mesure l'architecture base96 au pas 0 sur la 5090 libre, puis rétablit le
-coordinateur, même si le benchmark échoue. Ne pas redémarrer le coordinateur
-pendant ce probe. Il ne s'agit pas d'une validation de qualité. Le wrapper
+Coarse initial terminé à 100000 pas. Le premier job `architecture-pipeline`
+est terminal en échec : garde GPU après initialisation CUDA et attribution
+PID ambiguë sous WSL ; aucun timing produit. Le coordinateur a bien été
+rétabli, puis le base a démarré.
+
+Nouvelle transition prévue après le **base initial** : le coordinateur
+`training-workflow` est arrêté volontairement (code −15), le trainer base
+continue. Le job **`base-initial-pipeline`** attend sa fin réelle (100000 pas),
+mesure son checkpoint retenu sur la 5090 libre, puis rétablit le coordinateur,
+même si le benchmark échoue. Ne pas redémarrer le coordinateur pendant ce
+probe. L'autre GPU produit toujours des données : ce timing provisoire n'est
+pas une preuve finale de débit ou de qualité. Le wrapper
 `idle_probe.py` n'interrompt pas le trainer et ne redémarre pas un trainer
 échoué/interrompu sans inspection.
 
@@ -250,7 +261,7 @@ source distill/env.sh
 # Etat vivant vérifié (pas seulement un fichier de verrou).
 python -m distill.jobs status teacher-main --compact
 python -m distill.jobs status training-workflow --compact
-python -m distill.jobs status architecture-pipeline --compact
+python -m distill.jobs status base-initial-pipeline --compact
 cat ~/data/distill/training-workflow.json
 
 # Après avoir constaté que le handle teacher est terminal/manquant :

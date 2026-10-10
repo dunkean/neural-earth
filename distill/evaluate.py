@@ -81,7 +81,7 @@ def pipeline_speed_audit(benchmark, minimum=10.):
     if benchmark.get('status') != 'complete' or benchmark.get('stage') != 'base':
         return dict(passed=False, reason='Complete base pipeline benchmark is required.')
     if not all(benchmark.get(key) is True for key in
-               ('includes_feature_construction', 'includes_transfers', 'fresh_world_per_sample')):
+               ('includes_feature_construction', 'includes_transfers', 'fresh_world_per_sample', 'whole_system_idle')):
         return dict(passed=False, reason='Features/transfers and fresh uncached fields must be measured.')
     sizes = benchmark.get('sizes', [])
     repeats = benchmark.get('repeats', 0)
@@ -96,6 +96,8 @@ def pipeline_speed_audit(benchmark, minimum=10.):
             if len(rows) != repeats or {row.get('repeat') for row in rows} != set(range(repeats)):
                 return dict(passed=False, reason=f'Missing independent {name} repeats for {size}.')
             for row in rows:
+                if row.get('other_gpu_processes'):
+                    return dict(passed=False, reason='Other GPU work shared CPU resources during the final measurement.')
                 if not math.isfinite(row.get('seconds', float('nan'))) or row['seconds'] <= 0:
                     return dict(passed=False, reason='Invalid elapsed time.')
                 if name == 'reference' and row.get('base_windows', 0) <= 0:

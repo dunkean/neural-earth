@@ -148,7 +148,8 @@ class DistillationTests(unittest.TestCase):
 
     def test_pipeline_speed_rejects_cached_partial_or_incomplete_work(self):
         benchmark = dict(status='complete', stage='base', includes_feature_construction=True,
-                         includes_transfers=True, fresh_world_per_sample=True, sizes=[1024], repeats=3, rows=[])
+                         includes_transfers=True, fresh_world_per_sample=True, whole_system_idle=True,
+                         sizes=[1024], repeats=3, rows=[])
         for repeat in range(3):
             benchmark['rows'].extend([
                 dict(variant='reference', size=1024, repeat=repeat, warmup=False, seconds=12., base_windows=2300),

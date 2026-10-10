@@ -27,17 +27,41 @@ from distill.student import load_student
 from tools.verification.compare_base_variants import Count
 
 
-def require_idle_gpu():
-    uuid = str(torch.cuda.get_device_properties(0).uuid).lower()
+def require_idle_gpu(allow_other_gpus=False):
+    # Check BEFORE CUDA init: on this WSL host nvidia-smi attributes multiple
+    # Python workers to one PID. Initializing our own context before inventory
+    # can therefore make our probe appear to be an unrelated compute process.
+    if torch.cuda.is_initialized():
+        raise RuntimeError('GPU inventory must be checked before CUDA initialization.')
+    if os.environ.get('CUDA_DEVICE_ORDER') != 'PCI_BUS_ID':
+        raise RuntimeError('Use CUDA_DEVICE_ORDER=PCI_BUS_ID for unambiguous device mapping.')
+    devices = sorted(tuple(part.strip() for part in line.split(',', 1)) for line in subprocess.check_output(
+        ['nvidia-smi', '--query-gpu=pci.bus_id,uuid', '--format=csv,noheader,nounits'], text=True).splitlines())
+    visible = os.environ.get('CUDA_VISIBLE_DEVICES')
+    first = visible.split(',')[0].strip() if visible is not None else '0'
+    if first.isdigit():
+        uuid = devices[int(first)][1].lower().removeprefix('gpu-')
+    else:
+        matches = [device[1] for device in devices if device[1].lower().startswith(first.lower())]
+        if len(matches) != 1:
+            raise RuntimeError('Cannot map the first visible CUDA device to its physical GPU UUID.')
+        uuid = matches[0].lower().removeprefix('gpu-')
     output = subprocess.check_output(
         ['nvidia-smi', '--query-compute-apps=gpu_uuid,pid', '--format=csv,noheader,nounits'], text=True)
     other_pids = []
+    other_gpus = []
     for line in output.splitlines():
         gpu, pid = (value.strip() for value in line.split(',', 1))
-        if gpu.lower().removeprefix('gpu-') == uuid and pid != str(os.getpid()):
-            other_pids.append(pid)
+        if pid != str(os.getpid()):
+            if gpu.lower().removeprefix('gpu-') == uuid:
+                other_pids.append(pid)
+            else:
+                other_gpus.append(dict(gpu_uuid=gpu, pid=pid))
     if other_pids:
         raise RuntimeError(f'Selected GPU has other compute processes: {other_pids}. Do not benchmark concurrently.')
+    if other_gpus and not allow_other_gpus:
+        raise RuntimeError('Other GPUs are computing and share CPU resources. Free them for a final benchmark.')
+    return other_gpus
 
 
 def summarize(rows, sizes):
@@ -62,10 +86,12 @@ def main():
     parser.add_argument('--repeats', type=int, default=3)
     parser.add_argument('--seed', type=int, default=101)
     parser.add_argument('--profile', default='natural')
+    parser.add_argument('--allow-other-gpus', action='store_true',
+                        help='Provisional diagnostic only; shared CPU measurements cannot accept a model.')
     args = parser.parse_args()
     if args.repeats < 3 or len(set(args.sizes)) != len(args.sizes) or any(size < 512 or size % 512 for size in args.sizes):
         parser.error('At least three repeats and distinct positive sizes aligned to 512 are required.')
-    require_idle_gpu()
+    other_gpus = require_idle_gpu(args.allow_other_gpus)
     output = external_path(args.output)
     torch.set_num_threads(8)
     torch.backends.cudnn.benchmark = True
@@ -80,6 +106,7 @@ def main():
                      stage='base', dtype='bf16', step=saved['step'], sizes=args.sizes, repeats=args.repeats,
                      seed=args.seed, profile=args.profile, includes_feature_construction=True,
                      includes_transfers=True, coarse_prefetched=True, fresh_world_per_sample=True,
+                     whole_system_idle=not other_gpus, other_gpu_processes=other_gpus,
                      note='Base stage only; coarse prefetch, model loading and kernel warmup are excluded.')
     report = signature | dict(rows=[], status='running')
     if output.exists():
@@ -99,7 +126,9 @@ def main():
                 key = (variant, size, repeat)
                 if repeat >= 0 and any((row['variant'], row['size'], row['repeat']) == key for row in report['rows']):
                     continue
-                require_idle_gpu()
+                # Inventory was taken before our context existed. WSL PID
+                # attribution cannot distinguish our allocation afterwards.
+                competing = other_gpus
                 world = WorldPipeline(**(config | dict(seed=args.seed, dtype='bf16', T=2,
                     latents_batch_size=16, cache_limit=1024**3, torch_compile=False, log_mode='silent')))
                 world.coarse_model, world.base_model, world.decoder_model = (
@@ -127,6 +156,7 @@ def main():
                                seconds=elapsed, coarse_prefetch_seconds=coarse_seconds,
                                base_windows=counter.windows, base_calls=counter.calls,
                                student_counts=getattr(world, '_distill_counts', {}))
+                    row['other_gpu_processes'] = competing
                     report['rows'] = [old for old in report['rows'] if (old['variant'], old['size'], old['repeat']) != key]
                     report['rows'].append(row)
                     atomic_json(output, report)

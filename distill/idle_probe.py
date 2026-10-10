@@ -46,7 +46,7 @@ def main():
     try:
         atomic_json(progress, dict(status='benchmarking', updated_at=time.time()))
         subprocess.run([sys.executable, '-m', 'distill.bench_pipeline', '--checkpoint', str(args.checkpoint),
-                        '--output', str(args.output)], cwd=REPO, check=True)
+                        '--output', str(args.output), '--allow-other-gpus'], cwd=REPO, check=True)
         atomic_json(progress, dict(status='complete', output=str(args.output), updated_at=time.time()))
     except Exception as exc:
         atomic_json(progress, dict(status='probe-failed', error=str(exc), updated_at=time.time()))
