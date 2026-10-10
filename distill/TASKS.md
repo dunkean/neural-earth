@@ -112,7 +112,25 @@ ne remplacent pas ces mesures. Les exports d'inférence FP32 vérifiés font
 Les captures physiques supplémentaires et l'assemblage des 18 planches sont
 terminés et vérifiés ; aucune acceptation stricte n'est revendiquée.
 
-### Serveur de comparaison en direct demandé par l'utilisateur
+### Reprise qualité — diagnostic côtier
+
+Le serveur reste disponible sur la 5090. L'audit CPU
+`distill/audit_shore_training.py` mesure les intérieurs reconstruits des paires
+teacher alignées déjà stockées, sans générer de nouveaux targets ni utiliser les
+seeds réservées. Dans la bande ±20 m : 169/2129 fenêtres train ont des pixels
+proches de la mer, dont **113 avec terre et mer** ; validation séparée : **5/41**,
+toutes mixtes. Les 7 747 633 pixels train proches de la mer se répartissent entre
+4 070 594 positifs et 3 677 039 négatifs. Le rapport est
+`eval/shore-training-coverage.json`, avec provenance du jeu et de l'audit aligné.
+
+Ces nombres décrivent le proxy intérieur de la loss, pas une nouvelle validation
+du terrain final. La loss actuelle comporte une MAE d'altitude normalisée par
+l'écart-type de chaque fenêtre, mais pas de terme explicite terre/mer. Le
+diagnostic justifie de préparer un essai côtier ciblé, à comparer au parent128
+préservé et à contrôler ensuite sur toute la banque physique. Aucun nouvel
+élève n'est encore entraîné ni ajouté au menu live par ce diagnostic.
+
+### Comparaison interactive
 
 `distill/live_server.py` lance le viewer avec un menu **NN**, choix indépendant
 du coarse, du base (quatre variantes) et du decoder, chacun avec l'original comme
