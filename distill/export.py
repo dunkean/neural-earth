@@ -16,6 +16,41 @@ import torch
 from distill.common import REVISION, atomic_json, atomic_write, external_path
 
 
+def export_stage(checkpoint, output):
+    """Export one trained stage; a coarse trial never needs a base export."""
+    payload = Path(checkpoint).read_bytes()
+    source = torch.load(io.BytesIO(payload), map_location='cpu', weights_only=True)
+    stage = source['config']['stage']
+    if stage not in ('coarse', 'base', 'decoder') or source['step'] <= 0:
+        raise ValueError('A trained checkpoint of a known stage is required.')
+    state = source.get('ema', source['model'])
+    if not all(torch.isfinite(value).all() for value in state.values()):
+        raise ValueError('Non-finite export weights.')
+    provenance = dict(path=str(Path(checkpoint).resolve()), sha256=hashlib.sha256(payload).hexdigest(),
+                      step=source['step'], config=source['config'])
+    provenance = json.loads(json.dumps(provenance))
+    output = external_path(output)
+    manifest_path = output/'manifest.json'
+    if manifest_path.exists():
+        manifest = json.loads(manifest_path.read_text())
+        artifact = manifest['export']
+        if (manifest['source'] != json.loads(json.dumps(provenance)) or
+                hashlib.sha256((output/artifact['file']).read_bytes()).hexdigest() != artifact['sha256']):
+            raise ValueError('Single-stage exports are immutable; use a new output directory.')
+        return manifest
+    path = output/(stage+'.pt')
+    exported = dict(config=source['config'], model=state, step=source['step'], inference_only=True,
+                    selected_weights='ema' if 'ema' in source else 'model', source_checkpoint=provenance,
+                    teacher_revision=REVISION, warm_start=source.get('warm_start'))
+    atomic_write(path, lambda handle: torch.save(exported, handle))
+    artifact = dict(file=path.name, bytes=path.stat().st_size,
+                    sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+    manifest = dict(schema=1, stage=stage, source=provenance, export=artifact,
+                    inference_only=True, accepted=False)
+    atomic_json(manifest_path, manifest)
+    return manifest
+
+
 def export_bundle(checkpoints, output):
     if set(checkpoints) != {'base', 'coarse', 'decoder'}:
         raise ValueError('A bundle requires all three stages.')

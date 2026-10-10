@@ -213,6 +213,8 @@ def main():
     parser.add_argument('--dataset', type=Path, default=DATA/'crops/main')
     parser.add_argument('--output', type=Path)
     parser.add_argument('--resume', type=Path)
+    parser.add_argument('--initialize-from', type=str,
+                        help='Start a new coarse solver trial from trained EMA weights, resetting optimizer and step.')
     parser.add_argument('--width', type=int)
     parser.add_argument('--coarse-solver-steps', type=int)
     parser.add_argument('--steps', type=int, default=200000)
@@ -245,6 +247,8 @@ def main():
                         help='Optional relative physical gradient weight for paired height interiors.')
     parser.add_argument('--cpu', action='store_true')
     args = parser.parse_args()
+    if args.initialize_from and (args.resume or args.stage != 'coarse' or not args.coarse_solver_steps):
+        parser.error('Initialization requires a new coarse solver trial without --resume.')
     if min(args.steps, args.batch, args.eval_every, args.val_count) < 1 or args.workers < 0:
         parser.error('Positive steps/batch/evaluation intervals and nonnegative workers required.')
     if args.height_weight <= 0 or args.lr <= 0 or not all(math.isfinite(v) for v in (args.shore_weight, args.decoded_gradient_weight)) or min(args.spectral_weight, args.spectral_band_weight, args.gradient_weight, args.coarse_delta_weight, args.height_mae_weight, args.decoder_loss_weight, args.shore_weight, args.decoded_gradient_weight) < 0:
@@ -288,6 +292,20 @@ def main():
         if args.coarse_solver_steps is not None:
             config = replace(config, solver_steps=args.coarse_solver_steps)
     model = Student(config).to(device)
+    warm_start = saved.get('warm_start') if saved else None
+    if args.initialize_from:
+        import hashlib
+        initial_path = Path(args.initialize_from).expanduser().resolve()
+        payload = initial_path.read_bytes()
+        import io
+        parent = torch.load(io.BytesIO(payload), map_location='cpu', weights_only=True)
+        parent_config = dict(parent['config'])
+        parent_config['solver_steps'] = config.solver_steps
+        if json.loads(json.dumps(parent_config)) != json.loads(json.dumps(asdict(config))):
+            raise ValueError('Coarse initialization may change only the solver evaluation count.')
+        model.load_state_dict(parent.get('ema', parent['model']), strict=True)
+        warm_start = dict(path=str(initial_path), sha256=hashlib.sha256(payload).hexdigest(),
+                          step=parent['step'], solver_steps=parent['config']['solver_steps'])
     halo = model.halo if args.stage == 'base' else 0
     decoder, decoder_fingerprint, paired_audit = None, None, None
     if args.paired_decoder:
@@ -387,8 +405,8 @@ def main():
         if decoder_fingerprint:
             state['paired_decoder'] = decoder_fingerprint
             state['paired_audit'] = paired_audit
-        if saved and saved.get('warm_start'):
-            state['warm_start'] = saved['warm_start']
+        if warm_start:
+            state['warm_start'] = warm_start
         if device.type == 'cuda':
             state['cuda_rng'] = torch.cuda.get_rng_state_all()
         atomic_write(output/name, lambda handle: torch.save(state, handle))

@@ -2,7 +2,28 @@
 
 2026-10-10 · Grégory Beurier
 
-## État actuel après les tests live utilisateur
+## Reprise autorisée du 2026-10-11
+
+L'utilisateur supprime le diagnostic supplémentaire des anciens bases : leur
+perte visible des vallées d'érosion suffit à les rejeter. Repartir directement
+du teacher. `native_base.py` prépare un pilote à deux blocs par niveau au lieu
+de trois, avec poids transférés, même conditionnement58, attention, fenêtres64
+au pas32 et génération à deux étapes. Ses cibles sont les vrais appels natifs
+du teacher, conservés séparément pour les mondes train/val existants. Le job
+durable `base-native-pilot` est ordonnancé après les essais coarse sur GPU0.
+Les nouvelles planches physiques restent réservées à la sélection finale.
+
+Coarse2 et coarse1 sont autorisés pour essai direct dans l'app, sans évaluation
+physique détaillée. `coarse-short-trials` entraîne chacun5 000 pas depuis les
+poids du coarse4, avec nouvel optimiseur. Ce budget est un pilote, pas une
+garantie de convergence. Une fenêtre complète doit produire des valeurs finies
+et un export identique en CUDA Graph avant disponibilité dans le menu.
+Coarse4/base original/decoder distillé restent les défauts. Les anciens bases
+distillés sont retirés du catalogue. À la demande explicite de l'utilisateur,
+les poids coarse8/coarse4/decoder sont maintenant versionnés sous
+`distill/weights/`, avec SHA et provenance ; aucun poids base n'est versionné.
+
+## État avant cette reprise, après les tests live utilisateur
 
 Coarse8 et decoder distillés conviennent visuellement à l'utilisateur.
 **Tous les bases distillés actuels sont insuffisants**, y compris128 initial :
