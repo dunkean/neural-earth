@@ -190,6 +190,12 @@ def build(candidates, shared, output, additional=None):
 <title>Distillation : éléments de décision</title><style>body{font:17px system-ui;max-width:1200px;margin:40px auto;padding:0 20px;line-height:1.5}td,th{padding:8px;border-bottom:1px solid #ddd;text-align:left}table{border-collapse:collapse}a{color:#175c85}.scroll{overflow:auto}</style>
 <h1>Distillation : comparer les compromis</h1><p>Les quatre candidats sont conservés avec les mêmes élèves coarse et decoder.
 La sélection pratique dépend du rendu ; les critères stricts initiaux restent des diagnostics.</p>
+<p>Le 128 initial est le compromis le plus propre sur les plaines examinées. Le passage couplé restitue davantage
+de relief, avec du grain excessif sur certaines plaines. Le 192 ralentit le base sans amélioration régulière
+des cas difficiles. Les transitions très basses vers la mer peuvent changer nettement de forme malgré une
+faible erreur de hauteur : consulter ces planches avant de choisir.</p>
+<p>Aucun candidat ne satisfait tous les seuils stricts initiaux ; le gain ×10 visé pour le base n’est pas atteint.
+Les exports restent des candidats préservés, avec leurs limites mesurées.</p>
 <p><a href="plates/index.html">Planches contrastées, PNG et PDF</a> · <a href="gallery/index.html">Comparateur interactif : tous les sites</a></p>
 <p><a href="quality-all-sites.csv">Qualité, cas par cas</a> · <a href="performance.csv">Vitesse</a> · <a href="model-sizes.csv">Poids et taille des modèles</a> · <a href="manifest.json">Provenance</a></p>
 <h2>Qualité sur les cas critiques</h2><p>Trois élèves ensemble contre la référence BF16.

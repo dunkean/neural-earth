@@ -159,7 +159,8 @@ def build(candidates, output, additional=None):
     atomic_json(output/'manifest.json', dict(candidates=[dict(label=c[0], **b[2]) for c,b in zip(candidates,banks)],
         native_pixels=512, detail_crop_pixels=256, detail_display_zoom=2,
         physical_reference='Four independent cold viewer tiles', accepted=False))
-    pages[0].save(output/'comparisons.pdf', save_all=True, append_images=pages[1:], resolution=150)
+    pages[0].save(output/'comparisons.pdf', save_all=True, append_images=pages[1:], resolution=150,
+                  quality=100, subsampling=0)
     content=''.join(f'<li><a href="{html.escape(f)}">{html.escape(h)}</a></li>' for h,f in links)
     page='''<!doctype html><html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Comparaisons finales</title><style>body{font:18px system-ui;max-width:950px;margin:40px auto;padding:0 20px;line-height:1.6}a{color:#175c85}</style>

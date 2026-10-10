@@ -111,6 +111,32 @@ ne remplacent pas ces mesures. Les exports d'inférence FP32 vérifiés font
 Les captures physiques supplémentaires et l'assemblage des 18 planches restent
 en cours ; aucune acceptation stricte n'est revendiquée.
 
+### Dossier de décision terminé
+
+`~/data/distill/final/index.html` rassemble **18 planches PNG 2688×1895**, un PDF
+de 18 pages (JPEG qualité100 sans sous-échantillonnage couleur ; PNG sans perte),
+**152 comparaisons interactives**, 152 lignes de qualité détaillée, 32 synthèses
+des cas critiques, 48 lignes de performance, 72 mesures des grandes vues natives
+et 48 diagnostics des structures axiales. Les **12 exports** d'inférence sont
+revérifiés octet pour octet contre leurs manifests. Les 72 vues physiques élèves
+(quatre candidats, cas initiaux et supplémentaires) ont des joints, halos et
+différences de partition exactement nuls.
+
+Contrôle Chromium : les 152 paires d'images chargent, le curseur fonctionne,
+pas d'erreur JavaScript ni de débordement mobile. `pdfinfo` confirme 18 pages.
+Les **40 tests dédiés** passent. La revue des planches confirme le grain ajouté
+par les passages couplés sur la plaine très plate, le lissage du parent128 et
+les changements importants du trait de côte dans les transitions très basses.
+Le parent128 est le compromis visuel conseillé parmi les variantes examinées,
+avec coarse8 et decoder200k ; il n'est pas déclaré conforme aux seuils stricts.
+Le choix pratique reste ouvert à l'utilisateur, comme demandé.
+
+La livraison Git reste incomplète : l'API GitHub confirme encore
+`permissions.push=false` sur `dunkean/neural-earth` pour le compte configuré.
+L'archive Git locale sera rafraîchie sur le dernier commit. Aucun nouveau fork,
+changement de remote ni publication de poids n'est effectué sans destination
+autorisée. Ce blocage de publication ne change pas les résultats locaux.
+
 Objectif initial : remplacer le base model à 2 étapes (254 M paramètres) par un élève une passe ×10 plus rapide, dans la tolérance BF16/FP32.
 
 Objectif étendu par l'utilisateur le 2026-10-10 : **trois modèles distillés de
