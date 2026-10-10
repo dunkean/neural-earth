@@ -24,7 +24,7 @@ const storageKey='neural-earth-preferences-v1';
     if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:readRepositoryFile(u.pathname.slice(1),'utf8')});
     if(u.pathname==='/api/world'){
      const profile=u.searchParams.get('world_profile'),settings=JSON.parse(u.searchParams.get('generation'));
-     worldRequests.push({profile,settings});
+     worldRequests.push({profile,settings,seed:u.searchParams.get('seed')});
      if(holdFirstWorld)await firstWorldGate;
      return route.fulfill({json:{seed:'42',version:'test',cache_profile:'test',world_profile:profile,generation_profile:profile,generation_schema:schema,generation_settings:settings,world_bounds:[-20e6,-10e6,20e6,10e6],overview_bounds:[-20e6,-10e6,20e6,10e6],overview:'/overview.png',gpu:'Mock'}});
     }
@@ -69,6 +69,7 @@ const storageKey='neural-earth-preferences-v1';
    await page.goto('https://startup.test/');
    await page.waitForFunction(()=>world?.seed==='42');
    assert.equal(await page.locator('#gpuWelcome').count(),0);
+   assert.equal(worldRequests.at(-1).seed,'42','A plain launch reopens the last world instead of a new random seed');
    for(const key of gpuKeys)assert.equal(worldRequests.at(-1).settings[key],enabled);
    await page.locator('#generationPanel > summary').click();
    await page.locator('#orogen_detail').fill('123000');
@@ -132,6 +133,18 @@ const storageKey='neural-earth-preferences-v1';
    assert.equal(worldRequests.at(-1).settings.relief_pipeline,'orogen');
    assert.equal(worldRequests.at(-1).settings.orogen_gpu_erosion,enabled);
    assert.equal(await page.inputValue('#reliefPipeline'),enabled?'orogen-gpu':'orogen');
+
+   // The launcher's --gpu/--cpu answers the first-launch question; a saved answer wins afterwards.
+   await page.evaluate(key=>localStorage.removeItem(key),storageKey);
+   await page.goto('https://startup.test/?gpu='+(enabled?'1':'0'));
+   await page.waitForFunction(()=>world?.seed==='42');
+   assert.equal(await page.locator('#gpuWelcome').count(),0,'Launcher answer skips the question');
+   for(const key of gpuKeys)assert.equal(worldRequests.at(-1).settings[key],enabled,key+' follows the launcher');
+   for(const id of ['gpuRender','coarseGpu'])assert.equal(await page.isChecked('#'+id),enabled);
+   await page.goto('https://startup.test/?gpu='+(enabled?'0':'1'));
+   await page.waitForFunction(()=>world?.seed==='42');
+   assert.equal(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)).gpuAcceleration,storageKey),enabled);
+   for(const key of gpuKeys)assert.equal(worldRequests.at(-1).settings[key],enabled,key+' keeps the saved answer');
    assert.deepEqual(errors,[]);
    await context.close();
   }

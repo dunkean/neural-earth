@@ -18,10 +18,15 @@ window.TerrainGenerationControls=(()=>{
     const local=Object.fromEntries(Object.entries(settings).filter(([key])=>!key.endsWith('_stage')));
     savePreferences({generation:{profile,settings:local}});
   }
+  function rememberWorld(profile,seed,settings){
+    // The opened world, reopened at the next launch instead of a new random one.
+    const local=Object.fromEntries(Object.entries(settings).filter(([key])=>!key.endsWith('_stage')));
+    savePreferences({lastWorld:{profile,seed:String(seed),settings:local}});
+  }
   function withGpu(settings,enabled){
     return {...settings,relief_pipeline:'orogen',...Object.fromEntries([...gpuFields.map(([key])=>key),'orogen_gpu_erosion'].map(key=>[key,enabled]))};
   }
-  async function initializePreferences(){
+  async function initializePreferences(defaultGpu){
     let preferences=localPreferences();
     if(typeof preferences.gpuAcceleration==='boolean'){
       const resetErosion=preferences.erosionDefaultsVersion!==1;
@@ -31,6 +36,12 @@ window.TerrainGenerationControls=(()=>{
         savePreferences(preferences);
       }
       return {preferences,firstLaunch:false,resetErosion};
+    }
+    // The launcher's --gpu/--cpu answers the first-launch question.
+    if(typeof defaultGpu==='boolean'){
+      preferences={...preferences,gpuAcceleration:defaultGpu,erosionDefaultsVersion:1,rendering:{gpuRender:defaultGpu,coarseGpu:defaultGpu}};
+      savePreferences(preferences);
+      return {preferences,firstLaunch:true};
     }
     const dialog=document.createElement('dialog');dialog.id='gpuWelcome';
     dialog.innerHTML='<form method="dialog"><h2>Enable GPU acceleration?</h2><p>Enable all GPU options for Orogen relief, propagation, erosion, climate and projection, plus map rendering?</p><p>Orogen acceleration uses NVIDIA CUDA. Map rendering uses WebGPU. You can adjust each option later in Settings and Rendering. Your choices are saved on this browser.</p><div class="panelActions"><button value="no" autofocus>Use CPU options</button><button value="yes">Enable GPU acceleration</button></div></form>';
@@ -398,5 +409,5 @@ window.TerrainGenerationControls=(()=>{
       const reset=snrActions.querySelector('[data-shared-action=resetGeneration]');reset.textContent='Reset SNR';reset.onclick=()=>{noisePreset.value='current';noisePreset.dispatchEvent(new Event('change',{bubbles:true}));};
     }
   }
-  return {mount,defaults,classify,initializePreferences,savePreferences,saveGeneration,withGpu};
+  return {mount,defaults,classify,initializePreferences,savePreferences,saveGeneration,rememberWorld,withGpu};
 })();

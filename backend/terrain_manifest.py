@@ -1,11 +1,13 @@
 """Canonical, content-addressed identity for reference and experimental worlds."""
 from __future__ import annotations
 
-from terrain_paths import REPO_ROOT, WEB_ROOT, source_path, model_snapshot
+from terrain_paths import REPO_ROOT, WEB_ROOT, OUTPUT_ROOT, source_path, model_snapshot
 
 import hashlib
 import importlib.metadata
 import json
+import os
+import threading
 from copy import deepcopy
 from functools import lru_cache
 from pathlib import Path
@@ -36,13 +38,50 @@ def _digest(path: Path) -> dict:
             "sha256": _cached_digest(str(path.resolve()), stat.st_size, stat.st_mtime_ns)}
 
 
+# Digests persist across restarts under the same (size, mtime) trust as the
+# in-process cache: hashing the checkpoints and source rasters cost ~3 s of
+# every server start.
+_DIGEST_STORE = OUTPUT_ROOT / "file-digests.json"
+_digest_lock = threading.Lock()
+_stored_digests = None
+
+
+def _stored(resolved_path: str, size: int, mtime_ns: int):
+    global _stored_digests
+    with _digest_lock:
+        if _stored_digests is None:
+            try:
+                _stored_digests = json.loads(_DIGEST_STORE.read_text())
+            except (OSError, ValueError):
+                _stored_digests = {}
+        entry = _stored_digests.get(resolved_path)
+    if isinstance(entry, list) and entry[:2] == [size, mtime_ns]:
+        return entry[2]
+    return None
+
+
+def _store(resolved_path: str, size: int, mtime_ns: int, digest: str):
+    with _digest_lock:
+        _stored_digests[resolved_path] = [size, mtime_ns, digest]
+        try:
+            temporary = _DIGEST_STORE.with_name(f"{_DIGEST_STORE.name}.{os.getpid()}.tmp")
+            temporary.write_text(json.dumps(_stored_digests, sort_keys=True))
+            os.replace(temporary, _DIGEST_STORE)
+        except OSError:
+            pass
+
+
 @lru_cache(maxsize=256)
 def _cached_digest(resolved_path: str, size: int, mtime_ns: int) -> str:
+    stored = _stored(resolved_path, size, mtime_ns)
+    if stored is not None:
+        return stored
     h = hashlib.sha256()
     path = Path(resolved_path)
     with path.open("rb") as stream:
         while block := stream.read(8 * 1024 * 1024):
             h.update(block)
+    _store(resolved_path, size, mtime_ns, h.hexdigest())
     return h.hexdigest()
 
 

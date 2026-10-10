@@ -166,6 +166,31 @@ def all_gpu_locks():
         yield ordered
 
 
+# World generation waiting for the GPUs goes ahead of the optional startup
+# graph prewarm, which otherwise holds a device for ~10 s in a row.
+_generation_waiters = threading.Condition()
+_generation_waiting = 0
+
+
+@contextmanager
+def generation_gpu_locks():
+    global _generation_waiting
+    with _generation_waiters:
+        _generation_waiting += 1
+    try:
+        with all_gpu_locks() as ordered:
+            yield ordered
+    finally:
+        with _generation_waiters:
+            _generation_waiting -= 1
+            _generation_waiters.notify_all()
+
+
+def yield_to_generation():
+    with _generation_waiters:
+        _generation_waiters.wait_for(lambda: not _generation_waiting)
+
+
 def synchronize_gpus():
     with runtimes_lock:
         indices = sorted(runtimes)
@@ -485,8 +510,11 @@ def warm_base_forms(world):
     return dict(result,warmup_cuda_forward_calls={key:gpu_calls[key]-before[key] for key in before})
 
 
-def warm_graphs(world, *, coarse=True, state=None):
-    """Capture graphs; ``coarse=False`` on detail-only GPUs that never run it."""
+def warm_graphs(world, *, coarse=True, state=None, runtime=None):
+    """Capture graphs; ``coarse=False`` on detail-only GPUs that never run it.
+
+    With ``runtime``, each stage takes its compute lock separately and lets a
+    waiting world generation run first."""
     from terrain_inference import prewarm_coarse_graphs, set_coarse_streams
     from terrain_cuda_graphs import prewarm_decoder_form
     state = preload_state if state is None else state
@@ -497,13 +525,18 @@ def warm_graphs(world, *, coarse=True, state=None):
     stages.append(('decoder', lambda: prewarm_decoder_form(world.decoder_model, world.decoder_tile_size)))
     results = {}
     for name, prepare in stages:
-        state['warming_model'] = name
-        try:
-            results[name] = prepare()
-        except Exception as exc:
-            # Optional capture failure must not discard resident usable weights.
-            results[name] = dict(enabled=True, fully_warmed=False, state='failed',
-                                 error=f'{type(exc).__name__}: {exc}'[:400])
+        if runtime is not None:
+            yield_to_generation()
+        with runtime.lock if runtime is not None else nullcontext():
+            if runtime is not None and runtime.shared_pipeline is not world:
+                break  # Released from the plan meanwhile.
+            state['warming_model'] = name
+            try:
+                results[name] = prepare()
+            except Exception as exc:
+                # Optional capture failure must not discard resident usable weights.
+                results[name] = dict(enabled=True, fully_warmed=False, state='failed',
+                                     error=f'{type(exc).__name__}: {exc}'[:400])
     state.pop('warming_model', None)
     return dict(models=results, fully_warmed=all(
         not result.get('enabled') or result.get('fully_warmed', False) for result in results.values()))
@@ -630,7 +663,7 @@ def restore_shared_generation(generation):
                 worker = app.extensions.get('terrain_reference_worker')
                 if worker is not None:
                     worker.suspend(True)
-            with all_gpu_locks():
+            with generation_gpu_locks():
                 token.check()
                 synchronize_gpus()
                 return restore_stages(generation)
@@ -1347,18 +1380,26 @@ def warm_device(index):
     runtime = runtime_for(index)
     state = runtime.preload
     try:
-        with using_runtime(runtime), runtime.lock, torch.inference_mode(), span('startup.load_models', device=index):
+        with using_runtime(runtime), torch.inference_mode(), span('startup.load_models', device=index):
             if index not in gpu_plan['devices']:
                 return
             state.update(state='loading', error=None)
-            if runtime.shared_pipeline is None:
-                runtime.shared_pipeline = load_pipeline(42, device=index)
+            # Weights load without the compute lock, so the first world can be
+            # generated meanwhile; load_pipeline never loads a device twice.
+            pipeline = runtime.shared_pipeline or load_pipeline(42, device=index)
+            with runtime.lock:
+                if index not in gpu_plan['devices']:
+                    if runtime.shared_pipeline is None:
+                        getattr(terrain_runtime, 'release_pipeline', lambda index: None)(index)
+                    return
+                runtime.shared_pipeline = pipeline
             if os.environ.get('TERRAIN_PREWARM', '1') == '1':
                 state.update(state='warming')
                 try:
-                    state['cuda_graphs'] = warm_graphs(runtime.shared_pipeline, coarse=index == COARSE_DEVICE, state=state)
+                    state['cuda_graphs'] = warm_graphs(pipeline, coarse=index == COARSE_DEVICE, state=state, runtime=runtime)
                 finally:
-                    runtime.shared_pipeline.empty_cache()
+                    with runtime.lock:
+                        pipeline.empty_cache()
             state.update(state='ready')
     except Exception as exc:
         state.update(state='failed',error=str(exc)[:400])
@@ -1488,7 +1529,7 @@ def world_info():
                     worker=app.extensions.get('terrain_reference_worker')
                     if worker is not None:
                         worker.suspend(True)
-                with all_gpu_locks():
+                with generation_gpu_locks():
                     token.check()
                     synchronize_gpus()
                     result=metadata(seed,profile)
@@ -1529,7 +1570,7 @@ def generation_run():
                 worker=app.extensions.get('terrain_reference_worker')
                 if worker is not None:
                     worker.suspend(True)
-            with all_gpu_locks():
+            with generation_gpu_locks():
                 token.check()
                 # Drain the NN's asynchronous transfers/streams before Orogen.
                 synchronize_gpus()
@@ -2275,6 +2316,19 @@ def overview_albedo(key, compute):
     return albedo
 
 
+def _prune_overview_variants(directory, keep=6):
+    try:
+        variants=sorted(directory.glob('overview.*.light-*.png'),key=lambda f:f.stat().st_mtime_ns,reverse=True)
+    except OSError:
+        return  # A concurrent prune removed one; the next overview retries.
+    for stale in variants[keep:]:
+        for name in (stale,stale.with_suffix('.json')):
+            try:
+                name.unlink()
+            except OSError:
+                pass
+
+
 @app.get('/api/overview/natural-v1/<int:seed>.png')
 @pin_cache_io(lambda seed: f'{VERSION}/{generation_profile()}/{seed}/overview')
 def overview(seed):
@@ -2306,8 +2360,12 @@ def overview(seed):
         cached_identity=json.loads(receipt_path.read_text()).get('world_identity')
     except (OSError,ValueError):
         cached_identity=None
+    display_variant=lighting is not None or contours is not None or render_settings is not None
     if path.exists() and cached_identity==identity:
         disk_cache.record(cache_key,cache_paths)
+        if display_variant:
+            response=Response(path.read_bytes(),mimetype='image/png');response.cache_control.no_store=True
+            return response
         return send_file(path, mimetype='image/png', max_age=31536000)
     memory_key=(identity,wp,seed,mode,suffix)
     with _OVERVIEW_LOCK:
@@ -2372,8 +2430,14 @@ def overview(seed):
             rgb=apply_contours(rgb,elevation,contours,mode)
         buffer = io.BytesIO()
         Image.fromarray((np.clip(rgb, 0, 1)*255).astype(np.uint8)).save(buffer, format='PNG')
-        if lighting is not None or contours is not None or render_settings is not None:
+        if display_variant:
             _remember_overview(memory_key,buffer.getvalue())
+            # The last few display variants also persist, so reopening the
+            # same world at the next launch shows its overview at once.
+            _atomic_bytes(path, buffer.getvalue())
+            _atomic_bytes(receipt_path,json.dumps({'world_identity':identity,'mode':mode}).encode())
+            _prune_overview_variants(directory)
+            disk_cache.record(cache_key,cache_paths)
             return buffer.getvalue()
         _atomic_bytes(path, buffer.getvalue())
         _atomic_bytes(receipt_path,json.dumps({'world_identity':identity,'mode':mode}).encode())

@@ -44,4 +44,4 @@ else
 fi
 
 echo "Starting a new Neural Earth server..."
-exec "$root/.venv/bin/python" "$root/launch_terrain.py" "$@"
+exec "$root/.venv/bin/python" "$root/launch_terrain.py" --gpu "$@"

@@ -45,6 +45,37 @@ _PLATE_COLORS = np.array([colorsys.hsv_to_rgb((i*.61803398875)%1, .55, .9)
                           for i in range(120)], np.float32)
 
 
+# Large grids (2048x1024 overviews sample ~80 layers) blend on CUDA with the
+# NumPy float64 operation sequence: IEEE multiply/add, so identical values.
+_CUDA_PIXELS = 1 << 18
+
+
+def _cuda():
+    import os
+    if os.environ.get('TERRAIN_RENDER_DEVICE', 'auto').lower() == 'cpu':
+        return False
+    import terrain_render_torch
+    return terrain_render_torch.available()
+
+
+def _sample_cuda(source, j0, j1, tx, ty, a_rows, b_rows):
+    import torch
+    from terrain_device import current_cuda_index
+    dev = torch.device('cuda', current_cuda_index())
+    up = lambda array: torch.from_numpy(np.ascontiguousarray(array)).to(dev, non_blocking=True)
+    stream = torch.cuda.Stream(device=dev)
+    with torch.inference_mode(), torch.cuda.stream(stream):
+        source, tx, ty = up(source), up(tx), up(ty)
+        across = source[:, up(j0)]*(1-tx)
+        across += source[:, up(j1)]*tx
+        a, b = across[up(a_rows)], across[up(b_rows)]
+        a *= 1-ty
+        b *= ty
+        a += b
+        result = a.float().cpu().numpy()
+    return result
+
+
 def sample(world, field, xs, ys, *, categorical=False):
     xs, ys = np.asarray(xs, np.float64), np.asarray(ys, np.float64)
     x0,y0,x1,y1 = world.bounds
@@ -64,6 +95,8 @@ def sample(world, field, xs, ys, *, categorical=False):
     # Same float64 operations as a per-pixel gather, hence identical values.
     rows = np.unique(np.concatenate((iy, by)))
     source = field[rows]
+    if len(xs)*len(ys) >= _CUDA_PIXELS and source.dtype in (np.float32, np.float64) and _cuda():
+        return _sample_cuda(source, j0, j1, tx, ty, np.searchsorted(rows, iy), np.searchsorted(rows, by))
     across = source[:, j0]*(1-tx)
     across += source[:, j1]*tx
     a, b = across[np.searchsorted(rows, iy)], across[np.searchsorted(rows, by)]

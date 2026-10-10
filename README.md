@@ -77,7 +77,11 @@ Prepare the geography inputs and runtime directory using the [installation guide
 .\.venv\Scripts\python.exe launch_terrain.py
 ```
 
-On Linux, use `./start-neural-earth.sh` (add `--no-open` for unattended startup). On Windows, double-click **start-neural-earth.cmd**. Open **http://127.0.0.1:8765**. Pinned model weights download on first use; loading all three networks and preparing CUDA Graphs takes time.
+On Linux, use `./start-neural-earth.sh` (add `--no-open` for unattended startup). On Windows, double-click **start-neural-earth.cmd**. `restart-neural-earth.bat` / `restart-neural-earth.sh` first stop any running server. Open **http://127.0.0.1:8765**. Pinned model weights download on first use.
+
+The start and restart scripts pass `--gpu`, which is also the launcher default: a browser's first launch enables every optional GPU acceleration without asking. Pass `--cpu` (for example `start-neural-earth.cmd --cpu`) to choose the CPU options instead. Launching `http://127.0.0.1:8765` directly without the launcher asks the question once. A browser's saved choice, then its Settings and Rendering toggles, take precedence over later launches.
+
+A plain launch reopens the last world opened in that browser (seed and settings), so its cached Orogen stages and overview are reused. Use a new seed in the viewer for another world. The world appears while the networks load: model weights load beside world generation, and CUDA Graph preparation yields to it. Neural tiles follow once the networks are ready.
 
 The default **Orogen** generator uses bundled Orogen code, with 100,000 mesh points, three continents, continent variety 0.85 and erosion enabled. Orogen erosion is active by default for every UI generator: the first-launch GPU answer selects GPU or CPU erosion. It also enables or disables the other optional GPU acceleration settings and map rendering. Existing browsers receive a one-time correction of the old erosion default; later edits are saved locally. **Custom → Continental atlas** additionally requires Rust/Cargo and a pinned sibling `world-builder-rs` checkout. Optional GPU erosion has separate dependencies. The installation guide documents these and configurable storage (`~/.cache/neural-earth` on Linux, `E:/TerrainDiffusionRuntime` on Windows).
 
@@ -151,6 +155,8 @@ The camera remains responsive while visible regions receive priority. Parent til
 ## Scope and performance
 
 Neural Earth produces a complete geographic world to explore, with finite spherical or planar geometry. It does not generate an entire planet at 30 m on startup. Larger visible regions, deeper refinement and more streams increase computation and memory. Four coarse streams are the default scheduling balance; the coarse network batch remains one.
+
+`tools/benchmarks/benchmark_startup.py` measures the cold start on a separate port (8775): server response, model loading and CUDA Graph preparation, `/api/world` and the Render overview. `--gpu` (default) runs every optional Orogen stage on CUDA, `--cpu` runs Orogen on the CPU; without `--seed` it generates a new random world, and a seed already generated measures a reopened world. Stop other servers first, because they share GPU memory. On an RTX 3090, a reopened world shows its overview after about 9 s, and a new world with CPU Orogen after about 16 s.
 
 Terrain and climate target worldbuilding plausibility. Biomes and materials are visual models, without independent ecosystem simulation. Neural detail does not guarantee globally connected rivers or preservation of every source erosion feature. Optional sub-30 m refinement is experimental.
 

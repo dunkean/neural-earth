@@ -18,5 +18,5 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
   "for ($i = 0; $i -lt 40 -and (Get-NetTCPConnection -State Listen -LocalPort 8765 -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 250 }"
 
 echo Starting a new Neural Earth server...
-"%~dp0.venv\Scripts\python.exe" "%~dp0launch_terrain.py" %*
+"%~dp0.venv\Scripts\python.exe" "%~dp0launch_terrain.py" --gpu %*
 if errorlevel 1 pause
