@@ -4,7 +4,7 @@ import hashlib
 import json
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 import torch
@@ -25,7 +25,7 @@ from distill.check_physical_seams import partition_stats
 from distill.export import export_bundle
 from distill.decoded_loss import PairedCrops, decode, reconstructed_height
 from distill.benchmark_candidates import wait_seam_diagnostic
-from distill.bench_pipeline import StageCount
+from distill.bench_pipeline import StageCount, release_counter_graphs
 
 
 class DistillationTests(unittest.TestCase):
@@ -83,8 +83,34 @@ class DistillationTests(unittest.TestCase):
         self.assertEqual((counted.calls, counted.windows), (1, 3))
         torch.testing.assert_close(counted(inputs), model(inputs), rtol=0, atol=0)
         self.assertEqual((counted.calls, counted.windows), (2, 6))
+        counted.reset()
+        # Solver capture forwards must not inflate the real replay count.
+        counted(inputs)
+        counted._terrain_note_graph_forwards(inputs, 20)
+        self.assertEqual((counted.calls, counted.windows), (20, 60))
+        counted._terrain_note_graph_forwards(inputs, 20)
+        self.assertEqual((counted.calls, counted.windows), (40, 120))
+        counted.reset()
+        self.assertEqual((counted.calls, counted.windows), (0, 0))
         with self.assertRaises(AttributeError):
             counted.missing_method
+
+    def test_benchmark_releases_owned_solver_graphs_without_clearing_borrowed_model(self):
+        borrowed = Mock()
+        owned = Mock()
+        pool = Mock()
+        counter = StageCount(torch.nn.Identity())
+        counter.model.__dict__['_terrain_solver_graph_cache'] = {'borrowed': borrowed}
+        counter.__dict__['_terrain_solver_graph_cache'] = {'owned': owned}
+        counter.__dict__['_terrain_stream_pool'] = ('key', pool)
+        release_counter_graphs({'coarse': counter})
+        owned._clear_buckets.assert_called_once_with()
+        pool.close.assert_called_once_with()
+        borrowed._clear_buckets.assert_not_called()
+        self.assertNotIn('_terrain_solver_graph_cache', counter.__dict__)
+        self.assertNotIn('_terrain_stream_pool', counter.__dict__)
+        release_counter_graphs({'coarse': counter})
+        owned._clear_buckets.assert_called_once_with()
 
     def test_global_noise_is_independent_of_negative_crop_partition(self):
         for seed in (9281, 9282):

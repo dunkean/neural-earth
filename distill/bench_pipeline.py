@@ -32,6 +32,18 @@ class StageCount(Count):
     def __init__(self, model):
         super().__init__(model)
         self.eval()
+        self.reset()
+
+    def reset(self):
+        self.calls = self.windows = 0
+        self._solver_calls = self._solver_windows = 0
+
+    def _terrain_note_graph_forwards(self, inputs, evaluations):
+        # Whole-solver graph replay bypasses Python forward. Its production
+        # hook counts the real network evaluations, excluding capture warmups.
+        self._solver_calls += evaluations
+        self._solver_windows += inputs.shape[0]*evaluations
+        self.calls, self.windows = self._solver_calls, self._solver_windows
 
     def __getattr__(self, name):
         try:
@@ -43,6 +55,19 @@ class StageCount(Count):
         self.windows += inputs.shape[0]
         self.calls += 1
         return self.model.forward_with_embeddings(inputs, *args, **kwargs)
+
+
+def release_counter_graphs(counters):
+    # Production normally retains these on a long-lived shared model. Here
+    # each sample owns its counters and their solver caches; break adapter ->
+    # counter -> graph cycles explicitly so private CUDA pools can be freed.
+    for counter in counters.values():
+        cache = counter.__dict__.pop('_terrain_solver_graph_cache', {})
+        for graph in cache.values():
+            graph._clear_buckets()
+        pool = counter.__dict__.pop('_terrain_stream_pool', None)
+        if pool is not None:
+            pool[1].close()
 
 
 def require_idle_gpu(allow_other_gpus=False):
@@ -143,6 +168,10 @@ def main():
     from terrain_diffusion.inference.world_pipeline import WorldPipeline
     loaded = load_pipeline(args.seed)
     config = {key: value for key, value in dict(loaded.config).items() if not key.startswith('_')}
+    # Counters must share the same lifetime as the resident models. Whole
+    # coarse solver graphs are cached on their owner; recreating that owner for
+    # every fresh world would repeatedly allocate private CUDA memory pools.
+    counters = {name: StageCount(getattr(loaded, name+'_model')) for name in ('coarse', 'base', 'decoder')}
     for variant in ('reference', 'student'):
         if variant == 'student':
             # Teacher captures for the replaced stage can occupy most of VRAM.
@@ -168,7 +197,6 @@ def main():
                 world.coarse_model, world.base_model, world.decoder_model = (
                     loaded.coarse_model, loaded.base_model, loaded.decoder_model)
                 configure_world(world, replace(loaded._terrain_profile, cuda_graphs=True), world_profile=args.profile)
-                counters = {name: StageCount(getattr(world, name+'_model')) for name in ('coarse', 'base', 'decoder')}
                 for name, counter in counters.items():
                     setattr(world, name+'_model', counter)
                 if variant == 'student':
@@ -185,7 +213,7 @@ def main():
                     torch.cuda.synchronize()
                     dependency_seconds = time.perf_counter()-before
                     for counter in counters.values():
-                        counter.calls = counter.windows = 0
+                        counter.reset()
                     started = time.perf_counter()
                     tensor = getattr(world, {'base': 'latents', 'coarse': 'coarse', 'decoder': 'residual'}[stage])
                     field = tensor[:, 0:size, 0:size]
@@ -196,6 +224,8 @@ def main():
                         raise RuntimeError('Dependency prefetch missed an input window; timing is not isolated.')
                     if not torch.isfinite(field).all():
                         raise FloatingPointError('Non-finite final field.')
+                    if torch.cuda.memory_reserved() > torch.cuda.get_device_properties(0).total_memory:
+                        raise RuntimeError('CUDA reservations exceed physical VRAM; reject paging-contaminated timing.')
                     row = dict(variant=variant, size=size, repeat=repeat, warmup=repeat < 0,
                                seconds=elapsed, dependency_prefetch_seconds=dependency_seconds,
                                cuda_allocated_bytes=torch.cuda.memory_allocated(),
@@ -212,9 +242,10 @@ def main():
                     print(json.dumps(row), flush=True)
                 finally:
                     world.close()
-                    del field, world, tensor, counters, counter
+                    del field, world, tensor
                     gc.collect()
                     torch.cuda.empty_cache()
+    release_counter_graphs(counters)
     report['comparisons'] = summarize(report['rows'], args.sizes)
     report['status'] = 'complete'
     atomic_json(output, report)

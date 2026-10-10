@@ -800,6 +800,19 @@ temps instables ; elle est conservée comme diagnostic, sans servir de résultat
 de performance. Le benchmark corrigé et ses jobs dépendants ont été relancés.
 Les **32 tests de distillation passent** ; les mesures GPU restent en cours.
 
+Le contrôle de mémoire a identifié le problème restant : le compteur devait
+être partagé entre mondes frais, comme les poids résidents, pour partager aussi
+le cache du solver coarse. Avec ce partage, les réservations restent à
+**9,38 Gio** pendant les quatre répétitions élève au lieu d'augmenter de plusieurs
+Gio par monde. Un garde refuse toute mesure réservant plus que la VRAM physique.
+Le contrôle 512×512 latents sur 4090 donne une médiane teacher **1,249 s**, élève
+**0,164 s**, soit **×7,59**, halo et construction CPU des features compris,
+coarse pré-calculé hors chronomètre (`bench/base-memory-probe-v3.json`). Les
+anciens rapports contaminés par la pagination sont conservés comme diagnostics.
+Le coarse8 actuel construit son scheduler sur CPU : son micro-benchmark publie
+le temps eager et indique explicitement CUDA Graphs indisponible. Les mesures
+physiques des poids n'ont pas changé. **33 tests de distillation passent.**
+
 ## Préparation du 2026-10-10 — en attente du top
 
 La passation a été reçue en texte dans la conversation. Les performances de la

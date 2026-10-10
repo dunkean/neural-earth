@@ -110,16 +110,25 @@ def main():
                 with torch.autocast('cuda', dtype=torch.bfloat16):
                     return model(inputs)
             eager = time_cuda(forward)
-            graph = capture(forward)
-            graph_ms = time_cuda(graph.replay)
+            # The short coarse solver constructs a CPU scheduler at each call.
+            # Its scalar transfers cannot be captured; time the actual eager
+            # path without changing model numerics just for this benchmark.
+            graph_supported = not (stage == 'coarse' and model.config.solver_steps)
+            graph_ms = None
+            if graph_supported:
+                graph = capture(forward)
+                graph_ms = time_cuda(graph.replay)
+                del graph
             equivalent = args.batch*tile**2/64**2
             item = dict(dtype='bf16', channels_last=channels_last, batch=args.batch,
                         eager_ms=eager, graph_ms=graph_ms,
-                        graph_ms_per_64_surface=graph_ms/equivalent,
+                        graph_supported=graph_supported,
+                        graph_unavailable_reason=None if graph_supported else
+                            'Coarse solver constructs CPU schedule and transfers unpinned scalars each call.',
+                        graph_ms_per_64_surface=graph_ms/equivalent if graph_ms is not None else None,
                         includes_halo=True, excludes_feature_construction=True)
             report['samples'].append(item)
             print(json.dumps(item), flush=True)
-            del graph
     report['fp8_raw_gemm'] = fp8_bounds()
     atomic_json(external_path(args.output), report)
     print(json.dumps(report['fp8_raw_gemm']), flush=True)
