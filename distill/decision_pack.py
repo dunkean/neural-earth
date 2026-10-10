@@ -18,7 +18,8 @@ import shutil
 import numpy as np
 
 from distill.common import atomic_json, atomic_write, external_path
-from distill.final_plates import build as plates
+from distill.final_plates import KINDS, build as plates
+from distill.grid_artifacts import analyze as grid_analyze
 from distill.rare_cases import local_errors
 from distill.review_gallery import build as gallery
 
@@ -28,6 +29,38 @@ def save_csv(path, rows):
     writer=csv.DictWriter(stream, fieldnames=list(rows[0]))
     writer.writeheader(); writer.writerows(rows)
     atomic_write(path, lambda f:f.write(stream.getvalue().encode('utf-8')))
+
+
+def quality_summary(rows):
+    groups={}
+    ranks={name:i for i,name in enumerate(dict.fromkeys(r['candidate'] for r in rows))}
+    for row in rows:
+        if row['kind']=='historical':
+            continue
+        groups.setdefault((row['kind'],row['lod'],row['candidate']),[]).append(row)
+    result=[]
+    for (kind,lod,label),values in sorted(groups.items(),key=lambda item:(item[0][0],item[0][1],ranks[item[0][2]])):
+        slopes=[r['slope_ratio'] for r in values if r['slope_ratio'] is not None]
+        fine=[r['psd_band_5_ratio'] for r in values if r['psd_band_5_ratio'] is not None]
+        result.append(dict(candidate=label,kind=kind,lod=lod,views=len(values),
+            median_mae_m=float(np.median([r['mae_m'] for r in values])),
+            worst_mae_m=max(r['mae_m'] for r in values),
+            worst_coast_disagreement_pct=max(r['coast_sign_disagreement_pct'] for r in values),
+            slope_ratio_min=min(slopes) if slopes else None,slope_ratio_max=max(slopes) if slopes else None,
+            finest_psd_ratio_min=min(fine) if fine else None,finest_psd_ratio_max=max(fine) if fine else None))
+    return result
+
+
+def summary_table(rows):
+    content='<table><tr><th>Cas</th><th>LOD</th><th>Candidat</th><th>MAE médiane / pire (m)</th><th>Terre/mer pire (%)</th><th>Pentes min–max / réf.</th><th>Bande fine min–max / réf.</th></tr>'
+    def interval(a,b):
+        return '—' if a is None else f'{a:.2f}–{b:.2f}'
+    for row in rows:
+        values=[KINDS.get(row['kind'],row['kind']),row['lod'],row['candidate'],
+            f"{row['median_mae_m']:.2f} / {row['worst_mae_m']:.2f}",f"{row['worst_coast_disagreement_pct']:.2f}",
+            interval(row['slope_ratio_min'],row['slope_ratio_max']),interval(row['finest_psd_ratio_min'],row['finest_psd_ratio_max'])]
+        content+='<tr>'+''.join('<td>'+html.escape(str(v))+'</td>' for v in values)+'</tr>'
+    return content+'</table>'
 
 
 def read_quality(label, directory, seam):
@@ -89,6 +122,7 @@ def build(candidates, shared, output, additional=None):
     output.mkdir(parents=True,exist_ok=True)
     quality,speed,sizes,sources=[],[],[],[]
     galleries=[]
+    gallery_labels={}
     for index,(label,seam_dir,prefix,bench_dir) in enumerate(candidates):
         seam=json.loads((Path(seam_dir)/'report.json').read_text())
         evidence=output/'evidence'/f'candidate-{index+1}'
@@ -98,6 +132,7 @@ def build(candidates, shared, output, additional=None):
             directory=Path(str(prefix)+suffix)
             quality.extend(read_quality(label,directory,seam))
             galleries.append(directory)
+            gallery_labels[str(directory.resolve())]=label+(' · cas critiques' if suffix else ' · sites historiques')
             shutil.copy2(directory/'report.json',evidence/('quality-rare.json' if suffix else 'quality-historical.json'))
             if (directory/'optimization-equivalence.json').exists():
                 shutil.copy2(directory/'optimization-equivalence.json',evidence/('equivalence-rare.json' if suffix else 'equivalence-historical.json'))
@@ -129,10 +164,16 @@ def build(candidates, shared, output, additional=None):
             historical_cold_tiles=str(additional[index]) if additional is not None else None,
             evidence=str(evidence.relative_to(output))))
     save_csv(output/'quality-all-sites.csv',quality)
+    summarized=quality_summary(quality)
+    save_csv(output/'quality-summary.csv',summarized)
     save_csv(output/'performance.csv',speed)
     save_csv(output/'model-sizes.csv',sizes)
+    grid_reports=[grid_analyze(Path(str(c[2])+'-rare')) for c in candidates]
+    atomic_json(output/'grid/report.json',dict(reports=grid_reports,accepted=False,
+        note='Axial Fourier projections at periods 32 and 64 latents, LOD 3. Diagnostic only, not a causal proof or acceptance threshold.'))
+    save_csv(output/'grid/metrics.csv',[r for report in grid_reports for r in report['rows']])
     plates([(c[0],c[1]) for c in candidates],output/'plates',additional)
-    count=gallery(galleries,output/'gallery')
+    count=gallery(galleries,output/'gallery',labels=gallery_labels)
     atomic_json(output/'manifest.json',dict(candidates=sources,gallery_views=count,accepted=False,
         performance_scope='Each neural stage separately; dependencies prefetched. Not end-to-end viewer latency.',
         quality_scope='All historical and rare viewer tiles; 512px plates have their own metrics.'))
@@ -147,6 +188,13 @@ def build(candidates, shared, output, additional=None):
 La sélection pratique dépend du rendu ; les critères stricts initiaux restent des diagnostics.</p>
 <p><a href="plates/index.html">Planches contrastées, PNG et PDF</a> · <a href="gallery/index.html">Comparateur interactif : tous les sites</a></p>
 <p><a href="quality-all-sites.csv">Qualité, cas par cas</a> · <a href="performance.csv">Vitesse</a> · <a href="model-sizes.csv">Poids et taille des modèles</a> · <a href="manifest.json">Provenance</a></p>
+<h2>Qualité sur les cas critiques</h2><p>Trois élèves ensemble contre la référence BF16.
+Chaque ligne résume les lieux d’une famille ; le pire cas et les intervalles restent visibles.
+Le désaccord terre/mer est la fraction de pixels dont le signe de hauteur change.
+Les rapports de pente et de puissance spectrale visent 1 ; la bande fine couvre 0,25–0,5 cycle/pixel.
+Toutes les bandes, les erreurs près des côtes et sur les terres de 0–20 m sont dans les mesures individuelles.</p>
+<p><a href="quality-summary.csv">Synthèse qualité (CSV)</a> · <a href="grid/metrics.csv">Lignes horizontales/verticales : diagnostic (CSV)</a></p>
+<div class="scroll">'''+summary_table(summarized)+'''</div>
 <h2>Vitesse mesurée</h2><p>Chaque étape est chronométrée séparément, sur des champs neufs, construction des entrées et transferts inclus.
 Les dépendances sont préchargées, les poids résidents et le warmup exclu. Médiane de trois répétitions, deux GPU libres.
 Ces gains ne sont pas une mesure du temps d’affichage complet.</p><div class="scroll">'''+table+'</div></html>'

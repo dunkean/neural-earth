@@ -82,7 +82,7 @@ def table(row, reference, local):
         for name, value in values) + '</table>'
 
 
-def build(directories, output):
+def build(directories, output, labels=None):
     output = external_path(output)
     output.mkdir(parents=True, exist_ok=True)
     groups, manifests = [], []
@@ -102,7 +102,8 @@ def build(directories, output):
                     continue
                 stage_label = {'student': 'Base', 'student_coarse': 'Coarse',
                                'student_decoder': 'Decoder', 'student_all': 'Trois élèves ensemble'}[variant]
-                group = dict(label=stage_label+' · '+directory.name, views=[])
+                display_label = (labels or {}).get(str(directory), directory.name)
+                group = dict(label=display_label+' · '+stage_label, views=[])
                 for row in rows:
                     site, lod = row['site'], row['lod']
                     if 'vs_reference' not in row:
