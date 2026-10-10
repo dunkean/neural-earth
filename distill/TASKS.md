@@ -604,6 +604,32 @@ SHA/config/pas dans `inventory.json`. Ajouts conservés pour comparaison :
 base 96 EMA 295000 et base 128 EMA 20000. Cela ne les déclare pas acceptés ;
 les futurs meilleurs checkpoints ne peuvent pas écraser ces copies.
 
+Coarse 4 a terminé : candidat du pas **50000**, SHA
+`4e5f9a33177779dd23b65a7e3ec46422bcb237a6f69b82e5d47a7994d0ea8a3c`,
+conservé dans `ckpt/candidates/`. Inspection complète : **0/14 + 0/24** passent
+tous les seuils stricts, MAE historique 9,68–275,25 m ; plaines rares LOD 0
+0,61–10,71 m, côtes humides 11,01–72,69 m. Planches sous
+`eval/coarse-solver4-pilot{,-rare}`. Il améliore le solveur 4 non entraîné
+(snow LOD 3 : 368→149 m ; coast LOD 0 : 192→96 m), mais pas assez pour
+conclure à un bon compromis sur tous les reliefs.
+
+Contrôles séparés, **pas 0 / non distillés**, conservés dans `ckpt/controls` :
+le hook à 20 étapes reproduit exactement le teacher sur snow/coast aux deux
+LODs (MAE et max **0**). À huit étapes sans entraînement, les mêmes LOD 0
+ont une MAE de 51,85 / 51,28 m, contre 275,25 / 95,53 m pour le 4 entraîné ;
+snow LOD 3 reste à 233 m. Cela motive un essai **coarse-solver8-pilot**,
+25000 pas, batch 4, LR 1e-5, mêmes losses/données, après smoke 32 pas réussi.
+Initialisation depuis le teacher BF16, nouveau dossier/optimiseur/RNG ; aucune
+prétention de compression des paramètres ou d'un gain mesuré ×2,5.
+Son inspection sera produite automatiquement sous `coarse-solver8-pilot`.
+
+Les jobs `candidate-bundle-seams`, `base128-cuda-seams` et
+`candidate-bundle-physical` attendent les inspections des candidats figés.
+La dernière produit les images des **trois élèves ensemble**, sur les lieux
+historiques et rares, avec les mêmes SHA que la preuve de continuité.
+La variante coarse 4 de ce premier assemblage reste explicitement un
+compromis à comparer, pas un modèle accepté par les seuils stricts.
+
 ```bash
 python -m distill.rare_cases survey ~/data/distill/eval/rare-proposals.json --count 12
 python tools/verification/compare_base_variants.py run ~/data/distill/eval/rare-teacher-survey \
