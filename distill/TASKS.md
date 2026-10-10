@@ -432,6 +432,34 @@ de cette passe. Le score best est réinitialisé quand la policy change.
 Le coarse en cours n'est pas interrompu. Le decoder conserve sa recette actuelle
 avant décision sur ses propres mesures ; sa géométrie de fenêtre diffère du base.
 
+Le coarse 64 a ensuite terminé 300000 pas. Son meilleur score choisit le pas
+260000 (`ckpt/candidates/coarse-step260000-9c78ae036a21.pt`). Inspection complète :
+1/14 vues historiques et 0/16 rares passent, MAE historique jusqu'à 306 m,
+contre 11,64–41,89 m pour le diagnostic FP32 coarse. La supervision en mètres
+ne suffit donc pas. Rapports et planches : `eval/coarse-full-pilot{,-rare}`.
+
+Essai de capacité lancé séparément, **coarse128-pilot** sur la 4090 : largeur
+128, 9641318 paramètres, batch 4, objectif 100000 pas, même jeu complet et
+supervision hauteur/delta. Son dossier `ckpt/coarse128` conserve ses états/RNG ;
+il ne remplace aucun checkpoint précédent. Bien que plus gros que le teacher
+coarse (2797960 paramètres), il vise une seule passe contre 20, dont le coût
+doit être mesuré après validation. La 5090 poursuit base 200000→400000 avec
+la policy rare figée ; le coordinateur passera ensuite au decoder 200000.
+
+`distill/inspect_candidate.py` fige les octets du meilleur checkpoint d'une
+passe terminée, puis produit banque historique, banque rare, audits et planches
+avec la même empreinte. Exemple pour cet essai après sa fin :
+
+```bash
+python -m distill.inspect_candidate --stage coarse --minimum-step 100000 \
+  --checkpoint-dir ~/data/distill/ckpt/coarse128 --tag coarse128-pilot
+```
+
+22 tests de régression passent. Tests GPU séparés : 32 pas de sampling rare,
+puis reprise de 8 pas sans fichier policy (probabilités restaurées du checkpoint),
+puis 8 pas avec les 14 exemples de validation rares supplémentaires ; losses
+finies et états optimiseur/RNG conservés, sans modifier le checkpoint base principal.
+
 ```bash
 python -m distill.rare_cases survey ~/data/distill/eval/rare-proposals.json --count 12
 python tools/verification/compare_base_variants.py run ~/data/distill/eval/rare-teacher-survey \
