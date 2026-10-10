@@ -32,6 +32,11 @@ def serve(port, config):
     def review_ui(response):
         if request.path == '/' and response.status_code == 200:
             html = (REPO/'web/index.html').read_text()
+            # Reference selection happens per NN in this server. An old viewer
+            # link must not silently redirect the chosen models to /reference.
+            html = html.replace('<script', '<script>(()=>{const url=new URL(location.href);'
+                'url.searchParams.set("nn_engine","exact");history.replaceState(null,"",url);'
+                '})()</script><script', 1)
             html = html.replace('</html>', '<script src="/distill/live-controls.js"></script></html>')
             return Response(html, mimetype='text/html', headers={'Cache-Control': 'no-store'})
         if request.path.startswith('/api/distill/'):

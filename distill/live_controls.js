@@ -1,5 +1,7 @@
 /* Loaded only by the explicit local distillation review server. */
 (() => {
+  const engine = document.getElementById('nnEngine');
+  engine.closest('label').hidden = true;
   const panel = document.createElement('fieldset');
   panel.id = 'distillModels';
   panel.innerHTML = '<legend>Comparaison des NN</legend><p>Chaque modèle peut être remplacé séparément.</p>' +
