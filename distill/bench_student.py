@@ -14,6 +14,7 @@ from pathlib import Path
 import torch
 
 from distill.common import DATA, REPO, atomic_json, external_path
+from distill.bench_pipeline import require_idle_gpu
 from distill.student import load_student
 
 
@@ -78,9 +79,10 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--fp8-only', action='store_true')
     args = parser.parse_args()
+    require_idle_gpu()
     torch.cuda.set_device(0)
     torch.backends.cudnn.benchmark = True
-    report = dict(gpu=torch.cuda.get_device_name(), torch=torch.__version__, samples=[])
+    report = dict(gpu=torch.cuda.get_device_name(), torch=torch.__version__, samples=[], whole_system_idle=True)
     if not args.fp8_only:
         if not args.checkpoint:
             parser.error('--checkpoint is required unless --fp8-only.')

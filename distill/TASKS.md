@@ -715,6 +715,25 @@ Diagnostic FP32 **coarse** sur la 4090, 14 lieux : MAE 11,64–41,89 m dans
 teacher à 20 étapes ; les erreurs du coarse distillé précédent (jusqu'à 247 m)
 restent trop élevées. Cette mesure ne modifie aucun seuil d'acceptation.
 
+### Conservation et mesures finales des candidats
+
+Onze checkpoints immuables sont conservés dans `ckpt/candidates/`, avec
+`inventory.json` (SHA complet, architecture, pas, taille du checkpoint). Les
+fichiers d'entraînement contiennent optimiseur et EMA en double ; les tailles
+de distribution viennent uniquement des exports contenant les poids retenus.
+Les prochains candidats seront conservés séparément, sans écraser ces alternatives.
+
+`benchmark_candidates.py` attend la fin des évaluations physiques et des joints,
+puis exporte le bundle et mesure les trois réseaux et les trois étages sur les
+deux cartes, séquentiellement. Job `decoded-bundle-benchmark`, sortie prévue
+`bench/decoded-bundle/`. Les deux GPU doivent être libres avant chaque mesure.
+`bench_pipeline.py` précharge les dépendances communes hors chronomètre : coarse
+pour base, latents teacher pour decoder, aucune pour coarse ; il refuse une
+mesure où une dépendance manquante serait calculée dans la zone chronométrée.
+Features, transferts et blending de l'étage restent inclus. Ces chiffres ne sont
+pas encore disponibles et ne représentent pas le temps d'une vue complète.
+La mesure n'enregistre aucun graphe d'autograd.
+
 ## Préparation du 2026-10-10 — en attente du top
 
 La passation a été reçue en texte dans la conversation. Les performances de la
