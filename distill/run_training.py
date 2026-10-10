@@ -71,6 +71,11 @@ def train(name, stage, dataset, output, steps, width, batch, size=None, overfit=
         command.extend(['--train-size', str(size)])
     if overfit:
         command.append('--overfit')
+    if stage == 'base' and not overfit:
+        # The first main pass achieved good slopes but still ~50 m physical MAE
+        # and excess high-frequency power. Prioritize the small height channel
+        # and supervise its nonlinear metre conversion directly.
+        command.extend(['--height-weight', '32', '--height-mae-weight', '.02'])
     if saved:
         command.extend(['--resume', str(latest), '--allow-data-growth'])
     print(json.dumps(dict(starting=name, stage=stage, steps=steps, resume_step=saved['step'] if saved else 0)), flush=True)

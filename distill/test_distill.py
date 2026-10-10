@@ -11,7 +11,7 @@ from distill.dataset import StepBatches
 from distill.features import base_features, noise
 from distill.jobs import proc_identity
 from distill.student import Student, StudentConfig
-from distill.train import coarse_delta_loss, losses
+from distill.train import coarse_delta_loss, losses, lowfreq_height_mae
 from distill.evaluate import artifact_audit, audit, pipeline_speed_audit
 
 
@@ -96,6 +96,21 @@ class DistillationTests(unittest.TestCase):
         loss.backward()
         self.assertTrue(all(torch.isfinite(parameter.grad).all()
                             for parameter in model.parameters() if parameter.grad is not None))
+
+    def test_height_loss_measures_metres_and_ignores_masked_pixels(self):
+        target = torch.zeros(1, 5, 2, 2)
+        target[:, 4] = (10.+31.4)/38.6
+        prediction = target.clone()
+        prediction[:, 4] = (11.+31.4)/38.6
+        mask = torch.ones(1, 1, 2, 2)
+        mask[..., 0, 0] = 0
+        prediction[..., 0, 0] = 1000
+        prediction.requires_grad_()
+        loss = lowfreq_height_mae(prediction, target, mask)
+        self.assertAlmostEqual(float(loss.detach()), 21., places=3)
+        loss.backward()
+        self.assertTrue(torch.isfinite(prediction.grad).all())
+        self.assertEqual(float(prediction.grad[..., 0, 0].abs().max()), 0.)
 
     def test_atomic_writer_preserves_previous_checkpoint_on_failure(self):
         with tempfile.TemporaryDirectory() as directory:

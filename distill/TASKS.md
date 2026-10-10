@@ -133,6 +133,11 @@ préparation ci-dessous sont conservées comme historique ; les jobs ont reçu l
   batch/crop déterministes par numéro de pas, diagnostics par canal et composante
   d'altitude. Pondérer davantage les canaux d'altitude évite de sélectionner
   un modèle sur les seuls canaux latents du decoder.
+  Après le rejet physique du base initial : canal hauteur pondéré 32 plutôt
+  que 4 et MAE de la contribution d'altitude basse fréquence en mètres
+  (poids 0,02, unité de loss = 100 m) pour les prochains passages principaux.
+  L'objectif et le score de sélection changent ensemble ; optimiser/RNG/EMA
+  sont conservés, mais le meilleur score est réinitialisé lors du changement.
 - [x] Têtes de sortie 1×1 en FP32, reste du réseau sous autocast BF16 : éviter
   un plancher de quantification sur les champs fusionnés. Loss supplémentaire
   sur moyenne–p5 du coarse, normalisée à l'échelle de cette différence ; arrêt
@@ -170,12 +175,13 @@ préparation ci-dessous sont conservées comme historique ; les jobs ont reçu l
   Benchmarks, joints et revue visuelle doivent porter les mêmes empreintes de
   poids et de code que les évaluations physiques ; un benchmark au pas 0
   ne peut pas accepter un checkpoint entraîné.
-- [x] Treize tests dédiés : bruit/crops négatifs, features globales, invariance
+- [x] Quatorze tests dédiés : bruit/crops négatifs, features globales, invariance
   avec halo, échantillonnage repris, losses masquées/gradients finis, écriture
   interrompue, identité des processus, précision des sorties sous autocast,
   supervision du relief coarse, refus d'une validation incomplète et rejet
   des preuves issues d'autres poids ou sans revue des joints, refus des mesures
-  de débit sur champs en cache/partiels ou répétitions manquantes.
+  de débit sur champs en cache/partiels ou répétitions manquantes ; conversion
+  de hauteur connue 100→121 m donnant une MAE 21 m et gradients masqués finis.
 
 Le masque du conditionnement base upstream est constant (ones), ce n'est pas
 un masque terre/mer ; `histogram_raw` est un vecteur de cinq valeurs. Les données
@@ -213,6 +219,15 @@ l'entraînement pendant que le reste du dataset est généré.
   avec l'entraînement : ses temps ne sont pas des benchmarks. La génération
   continue ; réévaluer après exposition au dataset complet avant d'accepter
   la capacité ou de prolonger aveuglément cette recette.
+- [x] Base initial terminé à 100000 pas sur 2690 crops figés : proxy MAE
+  d'altitude ~46,99 m. Diagnostic physique au même holdout natural LOD 3 :
+  **MAE 50,16 m**, côte différente sur 4,17 % des pixels ; pentes proches
+  (+1,3 % moyenne, +0,06 % p90), mais les trois bandes PSD hautes valent
+  **1,74 / 1,87 / 1,61×** la référence. Candidat rejeté contre l'étalon 7,21 m.
+  Rapport et empreinte figée : `~/data/distill/eval/base-pilot/report.json`.
+  Carte partagée avec le decoder pendant ce diagnostic : aucun chiffre de
+  débit ne doit être tiré de ses secondes. La recette suivante priorise la
+  hauteur et sa conversion physique ; validation complète toujours requise.
 - [x] Borne architecture base96, **poids non entraînés, mesure de coût seulement** :
   512² utiles + halo 192 → entrée 896² ; 47,244 ms (graph, channels_last) sur
   4090, 0,738 ms par surface 64², ~19,05× vs huit forwards teacher BF16.
@@ -241,18 +256,17 @@ l'utilisateur. Cette limitation de livraison n'arrête pas les calculs locaux.
 
 ### Commandes de reprise et inspection espacée
 
-Coarse initial terminé à 100000 pas. Le premier job `architecture-pipeline`
-est terminal en échec : garde GPU après initialisation CUDA et attribution
-PID ambiguë sous WSL ; aucun timing produit. Le coordinateur a bien été
-rétabli, puis le base a démarré.
+Coarse et base initiaux terminés à 100000 pas chacun. Les probes
+`architecture-pipeline` et `base-initial-pipeline` sont terminaux en échec :
+`nvidia-smi` attribue le PID teacher 49270 aux deux cartes, y compris à la
+transition après fin du trainer, donc la garde GPU refuse la mesure. Déplacer
+la garde avant l'initialisation CUDA n'a pas résolu l'ambiguïté. Aucun timing
+produit ; ne pas relancer ces probes à chaque transition. La mesure finale
+reste requise quand teacher et trainers sont tous terminés.
 
-Nouvelle transition prévue après le **base initial** : le coordinateur
-`training-workflow` est arrêté volontairement (code −15), le trainer base
-continue. Le job **`base-initial-pipeline`** attend sa fin réelle (100000 pas),
-mesure son checkpoint retenu sur la 5090 libre, puis rétablit le coordinateur,
-même si le benchmark échoue. Ne pas redémarrer le coordinateur pendant ce
-probe. L'autre GPU produit toujours des données : ce timing provisoire n'est
-pas une preuve finale de débit ou de qualité. Le wrapper
+Le coordinateur a bien été rétabli après l'échec du probe, puis le decoder a
+démarré. Il a ensuite été rechargé sans interrompre le decoder afin d'appliquer
+la nouvelle recette du base à son passage sur le dataset complet. Le wrapper
 `idle_probe.py` n'interrompt pas le trainer et ne redémarre pas un trainer
 échoué/interrompu sans inspection.
 
@@ -261,7 +275,6 @@ source distill/env.sh
 # Etat vivant vérifié (pas seulement un fichier de verrou).
 python -m distill.jobs status teacher-main --compact
 python -m distill.jobs status training-workflow --compact
-python -m distill.jobs status base-initial-pipeline --compact
 cat ~/data/distill/training-workflow.json
 
 # Après avoir constaté que le handle teacher est terminal/manquant :
