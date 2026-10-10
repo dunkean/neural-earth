@@ -1,5 +1,6 @@
 """Review switching validates choices and separates all neural cache identities."""
 import json
+import hashlib
 from pathlib import Path
 import tempfile
 import unittest
@@ -97,6 +98,24 @@ class LiveModelTests(unittest.TestCase):
             selection = dict(DEFAULT_SELECTION, coarse=f'solver{evaluations}')
             models.save_request(dict(selection=selection))
             self.assertEqual(LiveModels(models.path, options).selection, selection)
+
+    def test_full_coarse_replaces_pilot_only_after_matching_export_delivery(self):
+        root = self.install_review_exports()
+        pilot = root/'live/weights/coarse1/coarse.pt'
+        pilot.parent.mkdir(parents=True)
+        pilot.write_bytes(b'preserved-pilot')
+        full = root/'ckpt/coarse-full/coarse1/export/coarse.pt'
+        full.parent.mkdir(parents=True)
+        full.write_bytes(b'full-export')
+        options = lambda: catalog(root, bundled_root=root/'bundled')['coarse']['solver1']
+        self.assertEqual(options()['path'], str(pilot))
+        delivery = full.parent.parent/'delivery.json'
+        proof = dict(status='complete', export_max_abs=0.,
+                     export=dict(export=dict(sha256=hashlib.sha256(full.read_bytes()).hexdigest())))
+        atomic_json(delivery, proof)
+        self.assertEqual(options()['path'], str(full))
+        full.write_bytes(b'changed-after-verification')
+        self.assertEqual(options()['path'], str(pilot))
 
     def test_bundled_weights_work_without_the_external_training_directory(self):
         root = Path(self.directory.name)

@@ -81,8 +81,15 @@ class NativeBase(nn.Module):
 
 
 def teacher_source():
-    from terrain_app import resolve_model_source
-    return Path(resolve_model_source())/'base_model'
+    # Resolving metadata must also work in a CPU-only planner. Importing
+    # terrain_app selects/initializes CUDA as a module side effect.
+    from terrain_paths import model_snapshot
+    source = model_snapshot(REVISION)/'base_model'
+    if (source/'config.json').is_file() and (source/'diffusion_pytorch_model.safetensors').is_file():
+        return source
+    from huggingface_hub import snapshot_download
+    return Path(snapshot_download(repo_id='xandergos/terrain-diffusion-30m', revision=REVISION,
+        allow_patterns=['base_model/*']))/'base_model'
 
 
 def source_samples(root, per_profile):
@@ -216,15 +223,27 @@ class NativePairs(Dataset):
 
 
 @torch.no_grad()
-def validate(model, data, device):
+def validation_details(model, data, device, count=12):
     # A short native-operator validation selects checkpoints. It is not a new
     # morphology diagnosis or an acceptance claim about decoded terrain.
-    errors = []
-    for index in torch.linspace(0, len(data)-1, min(12, len(data))).round().long().tolist():
+    errors, phases = [], {}
+    for index in torch.linspace(0, len(data)-1, min(count, len(data))).round().long().tolist():
         inputs, labels, condition, target = (v[None].to(device) for v in data[index])
         prediction = model(inputs, labels, [condition])
-        errors.append(float((prediction-target).square().mean()))
-    return float(np.mean(errors))
+        error = float((prediction-target).square().mean())
+        errors.append(error)
+        label = str(round(float(labels[0]), 5))
+        phase = phases.setdefault(label, dict(errors=[], variances=[]))
+        phase['errors'].append(error)
+        phase['variances'].append(float(target.var(unbiased=False)))
+    return dict(mse=float(np.mean(errors)), phases={label: dict(count=len(values['errors']),
+        mse=float(np.mean(values['errors'])), target_variance=float(np.mean(values['variances'])),
+        relative_mse=float(np.mean(values['errors']))/max(float(np.mean(values['variances'])), 1e-8))
+        for label, values in phases.items()}, note='Native operator proxy, not decoded terrain quality.')
+
+
+def validate(model, data, device):
+    return validation_details(model, data, device)['mse']
 
 
 def train(args):
@@ -239,19 +258,36 @@ def train(args):
     device = torch.device('cuda:0')
     saved = torch.load(output/'latest.pt', map_location='cpu', weights_only=True) if (output/'latest.pt').exists() else None
     teacher_config = json.loads((source/'config.json').read_text())
-    config = pruned_config(teacher_config)
+    if args.width is None and args.blocks == 2:
+        config = pruned_config(teacher_config)
+    else:
+        from distill.native_compression import compressed_config
+        config = compressed_config(teacher_config, args.width if args.width is not None else teacher_config['model_channels'], args.blocks)
+    calibration_digest = hashlib.sha256(args.calibration.read_bytes()).hexdigest() if args.calibration else None
     torch.manual_seed(args.seed)
     model = NativeBase(config)
     if saved:
         if (saved['config'] != config or saved['dataset_manifest'] != manifest or saved['seed'] != args.seed or
-                saved['arguments']['batch'] != args.batch or saved['arguments']['lr'] != args.lr):
+                saved['arguments']['batch'] != args.batch or saved['arguments']['lr'] != args.lr or
+                saved.get('calibration_sha256') != calibration_digest):
             raise ValueError('Native base resume provenance changed.')
         model.load_state_dict(saved['model'])
         mapping = saved['teacher_mapping']
     else:
         teacher = EDMUnet2D.from_pretrained(str(source))
         teacher.to(dtype=torch.bfloat16).to(dtype=torch.float32)
-        state, mapping = transfer_state(teacher.state_dict(), model.net.state_dict(), config)
+        if args.width is None and args.blocks == 2:
+            state, mapping = transfer_state(teacher.state_dict(), model.net.state_dict(), config)
+        else:
+            from distill.native_compression import project_state
+            scores = {}
+            if args.calibration:
+                calibration = json.loads(args.calibration.read_text())
+                if (calibration['split'] != 'train' or calibration['dataset_manifest_sha256'] !=
+                        hashlib.sha256((dataset/'manifest.json').read_bytes()).hexdigest()):
+                    raise ValueError('Native channel calibration must match this training dataset.')
+                scores = {key: torch.tensor(value) for key, value in calibration['channel_energy'].items()}
+            state, mapping = project_state(teacher, model.net, scores)
         model.net.load_state_dict(state, strict=True)
         del teacher, state
     model.to(device).eval()
@@ -267,29 +303,34 @@ def train(args):
         torch.cuda.set_rng_state_all(saved['cuda_rng'])
     torch.backends.cudnn.benchmark = True
     best = saved['best_score'] if saved else float('inf')
+    if saved and saved.get('arguments', {}).get('val_count', 12) != args.val_count:
+        best = float('inf')
     step = start
     started = time.monotonic()
     last_save = started
     atomic_json(output/'run.json', dict(config=config, start_step=start, target_steps=args.steps,
                 teacher_sha256=manifest['teacher_sha256'], teacher_revision=REVISION,
                 parameters=sum(p.numel() for p in model.parameters()),
-                transfer_complete=True, retained_blocks=[0, 2],
+                transfer_complete=True, retained_blocks={1: [0], 2: [0, 2], 3: [0, 1, 2]}[args.blocks],
                 train_windows=len(train_pairs), val_windows=len(val_pairs), batch=args.batch,
-                lr=args.lr, inference_stages=2, window=64, stride=32, conditioning=58))
+                lr=args.lr, inference_stages=2, window=64, stride=32, conditioning=58,
+                calibration_sha256=calibration_digest, val_count=args.val_count))
 
     def checkpoint(name):
         state = dict(config=config, model=model.state_dict(), ema=ema.state_dict(),
             optimizer=optimizer.state_dict(), step=step, best_score=best,
             dataset_manifest=manifest, teacher_mapping=mapping, seed=args.seed,
             rng=torch.get_rng_state(), cuda_rng=torch.cuda.get_rng_state_all(),
-            arguments=dict(steps=args.steps, lr=args.lr, batch=args.batch))
+            arguments=dict(steps=args.steps, lr=args.lr, batch=args.batch, val_count=args.val_count),
+            calibration_sha256=calibration_digest)
         atomic_write(output/name, lambda handle: torch.save(state, handle))
 
     if not saved:
-        baseline = validate(ema, val_pairs, device)
+        details = validation_details(ema, val_pairs, device, args.val_count)
+        baseline = details['mse']
         best = baseline
         checkpoint('initial.pt')
-        append_json(output/'validation.jsonl', dict(step=0, native_velocity_mse=baseline))
+        append_json(output/'validation.jsonl', dict(step=0, native_velocity_mse=baseline, details=details))
         print(json.dumps(dict(step=0, native_velocity_mse=baseline)), flush=True)
     loader = DataLoader(train_pairs, batch_sampler=StepBatches(len(train_pairs), args.batch,
         start, args.steps, args.seed, train_pairs.stage_probabilities()), num_workers=0, pin_memory=True)
@@ -319,8 +360,9 @@ def train(args):
                 append_json(output/'train.jsonl', item)
                 print(json.dumps(item), flush=True)
             if step % args.eval_every == 0 or step == args.steps:
-                score = validate(ema, val_pairs, device)
-                append_json(output/'validation.jsonl', dict(step=step, native_velocity_mse=score))
+                details = validation_details(ema, val_pairs, device, args.val_count)
+                score = details['mse']
+                append_json(output/'validation.jsonl', dict(step=step, native_velocity_mse=score, details=details))
                 if score < best:
                     best = score
                     checkpoint('best.pt')
@@ -351,8 +393,12 @@ def main():
     parser.add_argument('--lr', type=float, default=2e-5)
     parser.add_argument('--eval-every', type=int, default=250)
     parser.add_argument('--seed', type=int, default=20261010)
+    parser.add_argument('--width', type=int, help='Compressed native width; default retains the original pilot.')
+    parser.add_argument('--blocks', type=int, choices=(1, 2, 3), default=2)
+    parser.add_argument('--calibration', type=Path, help='Train-only native channel calibration JSON.')
+    parser.add_argument('--val-count', type=int, default=12)
     args = parser.parse_args()
-    if min(args.steps, args.batch, args.eval_every, args.worlds_per_profile) < 1 or not np.isfinite(args.lr) or args.lr <= 0:
+    if min(args.steps, args.batch, args.eval_every, args.worlds_per_profile, args.val_count) < 1 or not np.isfinite(args.lr) or args.lr <= 0:
         parser.error('Positive finite native pilot settings required.')
     torch.set_num_threads(8)
     for signum in (signal.SIGINT, signal.SIGTERM):

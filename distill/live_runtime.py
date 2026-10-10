@@ -21,12 +21,24 @@ def catalog(root=DATA, bundled_root=REPO/'distill/weights'):
         bundled = Path(bundled_root)/name
         return bundled if bundled.is_file() else fallback
 
+    def short_coarse_path(evaluations):
+        full = Path(root)/'ckpt/coarse-full'/f'coarse{evaluations}'/'export/coarse.pt'
+        delivery = full.parent.parent/'delivery.json'
+        # A half-finished export must not replace the reviewed pilot.
+        if full.is_file() and delivery.is_file():
+            proof = json.loads(delivery.read_text())
+            if (proof.get('status') == 'complete' and proof.get('export_max_abs') == 0. and
+                    proof.get('export', {}).get('export', {}).get('sha256') ==
+                    hashlib.sha256(full.read_bytes()).hexdigest()):
+                return full
+        return Path(root)/f'live/weights/coarse{evaluations}/coarse.pt'
+
     specifications = {
         'coarse': [
             ('solver8', 'Distillé · 8 étapes', weight_path('coarse8.pt', weights/'candidate-1/coarse.pt')),
             ('solver4', 'Distillé · 4 étapes', weight_path('coarse4.pt', Path(root)/'live/weights/coarse4/coarse.pt')),
-            ('solver2', 'Distillé · 2 étapes · essai', weight_path('coarse2.pt', Path(root)/'live/weights/coarse2/coarse.pt')),
-            ('solver1', 'Distillé · 1 étape · essai', weight_path('coarse1.pt', Path(root)/'live/weights/coarse1/coarse.pt')),
+            ('solver2', 'Distillé · 2 étapes', weight_path('coarse2.pt', short_coarse_path(2))),
+            ('solver1', 'Distillé · 1 étape', weight_path('coarse1.pt', short_coarse_path(1))),
         ],
         'base': [],
         'decoder': [('distilled200k', 'Distillé · 13 Mo', weight_path('decoder.pt', weights/'candidate-1/decoder.pt'))],

@@ -10,12 +10,88 @@ from distill.coarse_solver import CoarseSolver
 from distill.native_base import NativeBase, NativePairs, pruned_config, transfer_state
 from distill.export import export_stage
 from distill.student import Student, StudentConfig, load_student
+from distill.native_compression import compressed_config, project_state, select_channels
+from distill.native_bank import SceneCapture, scene_proposals
 
 
 class NativeTeacherTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         torch.set_num_threads(2)
+
+    def compression_teacher(self):
+        config = dict(image_size=64, in_channels=5, out_channels=5, model_channels=16,
+                      layers_per_block=3, model_channel_mults=[1, 2, 3, 4],
+                      conditional_inputs=[['tensor', 58, 1.]], concat_balance=.5,
+                      block_kwargs=dict(channels_per_head=4))
+        return NativeBase(config)
+
+    def test_uncompressed_projection_reconstructs_teacher_with_nonzero_output(self):
+        teacher = self.compression_teacher()
+        teacher.net.out_gain.data.fill_(1.)
+        student = NativeBase(compressed_config(teacher.config, 16, 3))
+        state, mapping = project_state(teacher.net, student.net)
+        student.net.load_state_dict(state, strict=True)
+        self.assertEqual(set(mapping), set(student.net.state_dict()))
+        inputs, labels, conditions = torch.randn(1, 5, 64, 64), torch.ones(1), [torch.randn(1, 58)]
+        expected = teacher(inputs, labels, conditions)
+        self.assertGreater(float(expected.abs().max().detach()), .01)
+        torch.testing.assert_close(student(inputs, labels, conditions), expected, rtol=0, atol=0)
+
+    def test_compression_preserves_interleaved_qkv_and_both_skip_groups(self):
+        teacher = self.compression_teacher()
+        teacher.net.out_gain.data.fill_(1.)
+        for blocks in (1, 2, 3):
+            student = NativeBase(compressed_config(teacher.config, 8, blocks))
+            state, mapping = project_state(teacher.net, student.net)
+            student.net.load_state_dict(state, strict=True)
+            key = 'dec.8x8_in0.attn_qkv.weight'
+            selected = select_channels(64, 32, 4)
+            qkv = (selected[:, None]*3+torch.arange(3)).flatten()
+            expected = teacher.net.state_dict()[key].index_select(0, qkv).index_select(1, selected)
+            torch.testing.assert_close(state[key], expected, rtol=0, atol=0)
+            self.assertEqual(mapping[key]['output'], qkv.tolist())
+            key = 'dec.8x8_block0.conv_res0.weight'
+            self.assertEqual(mapping[key]['inputs'], selected.tolist()+(selected+64).tolist())
+            # Embedding coordinates and their learned Fourier basis remain intact.
+            torch.testing.assert_close(state['noise_linear.weight'], teacher.net.state_dict()['noise_linear.weight'], rtol=0, atol=0)
+            output = student(torch.randn(1, 5, 64, 64), torch.ones(1), [torch.randn(1, 58)])
+            self.assertTrue(torch.isfinite(output).all())
+            output.square().mean().backward()
+            self.assertTrue(all(torch.isfinite(p.grad).all() for p in student.parameters() if p.grad is not None))
+            self.assertGreater(float(student.net.out_conv.weight.grad.abs().sum()), 0.)
+
+    def test_calibrated_selection_keeps_complete_attention_heads(self):
+        scores = torch.arange(16).float()
+        self.assertEqual(select_channels(16, 8, 4, scores).tolist(), list(range(8, 16)))
+        with self.assertRaises(ValueError):
+            select_channels(16, 8, 4, torch.full((16,), float('nan')))
+        with self.assertRaises(ValueError):
+            config = self.compression_teacher().config | dict(block_kwargs=dict(channels_per_head=8))
+            compressed_config(config, 7, 2)
+
+    def test_scene_selection_keeps_distinct_land_coast_and_sea_proposals(self):
+        rows = [dict(index=i, land_fraction=value) for i, value in enumerate((1., .48, 0., .8))]
+        self.assertEqual([row['index'] for row in scene_proposals(rows)], [0, 1, 2])
+
+    def test_scene_capture_retains_coordinates_small_values_and_blended_targets(self):
+        class Teacher(torch.nn.Module):
+            def forward(self, inputs, **kwargs):
+                return inputs*2
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'scene.npz'
+            recorder = SceneCapture(Teacher(), path, dict(seed=10000, split='train'))
+            for label, context in ((1.5, (0, -2, 3)), (.6, (0, -1, 2))):
+                recorder.contexts = [context]
+                recorder(torch.full((1, 5, 64, 64), 1e-9), torch.tensor([label]), [torch.zeros(1,58)])
+            field = torch.ones(6,64,64)
+            field[-1].fill_(.5)
+            recorder.save_scene(field)
+            with np.load(path, allow_pickle=False) as stored:
+                self.assertEqual(stored['inputs'].dtype, np.float32)
+                self.assertGreater(float(stored['inputs'].min()), 0.)
+                np.testing.assert_array_equal(stored['contexts'], [[0,-2,3],[0,-1,2]])
+                np.testing.assert_array_equal(stored['final_latents'], np.full((5,64,64), 2.))
 
     def test_every_pruned_tensor_inherits_the_matching_teacher_skip(self):
         config = dict(image_size=64, in_channels=5, out_channels=5, model_channels=16,

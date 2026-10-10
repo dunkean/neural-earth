@@ -124,6 +124,12 @@ def centre(prediction, target):
     return prediction[..., hy:hy+target.shape[-2], hx:hx+target.shape[-1]]
 
 
+def validation_footprint_changed(saved_arguments, arguments):
+    """A best score from two pilot crops cannot select a full-validation run."""
+    return any(saved_arguments.get(key, default) != arguments.get(key, default)
+               for key, default in (('val_count', 12), ('overfit', False), ('train_size', None)))
+
+
 @torch.no_grad()
 def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_scaling=None, extra_files=(), decoder=None,
              decoded_weights=(.02, .05), shore_weight=0., decoded_gradient_weight=0.):
@@ -225,6 +231,8 @@ def main():
     parser.add_argument('--eval-every', type=int, default=2000)
     parser.add_argument('--val-count', type=int, default=12)
     parser.add_argument('--save-seconds', type=float, default=120)
+    parser.add_argument('--keep-steps', nargs='*', type=int, default=[],
+                        help='Preserve separate resumable checkpoints at these optimizer steps.')
     parser.add_argument('--seed', type=int, default=8675309)
     parser.add_argument('--spectral-weight', type=float, default=.02)
     parser.add_argument('--spectral-band-weight', type=float, default=0.)
@@ -251,6 +259,8 @@ def main():
         parser.error('Initialization requires a new coarse solver trial without --resume.')
     if min(args.steps, args.batch, args.eval_every, args.val_count) < 1 or args.workers < 0:
         parser.error('Positive steps/batch/evaluation intervals and nonnegative workers required.')
+    if any(step < 1 or step > args.steps for step in args.keep_steps):
+        parser.error('Retained checkpoint steps must be within the training budget.')
     if args.height_weight <= 0 or args.lr <= 0 or not all(math.isfinite(v) for v in (args.shore_weight, args.decoded_gradient_weight)) or min(args.spectral_weight, args.spectral_band_weight, args.gradient_weight, args.coarse_delta_weight, args.height_mae_weight, args.decoder_loss_weight, args.shore_weight, args.decoded_gradient_weight) < 0:
         parser.error('Positive height weight/LR and nonnegative spectral/gradient weights required.')
     device = torch.device('cpu' if args.cpu else 'cuda:0')
@@ -366,7 +376,7 @@ def main():
     if start > args.steps:
         raise ValueError('Target --steps is smaller than the resumed optimizer step.')
     best = saved.get('best_score', float('inf')) if saved else float('inf')
-    if saved and (saved['arguments'].get('train_size') != args.train_size or
+    if saved and (validation_footprint_changed(saved['arguments'], vars(args)) or
                   saved['arguments'].get('height_weight', 1.) != args.height_weight or
                   saved['arguments'].get('coarse_delta_weight', 0.) != args.coarse_delta_weight or
                   saved['arguments'].get('height_mae_weight', 0.) != args.height_mae_weight or
@@ -494,6 +504,8 @@ def main():
                 last_save = time.monotonic()
                 atomic_json(output/'status.json', dict(status='running', step=step, target_steps=args.steps,
                             validation=last_validation, training_crops=len(train), checkpoint=str(output/'latest.pt')))
+            if step in args.keep_steps:
+                checkpoint(f'step-{step:06d}.pt')
         checkpoint()
         status = 'interrupted' if STOP else 'complete'
         atomic_json(output/'status.json', dict(status=status, step=step, target_steps=args.steps,

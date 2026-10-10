@@ -2,6 +2,61 @@
 
 2026-10-10 · Grégory Beurier
 
+## Objectif actif du 2026-10-11 : coarse complets, puis base
+
+L'utilisateur demande les full runs coarse1 et coarse2, puis une distillation
+base réellement plus rapide et fidèle à l'érosion. `coarse_full.py` reprend les
+pilotes5k jusqu'à200k, sur19616 train /384 val. Jobs durables `coarse-full1`
+(4090) et `coarse-full2` (5090), entraînements indépendants en cours. Les scores
+sur deux crops du pilote ne sélectionnent plus les poids du run à384 val.
+Checkpoints25k/50k/100k/150k/200k, best et latest conservés ; dossiers pilotes
+inchangés. Exports sous `ckpt/coarse-full/coarse{1,2}/export/`. Le catalogue
+préfère ces exports seulement après `delivery.json`, smoke CUDA Graph exact et
+SHA conforme. Aucun nouvel audit physique détaillé des coarse n'est demandé.
+Le serveur live est arrêté pour libérer les deux GPU.
+
+Mesure coarse corrigée sur5090 : référence20 :145 ms,8 :195 ms,4 :139 ms,
+2 :110 ms,1 :96 ms, champ128² neuf, médiane3 répétitions, préparation et
+transferts inclus. La référence utilise4 streams, les élèves1. L'ancien
+compteur autour du wrapper CUDA provoquait des captures imbriquées dans le
+banc coarse ; les anciennes accélérations coarse ne sont pas réutilisées.
+Preuve : `bench/coarse-choice-20261011/gpu1.json` et son script externe.
+
+Revue indépendante **Opus5.5, effort high**, session
+479ac10b-9b24-41f7-8ff7-39fc877964ec, lecture seule, terminée. Réponse longue
+archivée, puis reformulation demandée :408 mots, une page. Sources et preuves
+sous `review/opus-base-20261011{,-brief}/`. Analyse : chronométrer avant long
+training ; conserver embeddings/conditionnement58 etT2 ; élaguer les têtes
+entières en respectant QKV entrelacés et les deux groupes de chaque skip ;
+calibrer sur train uniquement ; apprendre la fusion et les états élève en phase2.
+Les gains estimés par Opus restent des hypothèses. Les4 streams concernent le
+coarse, alors que le base conserve le vrai batching de production.
+
+`native_compression.py` implémente la projection explicite des tenseurs et
+conserve la base des embeddings du teacher. Configurations :128×2 :90,84 M,
+96×2 :52,53 M,128×1 :65,77 M,96×1 :38,06 M. Les tests CPU vérifient identité
+teacher non comprimé, skips, QKV entrelacés, têtes, sorties et gradients finis.
+Ce sont des paramètres et des preuves de code, pas des gains GPU ni une
+acceptation visuelle. Le pilote199 M existant reste conservé, sans prolongation.
+
+Job CPU `base-native-next` : attend les handles terminaux et les livraisons
+200k des deux coarse, puis benchmark `bench_native.py` sur5090 au repos,
+sans compteurs. Première architecture native atteignant2× sur le champ complet,
+dans l'ordre128×2/96×2/128×1/96×1, retenue pour un pilote. Ce seuil élimine les
+pilotes sans intérêt de vitesse ; il ne constitue pas l'objectif final.
+`native_bank.py` prépare624 scènes128² :576 propositions terre/côte/mer sur
+192 mondes train,48 nouveaux mondes val séparés, aucun seed réservé. Capture
+GPU4090, appels BF16 stockés en FP32, coordonnées et tailles de batch originales,
+cibles finales fusionnées et champ initial pondéré conservés. Calibration puis
+pilote5000 pas sur5090. Les contrôles teacher reconstruit et interface de training
+non comprimée précèdent le pilote ; erreurs par phase et variance enregistrées.
+
+La suite reste **inachevée** : training à travers la fusion, cibles teacher sur
+états élève, rendu décodé/érosion/côte, raccords froids et halos, entraînement
+complet du meilleur base, mesures de vitesse et planches finales de décision.
+Aucun nouveau base n'est dans le menu ni dans Git. Plan et éléments de revue :
+[BASE_PLAN_20261011.md](BASE_PLAN_20261011.md).
+
 ## Reprise autorisée du 2026-10-11
 
 L'utilisateur supprime le diagnostic supplémentaire des anciens bases : leur
