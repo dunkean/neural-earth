@@ -112,7 +112,25 @@ ne remplacent pas ces mesures. Les exports d'inférence FP32 vérifiés font
 Les captures physiques supplémentaires et l'assemblage des 18 planches sont
 terminés et vérifiés ; aucune acceptation stricte n'est revendiquée.
 
-### Dossier de décision terminé
+### Serveur de comparaison en direct demandé par l'utilisateur
+
+`distill/live_server.py` lance le viewer avec un menu **NN**, choix indépendant
+du coarse, du base (quatre variantes) et du decoder, chacun avec l'original comme
+référence. Le bouton **Reset après Orogen** invalide tous les caches neuronaux
+dans un nouveau namespace, sans effacer ni recalculer les données Orogen. Les
+poids et le code participent aux identités, les exports sont revérifiés au
+chargement. Un superviseur tmux conserve le serveur et ses choix après les
+rechargements du moteur. Les deux hooks backend sont désactivés par défaut.
+
+Vérification live : huit combinaisons sur une tuile LOD0 valide, appels élèves
+observés pour chaque étape sélectionnée ; bootstrap Orogen inchangé. Un reset
+sur le même bundle force un cache miss et restitue exactement les mêmes valeurs.
+Chromium vérifie changement et reset, conservation seed/caméra/réglages,
+absence d'erreur JavaScript. **43 tests** passent. Rapports sous
+`~/data/distill/live/`, instructions dans `distill/LIVE.md`. Ces tests prouvent
+l'intégration interactive, pas une nouvelle acceptation globale de qualité.
+
+### Résultats du dossier final
 
 `~/data/distill/final/index.html` rassemble **18 planches PNG 2688×1895**, un PDF
 de 18 pages (JPEG qualité100 sans sous-échantillonnage couleur ; PNG sans perte),
