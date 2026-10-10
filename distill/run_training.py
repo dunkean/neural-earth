@@ -76,6 +76,10 @@ def train(name, stage, dataset, output, steps, width, batch, size=None, overfit=
         # and excess high-frequency power. Prioritize the small height channel
         # and supervise its nonlinear metre conversion directly.
         command.extend(['--height-weight', '32', '--height-mae-weight', '.02'])
+    if stage == 'decoder' and not overfit and steps > 100000:
+        # Initial physical MAE is small, but separate PSD bands still deviate
+        # by up to 55%. Supervise their relative power explicitly.
+        command.extend(['--spectral-band-weight', '.05'])
     if saved:
         command.extend(['--resume', str(latest), '--allow-data-growth'])
     print(json.dumps(dict(starting=name, stage=stage, steps=steps, resume_step=saved['step'] if saved else 0)), flush=True)
@@ -114,6 +118,17 @@ def main():
         train('train-base', 'base', DATA/'crops/main', DATA/'ckpt/base', 100000, 96, 1, size=128)
         progress('decoder-initial')
         train('train-decoder', 'decoder', DATA/'crops/main', DATA/'ckpt/decoder', 100000, 64, 1)
+        # Do useful optimization while the teacher finishes. Every pass admits
+        # growth explicitly and freezes its filenames; the final passes below
+        # still require the complete audited dataset.
+        progress('waiting-for-expanded-data')
+        wait_dataset(DATA/'crops/main', 8192)
+        progress('coarse-expanded-data')
+        train('train-coarse', 'coarse', DATA/'crops/main', DATA/'ckpt/coarse', 200000, 64, 8)
+        progress('base-expanded-data')
+        train('train-base', 'base', DATA/'crops/main', DATA/'ckpt/base', 200000, 96, 1, size=256)
+        progress('decoder-expanded-data')
+        train('train-decoder', 'decoder', DATA/'crops/main', DATA/'ckpt/decoder', 150000, 64, 1)
         progress('waiting-for-complete-data')
         wait_dataset(DATA/'crops/main', 19616, full=True)
         progress('auditing-complete-dataset')

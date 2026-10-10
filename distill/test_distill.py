@@ -12,7 +12,7 @@ from distill.features import base_features, noise
 from distill.jobs import proc_identity
 from distill.resume_teacher import validate_resume_plan
 from distill.student import Student, StudentConfig
-from distill.train import coarse_delta_loss, losses, lowfreq_height_mae
+from distill.train import coarse_delta_loss, losses, lowfreq_height_mae, spectral_band_loss
 from distill.evaluate import artifact_audit, audit, pipeline_speed_audit
 
 
@@ -72,6 +72,22 @@ class DistillationTests(unittest.TestCase):
         loss, _ = losses(prediction, torch.randn_like(prediction), torch.ones(1, 1, 32, 32))
         loss.backward()
         self.assertTrue(torch.isfinite(prediction.grad).all())
+
+    def test_spectral_bands_detect_small_high_frequency_changes(self):
+        x = torch.arange(128, dtype=torch.float32)
+        low = torch.sin(x*2*torch.pi/128).view(1, 1, 1, 128).expand(1, 1, 128, 128)
+        high = torch.sin(x*2*torch.pi*.375).view(1, 1, 1, 128)
+        target = low+.001*high
+        mask = torch.ones(1, 1, 128, 128)
+        self.assertEqual(float(spectral_band_loss(target, target, mask)), 0.)
+        changed = (low+.002*high).requires_grad_()
+        value = spectral_band_loss(changed, target, mask)
+        self.assertGreater(float(value.detach()), .1)
+        value.backward()
+        self.assertTrue(torch.isfinite(changed.grad).all())
+        zeros = torch.zeros_like(target, requires_grad=True)
+        spectral_band_loss(zeros, zeros.detach(), mask).backward()
+        self.assertTrue(torch.isfinite(zeros.grad).all())
 
     def test_coarse_relief_loss_distinguishes_offset_from_relief_change(self):
         target = torch.zeros(1, 6, 8, 8)

@@ -76,6 +76,37 @@ def lowfreq_height_mae(prediction, target, mask):
     return (error*mask[:, 0]).sum()/mask.sum().clamp_min(1)
 
 
+def spectral_band_loss(prediction, target, mask):
+    """Relative power errors in the five radial bands used by physical evaluation."""
+    p, t = prediction.float(), target.float()
+    h, w = p.shape[-2:]
+    hann = torch.hann_window(h, device=p.device)[:, None]*torch.hann_window(w, device=p.device)[None]
+    def power(value):
+        mean = (value*mask).sum((-2, -1), keepdim=True)/mask.sum((-2, -1), keepdim=True).clamp_min(1)
+        return torch.fft.rfft2((value-mean)*mask*hann, norm='ortho').abs().square()
+    pp, tt = power(p), power(t)
+    yy = torch.fft.fftfreq(h, device=p.device)[:, None]
+    xx = torch.fft.rfftfreq(w, device=p.device)[None]
+    radius = (yy.square()+xx.square()).sqrt()
+    multiplicity = p.new_full((w//2+1,), 2.)
+    multiplicity[0] = 1.
+    if w % 2 == 0:
+        multiplicity[-1] = 1.
+    multiplicity = multiplicity.expand(h, -1)
+    # Each band has its own scale; dominant low frequencies cannot hide small
+    # high-frequency errors. A relative floor keeps silent bands finite.
+    floor = tt.detach().mean((-2, -1)).clamp_min(1e-8)*1e-6
+    terms = []
+    for lo, hi in ((0, .03125), (.03125, .0625), (.0625, .125), (.125, .25), (.25, .5)):
+        band = (radius >= lo) & (radius < hi)
+        if band.any():
+            weight = multiplicity[band]
+            a = (pp[..., band]*weight).sum(-1)/weight.sum()
+            b = (tt[..., band]*weight).sum(-1)/weight.sum()
+            terms.append((torch.log(a+floor)-torch.log(b+floor)).square().mean())
+    return torch.stack(terms).mean()
+
+
 def centre(prediction, target):
     hy, hx = ((prediction.shape[-2]-target.shape[-2])//2,
               (prediction.shape[-1]-target.shape[-1])//2)
@@ -85,13 +116,15 @@ def centre(prediction, target):
 
 
 @torch.no_grad()
-def validate(model, dataset, device, count=12):
+def validate(model, dataset, device, count=12, spectral_band_weight=0.):
     was_training = model.training
     model.eval()
     totals = dict(mse=0., gradient=0., spectral=0., slope_ratio=0., spectrum_ratio=0.)
     channel_mse = torch.zeros(model.config.out_channels, device=device)
     height_mae = 0.
     delta_mse = 0.
+    if spectral_band_weight:
+        totals['spectral_bands'] = 0.
     count = min(count, len(dataset))
     # Cover the sorted validation index range, rather than only its first profile.
     indices = torch.linspace(0, len(dataset)-1, count).round().long().tolist()
@@ -104,6 +137,8 @@ def validate(model, dataset, device, count=12):
         for key, value in values.items():
             totals[key] += float(value)/count
         p, t = pred.float(), target.float()
+        if spectral_band_weight:
+            totals['spectral_bands'] += float(spectral_band_loss(p, t, mask))/count
         channel_mse += (((p-t).square()*mask).sum((0, 2, 3))/mask.sum().clamp_min(1))/count
         if model.config.stage == 'base':
             # A diagnostic in metres for the low-frequency component only;
@@ -152,6 +187,7 @@ def main():
     parser.add_argument('--save-seconds', type=float, default=120)
     parser.add_argument('--seed', type=int, default=8675309)
     parser.add_argument('--spectral-weight', type=float, default=.02)
+    parser.add_argument('--spectral-band-weight', type=float, default=0.)
     parser.add_argument('--gradient-weight', type=float, default=.05)
     parser.add_argument('--height-weight', type=float, default=4.,
                         help='Relative MSE weight for base lowfreq / coarse mean+p5 channels.')
@@ -164,7 +200,7 @@ def main():
     args = parser.parse_args()
     if min(args.steps, args.batch, args.eval_every, args.val_count) < 1 or args.workers < 0:
         parser.error('Positive steps/batch/evaluation intervals and nonnegative workers required.')
-    if args.height_weight <= 0 or args.lr <= 0 or min(args.spectral_weight, args.gradient_weight, args.coarse_delta_weight, args.height_mae_weight) < 0:
+    if args.height_weight <= 0 or args.lr <= 0 or min(args.spectral_weight, args.spectral_band_weight, args.gradient_weight, args.coarse_delta_weight, args.height_mae_weight) < 0:
         parser.error('Positive height weight/LR and nonnegative spectral/gradient weights required.')
     device = torch.device('cpu' if args.cpu else 'cuda:0')
     torch.set_num_threads(8)
@@ -220,6 +256,7 @@ def main():
                   saved['arguments'].get('height_weight', 1.) != args.height_weight or
                   saved['arguments'].get('coarse_delta_weight', 0.) != args.coarse_delta_weight or
                   saved['arguments'].get('height_mae_weight', 0.) != args.height_mae_weight or
+                  saved['arguments'].get('spectral_band_weight', 0.) != args.spectral_band_weight or
                   saved['arguments'].get('gradient_weight', .05) != args.gradient_weight or
                   saved['arguments'].get('spectral_weight', .02) != args.spectral_weight):
         # A new target crop changes the validation footprint. Do not compare its
@@ -265,6 +302,10 @@ def main():
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == 'cuda'):
                 prediction = centre(model(inputs), target)
                 loss, values = losses(prediction, target, mask, args.spectral_weight, args.gradient_weight, channel_weights)
+                if args.spectral_band_weight:
+                    band_error = spectral_band_loss(prediction, target, mask)
+                    loss = loss + args.spectral_band_weight*band_error
+                    values['spectral_bands'] = band_error
                 if args.stage == 'coarse' and args.coarse_delta_weight:
                     delta_loss = coarse_delta_loss(prediction.float(), target, mask)
                     loss = loss + args.coarse_delta_weight*delta_loss
@@ -290,9 +331,10 @@ def main():
                 append_json(output/'train.jsonl', item)
                 print(json.dumps(item), flush=True)
             if step % args.eval_every == 0 or step == args.steps:
-                last_validation = validate(ema, validation, device, args.val_count)
+                last_validation = validate(ema, validation, device, args.val_count, args.spectral_band_weight)
                 weighted_mse = sum(w*v for w, v in zip(channel_weights, last_validation['channel_mse']))/sum(channel_weights)
                 score = weighted_mse+args.gradient_weight*last_validation['gradient']+args.spectral_weight*last_validation['spectral']
+                score += args.spectral_band_weight*last_validation.get('spectral_bands', 0.)
                 if args.stage == 'coarse':
                     score += args.coarse_delta_weight*last_validation['mean_minus_p5_mse']
                 if args.stage == 'base':

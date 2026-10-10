@@ -229,8 +229,17 @@ l'entraînement pendant que le reste du dataset est généré.
   débit ne doit être tiré de ses secondes. La recette suivante priorise la
   hauteur et sa conversion physique ; validation complète toujours requise.
 - [x] Decoder initial terminé à 100000 pas : MSE de validation 0,001276,
-  pente 0,9588× et spectre agrégé 0,9761×. Diagnostic physique LOD 0 lancé ;
-  ces proxies ne constituent pas une acceptation.
+  pente 0,9588× et spectre agrégé 0,9761×. Diagnostic physique des sept sites
+  LOD 0 : MAE 0,35–4,29 m, sous les étalons locaux, mais PSD hors ±5 %
+  (jusqu'à 1,55×) : candidat rejeté. Rapport et SHA figée dans
+  `~/data/distill/eval/decoder-pilot/report.json`. La prochaine reprise complète
+  ajoute une loss de puissance relative dans les cinq bandes radiales,
+  `--spectral-band-weight .05`, avec réinitialisation du meilleur score.
+  Les 16 tests passent, dont une perturbation haute fréquence de petite
+  amplitude cachée par une basse fréquence dominante et les gradients à zéro.
+  Essai CUDA de reprise de 32 pas réussi dans `ckpt/decoder-band-smoke`,
+  avec optimiseur/EMA conservés et correspondance des seeds attachée ; les
+  checkpoints principaux n'ont pas été modifiés par cet essai.
 - [x] Reprise après rejet topologique du monde continents seed 10322, avant
   tout crop de ce monde : `resume_teacher.py` remplace cette seed par 1010322
   du même profil. La correspondance est atomiquement enregistrée dans
@@ -247,8 +256,12 @@ l'entraînement pendant que le reste du dataset est généré.
   Mesure antérieure à l'ajout des têtes FP32, donc à refaire avec le modèle final.
 - [ ] Dataset principal : 20000 triples sur GPU 0 dans `tmux`.
 - [ ] Entraînements principaux sur GPU 1 : les trois passages initiaux à 100000
-  pas sont terminés ; reprise explicite avec les exemples ajoutés et
-  entraînements finaux sur le jeu complet restent à effectuer.
+  pas sont terminés. Dès 8192 crops train disponibles, passages intermédiaires
+  coarse 200000, base 200000 (crop 256 et nouvelle loss hauteur), decoder
+  150000 (nouvelle loss PSD), pour utiliser la 5090 pendant la génération.
+  Chaque liste reste figée et les ajouts sont explicitement admis. Les passages
+  finaux coarse 300000 / base 400000 / decoder 200000 exigent toujours le jeu
+  complet audité ; validation physique finale toujours requise.
 - [ ] Audit complet des 20000 triples, qualité des trois modèles séparément
   et ensemble, sur 7 sites × LOD 3/0, avec un étalon BF16/FP32 sur la carte
   d'évaluation (4090).
