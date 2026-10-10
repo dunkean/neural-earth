@@ -148,6 +148,74 @@ class SurfaceTests(unittest.TestCase):
         # Away from the sea the coastal model only recolours the flats.
         self.assertLess(np.abs(coarse[-1]-fine[inland]).max(),.02)
 
+    def test_beaches_vary_by_coast_but_stay_mostly_light(self):
+        # Shore sample of 200 coasts around the planet, temperate climate.
+        rng=np.random.default_rng(1);shore=[]
+        x=(np.arange(8)+.5)*30-60;shape=(1,8)
+        h=np.where(x<0,-5.,1.).astype(np.float32)[None]
+        seasons=np.broadcast_to(np.float32(TEMPERATE).reshape(6,1,1),(6,*shape))
+        soil=np.broadcast_to(SOIL.reshape(9,1,1),(9,*shape))
+        for _ in range(200):
+            lat,lon=np.arcsin(rng.uniform(-.9,.9)),rng.uniform(-np.pi,np.pi)
+            c=6.37e6*np.array([np.cos(lat)*np.cos(lon),np.sin(lat),np.cos(lat)*np.sin(lon)])
+            t=np.cross(c,[0,1,0]);t/=np.linalg.norm(t)
+            p=(c+x[:,None]*t).astype(np.float32)[None]
+            rgb=surface_material(h,np.zeros((*shape,2),np.float32),np.zeros(shape,np.float32),p,
+                                 np.broadcast_to(np.float32([0,-1]),(*shape,2)),30.,soil,seasons,seed_value(42),{'variation':0})
+            shore.append(rgb[0,2])
+        shore=np.array(shore);lum=shore@[.2126,.7152,.0722]
+        self.assertGreater((lum>.6).mean(),.5,'most beaches are light sand')
+        self.assertGreater(((shore[:,0]-shore[:,2]>.25)&(lum>.5)).mean(),.1,'some are golden')
+        self.assertTrue(.02<(lum<.35).mean()<.15,'dark volcanic beaches are present but rare')
+
+    def coastal_palette(self,climate,footprint,*,grade=0.,tpi=0.,settings=None):
+        # The same 200 geographic coasts at each LOD and in each climate.
+        rng=np.random.default_rng(1);n=200;shape=(n,8)
+        lat=np.arcsin(rng.uniform(-.9,.9,n));lon=rng.uniform(-np.pi,np.pi,n)
+        c=6.37e6*np.stack((np.cos(lat)*np.cos(lon),np.sin(lat),np.cos(lat)*np.sin(lon)),-1)
+        tangent=np.cross(c,[0,1,0]);tangent/=np.linalg.norm(tangent,axis=-1,keepdims=True)
+        x=(np.arange(8)+.5)*footprint-2*footprint
+        point=(c[:,None]+x[None,:,None]*tangent[:,None]).astype(np.float32)
+        h=np.broadcast_to(np.where(x<0,-5.,1.).astype(np.float32),shape)
+        gradient=np.zeros((*shape,2),np.float32);gradient[...,0]=grade
+        soil=np.broadcast_to(SOIL[:,None,None],(9,*shape))
+        seasons=np.broadcast_to(np.array(climate,np.float32)[:,None,None],(6,*shape))
+        # Explicit distances keep these independent coast rows from sharing sea.
+        shore=np.broadcast_to(np.maximum(np.arange(8)-1,0)*footprint,shape)
+        return surface_material(h,gradient,np.full(shape,tpi,np.float32),point,
+                                np.broadcast_to(np.float32([0,-1]),(*shape,2)),footprint,
+                                soil,seasons,seed_value(42),dict(variation=0,**(settings or {})),shore=shore)[:,2]
+
+    def test_cool_coasts_are_stony_and_snow_remains_seasonal_at_each_lod(self):
+        cold=[4,650,0,-15,650,0]
+        for fp in (3.75,15.,30.,60.,120.,240.):
+            with self.subTest(footprint=fp):
+                warm=self.coastal_palette(TEMPERATE,fp,settings={'snow':0})
+                stone=self.coastal_palette(cold,fp,settings={'snow':0})
+                self.assertLess(stone.mean(),warm.mean()-.09,'cold beaches expose darker local stone')
+                self.assertLess((stone[:,0]-stone[:,2]).mean(),.10,'stone is brown/gray, not golden sand')
+                winter=self.coastal_palette(cold,fp,settings={'season':0})
+                self.assertGreater(winter.mean(),.9,'wet cold beaches receive seasonal snow')
+                summer=self.coastal_palette(cold,fp,settings={'season':.5})
+                np.testing.assert_allclose(summer,stone,atol=1e-6)
+
+    def test_winter_frost_alone_does_not_remove_sand(self):
+        warm=self.coastal_palette(TEMPERATE,30.,settings={'snow':0})
+        continental=self.coastal_palette([22,500,0,-20,500,0],30.,settings={'snow':0})
+        self.assertGreater((continental[:,0]-continental[:,2]).mean(),.16)
+        self.assertLess(np.abs(continental.mean(0)-warm.mean(0)).max(),.025)
+
+    def test_coastal_relief_favors_stone_and_dark_sediment(self):
+        for fp in (15.,30.,60.,120.,240.):
+            with self.subTest(footprint=fp):
+                smooth_coast=self.coastal_palette(TEMPERATE,fp,grade=.14,settings={'snow':0})
+                cliff_foot=self.coastal_palette(TEMPERATE,fp,grade=.14,tpi=-.12,settings={'snow':0})
+                self.assertLess(cliff_foot.mean(),smooth_coast.mean()-.06)
+                self.assertLess((cliff_foot[:,0]-cliff_foot[:,2]).mean(),
+                                (smooth_coast[:,0]-smooth_coast[:,2]).mean()-.04)
+                lum=lambda rgb:rgb@np.array([.2126,.7152,.0722])
+                self.assertGreater((lum(cliff_foot)<.35).sum(),(lum(smooth_coast)<.35).sum())
+
     def test_legacy_coastal_toggle_is_accepted_and_ignored(self):
         self.assertEqual(parse_settings({'coasts':0}),parse_settings(None))
 
@@ -306,6 +374,27 @@ def fixtures():
         options=dict(options,season=season)
         result=surface_material(dem,gradient,tpi,point,north,r,soil(n),seasons,seed_value(42),options,pedology=ped(n))
         cases.append(dict(height=height,slope=slope,season=season,settings=options,seasons=case_climate,resolution=r,plane=plane,polar=polar,origin=origin,expected=(result[n//2,n//2]*255).tolist()))
+    # Actual sea/land boundaries verify beach coverage and the cliff-foot TPI
+    # through the WebGPU oracle, including snow and continental winter frost.
+    for r in (15.,30.,60.,120.,240.):
+        n=304;origin=(-5000,-4000);offset=np.arange(n)-n//2
+        x=origin[0]+(np.arange(n)+.5)*r;y=origin[1]+(np.arange(n)+.5)*r
+        point=coordinates(x,y,atlas.bounds)
+        for coast,case_climate,season in (
+                ('flat',[4,650,0,-15,650,0],.5),
+                ('flat',[4,650,0,-15,650,0],0),
+                ('flat',[22,500,0,-20,500,0],.5),
+                ('cliff',TEMPERATE,.5)):
+            profile=1+np.maximum(offset-2,0)*r*(.7 if coast=='cliff' else 0)
+            dem=np.broadcast_to(np.where(offset<0,-5.,profile),(n,n)).astype(np.float32).copy()
+            gradient,tpi=terrain_derivatives(dem,r)
+            seasons=np.broadcast_to(np.array(case_climate,np.float32)[:,None,None],(6,n,n))
+            options={'season':season}
+            result=surface_material(dem,gradient,tpi,point,np.broadcast_to([0,-1],gradient.shape),
+                                    r,soil(n),seasons,seed_value(42),options,pedology=ped(n))
+            cases.append(dict(height=1,slope=0,coast=coast,settings=options,seasons=case_climate,
+                              resolution=r,plane=False,polar=False,origin=origin,
+                              expected=(result[n//2,n//2]*255).tolist()))
     x=(np.arange(304)+.5)*30;dem=np.full((304,304),1000,np.float32);point=coordinates(x,x,atlas.bounds)
     gradient,tpi=terrain_derivatives(dem,30)
     bare=surface_material(dem,gradient,tpi,point,np.broadcast_to([0,-1],gradient.shape),30,soil(304),sea(304),seed_value(42),{},True)

@@ -33,7 +33,9 @@ const fixtures=JSON.parse(execFileSync(pythonExecutable(),['tests/python/test_te
         renderer.setRenderSettings({...TerrainRender.defaults(),...c.settings});
         for(const [i,v] of c.seasons.entries())climate.fill(v,(21+i)*33*33,(22+i)*33*33);
         const coarse=c.resolution===7680,n=coarse?160:304,dem=new Float32Array(n*n);
-        for(let y=0;y<n;y++)for(let x=0;x<n;x++)dem[y*n+x]=c.height+(x-n/2)*c.resolution*Math.tan(c.slope*Math.PI/180);
+        for(let y=0;y<n;y++)for(let x=0;x<n;x++)dem[y*n+x]=c.coast
+          ?(x<n/2?-5:1+Math.max(x-n/2-2,0)*c.resolution*(c.coast==='cliff'?.7:0))
+          :c.height+(x-n/2)*c.resolution*Math.tan(c.slope*Math.PI/180);
         climate[45*33*33+4]=c.plane?0:1;climate[45*33*33+5]=c.polar?1:0;
         if(coarse){
           renderer.uploadCoarse('case',Float32Array.from(dem,h=>Math.sign(h)*Math.sqrt(Math.abs(h))),{climate,climateWidth:33,climateHeight:33,origin:c.origin});

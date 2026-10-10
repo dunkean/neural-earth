@@ -6,10 +6,13 @@ const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-file
 const fs=require('node:fs'),http=require('node:http'),path=require('node:path');
 const {chromium}=loadPlaywright();
 const jsonArg=process.argv.indexOf('--json'),jsonOut=jsonArg>0?process.argv[jsonArg+1]:null;
+// Compare a saved shader revision without changing the working renderer.
+const rendererArg=process.argv.indexOf('--renderer');
+const rendererSource=rendererArg>0?fs.readFileSync(path.resolve(process.argv[rendererArg+1]),'utf8'):null;
 (async()=>{
   const server=http.createServer((req,res)=>{
     res.setHeader('Content-Type',req.url.endsWith('.js')?'application/javascript':'text/html');
-    res.end(req.url.endsWith('.js')?readRepositoryFile(path.join(NEURAL_EARTH_ROOT,req.url)):'<meta charset="utf-8"><div id="controls"></div><canvas id="map"></canvas><script>window.TerrainLighting={vectors:()=>[1,.35,1,1,-.5,-.5,.70710678,0]};</script><script src="/terrain_render_controls.js"></script><script src="/terrain_renderer.js"></script>');
+    res.end(req.url==='/terrain_renderer.js'&&rendererSource!==null?rendererSource:req.url.endsWith('.js')?readRepositoryFile(path.join(NEURAL_EARTH_ROOT,req.url)):'<meta charset="utf-8"><div id="controls"></div><canvas id="map"></canvas><script>window.TerrainLighting={vectors:()=>[1,.35,1,1,-.5,-.5,.70710678,0]};</script><script src="/terrain_render_controls.js"></script><script src="/terrain_renderer.js"></script>');
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let browser;
   try{
@@ -34,7 +37,7 @@ const jsonArg=process.argv.indexOf('--json'),jsonOut=jsonArg>0?process.argv[json
       const bench=async(n,warm,f)=>{for(let i=0;i<warm;i++)await f(i);const s=[];for(let i=0;i<n;i++)s.push(await f(warm+i));return r3(med(s));};
       const out={initMs:r3(initMs),gpu:renderer.adapter?.info?.description||renderer.adapter?.info?.device||renderer.adapter?.info?.vendor||'',upload:{}};
       const upload=(mpp)=>{for(let i=0;i<32;i++)renderer.uploadTile('t'+i,tiles[i],{climate,climateWidth:N,climateHeight:N,metresPerSample:mpp,lod:Math.log2(mpp/30),origin:[i*256*mpp,0]});};
-      for(const mode of ['relief','render'])for(const mpp of [30,240,1920,15360]){
+      for(const mode of ['relief','render'])for(const mpp of [30,60,120,240,1920,15360]){
         renderer.clear();renderer.setMode(mode);await done();
         const total=await bench(5,1,async()=>{renderer.clear();await done();return time(()=>upload(mpp));});
         out.upload[mode+'/'+mpp+'m']={totalMs:total,perTileMs:r3(total/32)};

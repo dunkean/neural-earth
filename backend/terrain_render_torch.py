@@ -280,11 +280,17 @@ def _surface_material(height, gradient, tpi, point, north, footprint, soil, seas
     color = mix(color, canopy, woods)
     flats = (1-sm(1.5, 6, height))*(1-sm(.05, .2, grade))
     reach = fbm(point, 20000., 3, fp, salt+7)
-    width = F(30)+F(290)*sm(-.5, .5, sq(reach))
+    width = F(25)+F(255)*sm(-.4, .6, sq(reach))
     band = div(width-up(shore)+float(F(fp)), F(fp)).clamp(0, 1)
     beach = band*(1-sm(4, 12, height))*(1-sm(.2, .5, grade))
-    color = mix(color, [.72, .67, .55], flats*F(1-float(_smooth(240, 960, fp)))*F(.8)*(1-F(.5)*w_boreal))
-    color = mix(color, [.80, .74, .59], beach*F(.85)*(1-F(.5)*w_boreal))
+    shingle = torch.maximum(1-sm(4, 14, t_hot), sm(.04, .22, grade)*terrain)
+    sediment = mix([.80, .75, .61], [.76, .63, .43], sm(-.2, .9, pv))
+    sediment = mix(sediment, [.86, .84, .76], w_trop*sm(0, -.8, pv)*F(.7))
+    sediment = mix(sediment, rock, shingle*F(.9))
+    sediment = mix(sediment, mix(ground, rock, F(.4)), sm(-.9, -1.5, m2)*F(.85))
+    sediment = mix(sediment, [.27, .26, .25], sm(1.25, 1.75, m1+F(.35)*shingle)*F(.9))
+    color = mix(color, sediment*F(.9), flats*F(1-float(_smooth(240, 960, fp)))*F(.8))
+    color = mix(color, sediment, beach*F(.8))
 
     py = point[..., 1]
     pp = point*point

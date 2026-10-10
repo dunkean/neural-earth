@@ -130,6 +130,19 @@ class TorchRenderTests(unittest.TestCase):
                 worst = max(worst, m); flips += int(f)
         self.assertEqual(flips, 0)
 
+    def test_cold_and_rugged_coasts_match_numpy(self):
+        case = direct_case((16, 32))
+        x = np.arange(32, dtype=np.float32)
+        for fp in (15., 30., 60., 120., 240.):
+            case['height'] = np.broadcast_to(np.where(x < 8, -5., 1.), (16, 32)).copy()
+            case['gradient'] = np.zeros((16, 32, 2), np.float32)
+            case['gradient'][..., 0] = .14
+            case['tpi'] = np.full((16, 32), -.12, np.float32)
+            for climate in ([4, 650, 0, -15, 650, 0], [22, 500, 0, -20, 500, 0]):
+                case['seasons'] = np.broadcast_to(np.array(climate, np.float32)[:, None, None], (6, 16, 32))
+                for settings in ({'season': .5}, {'season': 0}, {'snow': 0, 'variation': 2}):
+                    self.compare(case, fp, settings, False, True, 'cold/rugged coast')
+
     def test_inputs_may_be_integer_north_scalar_tpi_and_flat_shapes(self):
         case = direct_case((2, 300))
         flat = dict(height=case['height'][0], gradient=case['gradient'][0], point=case['point'][0],

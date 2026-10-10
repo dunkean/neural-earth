@@ -212,13 +212,23 @@
       let woods=surfaceCover(clamp(trees,0.,1.),grove,.65*variation);
       color=surfaceMix(color,canopy,woods);
       let flats=(1.-sstep(1.5,6.,height))*(1.-sstep(.05,.2,grade));
-      // Beaches: a 30-320 m strip along the sea as area coverage (visible at
+      // Beaches: a 25-280 m strip along the sea as area coverage (visible at
       // 240 m samples); low flats behind it stay as wetter river/estuary bars.
       let reach=surfaceFbm(point,20000.,3,fp,salt+7u);
-      let width=30.+290.*sstep(-.5,.5,reach.x*sqrt(reach.y));
+      let width=25.+255.*sstep(-.4,.6,reach.x*sqrt(reach.y));
       let beach=clamp((width-shore+fp)/fp,0.,1.)*(1.-sstep(4.,12.,height))*(1.-sstep(.2,.5,grade));
-      color=surfaceMix(color,vec3<f32>(.72,.67,.55),flats*(1.-sstep(240.,960.,fp))*.8*(1.-.5*wBoreal));
-      color=surfaceMix(color,vec3<f32>(.80,.74,.59),beach*.85*(1.-.5*wBoreal));
+      // Sediment follows the coast's geology: quartz or golden sand by province,
+      // tropical coral sand, and local stone on cool or rugged coasts. Summer
+      // warmth preserves sandy continental coasts despite their winter frost.
+      // Reuse slope/TPI and resolved noise, with no additional samples or FBM.
+      let shingle=max(1.-sstep(4.,14.,tHot),sstep(.04,.22,grade)*terrain);
+      var sediment=surfaceMix(vec3<f32>(.80,.75,.61),vec3<f32>(.76,.63,.43),sstep(-.2,.9,pv));
+      sediment=surfaceMix(sediment,vec3<f32>(.86,.84,.76),wTrop*sstep(0.,-.8,pv)*.7);
+      sediment=surfaceMix(sediment,rock,shingle*.9);
+      sediment=surfaceMix(sediment,surfaceMix(ground,rock,.4),sstep(-.9,-1.5,m2)*.85);
+      sediment=surfaceMix(sediment,vec3<f32>(.27,.26,.25),sstep(1.25,1.75,m1+.35*shingle)*.9);
+      color=surfaceMix(color,sediment*.9,flats*(1.-sstep(240.,960.,fp))*.8);
+      color=surfaceMix(color,sediment,beach*.8);
       // Snow: seasonal and perennial, exposure-aware, sheds from steep ridges.
       let hemisphere=point.y/max(sqrt(point.y*point.y+.0064*dot(point,point)),1.);
       let aspect=dot(gradient,north)/max(length(gradient),.00001)*hemisphere;

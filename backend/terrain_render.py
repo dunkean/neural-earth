@@ -244,15 +244,25 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
     woods = cover(np.clip(trees,0,1),patch,.65*float(var))
     color = mix(color,canopy,woods)
     flats = (1-smooth(1.5,6,height))*(1-smooth(.05,.2,grade))
-    # Beaches: a strip along the sea, 30-320 m wide by coast stretch, kept
+    # Beaches: a strip along the sea, 25-280 m wide by coast stretch, kept
     # as area coverage so wide ones stay visible at 240 m samples. Low flats
     # behind it (estuary and river bars) stay as darker, wetter sediment.
     shore = shore_distance(height,fp) if shore is None else np.asarray(shore,F)
     reach = fbm(point,20000.,3,fp,salt+7)
-    width = F(30)+F(290)*smooth(-.5,.5,reach[0]*np.sqrt(reach[1]))
+    width = F(25)+F(255)*smooth(-.4,.6,reach[0]*np.sqrt(reach[1]))
     beach = coast_band(shore,width,fp)*(1-smooth(4,12,height))*(1-smooth(.2,.5,grade))
-    color = mix(color,[.72,.67,.55],flats*F(1-float(smooth(240,960,fp)))*F(.8)*(1-F(.5)*w_boreal))
-    color = mix(color,[.80,.74,.59],beach*F(.85)*(1-F(.5)*w_boreal))
+    # Sediment follows the coast's geology: pale quartz or golden sand by
+    # province, coral sand in the tropics, and local stone on cool or rugged
+    # coasts. Summer warmth, not winter frost, distinguishes cold shingle
+    # from sandy continental coasts. Reuse slope/TPI and resolved noise.
+    shingle = np.maximum(1-smooth(4,14,t_hot),smooth(.04,.22,grade)*terrain)
+    sediment = mix([.80,.75,.61],[.76,.63,.43],smooth(-.2,.9,pv))
+    sediment = mix(sediment,[.86,.84,.76],w_trop*smooth(0,-.8,pv)*F(.7))
+    sediment = mix(sediment,rock,shingle*F(.9))
+    sediment = mix(sediment,mix(ground,rock,F(.4)),smooth(-.9,-1.5,m2)*F(.85))
+    sediment = mix(sediment,[.27,.26,.25],smooth(1.25,1.75,m1+F(.35)*shingle)*F(.9))
+    color = mix(color,sediment*F(.9),flats*F(1-float(smooth(240,960,fp)))*F(.8))
+    color = mix(color,sediment,beach*F(.8))
 
     # Snow: seasonal and perennial, exposure-aware, sheds from steep ridges.
     gnorm = np.linalg.norm(gradient,axis=-1)
