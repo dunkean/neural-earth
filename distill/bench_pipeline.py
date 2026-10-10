@@ -27,6 +27,24 @@ from distill.student import load_student
 from tools.verification.compare_base_variants import Count
 
 
+class StageCount(Count):
+    """Retain production model helpers used by cached-embedding inference."""
+    def __init__(self, model):
+        super().__init__(model)
+        self.eval()
+
+    def __getattr__(self, name):
+        try:
+            return super().__getattr__(name)
+        except AttributeError:
+            return getattr(self.model, name)
+
+    def forward_with_embeddings(self, inputs, *args, **kwargs):
+        self.windows += inputs.shape[0]
+        self.calls += 1
+        return self.model.forward_with_embeddings(inputs, *args, **kwargs)
+
+
 def require_idle_gpu(allow_other_gpus=False):
     # Check BEFORE CUDA init: on this WSL host nvidia-smi attributes multiple
     # Python workers to one PID. Initializing our own context before inventory
@@ -126,6 +144,16 @@ def main():
     loaded = load_pipeline(args.seed)
     config = {key: value for key, value in dict(loaded.config).items() if not key.startswith('_')}
     for variant in ('reference', 'student'):
+        if variant == 'student':
+            # Teacher captures for the replaced stage can occupy most of VRAM.
+            # Release their private pools before warming the student; keeping
+            # them would measure Windows GPU paging rather than stage inference.
+            replaced = getattr(loaded, stage+'_model')
+            clear = getattr(replaced, '_clear_buckets', None)
+            if clear is not None:
+                clear()
+            gc.collect()
+            torch.cuda.empty_cache()
         for size in args.sizes:
             # Always rewarm in a new process, even if prior warmup was durable.
             for repeat in range(-1, args.repeats):
@@ -140,7 +168,7 @@ def main():
                 world.coarse_model, world.base_model, world.decoder_model = (
                     loaded.coarse_model, loaded.base_model, loaded.decoder_model)
                 configure_world(world, replace(loaded._terrain_profile, cuda_graphs=True), world_profile=args.profile)
-                counters = {name: Count(getattr(world, name+'_model')) for name in ('coarse', 'base', 'decoder')}
+                counters = {name: StageCount(getattr(world, name+'_model')) for name in ('coarse', 'base', 'decoder')}
                 for name, counter in counters.items():
                     setattr(world, name+'_model', counter)
                 if variant == 'student':
@@ -170,6 +198,8 @@ def main():
                         raise FloatingPointError('Non-finite final field.')
                     row = dict(variant=variant, size=size, repeat=repeat, warmup=repeat < 0,
                                seconds=elapsed, dependency_prefetch_seconds=dependency_seconds,
+                               cuda_allocated_bytes=torch.cuda.memory_allocated(),
+                               cuda_reserved_bytes=torch.cuda.memory_reserved(),
                                coarse_prefetch_seconds=dependency_seconds if stage == 'base' else None,
                                base_windows=counters['base'].windows, base_calls=counters['base'].calls,
                                stage_windows=counters[stage].windows, stage_calls=counters[stage].calls,
@@ -184,6 +214,7 @@ def main():
                     world.close()
                     del field, world, tensor, counters, counter
                     gc.collect()
+                    torch.cuda.empty_cache()
     report['comparisons'] = summarize(report['rows'], args.sizes)
     report['status'] = 'complete'
     atomic_json(output, report)

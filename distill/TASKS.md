@@ -792,6 +792,14 @@ avec les deux GPU libres. Jobs `base192-decoded-followup` et
 `base128-control-followup` ; aucune nouvelle génération teacher ni intégration
 dans le serveur par défaut.
 
+Le compteur du benchmark préserve désormais les méthodes d'embeddings des
+modèles de production. Les captures CUDA du teacher remplacé sont libérées
+avant le warmup de l'élève, et les allocations/réservations CUDA sont consignées
+par mesure. Une première mesure a saturé la VRAM de la 4090 et produit des
+temps instables ; elle est conservée comme diagnostic, sans servir de résultat
+de performance. Le benchmark corrigé et ses jobs dépendants ont été relancés.
+Les **32 tests de distillation passent** ; les mesures GPU restent en cours.
+
 ## Préparation du 2026-10-10 — en attente du top
 
 La passation a été reçue en texte dans la conversation. Les performances de la

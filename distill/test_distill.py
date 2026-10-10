@@ -25,6 +25,7 @@ from distill.check_physical_seams import partition_stats
 from distill.export import export_bundle
 from distill.decoded_loss import PairedCrops, decode, reconstructed_height
 from distill.benchmark_candidates import wait_seam_diagnostic
+from distill.bench_pipeline import StageCount
 
 
 class DistillationTests(unittest.TestCase):
@@ -57,6 +58,33 @@ class DistillationTests(unittest.TestCase):
                 atomic_json(path, report | dict(rows=report['rows'][:11]))
                 with self.assertRaises(RuntimeError):
                     wait_seam_diagnostic('seams', path)
+
+    def test_stage_counter_preserves_production_embedding_methods(self):
+        class Network(torch.nn.Module):
+            config = {'stage': 'coarse'}
+
+            def compute_embeddings(self, labels, conditions):
+                return labels + conditions
+
+            def forward_with_embeddings(self, inputs, embeddings):
+                return inputs + embeddings
+
+            def forward(self, inputs):
+                return inputs*2
+
+        model = Network().eval()
+        counted = StageCount(model)
+        inputs = torch.ones(3, 2)
+        embeddings = counted.compute_embeddings(torch.tensor(2.), torch.tensor(4.))
+        torch.testing.assert_close(counted.forward_with_embeddings(inputs, embeddings),
+                                   model.forward_with_embeddings(inputs, embeddings), rtol=0, atol=0)
+        self.assertEqual(counted.config, model.config)
+        self.assertFalse(counted.training)
+        self.assertEqual((counted.calls, counted.windows), (1, 3))
+        torch.testing.assert_close(counted(inputs), model(inputs), rtol=0, atol=0)
+        self.assertEqual((counted.calls, counted.windows), (2, 6))
+        with self.assertRaises(AttributeError):
+            counted.missing_method
 
     def test_global_noise_is_independent_of_negative_crop_partition(self):
         for seed in (9281, 9282):
