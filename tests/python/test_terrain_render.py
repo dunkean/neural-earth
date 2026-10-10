@@ -121,6 +121,36 @@ class SurfaceTests(unittest.TestCase):
         coarse=direct(800,TEMPERATE,grade=.35,settings={'variation':0},footprint=7680.)
         self.assertLess(np.abs(coarse[0,0]-rock).max(),np.abs(fine[0,0]-rock).max()-.03)
 
+    def coast(self,footprint,n,settings):
+        # Sea for 1 km, then a 1 m lowland plain: beach strip, then river-bar flats.
+        x=(np.arange(n)+.5)*footprint-1000
+        h=np.where(x<0,-5.,1.).astype(np.float32)[None]
+        p=np.zeros((1,n,3),np.float32);p[...,0]=6.3e6;p[...,2]=x+2e5
+        shape=(1,n);seasons=np.broadcast_to(np.float32(TEMPERATE).reshape(6,1,1),(6,*shape))
+        soil=np.broadcast_to(SOIL.reshape(9,1,1),(9,*shape))
+        rgb=surface_material(h,np.zeros((*shape,2),np.float32),np.zeros(shape,np.float32),p,
+                             np.broadcast_to(np.float32([0,-1]),(*shape,2)),footprint,soil,seasons,seed_value(42),settings)
+        return x,rgb[0]
+
+    def test_beaches_follow_the_sea_and_keep_their_area_at_lod3(self):
+        on={'variation':0}
+        x,fine=self.coast(30.,256,on)
+        sand=np.array([.80,.74,.59])
+        self.assertLess(np.abs(fine[np.searchsorted(x,0)]-sand).max(),.06,'shore sample is beach')
+        inland=np.searchsorted(x,5000)
+        self.assertGreater(np.abs(fine[inland]-sand).max(),.06,'no beach kilometres inland')
+        self.assertLess(np.abs(fine[inland]-[.72,.67,.55]).max(),.1,'flats stay, as wetter bars')
+        # The 240 m view shows the strip and averages to the 30 m view.
+        xc,coarse=self.coast(240.,32,on)
+        self.assertLess(np.abs(coarse[np.searchsorted(xc,0)]-sand).max(),.12,'beach visible at LOD 3')
+        span=lambda x,rgb:rgb[(x>0)&(x<1920)].mean(0)
+        np.testing.assert_allclose(span(x,fine),span(xc,coarse),atol=.02)
+        # Away from the sea the coastal model only recolours the flats.
+        self.assertLess(np.abs(coarse[-1]-fine[inland]).max(),.02)
+
+    def test_legacy_coastal_toggle_is_accepted_and_ignored(self):
+        self.assertEqual(parse_settings({'coasts':0}),parse_settings(None))
+
     def test_valleys_are_greener_than_ridges_in_semi_arid_climates(self):
         semi=[26,170,.0065,14,170,.0065]
         valley=direct(300,semi,tpi=-.1,footprint=8000.,settings={'variation':0})[0,0]

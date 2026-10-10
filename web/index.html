@@ -39,6 +39,8 @@ dialog{max-width:460px;width:calc(100vw - 32px);color:#dce6eb;background:#19252c
 <script src="/terrain_map_tools.js"></script>
 <script src="/terrain_generation_controls.js"></script>
 <script src="terrain_toolbar.js"></script>
+<script src="/terrain_share.js"></script>
+<script src="/terrain_pins.js"></script>
 <script src="/terrain_inference_controls.js"></script>
 <script>
 'use strict';
@@ -65,7 +67,7 @@ let backendEpoch=0,error='',gpu='GPU',currentLod=5,cacheBytes=0,lastRefresh=0,la
 let desiredView=null,publishing=false,overviewFlight=null,overviewWanted=false,serverStatus=null,lastTelemetry=0,zoomUntil=0,latencyMs=500;
 let coarseRevision=0,automaticPreparationPending=null,pendingCoarsePreparation=null,presentedOverview=null,refinementLevel=null;let selectedProfile='orogen',viewMode='relief',visiblePlan=[];
 let sceneView=new URLSearchParams(location.search).get('view')==='globe'?'globe':'map',globe=null,globeCamera=null,mapCamera=null,lightingTimer=null;
-let activeGeneration=null,generationControls=null,worldLoading=false,forcedView=null;
+let activeGeneration=null,generationControls=null,worldLoading=false,forcedView=null,shareControls=null,restoringShare=false,terrainPins=null;
 let nnEngine=new URLSearchParams(location.search).get('nn_engine')==='reference'?'reference':'exact';
 let inferenceControls;
 let coarseInterpolation=new URLSearchParams(location.search).get('coarse_interpolation')==='bilinear'?'bilinear':'monotone';
@@ -102,7 +104,8 @@ const renderMaterials=window.TerrainRender||{get:()=>({}),serialize:()=> '{}',mo
 // default materials instead of recomputing seconds of CPU per setting change.
 const overviewMaterials=()=>gpuEnabled()?(renderMaterials.defaults?.()||{}):renderMaterials.get();
 function cacheIdentity(){return `${world.generation_profile||worldProfile()}/${world.world_version||'original'}/${world.cache_profile}/${world.world_identity||'unidentified'}/${gpuEnabled()?(viewMode==='pedology'?'source-pedology':'physical'):viewMode+'/appearance-'+(world.appearance_identity||'legacy')+(viewMode==='render'?'/materials-'+renderMaterials.serialize():'')+'/contours-'+JSON.stringify(styleRendering.get())}${neuralChart()?'/polar':''}`}
-function updateURL(){if(world){const params=new URLSearchParams({seed:world.seed,profile:worldProfile(),mode:viewMode,view:sceneView,render_settings:renderMaterials.serialize(),lighting:TerrainLighting.serialize(),contours:styleRendering.get().enabled?'1':'0',contour_interval:String(styleRendering.get().interval),contour_auto:styleRendering.get().automatic?'1':'0',contour_width:String(styleRendering.get().width),contour_density:String(styleRendering.get().density),prepare_world:automaticPreparation?'1':'0',nn_engine:nnEngine,coarse_streams:String(inferenceControls?.get()??4),coarse_interpolation:coarseInterpolation,cache_gib:String(MAX_BYTES/GIB)});if(!$('coarseGpu').checked)params.set('coarse_gpu','0');if(window.TerrainTiming?.enabled)params.set('profiling','1');if(latentPreviewsEnabled)params.set('latent_geometry',String(latentPreviewGeometry));if(activeGeneration)params.set('generation',JSON.stringify(activeGeneration));history.replaceState({terrainLocal:true},'','/?'+params)}}
+function updateURL(){if(world&&!restoringShare&&typeof history!=='undefined'){const params=new URLSearchParams(location.search);params.set('cache_gib',String(MAX_BYTES/GIB));params.set('coarse_gpu',$('coarseGpu').checked?'1':'0');if(latentPreviewsEnabled)params.set('latent_geometry',String(latentPreviewGeometry));const pins=terrainPins?.serialize();if(pins)params.set('pins',pins);else params.delete('pins');history.replaceState({...history.state,terrainLocal:true,seed:world.seed},'','/?'+params.toString().replace(/%2C/gi,',').replace(/%3B/gi,';')+(location.hash||''));shareControls?.updateURL();}}
+
 function nominalLod(){return Math.max(MIN_LOD,Math.min(MAX_LOD,Math.floor(Math.log2(Math.max(mpp,30*2**MIN_LOD)/30))))}
 function lodForCamera(){let lod=nominalLod();const bytes=gpuEnabled()?304*304*4+50*33*33*4+TILE_BYTES:TILE_BYTES;while(lod<MAX_LOD){const span=256*30*2**lod,nx=Math.ceil((cx+W*mpp/2)/span)-Math.floor((cx-W*mpp/2)/span),ny=Math.ceil((cy+H*mpp/2)/span)-Math.floor((cy-H*mpp/2)/span);const count=sceneView==='globe'&&globeCamera?visibleRegions(bounds()).reduce((n,r)=>n+(Math.ceil(r[2]/span)-Math.floor(r[0]/span))*(Math.ceil(r[3]/span)-Math.floor(r[1]/span)),0):nx*ny;if((count*1.3+12)*bytes<=MAX_BYTES*.85)break;lod++}return lod}
 function resize(){W=view.clientWidth;H=view.clientHeight;const d=devicePixelRatio||1;canvas.width=W*d;canvas.height=H*d;ctx.setTransform(d,0,0,d,0,0);annotations.width=W*d;annotations.height=H*d;ac.setTransform(d,0,0,d,0,0);mini.width=440;mini.height=240;draw();schedule()}
@@ -163,7 +166,7 @@ function evict(){
  }
 }
 function draw(){if(raf===null)raf=requestAnimationFrame(()=>{raf=null;drawFrame()})}
-function drawFrame(){syncGlobeCamera();if(gpuEnabled()){renderer?.setRenderSettings?.(renderMaterials.get());renderer?.setMode?.(viewMode);}if(styleRendering.get().automatic){const interval=window.TerrainStyleRendering?.autoInterval(mpp,styleRendering.get().density)||200;if(interval!==styleRendering.get().interval){styleRendering.set({interval});if(styleRendering.get().enabled){overviewFlight?.controller.abort();overviewFlight=null;restoreOverview();schedule();}}$('contourInterval').value=interval;}const frameStarted=window.TerrainTiming?.enabled?performance.now():0;counters.draws++;ac.clearRect(0,0,W,H);ctx.fillStyle='#09284d';ctx.fillRect(0,0,W,H);if(!world){updateActivity();visiblePlan=[];if(sceneView==='globe'){globe?.setImage(null);globe?.setTiles([],null,null);globe?.draw(W,H);}mapTools?.draw(ac);renderer?.draw([],{width:W,height:H,dpr:devicePixelRatio||1});return}const b=bounds();currentLod=displayLod();ctx.imageSmoothingEnabled=Object.hasOwn(mapStyles,viewMode)||mpp>30;if(sceneView==='map'){if(overview)rect(overview,world.overview_bounds);if(initialImage&&viewMode==='relief'&&currentLod===0)rect(initialImage,world.initial_bounds);}
+function drawFrame(){syncGlobeCamera();terrainPins?.draw();if(gpuEnabled()){renderer?.setRenderSettings?.(renderMaterials.get());renderer?.setMode?.(viewMode);}if(styleRendering.get().automatic){const interval=window.TerrainStyleRendering?.autoInterval(mpp,styleRendering.get().density)||200;if(interval!==styleRendering.get().interval){styleRendering.set({interval});if(styleRendering.get().enabled){overviewFlight?.controller.abort();overviewFlight=null;restoreOverview();schedule();}}$('contourInterval').value=interval;}const frameStarted=window.TerrainTiming?.enabled?performance.now():0;counters.draws++;ac.clearRect(0,0,W,H);ctx.fillStyle='#09284d';ctx.fillRect(0,0,W,H);if(!world){updateActivity();visiblePlan=[];if(sceneView==='globe'){globe?.setImage(null);globe?.setTiles([],null,null);globe?.draw(W,H);}mapTools?.draw(ac);renderer?.draw([],{width:W,height:H,dpr:devicePixelRatio||1});return}const b=bounds();currentLod=displayLod();ctx.imageSmoothingEnabled=Object.hasOwn(mapStyles,viewMode)||mpp>30;if(sceneView==='map'){if(overview)rect(overview,world.overview_bounds);if(initialImage&&viewMode==='relief'&&currentLod===0)rect(initialImage,world.initial_bounds);}
  const minDisplayLod=Math.min(coarseGpuEnabled()?7:MAX_LOD,continuousRefinement()?refinementPolicy().target:Math.max(MIN_LOD,currentLod-cacheLodGap()));
  // Ready parents are progressive fallbacks, including newly received stages.
  // The cache gap limits finer history; it must not hide intermediate relief.
@@ -243,7 +246,7 @@ function generateWorld(){
 
 function updateStatus(){updateActivity();if(!world)return;const v=visibleCounts(),s=serverStatus?.scheduler;const lane=s?` · GPU queue ${s.queued}, computing ${s.computing}, writing ${s.encoding}`:'';const prep=serverStatus?.coarse_preparation;const prepLabel=prep?.state==='running'&&prep.progress?` · Coarse NN ${prep.progress.complete_windows}/${prep.progress.total_windows}`:'';const mode=`${sceneView==='globe'?'Globe · ':''}${modeNames[viewMode]} ${sceneView==='globe'?'WebGL':gpuEnabled()?'WebGPU':'PNG'}`;$('status').textContent=error||`${gpu} · ${mode} · ${displayProfileName()} · Seed ${world.seed} · ${v.ready}/${v.wanted} visible tiles ready · ${inflight.size} transfer(s) · Cache ${(cacheBytes/1024**2).toFixed(1)} MiB${lane}${prepLabel}`;view.dataset.lod=lodForCamera();view.dataset.loaded=counters.received;view.dataset.pending=v.pending;view.dataset.queued=queue.length;view.dataset.cameraEpoch=cameraEpoch;view.dataset.render=gpuEnabled()?'webgpu':'png';view.dataset.worldProfile=worldProfile();view.dataset.mode=viewMode;view.dataset.view=sceneView}
 function clampCamera(){if(sceneView==='globe'){syncGlobeCamera();return}if(!world)return;const b=worldBounds(),halfX=W*mpp/2,halfY=H*mpp/2;cx=halfX*2>=b[2]-b[0]?(b[0]+b[2])/2:Math.max(b[0]+halfX,Math.min(b[2]-halfX,cx));cy=halfY*2>=b[3]-b[1]?(b[1]+b[3])/2:Math.max(b[1]+halfY,Math.min(b[3]-halfY,cy))}
-function schedule(){if(generationPending||!world)return;clampCamera();if(timer===null)timer=setTimeout(()=>{timer=null;refresh()},Math.max(0,50-(performance.now()-lastRefresh)));updateStatus()}
+function schedule(){if(generationPending||!world||restoringShare)return;clampCamera();updateURL();if(timer===null)timer=setTimeout(()=>{timer=null;refresh()},Math.max(0,50-(performance.now()-lastRefresh)));updateStatus()}
 const NATIVE_COARSE_SPAN=128*7680;
 function nativeCoarseTask(tx,ty,priority,prefetch=false){const learned=requestedLod()<=6||continuousRefinement()&&refinementPolicy().target<=6;const task={native_coarse:true,learned,nnEngine,coarseInterpolation,key:`${nnEngine}/${cacheIdentity()}/${world.seed}/native-coarse/${tx}/${ty}/${coarseInterpolation}`,path:`${world.seed}/${tx}/${ty}`,seed:world.seed,worldProfile:generationProfile(),displayIdentity:cacheIdentity(),mode:viewMode,lod:7,tx,ty,priority,prefetch,epoch};if(task.learned&&!$('renderSea').checked&&terrainClass(task)==='sea')task.learned=false;return task}
 function nativeCoarseTasks(b,priority=2000){const result=[];for(let ty=Math.floor(b[1]/NATIVE_COARSE_SPAN);ty<Math.ceil(b[3]/NATIVE_COARSE_SPAN);ty++)for(let tx=Math.floor(b[0]/NATIVE_COARSE_SPAN);tx<Math.ceil(b[2]/NATIVE_COARSE_SPAN);tx++){const distance=Math.min(900,Math.hypot((tx+.5)*NATIVE_COARSE_SPAN-cx,(ty+.5)*NATIVE_COARSE_SPAN-cy)/NATIVE_COARSE_SPAN*12);result.push(nativeCoarseTask(tx,ty,priority+distance))}return result}
@@ -390,11 +393,11 @@ async function openWorld(seed,profile=selectedProfile,{preserveCamera=false,gene
  if(data.initial_image){terrainFetch(data.initial_image).then(async original=>{if(!original.ok)return;const image=await createImageBitmap(await original.blob());if(e!==epoch){image.close();return}initialImage=image;draw();schedule()}).catch(()=>{})}
  if(automaticPreparation&&!generationPending)prepareCoarse({seed:data.seed,world_profile:generationProfile(),full_world:true});return true;
  }catch(exc){if(e===epoch){activeGeneration=previousGeneration;selectedProfile=previousProfile;error=exc.message;$('status').textContent=`Error: ${error}`;generationControls?.showError(error);syncWorldGenerator()}return false;}finally{if(e===epoch){worldLoading=false;updateStatus()}}}
-view.addEventListener('wheel',e=>{e.preventDefault();const r=view.getBoundingClientRect();zoom(Math.exp(-e.deltaY*.0015),e.clientX-r.left,e.clientY-r.top)},{passive:false});
-view.addEventListener('pointerdown',e=>{if(sceneView==='globe'||e.button!==0||e.target===mini||e.target.closest('#hud'))return;drag={x:e.clientX,y:e.clientY};view.setPointerCapture(e.pointerId);view.focus()});view.addEventListener('pointermove',e=>{if(!drag)return;cx-=(e.clientX-drag.x)*mpp;cy-=(e.clientY-drag.y)*mpp;drag={x:e.clientX,y:e.clientY};draw();schedule()});for(const name of ['pointerup','pointercancel','lostpointercapture'])view.addEventListener(name,()=>{drag=null;schedule()});
+view.addEventListener('wheel',e=>{e.preventDefault();const r=view.getBoundingClientRect();zoom(Math.exp(-e.deltaY*.0015),(e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height)},{passive:false});
+view.addEventListener('pointerdown',e=>{if(sceneView==='globe'||e.button!==0||e.target===mini||e.target.closest('#hud'))return;drag={x:e.clientX,y:e.clientY};view.setPointerCapture(e.pointerId);view.focus()});view.addEventListener('pointermove',e=>{if(!drag)return;const r=view.getBoundingClientRect();cx-=(e.clientX-drag.x)*W/r.width*mpp;cy-=(e.clientY-drag.y)*H/r.height*mpp;drag={x:e.clientX,y:e.clientY};draw();schedule()});for(const name of ['pointerup','pointercancel','lostpointercapture'])view.addEventListener(name,()=>{drag=null;schedule()});
 view.addEventListener('keydown',e=>{if(e.target!==view)return;if(sceneView==='globe'){const arrows={ArrowLeft:[.1,0],ArrowRight:[-.1,0],ArrowUp:[0,.1],ArrowDown:[0,-.1]};if(arrows[e.key]){e.preventDefault();globe?.orbit(...arrows[e.key]);return}}let handled=true;switch(e.key){case 'ArrowLeft':cx-=100*mpp;break;case 'ArrowRight':cx+=100*mpp;break;case 'ArrowUp':cy-=100*mpp;break;case 'ArrowDown':cy+=100*mpp;break;case '+':case '=':zoom(2);break;case '-':zoom(.5);break;case '0':fit();break;default:handled=false}if(handled){e.preventDefault();draw();schedule()}});
 $('cacheBudgetGiB').onchange=()=>{MAX_BYTES=Math.floor(normalizeCacheGiB($('cacheBudgetGiB').value,MAX_BYTES/GIB)*GIB);$('cacheBudgetGiB').value=MAX_BYTES/GIB;evict();draw();schedule();updateURL()};
-$('plus').onclick=()=>zoom(2);$('minus').onclick=()=>zoom(.5);$('fit').onclick=fit;$('initialView').onclick=()=>fitBounds(world?.initial_bounds);$('native').onclick=()=>{if(sceneView==='globe'){globe?.zoom(mpp/30);return}mpp=30;draw();schedule()};$('grid').onchange=draw;$('prefetch').onchange=schedule;$('renderSea').onchange=()=>{draw();schedule()};$('seaMaxLod').onchange=()=>{$('seaMaxLod').value=seaMaxLod();draw();schedule()};$('forcedLod').onchange=forceViewLod;$('cacheLodGap').onchange=()=>{draw();schedule()};$('refinementDepth').onchange=()=>{$('refinementDepth').value=refinementDepth();draw();schedule()};$('renderLod').onclick=forceViewLod;$('apply').onclick=generateWorld;$('random').onclick=()=>{$('seed').value=randomSeed();generateWorld()};$('seed').addEventListener('keydown',event=>{if(event.key==='Enter')generateWorld()});view.ondblclick=e=>{const r=view.getBoundingClientRect();zoom(2,e.clientX-r.left,e.clientY-r.top)};
+$('plus').onclick=()=>zoom(2);$('minus').onclick=()=>zoom(.5);$('fit').onclick=fit;$('initialView').onclick=()=>fitBounds(world?.initial_bounds);$('native').onclick=()=>{if(sceneView==='globe'){globe?.zoom(mpp/30);return}mpp=30;draw();schedule()};$('grid').onchange=()=>{draw();updateURL()};$('prefetch').onchange=schedule;$('renderSea').onchange=()=>{draw();schedule()};$('seaMaxLod').onchange=()=>{$('seaMaxLod').value=seaMaxLod();draw();schedule()};$('forcedLod').onchange=forceViewLod;$('cacheLodGap').onchange=()=>{draw();schedule()};$('refinementDepth').onchange=()=>{$('refinementDepth').value=refinementDepth();draw();schedule()};$('renderLod').onclick=forceViewLod;$('apply').onclick=generateWorld;$('random').onclick=()=>{$('seed').value=randomSeed();generateWorld()};$('seed').addEventListener('keydown',event=>{if(event.key==='Enter')generateWorld()});view.ondblclick=e=>{const r=view.getBoundingClientRect();zoom(2,(e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height)};
 function resetBackend(){backendEpoch++;for(const r of inflight.values()){r.controller.abort();counters.aborts++}inflight.clear();for(const key of [...tiles.keys()])dropTile(key);renderer?.clear();queue=[];draw();schedule()}
 async function prepareCoarse(data){if(generationPending&&data.action!=='stop')return;if(data.action!=='stop'&&!layerReady()){pendingCoarsePreparation=data;automaticPreparationPending=data;updateStatus();return;}pendingCoarsePreparation=null;const requestEngine=nnEngine,requestEpoch=epoch,requestId=++preparationRequest;automaticPreparationPending=data.action==='stop'?null:data;updateStatus();try{const response=await terrainFetch('/api/coarse/prepare',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)},requestEngine);const result=await response.json();if(requestEngine!==nnEngine||requestEpoch!==epoch||requestId!==preparationRequest)return;if(!response.ok)throw Error(result.error||`Preparation unavailable (${response.status})`);serverStatus={...serverStatus,coarse_preparation:result};error='';updateStatus()}catch(e){if(requestEngine!==nnEngine||requestEpoch!==epoch||requestId!==preparationRequest)return;error=e.message;updateStatus()}finally{if(requestEngine===nnEngine&&requestEpoch===epoch&&requestId===preparationRequest){automaticPreparationPending=null;updateStatus()}}}
 $('prepareEntireWorld').checked=automaticPreparation;
@@ -407,7 +410,7 @@ generationControls?.sync(selectedProfile,generationControls.defaults(selectedPro
 $('worldGenerator').onchange=()=>generationControls?.setGenerator($('worldGenerator').value);
 window.TerrainToolbar?.install();
 inferenceControls=window.TerrainInferenceControls?.mount({fetchSettings:terrainFetch,onChange:count=>{
- const url=new URL(location.href);url.searchParams.set('coarse_streams',String(count));history.replaceState(history.state,'',url);
+ updateURL();
 }});
 function syncSceneView(){
  const planar=world?.world_topology==='plane';if(planar||!globe)sceneView='map';
@@ -438,6 +441,32 @@ TerrainLighting.mount($('paneRendering'),()=>{clearTimeout(lightingTimer);lighti
  if(gpuEnabled()){for(const tile of tiles.values())if(!tile.native_coarse)renderer?.deleteTile(tile.key);draw();}else resetBackend();
  overviewFlight?.controller.abort();overviewFlight=null;overviewWanted=!!world;updateURL();draw();schedule();
 },100);});
+// A shared logical viewport keeps the same footprint and tile selection on smaller screens.
+let shareFrame=null,sharedSize=null;
+terrainPins=window.TerrainPins?.mount({view,getState:()=>({world,sceneView,W,H,cx,cy,mpp,worldBounds:worldBounds(),globe}),onChange:()=>{updateURL();draw();}})||null;
+function layoutSharedViewport(){if(!shareFrame||!sharedSize)return;const scale=Math.min(1,shareFrame.clientWidth/sharedSize[0],shareFrame.clientHeight/sharedSize[1]);view.style.transform=`translate(-50%,-50%) scale(${scale})`;}
+function setSharedSize(size){
+ if(!shareFrame){shareFrame=document.createElement('div');shareFrame.id='viewportFrame';shareFrame.style.cssText='flex:1;min-height:0;position:relative;overflow:hidden';view.before(shareFrame);shareFrame.append(view);new ResizeObserver(layoutSharedViewport).observe(shareFrame);}
+ sharedSize=size;view.style.cssText=size?`position:absolute;left:50%;top:50%;width:${size[0]}px;height:${size[1]}px;flex:none`:'width:100%;height:100%;flex:none';layoutSharedViewport();resize();$('unlockShareSize').hidden=!size;
+}
+function captureShare(){
+ syncGlobeCamera();const orbit=sceneView==='globe'?globe.snapshot():null;
+ return {
+  generation:{seed:world.seed,profile:worldProfile(),settings:world.generation_settings||activeGeneration||generationControls.defaults(worldProfile()),worldIdentity:world.world_identity||null,generationVersion:world.generation_schema?.version||null},
+  rendering:{materials:renderMaterials.get(),lighting:JSON.parse(TerrainLighting.serialize()),contours:styleRendering.get(),gpuRender:$('gpuRender').checked,coarseGpu:$('coarseGpu').checked,nnEngine,coarseInterpolation,cacheGiB:MAX_BYTES/GIB,cacheLodGap:cacheLodGap(),refinementDepth:refinementDepth(),renderSea:$('renderSea').checked,seaMaxLod:seaMaxLod(),grid:$('grid').checked,prefetch:$('prefetch').checked,coarseStreams:inferenceControls?.get()??4,appearanceIdentity:world.appearance_identity||null},
+  camera:{layer:viewMode,view:sceneView,zoom:mpp,position:[cx,cy],size:[W,H],lod:forcedView?.signature===viewSignature()?forcedView.lod:'auto',orbit:orbit?[orbit.yaw,orbit.pitch,orbit.altitude]:null,pins:terrainPins?.serialize()||'',latentGeometry:latentPreviewsEnabled?latentPreviewGeometry:0}
+ };
+}
+shareControls=window.TerrainShare?.mount({capture:captureShare,canShare:()=>!!world&&!worldLoading&&!generationPending&&!restoringShare})||null;
+if($('unlockShareSize'))$('unlockShareSize').onclick=()=>{setSharedSize(null);draw();schedule();};
+function restoreSharedRendering(settings){
+ renderMaterials.set(settings.materials);TerrainLighting.set(settings.lighting);styleRendering.set(settings.contours);syncContourControls();
+ nnEngine=settings.nnEngine;coarseInterpolation=settings.coarseInterpolation;MAX_BYTES=Math.floor(normalizeCacheGiB(settings.cacheGiB)*GIB);
+ $('nnEngine').value=nnEngine;$('coarseInterpolation').value=coarseInterpolation;$('cacheBudgetGiB').value=MAX_BYTES/GIB;
+ for(const id of ['gpuRender','coarseGpu','renderSea','grid','prefetch'])$(id).checked=settings[id];
+ for(const id of ['cacheLodGap','refinementDepth','seaMaxLod'])$(id).value=settings[id];
+ automaticPreparation=false;$('prepareEntireWorld').checked=false;
+}
 // One compact panel at a time; opening settings does not resize the map.
 const toolPanels=[...document.querySelectorAll('#controls > details')];
 new ResizeObserver(()=>document.documentElement.style.setProperty('--panel-top',($('controls').getBoundingClientRect().bottom+6)+'px')).observe($('controls'));
@@ -471,22 +500,44 @@ async function initializeWorld(){
  if(location.protocol==='file:'){$('status').textContent='Run start-terrain.cmd: continuous generation requires the local server.';return}
  const params=new URLSearchParams(location.search);
  try{
+  terrainPins?.set(params.get('pins')||'');
+  let shared=null,saved=null;
+  if(params.has('share')){
+   params.set('recipe',new URLSearchParams(location.hash.slice(1)).get('recipe')||params.get('recipe')||'');
+   shared=TerrainShare.fromParams(params);restoringShare=true;$('status').textContent='Restoring portable generation recipe…';
+   saved=await TerrainShare.load(shared);
+   if(!WORLD_PROFILES.includes(saved.generation.profile)||!Object.hasOwn(modeNames,shared.layer))throw Error('Unsupported shared generator or layer');
+  }
   const {preferences,firstLaunch,resetErosion}=await window.TerrainGenerationControls?.initializePreferences()||{preferences:{},firstLaunch:false};
   const stored=preferences.generation,localReload=history.state?.terrainLocal===true;
-  selectedProfile=(localReload||!params.has('profile'))&&WORLD_PROFILES.includes(stored?.profile)?stored.profile:WORLD_PROFILES.includes(params.get('profile'))?params.get('profile'):'orogen';
-  // Reloading this tab restores local edits; a newly opened shared link keeps its settings.
-  let settings=(localReload||!params.has('profile')&&!params.has('generation'))&&stored?.profile===selectedProfile?{...generationControls?.defaults(selectedProfile),...stored.settings}:params.has('generation')?JSON.parse(params.get('generation')):generationControls?.defaults(selectedProfile);
-  if(firstLaunch)settings=window.TerrainGenerationControls.withGpu(settings,preferences.gpuAcceleration);
-  else if(resetErosion)settings={...settings,relief_pipeline:'orogen',orogen_gpu_erosion:preferences.gpuAcceleration};
-  if(typeof preferences.rendering?.gpuRender==='boolean')$('gpuRender').checked=preferences.rendering.gpuRender;
-  if(typeof preferences.rendering?.coarseGpu==='boolean')$('coarseGpu').checked=preferences.rendering.coarseGpu;
-  if(!firstLaunch&&params.has('coarse_gpu'))$('coarseGpu').checked=params.get('coarse_gpu')!=='0';
+  selectedProfile=saved?saved.generation.profile:(localReload||!params.has('profile'))&&WORLD_PROFILES.includes(stored?.profile)?stored.profile:WORLD_PROFILES.includes(params.get('profile'))?params.get('profile'):'orogen';
+  let settings=saved?saved.generation.settings:(localReload||!params.has('profile')&&!params.has('generation'))&&stored?.profile===selectedProfile?{...generationControls?.defaults(selectedProfile),...stored.settings}:params.has('generation')?JSON.parse(params.get('generation')):generationControls?.defaults(selectedProfile);
+  if(!saved){
+   if(firstLaunch)settings=window.TerrainGenerationControls.withGpu(settings,preferences.gpuAcceleration);
+   else if(resetErosion)settings={...settings,relief_pipeline:'orogen',orogen_gpu_erosion:preferences.gpuAcceleration};
+   if(typeof preferences.rendering?.gpuRender==='boolean')$('gpuRender').checked=preferences.rendering.gpuRender;
+   if(typeof preferences.rendering?.coarseGpu==='boolean')$('coarseGpu').checked=preferences.rendering.coarseGpu;
+   if(!firstLaunch&&params.has('coarse_gpu'))$('coarseGpu').checked=params.get('coarse_gpu')!=='0';
+  }else restoreSharedRendering(saved.rendering);
   generationControls?.sync(selectedProfile,settings);syncWorldGenerator();window.TerrainToolbar?.sync?.();
-  viewMode=Object.hasOwn(modeNames,params.get('mode'))?params.get('mode'):'relief';$('mapMode').value=viewMode;
-  initializeRenderer().finally(()=>{rendererReady=true;pump();draw()});
-  await openWorld(params.get('seed')||randomSeed(),selectedProfile,{generation:settings});
- }catch(exc){error='Unable to initialize world: '+exc.message;$('status').textContent=error;generationControls?.showError(error);updateStatus()}
+  viewMode=shared?shared.layer:Object.hasOwn(modeNames,params.get('mode'))?params.get('mode'):'render';$('mapMode').value=viewMode;
+  if(shared){sceneView=shared.view;setSharedSize(shared.size);}
+  const rendererInitialization=initializeRenderer().finally(()=>{rendererReady=true;pump();draw()});
+  if(shared)await rendererInitialization;
+  const opened=await openWorld(saved?saved.generation.seed:params.get('seed')||(localReload&&history.state?.seed)||randomSeed(),selectedProfile,{generation:settings});
+  if(shared&&opened){
+   if(sceneView!==shared.view||viewMode!==shared.layer)throw Error('This installation cannot display the shared view or layer');
+   if(saved.rendering.gpuRender&&$('gpuRender').disabled)throw Error('This shared rendering requires WebGPU');
+   if(shared.orbit){const [yaw,pitch,altitude]=shared.orbit;globe.restore({yaw,pitch,altitude});syncGlobeCamera();}
+   else{[cx,cy]=shared.position;mpp=shared.zoom;}
+   $('forcedLod').value=shared.lod==='auto'?'':shared.lod;forcedView=shared.lod==='auto'?null:{lod:Number(shared.lod),signature:viewSignature()};
+   restoringShare=false;clampCamera();draw();schedule();window.TerrainToolbar?.sync?.();
+   await inferenceControls?.sync(saved.rendering.coarseStreams);
+   if(saved.generation.worldIdentity&&world.world_identity!==saved.generation.worldIdentity||saved.rendering.appearanceIdentity&&world.appearance_identity!==saved.rendering.appearanceIdentity)$('shareCompatibility').textContent='Recipe restored with a different generation or rendering runtime. Terrain may differ with different model versions or GPUs.';
+  }else restoringShare=false;
+ }catch(exc){restoringShare=false;error='Unable to initialize world: '+exc.message;$('status').textContent=error;generationControls?.showError(error);updateStatus()}
 }
+
 new ResizeObserver(resize).observe(view);resize();initializeWorld();
 </script>
 </html>

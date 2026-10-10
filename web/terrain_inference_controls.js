@@ -106,7 +106,7 @@ window.TerrainInferenceControls=(()=>{
     sync(choices.includes(query)?query:undefined);
     // GPU settings belong to the main server, even when the reference engine is displayed.
     const gpus=mountGpus(panel,{fetchGpu,reload});
-    return {sync:()=>sync(),get:()=>current,observe:(value,runtime)=>{
+    return {sync:count=>sync(count),get:()=>current,observe:(value,runtime)=>{
       if(select.disabled||!choices.includes(value))return;
       if(value!==current){current=value;select.value=String(value);onChange(value);}
       status.textContent=runtime&&runtime.requested===value&&runtime.effective!==value

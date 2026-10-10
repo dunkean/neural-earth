@@ -56,6 +56,9 @@ from terrain_profiling import span, trace, measured_lock, snapshot as profiling_
 from functools import lru_cache
 
 app = Flask(__name__)
+from terrain_share import register_share_routes
+register_share_routes(app, OUTPUT / 'share-recipes',
+                      restore_generation=lambda generation: restore_shared_generation(generation))
 from terrain_backend_proxy import register_backend_proxy
 register_backend_proxy(app)
 image_slots = threading.BoundedSemaphore(2)
@@ -612,6 +615,29 @@ def finish_generation(token):
                     worker.suspend(False)
             finally:
                 generation_coordinator.finish(token)
+
+
+def restore_shared_generation(generation):
+    """Rebuild portable stage dependencies through the normal exclusive GPU gate."""
+    from terrain_share_stages import restore_stages
+    if not generation.get('stages'):
+        return restore_stages(generation)
+    token = generation_coordinator.begin()
+    try:
+        with generation_scope(token):
+            with generation_coordinator.lock:
+                token.check()
+                worker = app.extensions.get('terrain_reference_worker')
+                if worker is not None:
+                    worker.suspend(True)
+            with all_gpu_locks():
+                token.check()
+                synchronize_gpus()
+                return restore_stages(generation)
+    except GenerationCancelled as exc:
+        raise RuntimeError(str(exc)) from exc
+    finally:
+        finish_generation(token)
 
 
 @app.post('/api/terrain/suspend')
@@ -1197,6 +1223,16 @@ def generation_controls_script():
 @app.get('/terrain_toolbar.js')
 def toolbar_script():
     return send_from_directory(WEB_ROOT,'terrain_toolbar.js')
+
+
+@app.get('/terrain_share.js')
+def share_script():
+    return send_from_directory(WEB_ROOT, 'terrain_share.js')
+
+
+@app.get('/terrain_pins.js')
+def pins_script():
+    return send_from_directory(WEB_ROOT, 'terrain_pins.js')
 
 
 @app.get('/terrain_inference_controls.js')

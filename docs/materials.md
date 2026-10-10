@@ -6,6 +6,8 @@ Regional provinces are evaluated at half the source atlas resolution (about 40 k
 
 Vegetation responds to aridity, season and the temperature-dependent tree line. Valleys favor moisture and small stands; ridges tend to remain exposed. Slope and terrain position control rock exposure. Snow responds to temperature, precipitation, sun exposure and slope retention; water color follows depth and seasonal sea ice.
 
+Beaches are a strip along the sea, 30-320 m wide depending on the coast stretch. Each sample takes the share of that strip it covers, so wide beaches remain visible at LOD 3 with the same mean color. Other low flats remain as slightly darker, wetter river and estuary bars until about 1 km samples. Sea distance is searched within the tile halo, so beaches at LOD -2 and finer narrow to that halo. Below-zero inland depressions count as sea until hydrology supplies lakes.
+
 Deterministic CPU/WGSL noise uses shared geographic coordinates and seed. Octaves fade as their wavelength approaches the sampling footprint and disappear when unresolved. Local variations diminish at distance, leaving climate and relief to define broad structures. Fine strata and vegetation texture are appearance detail, without a claim of additional trained DEM resolution.
 
 The annual-cycle control runs from northern winter to summer and back; southern appearance follows its own climate. Forest cover, variation, moisture, rock slope, snow amount and color controls apply immediately and persist in the URL. Reset restores exact RGB defaults.

@@ -4,7 +4,7 @@ import threading
 import numpy as np
 import torch
 from terrain_device import current_cuda_index
-from terrain_render import parse_settings, smooth as _smooth, NOISE_NORM, F
+from terrain_render import parse_settings, shore_distance, smooth as _smooth, NOISE_NORM, F
 
 _M = 0xFFFFFFFF
 _lock = threading.Lock()
@@ -169,21 +169,23 @@ def _up(x, shape, dev, dtype=torch.float32):
 
 
 def surface_material(height, gradient, tpi, point, north, footprint, soil, seasons,
-                     salt, settings=None, bare=False, pedology=None, *, device=None):
+                     salt, settings=None, bare=False, pedology=None, shore=None, *, device=None):
     dev = torch.device('cuda', current_cuda_index()) if device is None else torch.device(device)
     wide = np.asarray(north).dtype != np.float32
     stream = _stream(dev)
     with torch.inference_mode(), torch.cuda.device(dev), torch.cuda.stream(stream):
         out = _surface_material(height, gradient, tpi, point, north, footprint, soil, seasons,
-                                int(salt), settings, bare, pedology, dev, wide)
+                                int(salt), settings, bare, pedology, shore, dev, wide)
         stream.synchronize()
         res = out.cpu().numpy()
         stream.synchronize()
     return res
 
 
-def _surface_material(height, gradient, tpi, point, north, footprint, soil, seasons, salt, settings, bare, pedology, dev, wide):
+def _surface_material(height, gradient, tpi, point, north, footprint, soil, seasons, salt, settings, bare, pedology, shore, dev, wide):
     s = parse_settings(settings)
+    if shore is None:
+        shore = shore_distance(height, float(footprint))
     var, forest_amount, rock_tan = F(s['variation']), F(s['forest']), F(np.tan(np.deg2rad(s['rock_slope'])))
     fp = float(footprint)
     shape = tuple(np.shape(height))
@@ -276,8 +278,13 @@ def _surface_material(height, gradient, tpi, point, north, footprint, soil, seas
     trees = trees*(1-F(.22)*ridge)+F(.14)*valley*sm(2, 10, t_hot)*sm(.4, 1.2, humid)*(1-outcrop)*forest_amount
     woods = cover(trees.clamp(0, 1), patch, .65*float(var))
     color = mix(color, canopy, woods)
-    beach = (1-sm(1.5, 6, height))*(1-sm(.05, .2, grade))*F(1-float(_smooth(40, 120, fp)))
-    color = mix(color, [.76, .70, .56], beach*F(.8)*(1-F(.5)*w_boreal))
+    flats = (1-sm(1.5, 6, height))*(1-sm(.05, .2, grade))
+    reach = fbm(point, 20000., 3, fp, salt+7)
+    width = F(30)+F(290)*sm(-.5, .5, sq(reach))
+    band = div(width-up(shore)+float(F(fp)), F(fp)).clamp(0, 1)
+    beach = band*(1-sm(4, 12, height))*(1-sm(.2, .5, grade))
+    color = mix(color, [.72, .67, .55], flats*F(1-float(_smooth(240, 960, fp)))*F(.8)*(1-F(.5)*w_boreal))
+    color = mix(color, [.80, .74, .59], beach*F(.85)*(1-F(.5)*w_boreal))
 
     py = point[..., 1]
     pp = point*point

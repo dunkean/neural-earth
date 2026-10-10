@@ -16,7 +16,7 @@ import terrain_render_torch as T
 TEMPERATE = [22, 500, .0065, 2, 500, .0065]
 FOOTPRINTS = [3.75, 30, 60, 240, 1920, 7680, 19531]
 SETTINGS = [None, {'variation': 2, 'forest': .2}, {'moisture': -.5, 'season': 0}, {'moisture': .7, 'season': .25, 'snow': .3},
-            {'rock_slope': 65, 'season': .9, 'vegetation_tint': [.9, 1, .8], 'rock_tint': [1, .9, .95], 'snow_color': [1, 1, .9]}]
+            {'rock_slope': 65, 'season': .9, 'vegetation_tint': [.9, 1, .8], 'rock_tint': [1, .9, .95], 'snow_color': [1, 1, .9]}, {'season': .6}]
 SOIL = np.array([.42, .32, .22, .46, .44, .40, .3, .3, .4], np.float32)
 
 
@@ -117,6 +117,18 @@ class TorchRenderTests(unittest.TestCase):
                     m, f = self.compare(case, fp, settings, bare, not bare, 'tile')
                     worst = max(worst, m); flips += int(f)
         print(f'tile fields: max diff {worst:.2e}, pixels over 1e-4: {flips}')
+
+    def test_coastal_lowlands_match_numpy(self):
+        case = direct_case()
+        y, x = np.mgrid[:64, :64].astype(np.float32)
+        case['height'] = (x*.6-12+np.sin(y*.4)*3).astype(np.float32)
+        case['gradient'] = np.stack(np.gradient(case['height'], 30.)[::-1], -1).astype(np.float32)
+        worst = flips = 0
+        for fp in FOOTPRINTS:
+            for settings in (None, {'season': .6}):
+                m, f = self.compare(case, fp, settings, False, False, 'coast')
+                worst = max(worst, m); flips += int(f)
+        self.assertEqual(flips, 0)
 
     def test_inputs_may_be_integer_north_scalar_tpi_and_flat_shapes(self):
         case = direct_case((2, 300))

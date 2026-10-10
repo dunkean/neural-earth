@@ -12,7 +12,7 @@ import json
 import hashlib
 from pathlib import Path
 import numpy as np
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, distance_transform_edt
 from terrain_soil import coordinates, seed_value, sample_soil
 from terrain_koppen import seasonal_fields
 
@@ -37,7 +37,8 @@ def parse_settings(value=None):
         value = json.loads(value)
     if value is not None and not isinstance(value,dict):
         raise ValueError('Render settings must be an object')
-    value = value or {}
+    # ``coasts`` toggled the coastal model while it was opt-in; it is always on now.
+    value = {k:v for k,v in (value or {}).items() if k!='coasts'}
     if set(value)-set(DEFAULTS):
         raise ValueError('Unknown Render settings')
     result = {k:list(v) if isinstance(v,list) else v for k,v in DEFAULTS.items()}
@@ -119,11 +120,29 @@ def cover(fraction, pattern, sharpness=.35):
     return c+F(np.clip(sharpness,0,1))*c*(1-c)*v
 
 
+def shore_distance(height, resolution):
+    """Metres from each sample centre to the nearest sea (height < 0) centre."""
+    sea = np.asarray(height)<0
+    if not sea.any():
+        return np.full(sea.shape,np.inf,F)
+    spacing = (resolution,resolution) if np.isscalar(resolution) else (resolution[1],resolution[0])
+    return distance_transform_edt(~sea,sampling=spacing).astype(F)
+
+
+def coast_band(shore, width, fp):
+    """Fraction of a sample covered by the strip within ``width`` of the sea:
+    the shoreline lies half a sample from the first land centre, so a beach
+    keeps its area (and mean colour) at every footprint."""
+    return np.clip((width-shore+F(fp))/F(fp),0,1)
+
+
 def surface_material(height, gradient, tpi, point, north, footprint, soil, seasons,
-                     salt, settings=None, bare=False, pedology=None):
+                     salt, settings=None, bare=False, pedology=None, shore=None):
     """Satellite-like albedo. ``seasons`` are sea-level ts, ps, lapse_s, tw, pw, lapse_w.
 
     ``bare`` returns the substrate (soil + exposed bedrock) used by the Soil layer.
+    ``shore`` (metres to the sea, see ``shore_distance``) is derived from
+    ``height`` when omitted.
     """
     s = parse_settings(settings)
     var, forest_amount, rock_tan = F(s['variation']), F(s['forest']), F(np.tan(np.deg2rad(s['rock_slope'])))
@@ -224,8 +243,16 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
     trees = trees*(1-F(.22)*ridge)+F(.14)*valley*smooth(2,10,t_hot)*smooth(.4,1.2,humid)*(1-outcrop)*forest_amount
     woods = cover(np.clip(trees,0,1),patch,.65*float(var))
     color = mix(color,canopy,woods)
-    beach = (1-smooth(1.5,6,height))*(1-smooth(.05,.2,grade))*F(1-float(smooth(40,120,fp)))
-    color = mix(color,[.76,.70,.56],beach*F(.8)*(1-F(.5)*w_boreal))
+    flats = (1-smooth(1.5,6,height))*(1-smooth(.05,.2,grade))
+    # Beaches: a strip along the sea, 30-320 m wide by coast stretch, kept
+    # as area coverage so wide ones stay visible at 240 m samples. Low flats
+    # behind it (estuary and river bars) stay as darker, wetter sediment.
+    shore = shore_distance(height,fp) if shore is None else np.asarray(shore,F)
+    reach = fbm(point,20000.,3,fp,salt+7)
+    width = F(30)+F(290)*smooth(-.5,.5,reach[0]*np.sqrt(reach[1]))
+    beach = coast_band(shore,width,fp)*(1-smooth(4,12,height))*(1-smooth(.2,.5,grade))
+    color = mix(color,[.72,.67,.55],flats*F(1-float(smooth(240,960,fp)))*F(.8)*(1-F(.5)*w_boreal))
+    color = mix(color,[.80,.74,.59],beach*F(.85)*(1-F(.5)*w_boreal))
 
     # Snow: seasonal and perennial, exposure-aware, sheds from steep ridges.
     gnorm = np.linalg.norm(gradient,axis=-1)
@@ -284,8 +311,9 @@ def colorize_surface(world,xs,ys,elevation,resolution,generation_settings,settin
     north = np.stack((nx,ny),axis=-1)
     north /= np.maximum(np.linalg.norm(north,axis=-1,keepdims=True),1e-5)
     if not spherical:north.fill(0)
+    shore = shore_distance(elevation,resolution)
     return material(elevation,gradient,tpi,point,north,step,soil,seasons,
-                    seed_value(getattr(getattr(world,'source',world),'seed',0)),settings,mode=='soil',pedology)
+                    seed_value(getattr(getattr(world,'source',world),'seed',0)),settings,mode=='soil',pedology,shore)
 
 
 def material(*args):

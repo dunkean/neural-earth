@@ -160,6 +160,7 @@ Runtime modules live in `backend/`, browser assets in `web/`, automated tests in
 
 - [Installation and troubleshooting](docs/installation.md)
 - [Architecture and neural generation](docs/architecture.md)
+- [Orogen modifications and upstream tracking](docs/orogen-maintenance.md)
 - [Layers](docs/layers.md), [biomes](docs/biomes.md) and [materials](docs/materials.md)
 - [Third-party provenance and licenses](THIRD_PARTY_NOTICES.md)
 
