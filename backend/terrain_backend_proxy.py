@@ -63,6 +63,8 @@ def child_environment(token,parent_pid):
     env=os.environ.copy()
     env.update(TERRAIN_EXACT_KERNELS='0',TERRAIN_ATTENTION_BACKEND='reference',
                TERRAIN_PROFILE='0',TERRAIN_PROFILE_CUDA='0',TERRAIN_PREWARM_BASE='0',
+               # The isolated comparison worker keeps one GPU and its own identity.
+               TERRAIN_GPU_MODE='single',
                TERRAIN_REFERENCE_WORKER_TOKEN=token,TERRAIN_REFERENCE_PARENT_PID=str(parent_pid))
     return env
 

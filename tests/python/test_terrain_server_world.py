@@ -15,6 +15,7 @@ _activate_repository()
 from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
 
 import ast
+from contextlib import nullcontext
 from collections import OrderedDict
 from copy import deepcopy
 from dataclasses import asdict
@@ -91,16 +92,20 @@ class ServerWorldConstructionTests(unittest.TestCase):
             profile_data=profile_data, deepcopy=deepcopy, _reference_manifest=reference,
             terrestrial_file_snapshot=lambda generator='native':deepcopy(reference['files']),
             lru_cache=lru_cache, hashlib=hashlib, json=json,
-            shared_pipeline=None, load_pipeline=self.loader, WorldPipeline=WorldPipeline,
+            load_pipeline=self.loader, WorldPipeline=WorldPipeline, COARSE_DEVICE=0,
             runtime_profile=profile, coarse_stream_setting={'coarse':1}, OUTPUT=Path(self.temporary.name),
             WORLD_BOUNDS=(-20e6, -10e6, 20e6, 10e6), profile_bounds=profile_bounds,
             CoarsePreparation=CoarsePreparation, worlds=OrderedDict(), active_seed=None,
+            all_gpu_locks=lambda:nullcontext([]), synchronize_gpus=Mock(),
             app=self.app, jsonify=jsonify, Response=Response, request=request,
             MODES=MODES+OROGEN_MODES+SNR_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=OROGEN_MODES,
             has_request_context=has_request_context, subprocess=subprocess,
             GenerationCancelled=GenerationCancelled, jobs=SimpleNamespace(paused=False), finish_generation=lambda token:None,
             pin_cache_io=lambda key:lambda function:function, TILE=256, NATIVE=30, MIN_LOD=-2,
             JobCancelled=JobCancelled, QueueFull=QueueFull)
+        # The real per-device runtime holder, with the coarse device as current.
+        self.runtime = SimpleNamespace(index=0, shared_pipeline=None, worlds=self.namespace['worlds'])
+        self.namespace['current_runtime'] = lambda: self.runtime
         self.namespace['physical_tile'] = lambda seed,lod,tx,ty,**options:self.namespace['get_world'](
             seed, request.args.get('world_profile', 'natural'))
         tree = ast.parse((source_path('terrain_server.py', root=ROOT)).read_text(encoding='utf-8'))
@@ -167,7 +172,7 @@ class ServerWorldConstructionTests(unittest.TestCase):
                 self.assertTrue(preparation._manifest_path.is_file())
                 self.assertEqual(preparation.network_windows, 0)
                 self.assertIs(get_world(42, profile), world)
-        self.loader.assert_called_once_with(42)
+        self.loader.assert_called_once_with(42, device=0)
 
     def test_coarse_admission_rejects_other_terrestrial_profile_and_retired_labels(self):
         world = self.namespace['get_world'](42, 'terrestrial-earthlike')

@@ -21,7 +21,7 @@ import time
 import traceback
 import numpy as np
 import torch
-from terrain_device import select_cuda_device
+from terrain_device import select_cuda_device, current_cuda_index
 # Set the selected ordinal before the server chooses its numerical/cache profile.
 GPU_SELECTION = select_cuda_device()
 from PIL import Image
@@ -54,46 +54,80 @@ app = Flask(__name__)
 lock = threading.Lock()
 state = {'busy': False, 'progress': 0, 'message': 'Ready', 'result': None}
 pipeline = None
+# One resident model copy per plan device; ``pipeline`` stays the primary one.
+pipelines = {}
+_pipeline_locks = {}
+_pipelines_lock = threading.Lock()
 gpu_calls = {'coarse': 0, 'base': 0, 'decoder': 0}
+gpu_calls_by_device = {}
 if (OUTPUT / 'terrain.json').exists():
     state['result'] = json.loads((OUTPUT / 'terrain.json').read_text())
 
 
-def load_pipeline(seed):
+def load_pipeline(seed, device=None):
+    """Resident models on ``device`` (default: this thread's plan device)."""
     global pipeline
     selected = select_cuda_device()
-    cuda_device = f"cuda:{selected['selected']['index']}"
+    index = current_cuda_index() if device is None else int(device)
+    cuda_device = f"cuda:{index}"
     if not torch.cuda.is_available():
         raise RuntimeError('CUDA unavailable: this demo requires an NVIDIA GPU.')
-    if pipeline is None:
-        torch.set_num_threads(8)
-        # Weight version counters must remain available for the immutable eval
-        # cache, even when the caller already uses torch.inference_mode().
-        with torch.inference_mode(False):
-            pipeline = WorldPipeline.from_pretrained(
-                resolve_model_source(), seed=seed, torch_compile=False, dtype='bf16',
-                latents_batch_size=16, log_mode='info', cache_limit=512 * 1024 * 1024,
-            ).to(cuda_device)
-        configure_world(pipeline)
-        pipeline.bind()
-        def check_cuda(name):
-            def hook(model, args):
-                if not args or not isinstance(args[0], torch.Tensor) or not args[0].is_cuda:
-                    raise RuntimeError(f'Inference {name} ran outside CUDA')
-                gpu_calls[name] += 1
-            return hook
-        for name, model in zip(gpu_calls, (pipeline.coarse_model, pipeline.base_model, pipeline.decoder_model)):
-            model.register_forward_pre_hook(check_cuda(name))
-            def note_graph_forwards(x,count,name=name):
-                if not x.is_cuda:
-                    raise RuntimeError(f'Inference {name} ran outside CUDA')
-                gpu_calls[name] += count
-            model._terrain_note_graph_forwards=note_graph_forwards
-    elif pipeline.seed != seed:
-        pipeline.change_seed(seed)
-    for model in (pipeline.coarse_model, pipeline.base_model, pipeline.decoder_model):
-        assert next(model.parameters()).is_cuda
-    return pipeline
+    with _pipelines_lock:
+        device_lock = _pipeline_locks.setdefault(index, threading.Lock())
+    # Devices load in parallel; one device never loads its models twice.
+    with device_lock:
+        loaded = pipelines.get(index)
+        if loaded is None:
+            torch.set_num_threads(8)
+            # Weight version counters must remain available for the immutable eval
+            # cache, even when the caller already uses torch.inference_mode().
+            with torch.inference_mode(False), torch.cuda.device(index):
+                loaded = WorldPipeline.from_pretrained(
+                    resolve_model_source(), seed=seed, torch_compile=False, dtype='bf16',
+                    latents_batch_size=16, log_mode='info', cache_limit=512 * 1024 * 1024,
+                ).to(cuda_device)
+                configure_world(loaded)
+                loaded.bind()
+            calls = gpu_calls_by_device.setdefault(index, {'coarse': 0, 'base': 0, 'decoder': 0})
+            def check_cuda(name):
+                def hook(model, args):
+                    if not args or not isinstance(args[0], torch.Tensor) or not args[0].is_cuda:
+                        raise RuntimeError(f'Inference {name} ran outside CUDA')
+                    gpu_calls[name] += 1
+                    calls[name] += 1
+                return hook
+            for name, model in zip(gpu_calls, (loaded.coarse_model, loaded.base_model, loaded.decoder_model)):
+                model.register_forward_pre_hook(check_cuda(name))
+                def note_graph_forwards(x,count,name=name):
+                    if not x.is_cuda:
+                        raise RuntimeError(f'Inference {name} ran outside CUDA')
+                    gpu_calls[name] += count
+                    calls[name] += count
+                model._terrain_note_graph_forwards=note_graph_forwards
+            pipelines[index] = loaded
+            if index == selected['selected']['index']:
+                pipeline = loaded
+        elif loaded.seed != seed:
+            loaded.change_seed(seed)
+        for model in (loaded.coarse_model, loaded.base_model, loaded.decoder_model):
+            assert next(model.parameters()).device.index == index
+    return loaded
+
+
+def release_pipeline(device):
+    """Drop one device's resident models (a GPU removed from the plan)."""
+    global pipeline
+    with _pipelines_lock:
+        device_lock = _pipeline_locks.setdefault(int(device), threading.Lock())
+    with device_lock:
+        loaded = pipelines.pop(int(device), None)
+        if loaded is not None and loaded is pipeline:
+            pipeline = None
+    if loaded is not None:
+        loaded.close()
+        del loaded
+        with torch.cuda.device(int(device)):
+            torch.cuda.empty_cache()
 
 
 @torch.inference_mode()

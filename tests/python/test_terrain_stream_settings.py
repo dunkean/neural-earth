@@ -10,6 +10,7 @@ _activate_repository()
 from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
 
 import ast
+from contextlib import nullcontext
 from collections import OrderedDict
 from pathlib import Path
 import tempfile
@@ -36,9 +37,10 @@ class StreamSettingsTests(unittest.TestCase):
                               coarse=SimpleNamespace(_batch_size=1),tile_store=object())
         original_store=world.tile_store
         setting={'coarse':4}
-        namespace=dict(app=app,jsonify=jsonify,request=request,gpu_lock=threading.RLock(),
-            coarse_stream_setting=setting,shared_pipeline=world,background_world=world,
-            worlds=OrderedDict(a=world),preview_worlds={},polar_worlds={})
+        # One device runtime whose shared, background and foreground slots hold the same world.
+        runtime=SimpleNamespace(live_worlds=lambda:[world,world,world])
+        namespace=dict(app=app,jsonify=jsonify,request=request,
+            all_gpu_locks=lambda:nullcontext([runtime]),coarse_stream_setting=setting)
         source=(source_path('terrain_server.py', root=_REPO_ROOT))
         tree=ast.parse(source.read_text(encoding='utf-8'))
         node=next(n for n in tree.body if getattr(n,'name',None)=='inference_stream_settings')

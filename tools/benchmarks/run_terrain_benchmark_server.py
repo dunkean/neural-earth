@@ -16,13 +16,15 @@ if args.source_dir:
     sys.path.insert(0, str(source_modules))
 import torch
 import terrain_server as server
+# Multi-GPU servers keep models per device; frozen older sources use a global.
+runtime=server.current_runtime() if hasattr(server,'current_runtime') else server
 with server.gpu_lock,torch.inference_mode():
     server.preload_state['state']='loading'
-    server.shared_pipeline=server.load_pipeline(42)
+    runtime.shared_pipeline=server.load_pipeline(42)
     server.preload_state['state']='warming'
-    server.sample_elevation(server.shared_pipeline,0,0,0)
+    server.sample_elevation(runtime.shared_pipeline,0,0,0)
     if args.prewarm_base and hasattr(server,'warm_base_forms'):
-        server.preload_state['base_forms']=server.warm_base_forms(server.shared_pipeline)
-    server.shared_pipeline.empty_cache()
+        server.preload_state['base_forms']=server.warm_base_forms(runtime.shared_pipeline)
+    runtime.shared_pipeline.empty_cache()
     server.preload_state['state']='ready'
 server.app.run(host='127.0.0.1',port=args.port,threaded=True,use_reloader=False)

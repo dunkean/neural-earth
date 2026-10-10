@@ -180,6 +180,11 @@ class CoarsePreparation:
         self.persistence_seconds = 0.0
         self.disk_budget_exhausted = False
         self._model_f = None
+        # Multi-GPU: ``remote(indices)`` computes and persists missing windows on
+        # the plan's coarse device. This world then never runs the coarse model,
+        # so one world never mixes coarse windows from different GPU models.
+        self.remote = None
+        self.remote_windows = 0
 
     @property
     def _disk_bytes(self):
@@ -349,11 +354,18 @@ class CoarsePreparation:
                 else:
                     outputs[position] = cached.to(tensor.device)
             if missing:
+                remote = preparation.remote
                 start = perf_counter()
-                computed = original(missing, *args)
+                computed = remote(missing, *args) if remote is not None else original(missing, *args)
                 preparation.model_submission_seconds += perf_counter() - start
                 if len(computed) != len(missing):
                     raise RuntimeError('Coarse model returned an incomplete batch')
+                if remote is not None:
+                    # The coarse device already queued these windows for disk.
+                    for position, output in zip(missing_positions, computed):
+                        outputs[position] = output.to(tensor.device)
+                        preparation.remote_windows += 1
+                    return outputs
                 persistence_start = perf_counter()
                 for position, index, output in zip(missing_positions, missing, computed):
                     preparation._save_window(index, output)
@@ -730,11 +742,11 @@ class CoarsePreparation:
         total = len(self._indices)
         if len(self._persisted_indices) >= total or self.disk_budget_exhausted:
             return self.status()
-        generated_before = self.network_windows
+        generated_before = self.network_windows + self.remote_windows
         examined = 0
-        while examined < total and self.network_windows - generated_before < budget_windows:
+        while examined < total and self.network_windows + self.remote_windows - generated_before < budget_windows:
             group = []
-            remaining = budget_windows - (self.network_windows - generated_before)
+            remaining = budget_windows - (self.network_windows + self.remote_windows - generated_before)
             group_size = min(remaining, self._tensor.batch_size or 1)
             while examined < total and len(group) < group_size:
                 if self._priority_order is None:
@@ -776,6 +788,11 @@ class CoarsePreparation:
                     if check is not None:
                         check()
                     start = perf_counter()
+                    if self.remote is not None:
+                        self.remote([index])
+                        self.model_submission_seconds += perf_counter() - start
+                        self.remote_windows += 1
+                        continue
                     output = self._model_f([index])[0]
                     self.model_submission_seconds += perf_counter() - start
                     persist_start = perf_counter()
@@ -792,7 +809,7 @@ class CoarsePreparation:
             # intermediate quanta leave disk work off the compute lane.
             self.flush()
         self._save_cursor()
-        return dict(self.status(), quantum_windows=self.network_windows-generated_before)
+        return dict(self.status(), quantum_windows=self.network_windows+self.remote_windows-generated_before)
 
     def _required_indices(self, i1, j1, i2, j2):
         region = (slice(0, self._tensor.shape[0]), slice(i1, i2), slice(j1, j2))
@@ -927,6 +944,7 @@ class CoarsePreparation:
                     total_windows=total, coverage=complete/total if total else 1.0,
                     cursor=self._cursor, disk_hits=self.disk_hits,
                     network_windows=self.network_windows,
+                    remote_windows=self.remote_windows, remote_coarse=self.remote is not None,
                     model_synchronized_seconds=round(self.model_synchronized_seconds, 6),
                     model_submission_seconds=round(self.model_submission_seconds, 6),
                     model_timing='host submission only; no device synchronization',

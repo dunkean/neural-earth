@@ -76,6 +76,7 @@ class NativeCoarseTests(unittest.TestCase):
             native_coarse_ready=lambda *args:state['ready'],
             native_coarse_cache=OrderedDict(),native_coarse_cache_lock=threading.Lock(),
             nullcontext=nullcontext,measured_lock=lambda *args:nullcontext(),gpu_lock=None,
+            current_runtime=lambda:SimpleNamespace(lock=None),
             time=time,jobs=SimpleNamespace(submit=submit,check_current_interest=lambda:None),
             conditioning_preview=preview,get_world=lambda *args:None,
             transport_climate=lambda seed,profile,x,y,climate:climate,

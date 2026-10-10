@@ -9,12 +9,14 @@ import math
 import os
 from collections import OrderedDict
 from functools import wraps
-from contextlib import nullcontext
+from contextlib import nullcontext, contextmanager, ExitStack
 import re
 import subprocess
+import sys
 import threading
 import time
 import uuid
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -56,7 +58,6 @@ from functools import lru_cache
 app = Flask(__name__)
 from terrain_backend_proxy import register_backend_proxy
 register_backend_proxy(app)
-gpu_lock = threading.RLock()
 image_slots = threading.BoundedSemaphore(2)
 TILE = 256
 HALO = 24
@@ -64,6 +65,141 @@ NATIVE = 30
 VERSION = 'natural-v1'
 GPU_SELECTION = getattr(terrain_runtime, 'GPU_SELECTION', None)
 SELECTED_DEVICE = GPU_SELECTION['selected']['index'] if GPU_SELECTION else 0
+import terrain_device
+GPU_SETTINGS_PATH = OUTPUT / 'gpu-settings.json'
+# Startup environment overrides win over the menu and are reported as locked.
+GPU_ENVIRONMENT = terrain_device.environment_gpu_settings()
+
+
+def visible_gpus():
+    return GPU_SELECTION['visible_devices'] if GPU_SELECTION else []
+
+
+def resolve_plan(settings):
+    devices = visible_gpus()
+    if not devices:
+        return dict(requested_mode='single', mode='single', reason='no CUDA inventory',
+                    coarse_device=SELECTED_DEVICE, detail_devices=[SELECTED_DEVICE],
+                    devices=[SELECTED_DEVICE], settings=terrain_device.default_gpu_settings(), eligible=[])
+    return terrain_device.resolve_gpu_plan(devices, SELECTED_DEVICE, dict(settings, **GPU_ENVIRONMENT))
+
+
+gpu_settings = (terrain_device.load_gpu_settings(GPU_SETTINGS_PATH, visible_gpus()) if visible_gpus()
+                else terrain_device.default_gpu_settings())
+gpu_plan = resolve_plan(gpu_settings)
+# Every learned coarse window of this process comes from this device. It is
+# part of the cache identity; changing it requires a server restart.
+COARSE_DEVICE = gpu_plan['coarse_device']
+COARSE_GPU = next((d for d in visible_gpus() if d['index'] == COARSE_DEVICE),
+                  GPU_SELECTION['selected'] if GPU_SELECTION else None)
+
+
+class DeviceRuntime:
+    """Resident models, seed-local worlds and the compute lock of one GPU."""
+    def __init__(self, index, lock=None):
+        self.index = index
+        self.lock = lock or threading.RLock()
+        self.shared_pipeline = None
+        self.worlds = OrderedDict()
+        self.preview_worlds = OrderedDict()
+        self.polar_worlds = OrderedDict()
+        self.background_world = None
+        self.background_world_key = None
+        self.preload = dict(state='idle')
+
+    def live_worlds(self):
+        return [w for w in (self.shared_pipeline, self.background_world, *self.worlds.values(),
+                            *self.preview_worlds.values(), *self.polar_worlds.values()) if w is not None]
+
+
+runtimes = {COARSE_DEVICE: DeviceRuntime(COARSE_DEVICE)}
+runtimes_lock = threading.Lock()
+_runtime_local = threading.local()
+# Historical names: the coarse device's lock and stores.
+gpu_lock = runtimes[COARSE_DEVICE].lock
+worlds = runtimes[COARSE_DEVICE].worlds
+preview_worlds = runtimes[COARSE_DEVICE].preview_worlds
+polar_worlds = runtimes[COARSE_DEVICE].polar_worlds
+preload_state = runtimes[COARSE_DEVICE].preload
+
+
+def runtime_for(index):
+    with runtimes_lock:
+        runtime = runtimes.get(index)
+        if runtime is None:
+            runtime = runtimes[index] = DeviceRuntime(index)
+        return runtime
+
+
+def current_runtime():
+    return getattr(_runtime_local, 'runtime', None) or runtimes[COARSE_DEVICE]
+
+
+@contextmanager
+def using_runtime(runtime):
+    """Run this thread's terrain calls against another device's stores."""
+    previous = getattr(_runtime_local, 'runtime', None)
+    _runtime_local.runtime = runtime
+    try:
+        with (terrain_device.using_device(runtime.index) if GPU_SELECTION else nullcontext()):
+            yield runtime
+    finally:
+        _runtime_local.runtime = previous
+
+
+@contextmanager
+def all_gpu_locks():
+    """Exclusive use of every GPU. Lock order: detail devices, coarse device last.
+
+    A detail worker may wait for the coarse lock while holding its own (remote
+    coarse windows); the coarse device never waits for another device.
+    """
+    with runtimes_lock:
+        ordered = sorted((r for r in runtimes.values() if r.index != COARSE_DEVICE), key=lambda r: r.index)
+        ordered.append(runtimes[COARSE_DEVICE])
+    with ExitStack() as stack:
+        for runtime in ordered:
+            stack.enter_context(runtime.lock)
+        yield ordered
+
+
+def synchronize_gpus():
+    with runtimes_lock:
+        indices = sorted(runtimes)
+    for index in indices:
+        torch.cuda.synchronize(index)
+
+
+def gpu_label():
+    names = {d['index']: d['name'] for d in visible_gpus()}
+    if not names:
+        return torch.cuda.get_device_name(SELECTED_DEVICE)
+    return ' + '.join(names.get(index, f'GPU {index}') for index in gpu_plan['devices'])
+
+
+def device_provenance(index):
+    """Tile receipt: which GPU ran the latent/decoder networks of this tile."""
+    device = next((d for d in visible_gpus() if d['index'] == index), None)
+    return dict(device=index, device_name=device['name'] if device else None,
+                device_uuid=device['uuid'] if device else None, coarse_device_uuid=COARSE_GPU['uuid'] if COARSE_GPU else None)
+
+
+def route_job(job):
+    """Allowed devices for a queued GPU job, under the live plan."""
+    plan = gpu_plan
+    if job.role == 'detail':
+        return plan['detail_devices']
+    # Coarse tiles, native coarse transport, background preparation and any
+    # unlabelled job stay on the device that owns learned coarse windows.
+    return (plan['coarse_device'],)
+
+
+def bind_gpu_worker(index):
+    if GPU_SELECTION:
+        terrain_device.bind_thread_device(index)
+    _runtime_local.runtime = runtime_for(index)
+
+
 try:
     from terrain_inference import choose_profile, VERSION as INFERENCE_VERSION
 except ImportError as exc:
@@ -77,12 +213,14 @@ else:
     profile_data.pop('name', None)  # Free memory is not an identity of numerical output.
     profile_data.pop('coarse_streams', None)  # Batch-one execution count preserves physical output.
 coarse_stream_setting = {'coarse': runtime_profile.coarse_streams if runtime_profile else 1}
+# Numerical identity follows the coarse device: it decides every learned coarse
+# window. In single-GPU mode it is the selected device, as before multi-GPU.
 profile_data.update(model_revision=getattr(terrain_runtime, 'MODEL_REVISION', 'unversioned'),
-    torch=str(torch.__version__), cuda=torch.version.cuda, cuda_device=SELECTED_DEVICE,
-    compute_capability=GPU_SELECTION['selected']['compute_capability'] if GPU_SELECTION else None,
+    torch=str(torch.__version__), cuda=torch.version.cuda, cuda_device=COARSE_DEVICE,
+    compute_capability=COARSE_GPU['compute_capability'] if COARSE_GPU else None,
     driver=GPU_SELECTION.get('driver') if GPU_SELECTION else None)
-if GPU_SELECTION:
-    profile_data.update(gpu_name=GPU_SELECTION['selected']['name'],gpu_uuid=GPU_SELECTION['selected']['uuid'])
+if COARSE_GPU:
+    profile_data.update(gpu_name=COARSE_GPU['name'],gpu_uuid=COARSE_GPU['uuid'])
 profile_data.update(physical_lod_version='bandlimit-climate-v3')
 profile_data.update(refinement_version=REFINEMENT_VERSION, refinement_min_lod=MIN_LOD)
 from terrain_world import WORLD_VERSION, profile_metadata
@@ -100,12 +238,10 @@ CACHE.mkdir(parents=True, exist_ok=True)
 PHYSICAL_CACHE = CACHE / 'physical-v1'
 PHYSICAL_CACHE.mkdir(exist_ok=True)
 active_seed = None
-shared_pipeline = None
-preload_state = dict(state='idle')
-worlds = OrderedDict()
-background_world_key = None
-background_world = None
-jobs = TerrainJobs()
+jobs = TerrainJobs(cpu_workers=2 if len(visible_gpus()) < 2 else len(visible_gpus())+1,
+                   gpu_lanes=max(1, len(visible_gpus())))
+jobs.configure_gpus(gpu_plan['devices'], route_job, bind_gpu_worker)
+terrain_device.set_multi_gpu_workers(len(gpu_plan['devices']) > 1)
 physical_delivery = PhysicalDelivery()
 physical_locks = [threading.RLock() for _ in range(64)]
 disk_cache = TerrainDiskCache(CACHE, VERSION,
@@ -224,9 +360,10 @@ def clip_world_axes(xs, ys, profile):
 
 
 def _create_world(seed, world_profile, cache_limit, *, polar=False):
-    global shared_pipeline
-    if shared_pipeline is None:
-        shared_pipeline = load_pipeline(seed)
+    runtime = current_runtime()
+    if runtime.shared_pipeline is None:
+        runtime.shared_pipeline = load_pipeline(seed, device=runtime.index)
+    shared_pipeline = runtime.shared_pipeline
     # Seed-local mutable caches; neural weights remain shared on the GPU.
     config = {k:v for k,v in dict(shared_pipeline.config).items() if not k.startswith('_')}
     config.update(seed=seed, latents_batch_size=16, dtype='bf16',
@@ -248,11 +385,37 @@ def _create_world(seed, world_profile, cache_limit, *, polar=False):
         if polar:
             from terrain_polar import chart_manifest
             world._terrain_manifest = chart_manifest(world._terrain_manifest)
-        CoarsePreparation(OUTPUT/'coarse-worlds',world._terrain_manifest,bounds=profile_bounds(world_profile)).install(world)
+        preparation=CoarsePreparation(OUTPUT/'coarse-worlds',world._terrain_manifest,bounds=profile_bounds(world_profile)).install(world)
+        if runtime.index != COARSE_DEVICE:
+            preparation.remote = remote_coarse(seed, world_profile, polar=polar)
     except ValueError as exc:
         world.close()
         raise RuntimeError(f'Coarse world admission failed: {exc}') from exc
+    world._terrain_device = runtime.index
     return world
+
+
+def remote_coarse(seed, world_profile, *, polar=False):
+    """Missing coarse windows of a detail-device world, computed on the coarse GPU.
+
+    Runs in the detail worker thread, which already owns its own device lock;
+    taking the coarse lock second is the global lock order. The coarse world's
+    persisted model function loads or computes and queues each window for disk.
+    """
+    def compute(indices, *args):
+        runtime = runtime_for(COARSE_DEVICE)
+        with measured_lock(runtime.lock, 'coarse.remote_lock_wait'), using_runtime(runtime), torch.inference_mode():
+            world = get_polar_world(seed, world_profile) if polar else get_world(seed, world_profile, foreground=False)
+            with span('coarse.remote_windows', windows=len(indices), device=runtime.index):
+                # Groups follow the coarse world's own stream count, so a group
+                # is never solved as one multi-window network batch.
+                size = max(1, world.coarse._batch_size or 1)
+                outputs = []
+                for start in range(0, len(indices), size):
+                    outputs.extend(world.coarse._f(list(indices[start:start+size]), *args))
+                # One synchronising host copy; this GPU pair has no peer access.
+                return [output.detach().to('cpu', dtype=torch.float32) for output in outputs]
+    return compute
 
 
 preview_worlds=OrderedDict()
@@ -269,6 +432,7 @@ def close_world(world):
 
 def get_preview_world(seed,profile):
     # Preview batch composition must never populate the final latent store.
+    preview_worlds=current_runtime().preview_worlds
     key=(profile,seed)
     if key not in preview_worlds:
         preview_worlds[key]=_create_world(seed,profile,128*1024*1024)
@@ -281,6 +445,7 @@ def get_preview_world(seed,profile):
 
 def get_polar_world(seed,profile,*,preview=False):
     # Approximate latent batching remains isolated from the final chart store.
+    polar_worlds=current_runtime().polar_worlds
     key=(profile,seed,preview)
     if key not in polar_worlds:
         polar_worlds[key]=_create_world(seed,profile,128*1024*1024,polar=True)
@@ -302,31 +467,35 @@ def warm_base_forms(world):
     return dict(result,warmup_cuda_forward_calls={key:gpu_calls[key]-before[key] for key in before})
 
 
-def warm_graphs(world):
+def warm_graphs(world, *, coarse=True, state=None):
+    """Capture graphs; ``coarse=False`` on detail-only GPUs that never run it."""
     from terrain_inference import prewarm_coarse_graphs, set_coarse_streams
     from terrain_cuda_graphs import prewarm_decoder_form
+    state = preload_state if state is None else state
     set_coarse_streams(world, coarse_stream_setting['coarse'])
-    stages = [('coarse', lambda: prewarm_coarse_graphs(world))]
+    stages = [('coarse', lambda: prewarm_coarse_graphs(world))] if coarse else []
     if os.environ.get('TERRAIN_PREWARM_BASE', '1') == '1':
         stages.append(('base', lambda: warm_base_forms(world)))
     stages.append(('decoder', lambda: prewarm_decoder_form(world.decoder_model, world.decoder_tile_size)))
     results = {}
     for name, prepare in stages:
-        preload_state['warming_model'] = name
+        state['warming_model'] = name
         try:
             results[name] = prepare()
         except Exception as exc:
             # Optional capture failure must not discard resident usable weights.
             results[name] = dict(enabled=True, fully_warmed=False, state='failed',
                                  error=f'{type(exc).__name__}: {exc}'[:400])
-    preload_state.pop('warming_model', None)
+    state.pop('warming_model', None)
     return dict(models=results, fully_warmed=all(
         not result.get('enabled') or result.get('fully_warmed', False) for result in results.values()))
 
 
-def get_world(seed, world_profile='natural'):
+def get_world(seed, world_profile='natural', *, foreground=True):
     global active_seed
-    active_seed = seed
+    if foreground:
+        active_seed = seed
+    worlds = current_runtime().worlds
     world_key=(world_profile,seed)
     if world_key in worlds:
         worlds.move_to_end(world_key)
@@ -342,33 +511,34 @@ def get_world(seed, world_profile='natural'):
 
 
 def prepare_coarse_quantum(seed, profile, *, budget_windows=1):
-    global background_world, background_world_key
-    with gpu_lock, torch.inference_mode():
+    runtime = current_runtime()
+    with runtime.lock, torch.inference_mode():
         jobs.check_current_interest()
         world_manifest(seed, profile)
         mask = scheduling_land_mask(seed, profile)
         key=(profile,seed)
-        if background_world_key != key:
-            if background_world is not None:
-                close_world(background_world)
-            background_world = None
-            background_world_key = None
+        if runtime.background_world_key != key:
+            if runtime.background_world is not None:
+                close_world(runtime.background_world)
+            runtime.background_world = None
+            runtime.background_world_key = None
             # One bounded seed-local workspace shares neural weights but never
             # enters the foreground LRU or changes its active seed.
-            background_world = _create_world(seed,profile,64*1024*1024)
-            background_world_key = key
-        world=background_world
+            runtime.background_world = _create_world(seed,profile,64*1024*1024)
+            runtime.background_world_key = key
+        world=runtime.background_world
         world._terrain_coarse_preparation.prioritize(mask, coarse_background.focus(seed, profile))
         return world._terrain_coarse_preparation.step(world,budget_windows=budget_windows)
 
 
 def _available_world(seed, profile):
     """Find a prepared world without loading models for untouched previews."""
-    world=worlds.get((profile,seed))
+    runtime=current_runtime()
+    world=runtime.worlds.get((profile,seed))
     if world is not None:
         return world
-    if background_world_key==(profile,seed):
-        return background_world
+    if runtime.background_world_key==(profile,seed):
+        return runtime.background_world
     # After a background world is replaced or a server restart, persisted
     # windows must still be discoverable by a foreground high-LOD request.
     probe=CoarsePreparation(OUTPUT/'coarse-worlds',world_manifest(seed,profile),
@@ -390,12 +560,11 @@ def inference_stream_settings():
         count = data.get('coarse') if isinstance(data, dict) else None
         if type(count) is not int or count not in (1,2,4,8,16):
             return jsonify(error='Coarse streams must be 1, 2, 4, 8 or 16'),400
-        with gpu_lock:
+        with all_gpu_locks() as locked:
             if count == coarse_stream_setting['coarse']:
                 return jsonify(**coarse_stream_setting, options=[1,2,4,8,16])
             from terrain_inference import set_coarse_streams
-            live = [shared_pipeline, background_world, *worlds.values(),
-                    *preview_worlds.values(), *polar_worlds.values()]
+            live = [world for runtime in locked for world in runtime.live_worlds()]
             owners = set()
             for world in live:
                 if world is None:
@@ -435,8 +604,8 @@ def terrain_suspend():
     """Drain a reference worker before the parent uses the shared GPU."""
     if (request.get_json() or {}).get('paused',True):
         generation_coordinator.suspend(True)
-        with gpu_lock:
-            torch.cuda.synchronize(SELECTED_DEVICE)
+        with all_gpu_locks():
+            synchronize_gpus()
     else:
         generation_coordinator.suspend(False)
     return jsonify(paused=jobs.paused)
@@ -458,7 +627,7 @@ def coarse_prepare():
         with generation_coordinator.lock:
             if generation_coordinator.current is not None or jobs.paused:
                 return jsonify(error='A world is being generated',state='paused'),409
-        with gpu_lock:
+        with all_gpu_locks():
             if jobs.paused:
                 return jsonify(error='A world is being generated',state='paused'),409
             world_manifest(seed, profile)
@@ -759,27 +928,40 @@ def existing_final_mip(seed,profile,lod,tx,ty):
         return None
 
 
+def probe_coarse_preparation(seed, profile, ready):
+    """``ready(preparation)`` with any idle device's resident world, else None.
+
+    All devices share one persisted coarse namespace per world. A busy GPU must
+    never hold a ready preview hostage, and probing cannot load a world or evict
+    an LRU. False means every device was idle and none holds this world.
+    """
+    with runtimes_lock:
+        candidates = [runtimes[COARSE_DEVICE], *(r for i, r in sorted(runtimes.items()) if i != COARSE_DEVICE)]
+    unknown = False
+    for runtime in candidates:
+        if not runtime.lock.acquire(blocking=False):
+            unknown = True
+            continue
+        try:
+            world=runtime.worlds.get((profile,seed))
+            if world is None and runtime.background_world_key==(profile,seed):
+                world=runtime.background_world
+            preparation=getattr(world,'_terrain_coarse_preparation',None)
+            if preparation is not None:
+                return ready(preparation)
+        finally:
+            runtime.lock.release()
+    return None if unknown else False
+
+
 def learned_tile_state(seed, profile, lod, tx, ty):
     if lod<7:
         return False
-    # This is also called on HTTP cache hits. A busy GPU must never hold a
-    # ready preview hostage, and probing cannot load a world or evict the LRU.
-    if not gpu_lock.acquire(blocking=False):
-        return None
-    try:
-        world=worlds.get((profile,seed))
-        if world is None and background_world_key==(profile,seed):
-            world=background_world
-        preparation=getattr(world,'_terrain_coarse_preparation',None)
-        if preparation is None:
-            return False
-        step=2**lod
-        xs=tx*TILE*step+(np.arange(-HALO,TILE+HALO)+.5)*step
-        ys=ty*TILE*step+(np.arange(-HALO,TILE+HALO)+.5)*step
-        xs, ys = clip_world_axes(xs, ys, profile)
-        return _learned_ready(preparation,xs,ys,lod,tx,ty)
-    finally:
-        gpu_lock.release()
+    step=2**lod
+    xs=tx*TILE*step+(np.arange(-HALO,TILE+HALO)+.5)*step
+    ys=ty*TILE*step+(np.arange(-HALO,TILE+HALO)+.5)*step
+    xs, ys = clip_world_axes(xs, ys, profile)
+    return probe_coarse_preparation(seed, profile, lambda preparation: _learned_ready(preparation,xs,ys,lod,tx,ty))
 
 
 def learned_tile_ready(seed, profile, lod, tx, ty):
@@ -941,7 +1123,7 @@ def metadata(seed, world_profile=None):
             'refinement_experimental':True, 'refinement_disk_cache':False,
             'initial_bounds':bounds, 'initial_image':initial_image,
             'overview_bounds':overview_bounds,
-            'overview':f'/api/overview/{VERSION}/{seed}.png?profile={PROFILE}&world_profile={world_profile}&appearance={APPEARANCE_IDENTITY}', 'gpu':torch.cuda.get_device_name(SELECTED_DEVICE),
+            'overview':f'/api/overview/{VERSION}/{seed}.png?profile={PROFILE}&world_profile={world_profile}&appearance={APPEARANCE_IDENTITY}', 'gpu':gpu_label(),
             'climate_format':'baseline-BIO4-BIO12-BIO15-beta-f32','climate_width':CLIMATE_SIZE,
             'preview_min_lod':7,'preview_label':'Preview of the five network inputs (without NN)',
             'bootstrap_raster_spacing_m': None if not descriptor.needs_bootstrap else
@@ -1038,8 +1220,8 @@ def status():
             inference = inference_status(next(reversed(worlds.values())))
     except ImportError:
         pass
-    return jsonify(version=VERSION, cache_profile=PROFILE, gpu=torch.cuda.get_device_name(SELECTED_DEVICE), cuda=torch.version.cuda,
-                   device_selection=GPU_SELECTION, model_preload=dict(preload_state),
+    return jsonify(version=VERSION, cache_profile=PROFILE, gpu=gpu_label(), cuda=torch.version.cuda,
+                   device_selection=GPU_SELECTION, model_preload=dict(preload_state), gpus=gpu_status(),
                    active_seed=str(active_seed), cached_seeds=[str(s[1]) for s in worlds],
                    metrics=dict(metrics), scheduler=jobs.status(), disk_cache=disk_cache.status(),
                    physical_delivery=physical_delivery.status(), inference=inference,
@@ -1050,6 +1232,164 @@ def status():
                        isolated_final_store=True),
                    coarse_preparation=coarse_background.status(),
                    cuda_forward_calls=dict(gpu_calls))
+
+
+RESTART_COMMAND = None  # Set when this file is the server entry point.
+STARTED_AT = time.time()
+gpu_settings_lock = threading.Lock()
+
+
+def gpu_status():
+    lanes = {lane['device']: lane for lane in jobs.status()['gpu_lanes']}
+    calls = getattr(terrain_runtime, 'gpu_calls_by_device', {})
+    pending = resolve_plan(gpu_settings)
+    enabled = gpu_settings['devices']
+    devices = []
+    for device in visible_gpus():
+        index = device['index']
+        runtime = runtimes.get(index)
+        roles = [role for role, member in (('coarse', index == gpu_plan['coarse_device']),
+                                           ('detail', index in gpu_plan['detail_devices'])) if member]
+        lane = lanes.get(index) or {}
+        devices.append(dict(index=index, uuid=device['uuid'], name=device['name'],
+            memory_bytes=device['memory_bytes'], compute_capability=device['compute_capability'],
+            eligible=terrain_device.multi_gpu_eligible(device), primary=index == SELECTED_DEVICE,
+            enabled=enabled == 'auto' or device['uuid'] in enabled, roles=roles,
+            preload=dict(runtime.preload) if runtime else None,
+            tiles=lane.get('completed', 0), failed=lane.get('failed', 0), cancelled=lane.get('cancelled', 0),
+            compute_seconds=lane.get('compute_seconds', 0.0), current_job=lane.get('current'),
+            affinity_steals=lane.get('steals', 0), forward_calls=dict(calls.get(index, {}))))
+    plan = {k: v for k, v in gpu_plan.items() if k != 'settings'}
+    return dict(settings=gpu_settings, environment=sorted(GPU_ENVIRONMENT), plan=plan,
+                pending_plan={k: v for k, v in pending.items() if k != 'settings'},
+                restart_required=pending['coarse_device'] != COARSE_DEVICE,
+                coarse_device=COARSE_DEVICE, modes=list(terrain_device.GPU_MODES), devices=devices,
+                restart_available=RESTART_COMMAND is not None, pid=os.getpid(), started_at=STARTED_AT)
+
+
+def release_runtime(index):
+    """Free a GPU removed from the plan once its running tile has finished."""
+    runtime = runtimes.get(index)
+    if runtime is None or index == COARSE_DEVICE:
+        return
+    with runtime.lock:
+        if index in gpu_plan['devices']:
+            return  # Re-enabled meanwhile.
+        for world in [runtime.background_world, *runtime.worlds.values(),
+                      *runtime.preview_worlds.values(), *runtime.polar_worlds.values()]:
+            if world is not None:
+                close_world(world)
+        runtime.worlds.clear();runtime.preview_worlds.clear();runtime.polar_worlds.clear()
+        runtime.background_world = runtime.background_world_key = None
+        runtime.shared_pipeline = None
+        release = getattr(terrain_runtime, 'release_pipeline', None)
+        if release is not None:
+            release(index)
+        runtime.preload.clear();runtime.preload.update(state='released')
+
+
+def warm_device(index):
+    runtime = runtime_for(index)
+    state = runtime.preload
+    try:
+        with using_runtime(runtime), runtime.lock, torch.inference_mode(), span('startup.load_models', device=index):
+            if index not in gpu_plan['devices']:
+                return
+            state.update(state='loading', error=None)
+            if runtime.shared_pipeline is None:
+                runtime.shared_pipeline = load_pipeline(42, device=index)
+            if os.environ.get('TERRAIN_PREWARM', '1') == '1':
+                state.update(state='warming')
+                try:
+                    state['cuda_graphs'] = warm_graphs(runtime.shared_pipeline, coarse=index == COARSE_DEVICE, state=state)
+                finally:
+                    runtime.shared_pipeline.empty_cache()
+            state.update(state='ready')
+    except Exception as exc:
+        state.update(state='failed',error=str(exc)[:400])
+        # The request path remains able to retry a transient load failure.
+        print(f'Model preloading failed on GPU {index}: {exc}', flush=True)
+
+
+def preload_devices(indices):
+    for index in indices:
+        threading.Thread(target=warm_device, args=(index,), name=f'terrain-model-preload-gpu{index}', daemon=True).start()
+
+
+def apply_gpu_plan(plan):
+    """Live change of detail devices; the coarse device is fixed per process."""
+    global gpu_plan
+    if plan['coarse_device'] != COARSE_DEVICE:
+        raise ValueError('Changing the coarse GPU requires a server restart')
+    previous, gpu_plan = gpu_plan, plan
+    jobs.configure_gpus(plan['devices'], route_job, bind_gpu_worker)
+    terrain_device.set_multi_gpu_workers(len(plan['devices']) > 1)
+    added = [index for index in plan['devices'] if index not in previous['devices']]
+    if added and os.environ.get('TERRAIN_PRELOAD_MODELS', '1') == '1':
+        preload_devices(added)
+    for index in previous['devices']:
+        if index not in plan['devices']:
+            threading.Thread(target=release_runtime, args=(index,), name=f'terrain-release-gpu{index}', daemon=True).start()
+
+
+@app.route('/api/gpu', methods=['GET', 'POST'])
+def gpu_settings_api():
+    global gpu_settings
+    if request.method == 'POST':
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify(error='GPU settings must be a JSON object'), 400
+        locked = sorted(set(data) & set(GPU_ENVIRONMENT))
+        if locked:
+            return jsonify(error='Set by the server environment: ' + ', '.join(locked), locked=locked), 409
+        if not visible_gpus():
+            return jsonify(error='No CUDA inventory available'), 409
+        try:
+            with gpu_settings_lock:
+                settings = terrain_device.validate_gpu_settings(dict(gpu_settings, **data), visible_gpus())
+                plan = resolve_plan(settings)
+                terrain_device.save_gpu_settings(GPU_SETTINGS_PATH, settings)
+                gpu_settings = settings
+                if plan['coarse_device'] == COARSE_DEVICE:
+                    apply_gpu_plan(plan)
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+    return jsonify(gpu_status())
+
+
+def _shutdown_for_restart():
+    time.sleep(.5)  # Let the HTTP response reach the browser.
+    try:
+        coarse_background.close()
+        with all_gpu_locks() as locked:
+            # Drain queued coarse windows to disk before the process exits.
+            for runtime in locked:
+                for world in runtime.live_worlds():
+                    preparation = getattr(world, '_terrain_coarse_preparation', None)
+                    if preparation is not None:
+                        preparation.flush(timeout=30)
+        worker = app.extensions.get('terrain_reference_worker')
+        if worker is not None:
+            worker.close()
+        physical_delivery.flush()
+    finally:
+        os._exit(0)
+
+
+@app.post('/api/server/restart')
+def server_restart():
+    """Replace this server process, e.g. to apply a new coarse GPU."""
+    if RESTART_COMMAND is None:
+        return jsonify(error='This server was not started as terrain_server.py; restart it manually'), 501
+    env = dict(os.environ, TERRAIN_RESTART_AFTER_PID=str(os.getpid()))
+    options = ({'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+               if os.name == 'nt' else {'start_new_session': True})
+    with open(REPO_ROOT / 'server.log', 'a', encoding='utf-8') as out, \
+            open(REPO_ROOT / 'server-error.log', 'a', encoding='utf-8') as err:
+        subprocess.Popen(RESTART_COMMAND, cwd=REPO_ROOT, env=env, stdin=subprocess.DEVNULL,
+                         stdout=out, stderr=err, close_fds=True, **options)
+    threading.Thread(target=_shutdown_for_restart, name='terrain-restart', daemon=True).start()
+    return jsonify(restarting=True, pid=os.getpid()), 202
 
 
 @app.get('/api/profile')
@@ -1089,9 +1429,9 @@ def world_info():
                     worker=app.extensions.get('terrain_reference_worker')
                     if worker is not None:
                         worker.suspend(True)
-                with gpu_lock:
+                with all_gpu_locks():
                     token.check()
-                    torch.cuda.synchronize(SELECTED_DEVICE)
+                    synchronize_gpus()
                     result=metadata(seed,profile)
             return jsonify(result)
         if jobs.paused:
@@ -1130,10 +1470,10 @@ def generation_run():
                 worker=app.extensions.get('terrain_reference_worker')
                 if worker is not None:
                     worker.suspend(True)
-            with gpu_lock:
+            with all_gpu_locks():
                 token.check()
                 # Drain the NN's asynchronous transfers/streams before Orogen.
-                torch.cuda.synchronize(SELECTED_DEVICE)
+                synchronize_gpus()
                 if stage=='restore':
                     settings,execution=data.get('settings'),{}
                 else:
@@ -1380,7 +1720,8 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
     queued_at = time.perf_counter()
     def compute():
         waiting = time.perf_counter()
-        lock = nullcontext() if preview_only else measured_lock(gpu_lock, 'tile.gpu_lock_wait')
+        runtime = current_runtime()
+        lock = nullcontext() if preview_only else measured_lock(runtime.lock, 'tile.gpu_lock_wait')
         with lock, torch.inference_mode():
             started = time.perf_counter()
             lock_wait = started-waiting
@@ -1425,6 +1766,8 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
                       'queue_seconds':round(waiting-queued_at, 4),
                       'gpu_lock_wait_seconds':round(lock_wait,4),
                       'cuda_calls':{k:0 if preview_only else gpu_calls[k]-before[k] for k in gpu_calls}}
+            if not preview_only:
+                report.update(device_provenance(runtime.index))
             metrics['stage'] = 'Ready'
             report.update(tile_relief_stats(elevation, HALO))
             report.update(generation_profile=wp,neural_chart='polar' if polar else None,climate_width=CLIMATE_SIZE,climate_height=CLIMATE_SIZE)
@@ -1472,8 +1815,13 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
     if session:
         session = _session(session)
     epoch = int(request.args.get('epoch', 0))
+    # Learned coarse tiles stay on the coarse GPU. Latent/decoder tiles may use
+    # any detail GPU; 2x2-tile blocks keep neighbours (and their shared
+    # windows) on one device while it has work.
+    detail = lod < 4
     job = jobs.submit(delivery_key, compute, finalize, session=session, epoch=epoch,
-                      lane='cpu' if preview_only else 'gpu')
+                      lane='cpu' if preview_only else 'gpu', role='detail' if detail else 'coarse',
+                      affinity=(wp, seed, polar, lod, tx >> 1, ty >> 1) if detail else None)
     with trace(job.sequence), span('tile.wait', key=job.key, lod=lod):
         result_path, report, arrays = job.wait()
     if not return_arrays:
@@ -1602,7 +1950,7 @@ def native_coarse_tile(seed, tx, ty):
         else:
             preview_only = not learned and not ready
             def compute():
-                with (nullcontext() if preview_only else measured_lock(gpu_lock, 'coarse.gpu_lock_wait')), torch.inference_mode():
+                with (nullcontext() if preview_only else measured_lock(current_runtime().lock, 'coarse.gpu_lock_wait')), torch.inference_mode():
                     started = time.perf_counter()
                     jobs.check_current_interest()
                     cx, cy = native_coarse.climate_axes(tx, ty, profile_bounds(wp))
@@ -1645,7 +1993,7 @@ def native_coarse_tile(seed, tx, ty):
                 return value
             session = request.args.get('session')
             job = jobs.submit(key, compute, finalize, session=_session(session) if session else None,
-                epoch=int(request.args.get('epoch', 0)), lane='cpu' if preview_only else 'gpu')
+                epoch=int(request.args.get('epoch', 0)), lane='cpu' if preview_only else 'gpu', role='coarse')
             root, climate, report = job.wait()
         cx, cy = native_coarse.climate_axes(tx, ty, profile_bounds(wp))
         climate = transport_climate(seed,wp,cx*NATIVE,cy*NATIVE,climate)
@@ -1815,6 +2163,7 @@ def _tile_headers(response, report, cache_hit):
                        'Compute-Seconds':report.get('compute_seconds', report['seconds']),
                        'Queue-Seconds':report.get('queue_seconds', 0),
                        'GPU-Lock-Wait-Seconds':report.get('gpu_lock_wait_seconds',0),
+                       'Device':report.get('device_name') or '',
                        'Render-Seconds':report.get('render_seconds', 0),
                        'Width':report.get('width', TILE+2*HALO), 'Halo':report.get('halo', HALO)}.items():
         response.headers[f'X-Terrain-{key}'] = str(value)
@@ -1975,25 +2324,32 @@ def overview(seed):
         return jsonify(error=str(exc)), 504
 
 
+def wait_for_replaced_server(port=8765):
+    """A restarted server waits for its predecessor to release its port."""
+    previous = os.environ.pop('TERRAIN_RESTART_AFTER_PID', None)
+    if not previous:
+        return
+    import psutil
+    import socket
+    deadline = time.monotonic()+60
+    while time.monotonic() < deadline and psutil.pid_exists(int(previous)):
+        time.sleep(.2)
+    while time.monotonic() < deadline:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            try:
+                probe.bind(('127.0.0.1', port))
+                return
+            except OSError:
+                time.sleep(.2)
+
+
 if __name__ == '__main__':
-    def warm_models():
-        global shared_pipeline
-        try:
-            with gpu_lock, torch.inference_mode(), span('startup.load_models'):
-                preload_state.update(state='loading')
-                if shared_pipeline is None:
-                    shared_pipeline = load_pipeline(42)
-                if os.environ.get('TERRAIN_PREWARM', '1') == '1':
-                    preload_state.update(state='warming')
-                    try:
-                        preload_state['cuda_graphs'] = warm_graphs(shared_pipeline)
-                    finally:
-                        shared_pipeline.empty_cache()
-                preload_state.update(state='ready')
-        except Exception as exc:
-            preload_state.update(state='failed',error=str(exc)[:400])
-            # The request path remains able to retry a transient load failure.
-            print(f'Model preloading failed: {exc}', flush=True)
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--port', type=int, default=8765)
+    arguments = parser.parse_args()
+    RESTART_COMMAND = [sys.executable, '-u', str(Path(__file__).resolve()), *sys.argv[1:]]
+    wait_for_replaced_server(arguments.port)
     if os.environ.get('TERRAIN_PRELOAD_MODELS', '1') == '1':
-        threading.Thread(target=warm_models, name='terrain-model-preload', daemon=True).start()
-    app.run(host='127.0.0.1', port=8765, threaded=True, debug=False)
+        preload_devices(gpu_plan['devices'])
+    app.run(host='127.0.0.1', port=arguments.port, threaded=True, debug=False)

@@ -112,7 +112,10 @@ class CudaGraphModel(torch.nn.Module):
                             warm_reference = self.model(static_x, noise_labels=static_labels, conditional_inputs=static_conditions, precomputed_embeds=static_embeds)
                     torch.cuda.current_stream(x.device).wait_stream(warm)
                     graph = torch.cuda.CUDAGraph()
-                    with torch.cuda.graph(graph, stream=warm):
+                    # Thread-local capture: other GPU workers and the coarse
+                    # persistence thread keep synchronising their own devices.
+                    # Global mode would invalidate a capture on any such call.
+                    with torch.cuda.graph(graph, stream=warm, capture_error_mode='thread_local'):
                         static_output = self.model(static_x, noise_labels=static_labels, conditional_inputs=static_conditions, precomputed_embeds=static_embeds)
                     # Every device/bucket gets its own exact first-use gate.
                     # This one scalar check is confined to capture setup.

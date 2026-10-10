@@ -196,7 +196,7 @@ class ProtocolTests(unittest.TestCase):
         terrain_app.OUTPUT=cls.output
         terrain_app.MODEL='test'
         terrain_app.gpu_calls={'coarse':0,'base':0,'decoder':0}
-        terrain_app.load_pipeline=lambda seed:None
+        terrain_app.load_pipeline=lambda seed,device=None:None
         inference=ModuleType('terrain_inference')
         inference.VERSION='test-v1'
         inference.choose_profile=lambda:SimpleNamespace(name='test',gpu_windows=True,latent_batch=16,coarse_streams=1)
@@ -587,7 +587,7 @@ class ProtocolTests(unittest.TestCase):
             def close(self):self.closed=True;made.append('closed')
         def create(seed,profile,limit):
             self.assertEqual(limit,128*1024*1024);world=World();made.append(world);return world
-        with patch.object(self.server,'preview_worlds',OrderedDict()),patch.object(self.server,'_create_world',side_effect=create):
+        with patch.object(self.server.current_runtime(),'preview_worlds',OrderedDict()),patch.object(self.server,'_create_world',side_effect=create):
             a=self.server.get_preview_world(1,'natural');b=self.server.get_preview_world(2,'natural')
             self.assertIsNot(a.tile_store,b.tile_store)
             self.assertIs(self.server.get_preview_world(1,'natural'),a)
@@ -700,10 +700,11 @@ class ProtocolTests(unittest.TestCase):
         def make(seed,profile,limit):
             created.append((seed,profile,limit,FakeWorld()))
             return created[-1][-1]
-        with patch.object(self.server,'worlds',worlds),\
+        runtime=self.server.current_runtime()
+        with patch.object(runtime,'worlds',worlds),\
              patch.object(self.server,'active_seed',7),\
-             patch.object(self.server,'background_world',None),\
-             patch.object(self.server,'background_world_key',None),\
+             patch.object(runtime,'background_world',None),\
+             patch.object(runtime,'background_world_key',None),\
              patch.object(self.server,'_create_world',side_effect=make):
             self.server.prepare_coarse_quantum(99,'natural')
             self.server.prepare_coarse_quantum(99,'natural')
@@ -712,7 +713,7 @@ class ProtocolTests(unittest.TestCase):
             self.assertTrue(created[0][-1].closed)
             self.assertIs(self.server._available_world(100,'natural'),created[-1][-1])
             self.assertEqual(self.server.active_seed,7)
-            self.assertEqual(list(self.server.worlds),list(worlds))
+            self.assertEqual(list(runtime.worlds),list(worlds))
             self.assertEqual([x[2] for x in created],[64*1024*1024]*2)
 
     def test_clipped_ready_coordinates_are_used_for_elevation(self):

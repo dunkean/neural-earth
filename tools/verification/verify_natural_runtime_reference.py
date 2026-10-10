@@ -95,8 +95,8 @@ def main():
             first_world.close()
             first_closed = True
             server.worlds.pop(('natural', 42), None)
-            if server.shared_pipeline is not None:
-                server.shared_pipeline.empty_cache()
+            if server.current_runtime().shared_pipeline is not None:
+                server.current_runtime().shared_pipeline.empty_cache()
             gc.collect()
             second_world, second_elev, second_climate, second = _sample_actual_server(server, torch)
             recreated = second_world is not first_world

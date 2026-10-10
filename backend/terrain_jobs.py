@@ -1,8 +1,13 @@
 """Small, backend-independent queue for shared terrain requests.
 
-Only the compute lane is serialized. CPU encoders run independently afterwards.
+Each GPU compute lane is serialized. CPU encoders run independently afterwards.
 Camera subscriptions cancel *queued* work; an already launched compute finishes
 and may populate the cache. This is intentionally not a neural-stage DAG yet.
+
+With several GPUs, one worker per device takes queued GPU jobs. A router maps
+each job to the devices allowed to run it (for instance, only the coarse
+device). Spatial affinity keeps a block of neighbouring tiles on one device
+while it has work; an idle device may take over a block rather than wait.
 """
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
@@ -41,6 +46,9 @@ class Job:
     slot_wait_seconds: float = 0
     queue_seconds: float = 0
     cancel_requested: bool = False
+    role: str = None
+    affinity: object = None
+    device: object = None
 
     def wait(self, timeout=300):
         if not self.event.wait(timeout):
@@ -51,7 +59,7 @@ class Job:
 
 
 class TerrainJobs:
-    def __init__(self, max_pending=128, session_ttl=35, cpu_workers=2):
+    def __init__(self, max_pending=128, session_ttl=35, cpu_workers=2, gpu_lanes=1):
         self.condition = threading.Condition()
         self.jobs = OrderedDict()
         self.views = {}
@@ -61,18 +69,70 @@ class TerrainJobs:
         self.current = threading.local()
         self.closed = False
         self.paused = False
-        self.worker = None
+        # GPU lanes: device key -> worker. ``None`` is the historical single lane.
+        self.workers = {}
+        self.gpu_devices = (None,)
+        self.router = None
+        self.bind_worker = None
+        self.affinity = OrderedDict()
+        self.device_metrics = {}
         self.preview_workers = []
         self.cpu = ThreadPoolExecutor(max_workers=cpu_workers, thread_name_prefix='terrain-encode')
         self.preview_cpu = ThreadPoolExecutor(max_workers=cpu_workers, thread_name_prefix='terrain-preview-encode')
         # Avoid unbounded detached elevation arrays if rendering is slower than CUDA.
-        self.cpu_slots = threading.Semaphore(cpu_workers + 1)
+        self.cpu_slots = threading.Semaphore(cpu_workers + max(1, gpu_lanes))
         self.preview_slots = threading.Semaphore(cpu_workers + 1)
         self.metrics = dict(submitted=0, deduplicated=0, cancelled_queued=0,
                             cancelled_computing=0,
                             completed=0, failed=0, obsolete_completed=0,
                             compute_seconds=0.0, encode_seconds=0.0,
-                            last_queue_seconds=0.0)
+                            last_queue_seconds=0.0, affinity_steals=0)
+
+    @property
+    def worker(self):
+        return self.workers.get(None) or next(iter(self.workers.values()), None)
+
+    def configure_gpus(self, devices, router=None, bind=None):
+        """Set GPU lanes. ``router(job)`` returns the allowed device keys.
+
+        Removing a device lets its worker finish the running job, then exit.
+        ``bind(device)`` runs once on each new worker thread before any job.
+        """
+        devices = tuple(devices) or (None,)
+        with self.condition:
+            self.gpu_devices = devices
+            self.router = router
+            self.bind_worker = bind
+            for device in devices:
+                self.device_metrics.setdefault(device, self._new_device_metrics())
+            for block, owner in list(self.affinity.items()):
+                if owner not in devices:
+                    self.affinity.pop(block)
+            if any(job.lane == 'gpu' and job.state == 'queued' for job in self.jobs.values()):
+                self._start_gpu_workers_locked()
+            self.condition.notify_all()
+
+    def _start_gpu_workers_locked(self):
+        for device in self.gpu_devices:
+            worker = self.workers.get(device)
+            if worker is None or not worker.is_alive():
+                name = 'terrain-compute' if device is None else f'terrain-compute-gpu{device}'
+                worker = threading.Thread(target=self._run, args=('gpu', device), name=name, daemon=True)
+                self.workers[device] = worker
+                worker.start()
+
+    def _allowed_locked(self, job, device):
+        if self.router is None:
+            return True
+        try:
+            allowed = self.router(job)
+        except Exception:
+            return device == self.gpu_devices[0]
+        if allowed is None:
+            return True
+        allowed = [d for d in allowed if d in self.gpu_devices]
+        # A routed device without a live lane must not strand its work.
+        return device in allowed if allowed else device == self.gpu_devices[0]
 
     def update_view(self, session, epoch, wants):
         """wants is {job_key: priority}; old epochs cannot resurrect old work."""
@@ -153,7 +213,7 @@ class TerrainJobs:
             self.metrics['cancelled_queued'] += 1
 
     def submit(self, key, compute, finalize=lambda value: value,
-               session=None, epoch=0, priority=2000, lane='gpu'):
+               session=None, epoch=0, priority=2000, lane='gpu', role=None, affinity=None):
         if lane not in ('gpu', 'cpu'):
             raise ValueError('Unknown terrain compute lane')
         with self.condition:
@@ -180,6 +240,8 @@ class TerrainJobs:
                 self.sequence += 1
                 job = Job(key, compute, finalize, priority, self.sequence)
                 job.lane = lane
+                job.role = role
+                job.affinity = affinity
                 self.jobs[key] = job
                 self.metrics['submitted'] += 1
             if session:
@@ -188,9 +250,8 @@ class TerrainJobs:
                 job.legacy = True
             self._priority_locked(job)
             instant('job.deduplicated' if deduplicated else 'job.admitted', key=key, sequence=job.sequence, lane=job.lane)
-            if job.lane == 'gpu' and self.worker is None:
-                self.worker = threading.Thread(target=self._run, name='terrain-compute', daemon=True)
-                self.worker.start()
+            if job.lane == 'gpu':
+                self._start_gpu_workers_locked()
             if job.lane == 'cpu' and not self.preview_workers:
                 for index in range(2):
                     worker = threading.Thread(target=self._run, args=('cpu',), name=f'terrain-preview-{index}', daemon=True)
@@ -199,13 +260,34 @@ class TerrainJobs:
             self.condition.notify_all()
             return job
 
-    def _run(self, lane='gpu'):
+    def _run(self, lane='gpu', device=None):
         slots = self.cpu_slots if lane == 'gpu' else self.preview_slots
         encoder = self.cpu if lane == 'gpu' else self.preview_cpu
+        if lane == 'gpu':
+            with self.condition:
+                bind = self.bind_worker
+            if bind is not None:
+                try:
+                    bind(device)
+                except BaseException as error:
+                    print(f'GPU worker {device} could not bind its device: {error}', flush=True)
+                    with self.condition:
+                        if self.workers.get(device) is threading.current_thread():
+                            self.workers.pop(device, None)
+                        self.gpu_devices = tuple(d for d in self.gpu_devices if d != device) or (None,)
+                        self.condition.notify_all()
+                    return
         while True:
             with self.condition:
                 self._expire_locked()
-                ready = [j for j in self.jobs.values() if j.state == 'queued' and j.lane == lane]
+                if lane == 'gpu' and device not in self.gpu_devices:
+                    # A plan change removed this device; queued work moves on.
+                    if self.workers.get(device) is threading.current_thread():
+                        self.workers.pop(device, None)
+                    self.condition.notify_all()
+                    return
+                ready = [j for j in self.jobs.values() if j.state == 'queued' and j.lane == lane
+                         and (lane != 'gpu' or self._allowed_locked(j, device))]
                 if not ready:
                     if self.closed:
                         return
@@ -213,13 +295,30 @@ class TerrainJobs:
                     continue
                 # Priority classes occupy bands of 1000. Aging only breaks ties
                 # within a class and cannot promote background over coverage.
+                # Within a class, a GPU prefers its own (or unclaimed) blocks.
                 now = time.monotonic()
-                job = min(ready, key=lambda j: (int(j.priority // 1000),
-                          j.priority % 1000 - min(50, now-j.created), j.sequence))
+                def rank(j):
+                    owner = self.affinity.get(j.affinity) if j.affinity is not None else None
+                    foreign = owner is not None and owner != device and owner in self.gpu_devices
+                    return (int(j.priority // 1000), foreign,
+                            j.priority % 1000 - min(50, now-j.created), j.sequence)
+                job = min(ready, key=rank)
+                if lane == 'gpu' and job.affinity is not None:
+                    owner = self.affinity.get(job.affinity)
+                    if owner is not None and owner != device:
+                        self.metrics['affinity_steals'] += 1
+                        self.device_metrics.setdefault(device, self._new_device_metrics())['steals'] += 1
+                    self.affinity[job.affinity] = device
+                    self.affinity.move_to_end(job.affinity)
+                    while len(self.affinity) > 4096:
+                        self.affinity.popitem(last=False)
                 job.state = 'computing'
+                job.device = device if lane == 'gpu' else None
                 job.admitted = now
                 job.queue_seconds = now-job.created
                 self.metrics['last_queue_seconds'] = job.queue_seconds
+                if lane == 'gpu' and device in self.device_metrics:
+                    self.device_metrics[device]['current'] = job.key
             slot_started = time.monotonic()
             with trace(job.sequence), span('job.finalizer_backpressure', lane=lane):
                 slots.acquire()
@@ -228,18 +327,33 @@ class TerrainJobs:
                 job.slot_wait_seconds = time.monotonic()-slot_started
                 self.check_current_interest()
                 job.started = time.monotonic()
-                with trace(job.sequence), span('job.compute', key=job.key, lane=lane):
+                with trace(job.sequence), span('job.compute', key=job.key, lane=lane, device=device):
                     value = job.compute()
                 job.compute_seconds = time.monotonic()-job.started
                 with self.condition:
                     job.state = 'encoding'
                     self.metrics['compute_seconds'] += job.compute_seconds
+                    self._device_done_locked(job, 'completed')
                 encoder.submit(self._finish, job, value)
             except BaseException as error:
                 slots.release()
+                with self.condition:
+                    self._device_done_locked(job, 'cancelled' if isinstance(error, JobCancelled) else 'failed')
                 self._complete(job, error=error)
             finally:
                 self.current.job = None
+
+    def _new_device_metrics(self):
+        return dict(completed=0, failed=0, cancelled=0, compute_seconds=0.0, current=None, steals=0)
+
+    def _device_done_locked(self, job, outcome):
+        stats = self.device_metrics.get(job.device) if job.lane == 'gpu' else None
+        if stats is None:
+            return
+        stats['current'] = None
+        stats[outcome] += 1
+        if job.started:
+            stats['compute_seconds'] += job.compute_seconds if outcome == 'completed' else time.monotonic()-job.started
 
     def check_current_interest(self):
         """Safe quantum boundary: never interrupt a CUDA kernel or half window."""
@@ -291,7 +405,13 @@ class TerrainJobs:
                         queued=sum(j.state == 'queued' for j in self.jobs.values()),
                         computing=sum(j.state == 'computing' for j in self.jobs.values()),
                         encoding=sum(j.state == 'encoding' for j in self.jobs.values()),
+                        gpu_lanes=[dict(self.device_metrics.get(device) or self._new_device_metrics(),
+                                        device=device, active=device in self.gpu_devices,
+                                        running=bool(self.workers.get(device) and self.workers[device].is_alive()),
+                                        compute_seconds=round((self.device_metrics.get(device) or {}).get('compute_seconds', 0.0), 4))
+                                   for device in dict.fromkeys((*self.gpu_devices, *self.device_metrics))],
                         jobs=[dict(key=j.key, state=j.state, priority=j.priority, lane=j.lane,
+                                   role=j.role, device=j.device,
                                    queue_seconds=j.queue_seconds, slot_wait_seconds=j.slot_wait_seconds,
                                    compute_seconds=j.compute_seconds)
                               for j in self.jobs.values()])
@@ -310,8 +430,8 @@ class TerrainJobs:
                     job.subscribers.clear()
                     self._cancel_if_unused_locked(job)
             self.condition.notify_all()
-        if self.worker:
-            self.worker.join(timeout=10)
+        for worker in list(self.workers.values()):
+            worker.join(timeout=10)
         for worker in self.preview_workers:
             worker.join(timeout=10)
         self.cpu.shutdown(wait=True)
