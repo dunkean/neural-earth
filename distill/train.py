@@ -16,6 +16,7 @@ from pathlib import Path
 import signal
 import time
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
@@ -76,6 +77,14 @@ def lowfreq_height_mae(prediction, target, mask):
     return (error*mask[:, 0]).sum()/mask.sum().clamp_min(1)
 
 
+def coarse_height_mae(prediction, target, mask, scaling):
+    """Mean/p5 altitude proxy in metres, using the teacher's recorded scales."""
+    means, stds = (prediction.new_tensor(value[:2]).view(1, 2, 1, 1) for value in scaling)
+    p, t = prediction[:, :2].float()*stds+means, target[:, :2].float()*stds+means
+    error = (p.sign()*p.square()-t.sign()*t.square()).abs()
+    return (error*mask).sum()/(2*mask.sum()).clamp_min(1)
+
+
 def spectral_band_loss(prediction, target, mask):
     """Relative power errors in the five radial bands used by physical evaluation."""
     p, t = prediction.float(), target.float()
@@ -116,13 +125,14 @@ def centre(prediction, target):
 
 
 @torch.no_grad()
-def validate(model, dataset, device, count=12, spectral_band_weight=0.):
+def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_scaling=None):
     was_training = model.training
     model.eval()
     totals = dict(mse=0., gradient=0., spectral=0., slope_ratio=0., spectrum_ratio=0.)
     channel_mse = torch.zeros(model.config.out_channels, device=device)
     height_mae = 0.
     delta_mse = 0.
+    coarse_mae = 0.
     if spectral_band_weight:
         totals['spectral_bands'] = 0.
     count = min(count, len(dataset))
@@ -146,6 +156,8 @@ def validate(model, dataset, device, count=12, spectral_band_weight=0.):
             height_mae += float(lowfreq_height_mae(p, t, mask))/count
         elif model.config.stage == 'coarse':
             delta_mse += float(coarse_delta_loss(p, t, mask))/count
+            if coarse_scaling is not None:
+                coarse_mae += float(coarse_height_mae(p, t, mask, coarse_scaling))/count
         slope_p = p.diff(dim=-1).square().mean()+p.diff(dim=-2).square().mean()
         slope_t = t.diff(dim=-1).square().mean()+t.diff(dim=-2).square().mean()
         totals['slope_ratio'] += float((slope_p/slope_t.clamp_min(1e-8)).sqrt())/count
@@ -158,6 +170,8 @@ def validate(model, dataset, device, count=12, spectral_band_weight=0.):
         totals['lowfreq_height_mae_m_proxy'] = height_mae
     elif model.config.stage == 'coarse':
         totals['mean_minus_p5_mse'] = delta_mse
+        if coarse_scaling is not None:
+            totals['coarse_height_mae_m_proxy'] = coarse_mae
     return totals
 
 
@@ -193,7 +207,7 @@ def main():
                         help='Relative MSE weight for base lowfreq / coarse mean+p5 channels.')
     parser.add_argument('--coarse-delta-weight', type=float, default=.25)
     parser.add_argument('--height-mae-weight', type=float, default=0.,
-                        help='Base low-frequency height MAE weight; one loss unit is 100 metres.')
+                        help='Base low-frequency / coarse mean+p5 height MAE weight; one loss unit is 100 metres.')
     parser.add_argument('--overfit', action='store_true')
     parser.add_argument('--allow-data-growth', action='store_true')
     parser.add_argument('--cpu', action='store_true')
@@ -225,6 +239,10 @@ def main():
     model = Student(config).to(device)
     halo = model.halo if args.stage == 'base' else 0
     train = Crops(dataset_root, args.stage, halo=halo, train_size=args.train_size)
+    coarse_scaling = None
+    if args.stage == 'coarse':
+        with np.load(train.paths[0], allow_pickle=False) as sample:
+            coarse_scaling = [sample['output_means'].tolist(), sample['output_stds'].tolist()]
     validation = Crops(dataset_root, args.stage, 'val', halo=halo,
                        train_size=args.train_size, overfit=args.overfit)
     # The exact list is checkpointed. Appending new data requires explicit admission.
@@ -314,6 +332,10 @@ def main():
                     height_error = lowfreq_height_mae(prediction, target, mask)
                     loss = loss + args.height_mae_weight*height_error/100
                     values['lowfreq_height_mae_m_proxy'] = height_error
+                if args.stage == 'coarse' and args.height_mae_weight:
+                    height_error = coarse_height_mae(prediction, target, mask, coarse_scaling)
+                    loss = loss + args.height_mae_weight*height_error/100
+                    values['coarse_height_mae_m_proxy'] = height_error
             if not torch.isfinite(loss):
                 raise FloatingPointError(f'Non-finite training loss at step {step}.')
             loss.backward()
@@ -331,12 +353,13 @@ def main():
                 append_json(output/'train.jsonl', item)
                 print(json.dumps(item), flush=True)
             if step % args.eval_every == 0 or step == args.steps:
-                last_validation = validate(ema, validation, device, args.val_count, args.spectral_band_weight)
+                last_validation = validate(ema, validation, device, args.val_count, args.spectral_band_weight, coarse_scaling)
                 weighted_mse = sum(w*v for w, v in zip(channel_weights, last_validation['channel_mse']))/sum(channel_weights)
                 score = weighted_mse+args.gradient_weight*last_validation['gradient']+args.spectral_weight*last_validation['spectral']
                 score += args.spectral_band_weight*last_validation.get('spectral_bands', 0.)
                 if args.stage == 'coarse':
                     score += args.coarse_delta_weight*last_validation['mean_minus_p5_mse']
+                    score += args.height_mae_weight*last_validation['coarse_height_mae_m_proxy']/100
                 if args.stage == 'base':
                     score += args.height_mae_weight*last_validation['lowfreq_height_mae_m_proxy']/100
                 item = dict(step=step, validation=last_validation, score=score,

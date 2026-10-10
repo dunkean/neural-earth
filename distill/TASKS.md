@@ -251,6 +251,17 @@ l'entraînement pendant que le reste du dataset est généré.
   restent identiques. Une substitution ne peut modifier un exemple existant.
   Les 15 tests de distillation passent. Le coordinateur arrêté à cet incident
   a été inspecté puis relancé, sans refaire les trois passages initiaux.
+- [x] Coarse élargi terminé à 200000 pas sur 10484 crops. Le meilleur score
+  de cette recette choisit l'EMA du pas **135000**, conservée sous
+  `ckpt/candidates/coarse-expanded-step135000-2796a5901b85.pt` (SHA identique
+  au rapport `eval/coarse-expanded-pilot/report.json`). Évaluation des 14 cas
+  sur 4090 : encore 31–247 m sur natural/orogen ; candidat rejeté.
+  La différence mean/p5 ne voit pas un décalage commun de ces deux hauteurs.
+  Le passage final ajoute donc `--height-mae-weight .05` en mètres, utilisant
+  les échelles enregistrées par le teacher, contrôlées par l'audit dataset.
+  Essai CUDA de reprise de 32 pas réussi dans `ckpt/coarse-height-smoke` ;
+  proxy MAE de validation ~49,7 m, aucun effet sur les checkpoints principaux.
+  Les 17 tests passent, dont l'offset commun invisible à la loss de relief.
 - [x] Borne architecture base96, **poids non entraînés, mesure de coût seulement** :
   512² utiles + halo 192 → entrée 896² ; 47,244 ms (graph, channels_last) sur
   4090, 0,738 ms par surface 64², ~19,05× vs huit forwards teacher BF16.

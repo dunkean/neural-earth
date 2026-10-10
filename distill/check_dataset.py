@@ -25,6 +25,7 @@ def check(root, expected=20000):
     stages, profiles = {}, defaultdict(lambda: dict(train=0, val=0, land_sum=0., count=0))
     for stage in manifest['stages']:
         seen = set()
+        coarse_scaling = None
         paths = sorted((root/stage).glob('*.npz'))
         for path in paths:
             with np.load(path, allow_pickle=False) as data:
@@ -66,6 +67,13 @@ def check(root, expected=20000):
                 elif stage == 'coarse':
                     if data['condition'].shape != (5, 64, 64) or data['labels'].shape != (5,):
                         raise ValueError(f'Coarse feature shape mismatch: {path}')
+                    scaling = (data['output_means'], data['output_stds'])
+                    if any(value.shape != (6,) for value in scaling) or (scaling[1] <= 0).any():
+                        raise ValueError(f'Invalid coarse output scaling: {path}')
+                    if coarse_scaling is None:
+                        coarse_scaling = tuple(value.copy() for value in scaling)
+                    elif any(not np.array_equal(a, b) for a, b in zip(scaling, coarse_scaling)):
+                        raise ValueError(f'Coarse output scaling changed: {path}')
                 elif data['latents'].shape != (4, size//8, size//8):
                     raise ValueError(f'Decoder latent shape mismatch: {path}')
         if seen != set(range(expected)):

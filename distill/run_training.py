@@ -80,6 +80,10 @@ def train(name, stage, dataset, output, steps, width, batch, size=None, overfit=
         # Initial physical MAE is small, but separate PSD bands still deviate
         # by up to 55%. Supervise their relative power explicitly.
         command.extend(['--spectral-band-weight', '.05'])
+    if stage == 'coarse' and not overfit and steps > 200000:
+        # The enlarged-data pilot still has 31–247 m errors on natural/orogen
+        # sites. Delta alone is blind to common mean/p5 altitude offsets.
+        command.extend(['--height-mae-weight', '.05'])
     if saved:
         command.extend(['--resume', str(latest), '--allow-data-growth'])
     print(json.dumps(dict(starting=name, stage=stage, steps=steps, resume_step=saved['step'] if saved else 0)), flush=True)

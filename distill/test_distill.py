@@ -12,7 +12,7 @@ from distill.features import base_features, noise
 from distill.jobs import proc_identity
 from distill.resume_teacher import validate_resume_plan
 from distill.student import Student, StudentConfig
-from distill.train import coarse_delta_loss, losses, lowfreq_height_mae, spectral_band_loss
+from distill.train import coarse_delta_loss, coarse_height_mae, losses, lowfreq_height_mae, spectral_band_loss
 from distill.evaluate import artifact_audit, audit, pipeline_speed_audit
 
 
@@ -102,6 +102,22 @@ class DistillationTests(unittest.TestCase):
         gradients, = torch.autograd.grad(value, changed_relief)
         self.assertTrue(torch.isfinite(gradients).all())
         self.assertLess(float((gradients[:, 0]+gradients[:, 1]).abs().max()), 1e-7)
+
+    def test_coarse_metres_detect_common_height_offsets(self):
+        target = torch.zeros(1, 6, 2, 2)
+        target[:, 0], target[:, 1] = 10., 9.
+        prediction = target.clone()
+        prediction[:, :2] += 1.
+        mask = torch.ones(1, 1, 2, 2)
+        self.assertEqual(float(coarse_delta_loss(prediction, target, mask)), 0.)
+        mask[..., 0, 0] = 0.
+        prediction[..., 0, 0] = 1000.
+        prediction.requires_grad_()
+        value = coarse_height_mae(prediction, target, mask, ([0.]*6, [1.]*6))
+        self.assertEqual(float(value.detach()), 20.)
+        value.backward()
+        self.assertTrue(torch.isfinite(prediction.grad).all())
+        self.assertEqual(float(prediction.grad[..., 0, 0].abs().max()), 0.)
 
     def test_autocast_preserves_output_precision_and_backward(self):
         model = Student(StudentConfig('coarse', 16, 2, (1,)))
