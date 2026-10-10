@@ -97,6 +97,7 @@ class ServerWorldConstructionTests(unittest.TestCase):
             WORLD_BOUNDS=(-20e6, -10e6, 20e6, 10e6), profile_bounds=profile_bounds,
             CoarsePreparation=CoarsePreparation, worlds=OrderedDict(), active_seed=None,
             all_gpu_locks=lambda:nullcontext([]), synchronize_gpus=Mock(),
+            share_windows=lambda world, kind: world,
             app=self.app, jsonify=jsonify, Response=Response, request=request,
             MODES=MODES+OROGEN_MODES+SNR_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=OROGEN_MODES,
             has_request_context=has_request_context, subprocess=subprocess,

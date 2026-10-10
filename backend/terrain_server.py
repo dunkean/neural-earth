@@ -243,6 +243,19 @@ jobs = TerrainJobs(cpu_workers=2 if len(visible_gpus()) < 2 else len(visible_gpu
                    gpu_lanes=max(1, len(visible_gpus())))
 jobs.configure_gpus(gpu_plan['devices'], route_job, bind_gpu_worker)
 terrain_device.set_multi_gpu_workers(len(gpu_plan['devices']) > 1)
+from terrain_shared_windows import SharedWindows
+# With several detail GPUs, each latent/decoder window is computed once and
+# shared, so neighbouring tiles from different GPUs use identical windows.
+shared_windows = SharedWindows(int(float(os.environ.get('TERRAIN_SHARED_WINDOW_MIB', '1024'))*1024**2),
+                               active=lambda: len(gpu_plan['detail_devices']) > 1,
+                               check=jobs.check_current_interest)
+
+
+def share_windows(world, kind):
+    manifest = getattr(world, '_terrain_manifest', None)
+    if isinstance(manifest, dict) and manifest.get('world_hash'):
+        shared_windows.install(world, (kind, manifest['world_hash']))
+    return world
 physical_delivery = PhysicalDelivery()
 physical_locks = [threading.RLock() for _ in range(64)]
 disk_cache = TerrainDiskCache(CACHE, VERSION,
@@ -436,7 +449,7 @@ def get_preview_world(seed,profile):
     preview_worlds=current_runtime().preview_worlds
     key=(profile,seed)
     if key not in preview_worlds:
-        preview_worlds[key]=_create_world(seed,profile,128*1024*1024)
+        preview_worlds[key]=share_windows(_create_world(seed,profile,128*1024*1024),'preview')
         while len(preview_worlds)>2:
             _,expired=preview_worlds.popitem(last=False)
             close_world(expired)
@@ -449,7 +462,8 @@ def get_polar_world(seed,profile,*,preview=False):
     polar_worlds=current_runtime().polar_worlds
     key=(profile,seed,preview)
     if key not in polar_worlds:
-        polar_worlds[key]=_create_world(seed,profile,128*1024*1024,polar=True)
+        polar_worlds[key]=share_windows(_create_world(seed,profile,128*1024*1024,polar=True),
+                                        'polar-preview' if preview else 'polar')
         while len(polar_worlds)>2:
             _,expired=polar_worlds.popitem(last=False)
             close_world(expired)
@@ -501,7 +515,7 @@ def get_world(seed, world_profile='natural', *, foreground=True):
     if world_key in worlds:
         worlds.move_to_end(world_key)
         return worlds[world_key]
-    world = _create_world(seed,world_profile,512*1024*1024)
+    world = share_windows(_create_world(seed,world_profile,512*1024*1024),'final')
     worlds[world_key] = world
     while len(worlds) > 2:
         _, expired = worlds.popitem(last=False)
@@ -1263,7 +1277,7 @@ def gpu_status():
             compute_seconds=lane.get('compute_seconds', 0.0), current_job=lane.get('current'),
             affinity_steals=lane.get('steals', 0), forward_calls=dict(calls.get(index, {}))))
     plan = {k: v for k, v in gpu_plan.items() if k != 'settings'}
-    return dict(settings=gpu_settings, environment=sorted(GPU_ENVIRONMENT), plan=plan,
+    return dict(settings=gpu_settings, shared_windows=shared_windows.status(), environment=sorted(GPU_ENVIRONMENT), plan=plan,
                 pending_plan={k: v for k, v in pending.items() if k != 'settings'},
                 restart_required=pending['coarse_device'] != COARSE_DEVICE,
                 coarse_device=COARSE_DEVICE, modes=list(terrain_device.GPU_MODES), devices=devices,
@@ -1285,6 +1299,8 @@ def release_runtime(index):
         runtime.worlds.clear();runtime.preview_worlds.clear();runtime.polar_worlds.clear()
         runtime.background_world = runtime.background_world_key = None
         runtime.shared_pipeline = None
+        # Shared windows may live in this GPU's memory.
+        shared_windows.clear()
         release = getattr(terrain_runtime, 'release_pipeline', None)
         if release is not None:
             release(index)
@@ -1327,6 +1343,8 @@ def apply_gpu_plan(plan):
     previous, gpu_plan = gpu_plan, plan
     jobs.configure_gpus(plan['devices'], route_job, bind_gpu_worker)
     terrain_device.set_multi_gpu_workers(len(plan['devices']) > 1)
+    if len(plan['detail_devices']) < 2:
+        shared_windows.clear()
     added = [index for index in plan['devices'] if index not in previous['devices']]
     if added and os.environ.get('TERRAIN_PRELOAD_MODELS', '1') == '1':
         preload_devices(added)

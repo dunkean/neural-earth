@@ -125,6 +125,7 @@ def run_mode(mode, args, tiles, output, prime=()):
         _, _, raw = call(base, '/api/gpu')
         after = json.loads(raw)
         return dict(mode=mode, wall_seconds=round(wall, 3), plan=after['plan'], cache_profile=world['cache_profile'],
+                    shared_windows=after.get('shared_windows'),
                     world_identity=world['world_identity'], devices=after['devices'],
                     preload_graphs={d['name']: (d['preload'] or {}).get('cuda_graphs', {}).get('fully_warmed')
                                     for d in before['devices'] if d['roles']}), results
