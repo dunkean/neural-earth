@@ -272,6 +272,76 @@ def additional_evidence(report, variant, manifest_path=None, evaluation=None):
     return dict(checks=checks, passed=all(checks.values()), evidence=result)
 
 
+def coverage(dataset, output):
+    """Count rare morphology in stored targets, without touching held-out worlds.
+
+    This is a low-frequency base-target proxy, not full decoded terrain and not
+    a replacement for the physical case bank. No sampling weights are changed.
+    """
+    from collections import Counter
+    root = Path(dataset)
+    counts = Counter()
+    rows = []
+    paths = sorted((root / 'base').glob('*.npz'))
+    if not paths:
+        raise ValueError('No base targets to audit.')
+    for index, path in enumerate(paths):
+        with np.load(path, allow_pickle=False) as sample:
+            meta = json.loads(str(sample['metadata']))
+            if meta['seed'] in HOLDOUT_SEEDS:
+                raise ValueError('Reserved evaluation world found in training/validation data.')
+            q = sample['target'][4].astype(np.float64) * 38.6 - 31.4
+            height = np.sign(q) * q ** 2
+            cy, cx = meta['y'] // 32 - meta['coarse_y'], meta['x'] // 32 - meta['coarse_x']
+            n = meta['crop'] // 32
+            climate = sample['coarse'][2:, cy:cy+n, cx:cx+n].astype(np.float64)
+            climate = climate.repeat(32, axis=1).repeat(32, axis=2)
+            fields = np.concatenate((height[None], climate), axis=0)
+            conditioning = field_stats(fields)
+            stats = relief_stats(height, 3)
+            kinds = [kind for kind in KINDS if conditioning is not None and qualifies(kind, stats, conditioning)]
+            split, profile = meta['split'], meta['profile']
+            counts[(split, profile, 'all')] += 1
+            for kind in kinds:
+                counts[(split, profile, kind)] += 1
+            rows.append(dict(file=path.name, seed=meta['seed'], profile=profile, split=split,
+                             kinds=kinds, teacher_lowfreq=stats, climate=conditioning))
+        if (index + 1) % 2000 == 0:
+            print(json.dumps(dict(audited=index+1, total=len(paths))), flush=True)
+    atomic_json(external_path(output), dict(schema=1, dataset_manifest_digest=hashlib.sha256(
+        (root / 'manifest.json').read_bytes()).hexdigest(),
+        note='Low-frequency base-target proxy at 240 m/pixel; decoder detail and physical coast validation are separate.',
+        counts=[dict(split=s, profile=p, kind=k, count=c) for (s, p, k), c in sorted(counts.items())], rows=rows))
+
+
+def sampling_policy(coverage_path, output, rare_fraction=.25):
+    if not 0 <= rare_fraction <= .5:
+        raise ValueError('Keep at least half of the sampler uniform.')
+    payload = Path(coverage_path).read_bytes()
+    coverage_report = json.loads(payload)
+    rows = sorted((r for r in coverage_report['rows'] if r['split'] == 'train'), key=lambda r: r['file'])
+    if not rows or any(r['seed'] in HOLDOUT_SEEDS for r in rows):
+        raise ValueError('The sampler must contain training data only, without reserved seeds.')
+    p = np.full(len(rows), (1 - rare_fraction) / len(rows), dtype=np.float64)
+    counts = {}
+    for kind in KINDS:
+        mask = np.array([kind in row['kinds'] for row in rows])
+        counts[kind] = int(mask.sum())
+        if not mask.any():
+            raise ValueError(f'No training examples for {kind}; do not substitute evaluation worlds.')
+        p[mask] += rare_fraction / len(KINDS) / mask.sum()
+    validation_files = []
+    for kind in KINDS:
+        candidates = sorted(r['file'] for r in coverage_report['rows'] if r['split'] == 'val' and kind in r['kinds'])
+        if candidates:
+            validation_files.extend(candidates[i] for i in np.linspace(0, len(candidates)-1, min(4, len(candidates))).round().astype(int))
+    atomic_json(external_path(output), dict(schema=1, stage='base',
+        dataset_manifest_digest=coverage_report['dataset_manifest_digest'],
+        coverage_digest=hashlib.sha256(payload).hexdigest(), rare_fraction=rare_fraction,
+        counts=counts, train_files=[r['file'] for r in rows], probabilities=p.tolist(),
+        validation_files=sorted(set(validation_files))))
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -288,14 +358,25 @@ def main():
     check.add_argument('evaluation', type=Path)
     check.add_argument('variant')
     check.add_argument('output', type=Path)
+    cover = sub.add_parser('coverage')
+    cover.add_argument('dataset', type=Path)
+    cover.add_argument('output', type=Path)
+    balance = sub.add_parser('sampling-policy')
+    balance.add_argument('coverage', type=Path)
+    balance.add_argument('output', type=Path)
+    balance.add_argument('--rare-fraction', type=float, default=.25)
     args = parser.parse_args()
     if args.command == 'survey':
         survey(args.output, args.count)
     elif args.command == 'freeze':
         freeze(args.proposals, args.evaluation, args.output, args.per_kind)
-    else:
+    elif args.command == 'audit':
         result = audit(args.manifest, args.evaluation, args.variant, args.output)
         print(json.dumps(dict(physical_passed=result['physical_passed'], accepted=False)))
+    elif args.command == 'coverage':
+        coverage(args.dataset, args.output)
+    else:
+        sampling_policy(args.coverage, args.output, args.rare_fraction)
 
 
 if __name__ == '__main__':

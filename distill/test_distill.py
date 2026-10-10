@@ -14,7 +14,7 @@ from distill.resume_teacher import validate_resume_plan
 from distill.student import Student, StudentConfig
 from distill.train import coarse_delta_loss, coarse_height_mae, losses, lowfreq_height_mae, spectral_band_loss
 from distill.evaluate import artifact_audit, audit, pipeline_speed_audit
-from distill.rare_cases import additional_evidence, load_sites, local_errors, qualifies
+from distill.rare_cases import additional_evidence, load_sites, local_errors, qualifies, sampling_policy, KINDS
 from distill.common import source_digest
 
 
@@ -57,6 +57,32 @@ class DistillationTests(unittest.TestCase):
         resumed = list(StepBatches(51, 3, 8, 17, 333))
         self.assertEqual(all_steps[8:], resumed)
         self.assertNotEqual(all_steps[0], all_steps[1])
+
+    def test_weighted_sampling_resumes_exactly_and_rejects_invalid_weights(self):
+        all_steps = list(StepBatches(4, 8, 0, 12, 333, [0., 0., .1, .9]))
+        resumed = list(StepBatches(4, 8, 5, 12, 333, [0., 0., .1, .9]))
+        self.assertEqual(all_steps[5:], resumed)
+        self.assertTrue(all(i in (2, 3) for batch in all_steps for i, _ in batch))
+        for weights in ([1., 2.], [0.] * 4, [1., -1., 1., 1.], [1., float('nan'), 1., 1.]):
+            with self.assertRaises(ValueError):
+                StepBatches(4, 1, 0, 10, 333, weights)
+
+    def test_rare_sampling_policy_keeps_validation_and_holdout_out(self):
+        import json
+        with tempfile.TemporaryDirectory() as directory:
+            source, output = Path(directory) / 'coverage.json', Path(directory) / 'policy.json'
+            rows = [dict(file=f'train-{i}.npz', split='train', seed=10000+i, kinds=[kind])
+                    for i, kind in enumerate(KINDS)]
+            rows.append(dict(file='val-0.npz', split='val', seed=10500, kinds=list(KINDS)))
+            atomic_json(source, dict(dataset_manifest_digest='digest', rows=rows))
+            sampling_policy(source, output)
+            policy = json.loads(output.read_text())
+            self.assertEqual(policy['train_files'], [f'train-{i}.npz' for i in range(4)])
+            self.assertAlmostEqual(sum(policy['probabilities']), 1.)
+            rows[0]['seed'] = 42
+            atomic_json(source, dict(dataset_manifest_digest='digest', rows=rows))
+            with self.assertRaises(ValueError):
+                sampling_policy(source, output)
 
     def test_masked_pixels_do_not_affect_any_loss(self):
         torch.manual_seed(11)

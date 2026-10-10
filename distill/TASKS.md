@@ -402,6 +402,36 @@ cas « transition » sur la géométrie du teacher uniquement, avant toute analy
 des erreurs élèves. Le rapport provisoire est conservé sous `rare-student-pilot`.
 La banque finale ne sera plus modifiée en fonction des résultats élèves.
 
+Premier audit de cette banque avec les trois candidats précédents : aucun base
+ou coarse ne passe les 16 vues. Le base lisse particulièrement les plaines et
+les côtes au LOD 0 ; le coarse peut déplacer des rivages entiers. Le decoder
+reste proche en hauteur (MAE LOD 0 : 0,122–2,350 m), mais ses huit LOD 0 ont
+encore au moins un défaut de pente/spectre ; ses LOD 3 sont identiques au teacher.
+Rapports, audits locaux, quatre planches par catégorie et CSV :
+`eval/rare-coherent-pilot/`. Ces résultats complètent les échecs historiques,
+ils ne valident aucun candidat.
+
+Audit de couverture des 20000 cibles : sur 19616 crops train, 1059 plaines
+désertiques, 983 plaines tempérées, 227 côtes humides et 281 transitions très
+basses. Proxy de hauteur basse fréquence à 240 m/pixel, sans prétendre mesurer
+le terrain décodé ; les mondes réservés ne sont pas utilisés. Dans la validation
+séparée : respectivement 30, 17, 5 et 3. Fichier :
+`eval/rare-training-coverage.json` (reprendre avec `rare_cases coverage`).
+
+La prochaine passe base conserve **75 % d'échantillonnage uniforme** et ajoute
+25 % répartis également entre les quatre catégories, sur les cibles train
+existantes. Environ ×5–6 d'exposition aux deux catégories côtières, sans retirer
+les exemples ordinaires ni ajouter les lieux d'évaluation. La policy JSON
+`eval/rare-base-sampling.json` fige fichiers, probabilités et empreintes ; elle
+est aussi enregistrée intégralement dans chaque checkpoint. Un changement
+explicite exige `--allow-sampling-change` ; une reprise sans fichier policy
+réutilise les probabilités sauvegardées. Les crops restent déterministes par
+numéro de pas. Des exemples rares des **mondes de validation** complètent le
+diagnostic réparti sur les six profils, pour vérifier les compromis au cours
+de cette passe. Le score best est réinitialisé quand la policy change.
+Le coarse en cours n'est pas interrompu. Le decoder conserve sa recette actuelle
+avant décision sur ses propres mesures ; sa géométrie de fenêtre diffère du base.
+
 ```bash
 python -m distill.rare_cases survey ~/data/distill/eval/rare-proposals.json --count 12
 python tools/verification/compare_base_variants.py run ~/data/distill/eval/rare-teacher-survey \

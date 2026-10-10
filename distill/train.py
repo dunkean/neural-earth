@@ -125,7 +125,7 @@ def centre(prediction, target):
 
 
 @torch.no_grad()
-def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_scaling=None):
+def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_scaling=None, extra_files=()):
     was_training = model.training
     model.eval()
     totals = dict(mse=0., gradient=0., spectral=0., slope_ratio=0., spectrum_ratio=0.)
@@ -138,6 +138,11 @@ def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_s
     count = min(count, len(dataset))
     # Cover the sorted validation index range, rather than only its first profile.
     indices = torch.linspace(0, len(dataset)-1, count).round().long().tolist()
+    lookup = {path.name: i for i, path in enumerate(dataset.paths)}
+    if set(extra_files) - set(lookup):
+        raise ValueError('Additional rare validation files differ from this dataset.')
+    indices = sorted(set(indices) | {lookup[name] for name in extra_files})
+    count = len(indices)
     for index in indices:
         inputs, target, mask = dataset[index]
         inputs, target, mask = (v[None].to(device) for v in (inputs, target, mask))
@@ -175,8 +180,8 @@ def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_s
     return totals
 
 
-def make_loader(dataset, batch, start, stop, seed, workers, device):
-    kwargs = dict(dataset=dataset, batch_sampler=StepBatches(len(dataset), batch, start, stop, seed),
+def make_loader(dataset, batch, start, stop, seed, workers, device, probabilities=None):
+    kwargs = dict(dataset=dataset, batch_sampler=StepBatches(len(dataset), batch, start, stop, seed, probabilities),
                   num_workers=workers, pin_memory=device.type == 'cuda',
                   generator=torch.Generator().manual_seed(seed))
     if workers:
@@ -210,6 +215,8 @@ def main():
                         help='Base low-frequency / coarse mean+p5 height MAE weight; one loss unit is 100 metres.')
     parser.add_argument('--overfit', action='store_true')
     parser.add_argument('--allow-data-growth', action='store_true')
+    parser.add_argument('--sample-weights', type=str, help='Frozen train-only sampling policy JSON.')
+    parser.add_argument('--allow-sampling-change', action='store_true')
     parser.add_argument('--cpu', action='store_true')
     args = parser.parse_args()
     if min(args.steps, args.batch, args.eval_every, args.val_count) < 1 or args.workers < 0:
@@ -249,6 +256,20 @@ def main():
     files = [path.name for path in train.paths]
     manifest = json.loads((dataset_root/'manifest.json').read_text())
     seed_plan = load_plan(dataset_root, manifest)
+    sampling_policy = saved.get('sampling_policy') if saved else None
+    if args.sample_weights:
+        proposed_policy = json.loads(Path(args.sample_weights).expanduser().read_text())
+        if saved and proposed_policy != sampling_policy and not args.allow_sampling_change:
+            raise ValueError('Sampling policy changed; explicit --allow-sampling-change is required.')
+        sampling_policy = proposed_policy
+    if sampling_policy:
+        import hashlib
+        if (args.stage != 'base' or sampling_policy['stage'] != args.stage or
+            sampling_policy['train_files'] != files or sampling_policy['dataset_manifest_digest'] !=
+                hashlib.sha256((dataset_root/'manifest.json').read_bytes()).hexdigest()):
+            raise ValueError('Sampling policy must match this base dataset and its exact training files.')
+    probabilities = sampling_policy['probabilities'] if sampling_policy else None
+    rare_validation_files = sampling_policy.get('validation_files', []) if sampling_policy else []
     if saved:
         if saved['dataset_manifest'] != manifest:
             raise ValueError('Dataset provenance differs from the checkpoint.')
@@ -276,12 +297,13 @@ def main():
                   saved['arguments'].get('height_mae_weight', 0.) != args.height_mae_weight or
                   saved['arguments'].get('spectral_band_weight', 0.) != args.spectral_band_weight or
                   saved['arguments'].get('gradient_weight', .05) != args.gradient_weight or
-                  saved['arguments'].get('spectral_weight', .02) != args.spectral_weight):
+                  saved['arguments'].get('spectral_weight', .02) != args.spectral_weight or
+                  saved.get('sampling_policy') != sampling_policy):
         # A new target crop changes the validation footprint. Do not compare its
         # best score to the old crop's score; retain model/optimizer/EMA states.
         best = float('inf')
     # Explicitly increasing --steps is supported; LR progression is logged.
-    loader = make_loader(train, args.batch, start, args.steps, args.seed, args.workers, device)
+    loader = make_loader(train, args.batch, start, args.steps, args.seed, args.workers, device, probabilities)
     run_started, last_save = time.monotonic(), time.monotonic()
     last_validation, step = saved.get('validation') if saved else None, start
     for signum in (signal.SIGINT, signal.SIGTERM):
@@ -290,6 +312,7 @@ def main():
                 arguments=vars(args) | dict(dataset=str(args.dataset), output=str(output),
                 resume=str(args.resume) if args.resume else None), start_step=start,
                 training_crops=len(train), validation_crops=len(validation), halo=halo,
+                sampling_policy=sampling_policy,
                 parameters=sum(p.numel() for p in model.parameters())))
 
     def checkpoint(name='latest.pt'):
@@ -299,6 +322,7 @@ def main():
                      train_files=files, dataset_manifest=manifest, arguments=vars(args) |
                      dict(dataset=str(args.dataset), output=str(output), resume=str(args.resume) if args.resume else None))
         state['seed_plan'] = seed_plan
+        state['sampling_policy'] = sampling_policy
         if device.type == 'cuda':
             state['cuda_rng'] = torch.cuda.get_rng_state_all()
         atomic_write(output/name, lambda handle: torch.save(state, handle))
@@ -353,7 +377,8 @@ def main():
                 append_json(output/'train.jsonl', item)
                 print(json.dumps(item), flush=True)
             if step % args.eval_every == 0 or step == args.steps:
-                last_validation = validate(ema, validation, device, args.val_count, args.spectral_band_weight, coarse_scaling)
+                last_validation = validate(ema, validation, device, args.val_count, args.spectral_band_weight,
+                                           coarse_scaling, rare_validation_files)
                 weighted_mse = sum(w*v for w, v in zip(channel_weights, last_validation['channel_mse']))/sum(channel_weights)
                 score = weighted_mse+args.gradient_weight*last_validation['gradient']+args.spectral_weight*last_validation['spectral']
                 score += args.spectral_band_weight*last_validation.get('spectral_bands', 0.)

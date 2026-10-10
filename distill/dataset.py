@@ -58,13 +58,20 @@ class Crops(Dataset):
 
 class StepBatches(Sampler):
     """Resume at the next optimizer step, with exactly the same sample/crop order."""
-    def __init__(self, count, batch, start, stop, seed):
+    def __init__(self, count, batch, start, stop, seed, probabilities=None):
         self.count, self.batch, self.start, self.stop, self.seed = count, batch, start, stop, seed
+        self.probabilities = None
+        if probabilities is not None:
+            p = np.asarray(probabilities, dtype=np.float64)
+            if p.shape != (count,) or not np.isfinite(p).all() or (p < 0).any() or p.sum() <= 0:
+                raise ValueError('Sampling probabilities must be finite, nonnegative and cover every file.')
+            self.probabilities = p / p.sum()
 
     def __iter__(self):
         for step in range(self.start, self.stop):
             rng = np.random.default_rng(np.random.SeedSequence([self.seed, step]))
-            indices = rng.integers(self.count, size=self.batch)
+            indices = (rng.integers(self.count, size=self.batch) if self.probabilities is None
+                       else rng.choice(self.count, size=self.batch, p=self.probabilities))
             crops = rng.integers(0, 2**32, size=self.batch)
             yield [(int(i), int(c)) for i, c in zip(indices, crops)]
 

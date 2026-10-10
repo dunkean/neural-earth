@@ -77,6 +77,9 @@ def train(name, stage, dataset, output, steps, width, batch, size=None, overfit=
         # restoring auxiliary detail gradients and per-band power supervision.
         command.extend(['--height-weight', '8', '--height-mae-weight', '.02',
                         '--spectral-band-weight', '.05'])
+        if steps > 200000:
+            command.extend(['--sample-weights', str(DATA/'eval/rare-base-sampling.json'),
+                            '--allow-sampling-change'])
     if stage == 'decoder' and not overfit and steps > 100000:
         # Initial physical MAE is small, but separate PSD bands still deviate
         # by up to 55%. Supervise their relative power explicitly.
