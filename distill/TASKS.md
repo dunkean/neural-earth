@@ -763,6 +763,35 @@ Capacité : 128/192/256 canaux donnent respectivement **13 331 237 / 29 962 341 
 53 Mo ne constitue pas une contrainte : comparer un élève plus large si la
 supervision du relief décodé ne préserve pas suffisamment les détails visibles.
 
+Le coarse8 termine son passage à 25000 pas ; EMA retenue **22500**,
+`10010316d2d1…`. MAE sur les 14 vues : **17,08–113,90 m** ; sur les 24 rares :
+**0,224–48,896 m**. Aux deux côtes humides LOD 0 : **4,094 et 16,490 m**,
+contre 11,006 et 72,688 m pour coarse4. Aux transitions plaine basse/mer :
+0,224 et 1,288 m. Il reste hors acceptation stricte, mais est conservé comme
+candidat principal pour les comparaisons combinées.
+
+La première passe base après décodage termine ses **20000** pas. Le bundle
+coarse8 + base couplé + decoder200k a lui aussi des raccords physiques
+**exactement nuls sur les huit vues rares testées**, dans
+`eval/decoded-bundle-seams`. Sa comparaison physique complète est en cours.
+À 5000 pas, la nouvelle loss restaurait davantage de relief sur certains cas
+mais en exagérait d'autres ; les checkpoints parent100k et couplé5000 sont
+conservés. `eval/review-matched-bundle8/` compare ces deux bases avec exactement
+le même coarse8 et decoder200k. La galerie actuelle a été vérifiée dans
+Chromium sur **72 vues**, y compris mobile ; les tableaux comportent désormais
+les erreurs sur les terres, les plaines 0–20 m et la bande côtière de 300 m.
+
+Après les benchmarks du bundle 128, deux passages comparables sont préparés :
+base **192 canaux / ~120 Mo** sur la 5090 et contrôle **128 / ~53 Mo** sur la
+4090. Même EMA source de la première passe couplée, données alignées, loss,
+sampling rare, nouvel optimiseur et **20000 pas supplémentaires** chacun,
+avec un smoke de 32 pas et reprise de ses états. Cela distingue l'effet d'une
+capacité accrue d'un entraînement prolongé. Les contrôles physiques du contrôle
+128 se terminent avant ceux du 192 ; les mesures de vitesse sont séquentielles,
+avec les deux GPU libres. Jobs `base192-decoded-followup` et
+`base128-control-followup` ; aucune nouvelle génération teacher ni intégration
+dans le serveur par défaut.
+
 ## Préparation du 2026-10-10 — en attente du top
 
 La passation a été reçue en texte dans la conversation. Les performances de la

@@ -16,6 +16,7 @@ from PIL import Image
 
 from distill.common import atomic_json, atomic_write, external_path
 from distill.check_physical_seams import shade
+from distill.rare_cases import local_errors
 
 
 PAGE = '''<!doctype html>
@@ -65,11 +66,15 @@ chooseGroup();
 </script></html>'''
 
 
-def table(row, reference):
+def table(row, reference, local):
     error = row['vs_reference']
     ratios = [a/b if b else None for a, b in zip(row['psd'], reference['psd'])]
     slope = row['slope_mean']/reference['slope_mean'] if reference['slope_mean'] else None
     values = [('Erreur moyenne (m)', error['mae']), ('Erreur maximale (m)', error['max']),
+              ('Terre/mer en désaccord (%)', 100*error['coast']),
+              ('Erreur moyenne sur les terres (m)', local['land']['mae_m']),
+              ('Erreur sur les terres de 0–20 m (m)', local['low_land_0_20m']['mae_m']),
+              ('Erreur à moins de 300 m des côtes (m)', local['coast_300m']['mae_m']),
               ('Pente moyenne / référence', slope)]
     values += [(f'Puissance / référence — bande {i+1}', v) for i, v in enumerate(ratios)]
     return '<table><tr><th>Mesure</th><th>Valeur</th></tr>' + ''.join(
@@ -114,7 +119,9 @@ def build(directories, output):
                     if 'temp' in climate and 'rain' in climate:
                         context += f" · {climate['temp']:.1f} °C · {climate['rain']:.0f} mm/an"
                     group['views'].append(dict(label=f'{site} · LOD {lod}', context=context,
-                        reference=images['reference'], candidate=images[variant], table=table(row, reference[(site,lod)])))
+                        reference=images['reference'], candidate=images[variant],
+                        table=table(row, reference[(site,lod)], local_errors(arrays[f'{variant}|{site}|{lod}'],
+                                                                                 arrays[f'reference|{site}|{lod}'], lod))))
                 if group['views']:
                     groups.append(group)
     if not groups:

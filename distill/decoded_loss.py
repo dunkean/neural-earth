@@ -147,7 +147,7 @@ def initialize(checkpoint, decoder_checkpoint, audit, output, coverage=None):
                       previous_warm_start=source.get('warm_start'), paired_decoder=decoder,
                       audit_sha256=hashlib.sha256(Path(audit).read_bytes()).hexdigest(),
                       code_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
-                      note='New objective on existing aligned teacher pairs; no reserved evaluation seed is trained.')
+                      note='New fine-tuning trial on existing aligned teacher pairs; no reserved evaluation seed is trained.')
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, betas=(.9, .99), weight_decay=1e-4, fused=True)
     state = dict(source, config=asdict(model.config), model=model.state_dict(), ema=model.state_dict(),
                  optimizer=optimizer.state_dict(), step=0, best_score=float('inf'), validation=None,
