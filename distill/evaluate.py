@@ -12,6 +12,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+import statistics
 
 from distill.common import atomic_json, external_path
 
@@ -76,11 +77,48 @@ def speed_audit(base_path, student_path, minimum=10.):
                 note='Field ratio includes overlap/two passes; excludes feature construction and I/O.')
 
 
-def artifact_audit(report, variant, benchmark, seams):
+def pipeline_speed_audit(benchmark, minimum=10.):
+    if benchmark.get('status') != 'complete' or benchmark.get('stage') != 'base':
+        return dict(passed=False, reason='Complete base pipeline benchmark is required.')
+    if not all(benchmark.get(key) is True for key in
+               ('includes_feature_construction', 'includes_transfers', 'fresh_world_per_sample')):
+        return dict(passed=False, reason='Features/transfers and fresh uncached fields must be measured.')
+    sizes = benchmark.get('sizes', [])
+    repeats = benchmark.get('repeats', 0)
+    if not sizes or any(size < 1024 or size % 512 for size in sizes) or repeats < 3:
+        return dict(passed=False, reason='At least three repeats on fields of at least 1024² are required.')
+    comparisons = []
+    for size in sizes:
+        times = {}
+        for name in ('reference', 'student'):
+            rows = [row for row in benchmark.get('rows', [])
+                    if row.get('variant') == name and row.get('size') == size and row.get('warmup') is False]
+            if len(rows) != repeats or {row.get('repeat') for row in rows} != set(range(repeats)):
+                return dict(passed=False, reason=f'Missing independent {name} repeats for {size}.')
+            for row in rows:
+                if not math.isfinite(row.get('seconds', float('nan'))) or row['seconds'] <= 0:
+                    return dict(passed=False, reason='Invalid elapsed time.')
+                if name == 'reference' and row.get('base_windows', 0) <= 0:
+                    return dict(passed=False, reason='Teacher neural calls were not observed.')
+                if name == 'student':
+                    counters = row.get('student_counts', {}).get('base', {})
+                    if (row.get('base_windows') != 0 or counters.get('calls') != (size//512)**2 or
+                            counters.get('output_pixels') != size**2):
+                        return dict(passed=False, reason='Student did not compute a fresh full field without teacher calls.')
+            times[name] = statistics.median(row['seconds'] for row in rows)
+        gain = times['reference']/times['student']
+        comparisons.append(dict(size=size, teacher_seconds=times['reference'],
+                                student_seconds=times['student'], speedup=gain, passed=gain >= minimum))
+    return dict(passed=all(row['passed'] for row in comparisons), minimum_speedup=minimum,
+                comparisons=comparisons, note='Complete base stage; coarse prefetch and decoder are excluded.')
+
+
+def artifact_audit(report, variant, benchmark, seams, pipeline=None):
     """Bind all evidence to the same models/code; a timing fixture is not a candidate."""
     fingerprint = report.get('checkpoint_digests', {}).get(variant, {})
     sources = {key: value for key, value in fingerprint.items() if key.startswith('code:')}
     visual = seams.get('visual_review', {})
+    pipeline = pipeline or {}
     checks = dict(
         physical_weights_present=bool(fingerprint.get('base')) and len(sources) == 3,
         benchmark_weights=bool(fingerprint.get('base')) and benchmark.get('checkpoint_digest') == fingerprint.get('base'),
@@ -93,6 +131,9 @@ def artifact_audit(report, variant, benchmark, seams):
         seams_validation=seams.get('split') == 'val' and len(seams.get('rows', [])) >= 12,
         seams_numerical=seams.get('numerical_passed') is True and all(row.get('passed') is True for row in seams.get('rows', [])),
         seams_visual=visual.get('passed') is True and visual.get('checkpoint_digests') == fingerprint,
+        pipeline_weights=bool(fingerprint.get('base')) and pipeline.get('checkpoint_digest') == fingerprint.get('base'),
+        pipeline_code=bool(sources) and pipeline.get('student_source_digests') == sources,
+        pipeline_gpu=bool(report.get('gpu')) and pipeline.get('gpu') == report.get('gpu'),
     )
     return dict(checks=checks, passed=all(checks.values()))
 
@@ -104,6 +145,7 @@ def main():
     parser.add_argument('--baseline', default='fp32base')
     parser.add_argument('--base-benchmark', type=Path)
     parser.add_argument('--student-benchmark', type=Path)
+    parser.add_argument('--pipeline-benchmark', type=Path)
     parser.add_argument('--seams', type=Path)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -112,9 +154,12 @@ def main():
                        if args.base_benchmark and args.student_benchmark else dict(passed=False, reason='not measured'))
     result['seams'] = json.loads(args.seams.read_text()) if args.seams else dict(passed=False, reason='not verified')
     benchmark = json.loads(args.student_benchmark.read_text()) if args.student_benchmark else {}
-    result['artifacts'] = artifact_audit(json.loads(args.report.read_text()), args.variant, benchmark, result['seams'])
+    pipeline = json.loads(args.pipeline_benchmark.read_text()) if args.pipeline_benchmark else {}
+    result['pipeline_speed'] = pipeline_speed_audit(pipeline)
+    result['artifacts'] = artifact_audit(json.loads(args.report.read_text()), args.variant, benchmark, result['seams'], pipeline)
     result['accepted'] = (result['physical_passed'] and result['speed']['passed'] and
-                          result['seams'].get('passed', False) and result['artifacts']['passed'])
+                          result['seams'].get('passed', False) and result['artifacts']['passed'] and
+                          result['pipeline_speed']['passed'])
     atomic_json(external_path(args.output), result)
     print(json.dumps(dict(variant=args.variant, physical_passed=result['physical_passed'],
                          accepted=result['accepted'], failing_sites=sum(not r['passed'] for r in result['rows']))))

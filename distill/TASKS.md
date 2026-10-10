@@ -139,6 +139,11 @@ préparation ci-dessous sont conservées comme historique ; les jobs ont reçu l
   propre et reprise du coarse au pas 27518 pour appliquer cette recette.
 - [x] `bench_student.py` : eager/CUDA Graphs BF16, coût du halo inclus, borne
   GEMM FP8 séparée. Pas de prétention de convolution FP8 sans backend dédié.
+- [x] `bench_pipeline.py` : champs latents neufs 1024² et 2048², features CPU,
+  transferts et fusion inclus ; mêmes poids teacher résidents, coarse préchargé
+  des deux côtés, warmup exclu et trois répétitions. Refus explicite d'une carte
+  occupée, vérifié sur la 4090 pendant la génération. L'acceptation exige aussi
+  ≥10× sur cette mesure complète du base, pas seulement une borne de convolutions.
 - [x] `inference.py` et variantes `student`, `student_coarse`, `student_decoder`,
   `student_all` dans l'outil existant. Base sans blending ; coarse remplace les
   20 pas du solveur d'une fenêtre ; decoder remplace sa fenêtre 512/384.
@@ -160,11 +165,12 @@ préparation ci-dessous sont conservées comme historique ; les jobs ont reçu l
   Benchmarks, joints et revue visuelle doivent porter les mêmes empreintes de
   poids et de code que les évaluations physiques ; un benchmark au pas 0
   ne peut pas accepter un checkpoint entraîné.
-- [x] Douze tests dédiés : bruit/crops négatifs, features globales, invariance
+- [x] Treize tests dédiés : bruit/crops négatifs, features globales, invariance
   avec halo, échantillonnage repris, losses masquées/gradients finis, écriture
   interrompue, identité des processus, précision des sorties sous autocast,
   supervision du relief coarse, refus d'une validation incomplète et rejet
-  des preuves issues d'autres poids ou sans revue des joints.
+  des preuves issues d'autres poids ou sans revue des joints, refus des mesures
+  de débit sur champs en cache/partiels ou répétitions manquantes.
 
 Le masque du conditionnement base upstream est constant (ones), ce n'est pas
 un masque terre/mer ; `histogram_raw` est un vecteur de cinq valeurs. Les données
@@ -230,11 +236,21 @@ l'utilisateur. Cette limitation de livraison n'arrête pas les calculs locaux.
 
 ### Commandes de reprise et inspection espacée
 
+Transition temporaire prévue après le coarse initial : le coordinateur
+`training-workflow` a été arrêté volontairement (code −15), le trainer coarse
+continue. Le job **`architecture-pipeline`** attend sa fin réelle (100000 pas),
+mesure l'architecture base96 au pas 0 sur la 5090 libre, puis rétablit le
+coordinateur, même si le benchmark échoue. Ne pas redémarrer le coordinateur
+pendant ce probe. Il ne s'agit pas d'une validation de qualité. Le wrapper
+`idle_probe.py` n'interrompt pas le trainer et ne redémarre pas un trainer
+échoué/interrompu sans inspection.
+
 ```bash
 source distill/env.sh
 # Etat vivant vérifié (pas seulement un fichier de verrou).
 python -m distill.jobs status teacher-main --compact
 python -m distill.jobs status training-workflow --compact
+python -m distill.jobs status architecture-pipeline --compact
 cat ~/data/distill/training-workflow.json
 
 # Après avoir constaté que le handle teacher est terminal/manquant :
@@ -243,7 +259,7 @@ python -m distill.jobs start teacher-main --gpu 0 -- python -m distill.teacher \
   --profiles natural orogen terrestrial-earthlike terrestrial-archipelago \
   terrestrial-continents terrestrial-gondwana
 
-# Après avoir constaté que le coordinateur est terminal/manquant :
+# Après avoir constaté que le coordinateur ET le probe sont terminaux/manquants :
 python -m distill.jobs start training-workflow --gpu cpu -- python -m distill.run_training
 
 # Après sélection d'un candidat base immuable, GPU 0 libre :
@@ -252,6 +268,12 @@ CUDA_VISIBLE_DEVICES=0 python -m distill.check_seams \
   --output ~/data/distill/eval/base-seams.json
 # Ce rapport reste passed=false jusqu'à la revue des planches physiques.
 # La revue doit enregistrer leurs checkpoint_digests exacts sous visual_review.
+
+# Après sélection d'un candidat immuable, sur une carte libre :
+CUDA_VISIBLE_DEVICES=0 python -m distill.bench_pipeline \
+  --checkpoint ~/data/distill/ckpt/base/best.pt \
+  --output ~/data/distill/bench/pipeline-4090.json
+# Fournir ce résultat avec --pipeline-benchmark à distill.evaluate.
 ```
 
 Les logs sont sous `~/data/distill/jobs/<nom>/output.log`, les checkpoints sous

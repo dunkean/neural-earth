@@ -12,7 +12,7 @@ from distill.features import base_features, noise
 from distill.jobs import proc_identity
 from distill.student import Student, StudentConfig
 from distill.train import coarse_delta_loss, losses
-from distill.evaluate import artifact_audit, audit
+from distill.evaluate import artifact_audit, audit, pipeline_speed_audit
 
 
 class DistillationTests(unittest.TestCase):
@@ -138,12 +138,27 @@ class DistillationTests(unittest.TestCase):
         seams = dict(gpu='gpu', split='val', rows=[dict(passed=True)]*12,
                      numerical_passed=True, checkpoint_digest='trained-model', student_source_digests=sources,
                      visual_review=dict(passed=True, checkpoint_digests=fingerprint))
-        self.assertTrue(artifact_audit(report, 'student_all', benchmark, seams)['passed'])
+        pipeline = dict(benchmark)
+        self.assertTrue(artifact_audit(report, 'student_all', benchmark, seams, pipeline)['passed'])
         benchmark['checkpoint_digest'] = 'architecture-only'
-        self.assertFalse(artifact_audit(report, 'student_all', benchmark, seams)['passed'])
+        self.assertFalse(artifact_audit(report, 'student_all', benchmark, seams, pipeline)['passed'])
         benchmark['checkpoint_digest'] = 'trained-model'
         seams['visual_review'] = dict(passed=False)
-        self.assertFalse(artifact_audit(report, 'student_all', benchmark, seams)['passed'])
+        self.assertFalse(artifact_audit(report, 'student_all', benchmark, seams, pipeline)['passed'])
+
+    def test_pipeline_speed_rejects_cached_partial_or_incomplete_work(self):
+        benchmark = dict(status='complete', stage='base', includes_feature_construction=True,
+                         includes_transfers=True, fresh_world_per_sample=True, sizes=[1024], repeats=3, rows=[])
+        for repeat in range(3):
+            benchmark['rows'].extend([
+                dict(variant='reference', size=1024, repeat=repeat, warmup=False, seconds=12., base_windows=2300),
+                dict(variant='student', size=1024, repeat=repeat, warmup=False, seconds=1., base_windows=0,
+                     student_counts=dict(base=dict(calls=4, output_pixels=1024**2)))])
+        self.assertTrue(pipeline_speed_audit(benchmark)['passed'])
+        benchmark['rows'][-1]['student_counts']['base']['calls'] = 0
+        self.assertFalse(pipeline_speed_audit(benchmark)['passed'])
+        benchmark['rows'].pop()
+        self.assertFalse(pipeline_speed_audit(benchmark)['passed'])
 
 
 if __name__ == '__main__':
