@@ -2,7 +2,7 @@
 
 2026-10-10 · Grégory Beurier
 
-## Livraison finale demandée et comparaison en cours
+## Livraison finale — résultats et limites
 
 L'utilisateur demande les planches **à la fin** : paysages différents et
 contrastés, bonne qualité d'image, métriques permettant de choisir. Ne pas
@@ -34,7 +34,7 @@ preuves du contrôle initial à 32 étapes restent archivées sous
 `eval/*-initial32`. Rien n'est promu sur la seule loss. Les 38 tests dédiés
 passent, dont le refus d'un checkpoint smoke dans une comparaison `latest`
 à budget égal et le refus de planches utilisant des références différentes.
-Le contrôle des banques supplémentaires porte ce total à **39 tests** et
+Le contrôle des banques supplémentaires portait ce total à **39 tests** et
 refuse des poids différents ou une vue dupliquée. Le dossier final conserve
 également une copie des rapports JSON complets sous `evidence/`.
 
@@ -42,8 +42,8 @@ La chaîne durable vérifie successivement contrôle 128, équivalence physique
 des optimisations sur les deux anciens bases, essai 192, puis chronométrages
 sur les deux cartes au repos. `final-review-pack` attend leur achèvement,
 mesure également le base 128 initial avec ses propres poids, puis assemble
-`~/data/distill/final/`. Ce dossier reste **à vérifier et à commenter après
-la fin des jobs** ; sa préparation n'est pas une acceptation de qualité.
+`~/data/distill/final/`. Tous ces jobs sont terminés ; le dossier a été vérifié
+et livré à l'utilisateur. Cette livraison n'est pas une acceptation de qualité.
 
 Résultats désormais acquis : contrôle128 mesuré sur les 14 vues historiques
 et 24 vues rares, avec huit raccords physiques froids **exactement identiques**
@@ -70,7 +70,7 @@ cela ne justifie pas de prolonger aveuglément ni de passer à 256 canaux. Le
 parent128 initial demeure un compromis plus lisse à examiner. Aucun de ces
 candidats n'est présenté comme ayant satisfait tous les seuils stricts.
 Les **18 checkpoints immuables** sont vérifiés dans l'inventaire, dont les
-15 anciens aux SHA inchangés. Les chronométrages finaux sont en cours.
+15 anciens aux SHA inchangés. Les chronométrages finaux sont terminés.
 
 Le microbenchmark CUDA Graph du coarse a rencontré une copie CPU→GPU interdite :
 son helper de capture était hors du mode d'inférence et contournait les caches
@@ -87,8 +87,9 @@ figés, GPU et SHA des scripts, système au repos, rapports complets. Le sidecar
 `bench/optimized-bundle/reused-component-measurements.json` conserve les sources
 et empreintes ; ce ne sont **pas** des répétitions indépendantes. Chaque base
 continue d'être mesuré avec ses propres poids. Une archive Git vérifiée du code
-est préparée sous `delivery/distill-code.bundle`, à rafraîchir après les derniers
-commits ; elle constitue une livraison locale, sans masquer le push403 restant.
+est préparée sous `delivery/distill-code.bundle` et copiée dans `final/code/`,
+avec le commit livré et son SHA dans le manifest ; elle constitue une livraison
+locale, sans masquer le push403 restant.
 
 Les chronométrages sont maintenant complets pour les quatre bases sur les
 deux GPU. Poids résidents, champs neufs, construction des entrées et transferts
@@ -108,8 +109,8 @@ seuil initial ×10 n'est pas atteint. Les secondes des évaluations de qualité
 ne remplacent pas ces mesures. Les exports d'inférence FP32 vérifiés font
 53,349 Mo (base128), 119,874 Mo (base192), 11,218 Mo (coarse8) et 13,360 Mo
 (decoder). Le 192 coûte davantage sans amélioration régulière sur les cas rares.
-Les captures physiques supplémentaires et l'assemblage des 18 planches restent
-en cours ; aucune acceptation stricte n'est revendiquée.
+Les captures physiques supplémentaires et l'assemblage des 18 planches sont
+terminés et vérifiés ; aucune acceptation stricte n'est revendiquée.
 
 ### Dossier de décision terminé
 
@@ -133,7 +134,7 @@ Le choix pratique reste ouvert à l'utilisateur, comme demandé.
 
 La livraison Git reste incomplète : l'API GitHub confirme encore
 `permissions.push=false` sur `dunkean/neural-earth` pour le compte configuré.
-L'archive Git locale sera rafraîchie sur le dernier commit. Aucun nouveau fork,
+L'archive Git locale est rafraîchie après chaque commit de livraison. Aucun nouveau fork,
 changement de remote ni publication de poids n'est effectué sans destination
 autorisée. Ce blocage de publication ne change pas les résultats locaux.
 
