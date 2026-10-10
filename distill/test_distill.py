@@ -591,6 +591,21 @@ class DistillationTests(unittest.TestCase):
 
 
 class FinalEvidenceTests(unittest.TestCase):
+    def test_graph_benchmark_warmup_and_capture_use_inference_mode(self):
+        from contextlib import nullcontext
+        from unittest.mock import MagicMock, patch
+        from distill.bench_student import capture
+        calls=[]
+        stream,graph=MagicMock(),MagicMock()
+        with patch('torch.cuda.Stream',return_value=stream), \
+             patch('torch.cuda.current_stream',return_value=stream), \
+             patch('torch.cuda.stream',side_effect=lambda unused:nullcontext()), \
+             patch('torch.cuda.CUDAGraph',return_value=graph), \
+             patch('torch.cuda.graph',side_effect=lambda unused:nullcontext()):
+            result=capture(lambda:calls.append((torch.is_grad_enabled(),torch.is_inference_mode_enabled())))
+        self.assertIs(result,graph)
+        self.assertEqual(calls,[(False,True)]*4)
+
     def test_equal_budget_inspection_rejects_smoke_checkpoint(self):
         from distill.inspect_candidate import validate_candidate
         saved = dict(config=dict(stage='base'), arguments=dict(steps=32), step=32)

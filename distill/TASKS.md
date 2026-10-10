@@ -67,6 +67,15 @@ candidats n'est présenté comme ayant satisfait tous les seuils stricts.
 Les **18 checkpoints immuables** sont vérifiés dans l'inventaire, dont les
 15 anciens aux SHA inchangés. Les chronométrages finaux sont en cours.
 
+Le microbenchmark CUDA Graph du coarse a rencontré une copie CPU→GPU interdite :
+son helper de capture était hors du mode d'inférence et contournait les caches
+exacts du runtime. `bench_student.capture` couvre maintenant warmup et capture
+par `torch.inference_mode()`. Les rapports réseau enregistrent ce mode et le
+SHA du script ; le coordinateur recalcule les anciens rapports réseau, tandis
+que les mesures de pipeline complètes et les preuves physiques restent
+valides (leurs chemins utilisent déjà le mode d'inférence). Aucun poids ni
+code d'inférence n'a changé pour cette correction de mesure.
+
 Objectif initial : remplacer le base model à 2 étapes (254 M paramètres) par un élève une passe ×10 plus rapide, dans la tolérance BF16/FP32.
 
 Objectif étendu par l'utilisateur le 2026-10-10 : **trois modèles distillés de

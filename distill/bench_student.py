@@ -35,6 +35,7 @@ def time_cuda(fn, iterations=50):
     return min(times)
 
 
+@torch.inference_mode()
 def capture(fn):
     stream = torch.cuda.Stream()
     stream.wait_stream(torch.cuda.current_stream())
@@ -82,7 +83,9 @@ def main():
     require_idle_gpu()
     torch.cuda.set_device(0)
     torch.backends.cudnn.benchmark = True
-    report = dict(gpu=torch.cuda.get_device_name(), torch=torch.__version__, samples=[], whole_system_idle=True)
+    report = dict(gpu=torch.cuda.get_device_name(), torch=torch.__version__, samples=[], whole_system_idle=True,
+                  graph_inference_mode=True,
+                  benchmark_source_digest=hashlib.sha256(Path(__file__).read_bytes()).hexdigest())
     if not args.fp8_only:
         if not args.checkpoint:
             parser.error('--checkpoint is required unless --fp8-only.')

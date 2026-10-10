@@ -86,7 +86,9 @@ def main():
                         raise ValueError('Benchmark identity changed; use a separate output directory.')
                     # Network reports are written only after their measurement.
                     reuse = old.get('whole_system_idle') is True and (
-                        kind == 'network' or old.get('status') == 'complete')
+                        (kind == 'network' and old.get('graph_inference_mode') is True and
+                         old.get('benchmark_source_digest') == hashlib.sha256((REPO/'distill/bench_student.py').read_bytes()).hexdigest())
+                        or (kind == 'stage' and old.get('status') == 'complete'))
                 if not reuse:
                     print(f'BENCH gpu={gpu} stage={stage} kind={kind}', flush=True)
                     subprocess.run([sys.executable, '-m', module, '--checkpoint', str(paths[stage]),
