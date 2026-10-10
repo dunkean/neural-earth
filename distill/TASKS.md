@@ -132,8 +132,9 @@ Le parent128 est le compromis visuel conseillé parmi les variantes examinées,
 avec coarse8 et decoder200k ; il n'est pas déclaré conforme aux seuils stricts.
 Le choix pratique reste ouvert à l'utilisateur, comme demandé.
 
-La livraison Git reste incomplète : l'API GitHub confirme encore
-`permissions.push=false` sur `dunkean/neural-earth` pour le compte configuré.
+La livraison Git est débloquée : le token fourni par l'utilisateur correspond
+au compte `dunkean` et l'API confirme `permissions.push=true`. La branche
+`distill` est publiée sur `dunkean/neural-earth` ; son commit distant est vérifié.
 L'archive Git locale est rafraîchie après chaque commit de livraison. Aucun nouveau fork,
 changement de remote ni publication de poids n'est effectué sans destination
 autorisée. Ce blocage de publication ne change pas les résultats locaux.
@@ -443,14 +444,14 @@ l'entraînement pendant que le reste du dataset est généré.
   final vérifiés dans `~/data/distill/final/`.
 - [ ] Choix pratique de l'utilisateur sur le look and feel et les erreurs des
   côtes basses ; aucune acceptation stricte ni intégration par défaut au runtime.
-- [ ] Branche poussée à jour : accès GitHub en écriture manquant, archive Git
-  locale fournie pour la livraison. Le but reste actif tant que la publication
-  demandée et le choix de qualité restent à résoudre.
+- [x] Branche `distill` poussée sur `dunkean/neural-earth` avec le token fourni
+  par l'utilisateur ; identité du commit distant vérifiée. L'archive Git locale
+  reste fournie. La qualité pratique des candidats reste à choisir ou améliorer.
 
-Commit local initial : `0c6215f`. Push tenté vers `dunkean/neural-earth` :
-GitHub renvoie 403, compte `GBeurier` sans accès en écriture. Aucun fork ni
-changement de dépôt distant effectué ; destination autorisée demandée à
-l'utilisateur. Cette limitation de livraison n'arrête pas les calculs locaux.
+Commit local initial : `0c6215f`. Le premier push était refusé au compte
+`GBeurier`. Le token du compte `dunkean`, fourni ensuite par l'utilisateur,
+a permis de publier la branche sur le dépôt d'origine, sans fork ni changement
+de destination. Le secret n'est ni affiché ni copié dans le dépôt.
 
 ### Commandes de reprise et inspection espacée
 
