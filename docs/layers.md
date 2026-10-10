@@ -14,7 +14,7 @@ Choose a layer from the menu next to the map controls. Map and globe share the s
 | Seasonal climate | Northern summer and winter temperature and half-year rainfall |
 | Atmospheric layers | Pressure, wind direction/speed, rain shadows and ocean influence |
 | Ocean layers | Seasonal surface current direction and speed |
-| Tectonic layers | Plates, superplates, crust, boundaries and convergence |
+| Orogent layers | Plates, superplates, crust, boundaries and convergence |
 | Relief formation | Initial relief, uplift, orogeny, hotspots, back arcs, folded ridges and erosion changes |
 | Map styles | Parchment, Atlas, Classic, Engraving, Cadastral, Blueprint, Illuminated, Topographic, Night and Copernicus DEM |
 

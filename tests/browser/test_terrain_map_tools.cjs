@@ -26,6 +26,7 @@ assert.equal(distanceLabel(1500),'1.50 km');
     const errors = [], requests = [];let pauseWorld=false,releaseWorld,snrHeightRequests=0,computing=0;
     let pauseFineTiles=false,firstFineRequestResolve;
     const fineReleases=[];
+    await page.addInitScript(()=>{if(!localStorage.getItem('neural-earth-preferences-v1'))localStorage.setItem('neural-earth-preferences-v1',JSON.stringify({gpuAcceleration:true,rendering:{gpuRender:true,coarseGpu:true}}))});
     page.on('pageerror',e=>errors.push(e.message));
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM0LJrHwMDAxAAGAA7JAUW48M0QAAAAAElFTkSuQmCC','base64');
     const physical = new Float32Array(304*304+5*33*33); physical.fill(-125.5,0,304*304);

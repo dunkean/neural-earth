@@ -39,7 +39,7 @@ class IndependentStages(unittest.TestCase):
         return profile,world,executed
 
     def test_full_cpu_chain_matches_original_reference(self):
-        reference=core.generate_atlas(50,width=128,height=64,options={'detail':20000},include_layers=True)
+        reference=core.generate_atlas(50,self.settings['continental_style'],width=128,height=64,options={'detail':20000},include_layers=True)
         _,world,execution=self.run_stage(self.settings,'all')
         self.assertEqual(set(execution),{'relief','erosion','climate'})
         np.testing.assert_array_equal(world.height_m,reference[0])

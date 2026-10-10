@@ -5,7 +5,7 @@
 
 The **Biomes** entry in the current layer menu selects `orogen-biomes`. It combines a Köppen climate class with an altitude-dependent color treatment. There are **30 land classes plus the ocean**, with additional rock and snow colors.
 
-Orogen supplies the shared climate for the Noise, Tectonic and Custom relief generators. The layer represents climate-associated landscape colors. It does not independently simulate vegetation, forests, grasslands, wetlands, soils, glaciers or hydrology.
+Orogen supplies the shared climate for the Noise, Orogent and Custom relief generators. The layer represents climate-associated landscape colors. It does not independently simulate vegetation, forests, grasslands, wetlands, soils, glaciers or hydrology.
 
 ### Construction pipeline
 

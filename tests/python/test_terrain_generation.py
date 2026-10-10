@@ -17,6 +17,17 @@ import terrain_generation as generation
 
 
 class GenerationRegistryTests(unittest.TestCase):
+    def test_orogent_startup_defaults(self):
+        settings = generation.generator_schema()['defaults_by_profile']['orogen']
+        self.assertEqual(settings['height_source'], 'orogen')
+        self.assertEqual(settings['relief_pipeline'], 'orogen')
+        self.assertEqual(settings['continental_style'], 'continents')
+        self.assertEqual(settings['orogen_continent_count'], 3)
+        self.assertEqual(settings['orogen_detail'], 100000)
+        self.assertEqual(settings['orogen_continent_variety'], .85)
+        self.assertGreater(settings['orogen_hydraulic'], 0)
+        self.assertFalse(any(settings[key] for key in generation.OROGEN_GPU_PARAMETERS))
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name) / "registry"

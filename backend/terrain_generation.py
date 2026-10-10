@@ -26,10 +26,10 @@ OROGEN_PARAMETERS = {
     'orogen_plate_count': {'minimum':4, 'maximum':120, 'integer':True, 'default':80},
     'orogen_continent_count': {'minimum':1, 'maximum':10, 'integer':True, 'default':4},
     'orogen_land_coverage': {'minimum':.05, 'maximum':.9, 'default':.30},
-    'orogen_continent_variety': {'minimum':0., 'maximum':1., 'default':.35},
+    'orogen_continent_variety': {'minimum':0., 'maximum':1., 'default':.85},
     'orogen_motion_strength': {'minimum':0., 'maximum':4., 'default':1.},
     'orogen_convergence_threshold': {'minimum':.05, 'maximum':4., 'default':.75},
-    'orogen_detail': {'minimum':20000, 'maximum':1000000, 'integer':True, 'default':204000},
+    'orogen_detail': {'minimum':20000, 'maximum':1000000, 'integer':True, 'default':100000},
     'orogen_spread': {'minimum':1., 'maximum':12., 'default':5.},
     'orogen_roughness': {'minimum':0., 'maximum':1., 'default':.4},
     'orogen_warp': {'minimum':0., 'maximum':1., 'default':.75},
@@ -66,7 +66,7 @@ OROGEN_STAGE_PARAMETERS = {
 
 def orogen_defaults(style='earthlike'):
     values = {key:list(spec['default']) if isinstance(spec['default'],list) else spec['default'] for key,spec in OROGEN_PARAMETERS.items()}
-    plates, continents, coverage = {'gondwana':(80,1,.3), 'continents':(80,5,.3),
+    plates, continents, coverage = {'gondwana':(80,1,.3), 'continents':(80,3,.3),
         'earthlike':(80,4,.3), 'archipelago':(110,8,.18)}[style]
     values.update(orogen_plate_count=plates, orogen_continent_count=continents,
                   orogen_land_coverage=coverage)
@@ -81,7 +81,7 @@ def _defaults(base):
                 height_source="natural" if natural else "orogen" if base == "orogen" else "native",
                 climate_source="orogen" if base == "orogen" else "natural" if natural else "native",
                 relief_pipeline="orogen" if base == "orogen" else "original",
-                continental_style="earthlike" if natural or base == "orogen" else base.removeprefix("terrestrial-"),
+                continental_style="continents" if base == "orogen" else "earthlike" if natural else base.removeprefix("terrestrial-"),
                 continental_strength=.8, macro_scale_km=600.,
                 frequency_mult=[1.] * 5, octaves=[4, 2, 4, 4, 4],
                 cond_snr=[.5] * 5 if natural else [.05, .5, .5, .5, .5],

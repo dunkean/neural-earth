@@ -39,8 +39,8 @@ EXTRA = {
 }
 MODES += tuple(EXTRA)
 LEGENDS.update({k:v[1] for k,v in EXTRA.items()})
-LEGENDS['orogen-convergence']='Original propagated tectonic stress · positive compression'
-LEGENDS['orogen-uplift']='Original tectonic elevation contribution · internal Orogen units'
+LEGENDS['orogen-convergence']='Original propagated Orogent stress · positive compression'
+LEGENDS['orogen-uplift']='Original Orogent elevation contribution · internal units'
 _PLATE_COLORS = np.array([colorsys.hsv_to_rgb((i*.61803398875)%1, .55, .9)
                           for i in range(120)], np.float32)
 

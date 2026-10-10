@@ -79,7 +79,7 @@ Prepare the geography inputs and runtime directory using the [installation guide
 
 On Linux, use `./start-neural-earth.sh` (add `--no-open` for unattended startup). On Windows, double-click **start-neural-earth.cmd**. Open **http://127.0.0.1:8765**. Pinned model weights download on first use; loading all three networks and preparing CUDA Graphs takes time.
 
-The default **Tectonic** generator uses bundled Orogen code. **Custom → Continental atlas** additionally requires Rust/Cargo and a pinned sibling `world-builder-rs` checkout. Optional GPU erosion has separate dependencies. The installation guide documents these and configurable storage (`~/.cache/neural-earth` on Linux, `E:/TerrainDiffusionRuntime` on Windows).
+The default **Orogent** generator uses bundled Orogen code, with 100,000 mesh points, three continents, continent variety 0.85 and erosion enabled. On first launch, choose whether to enable all optional GPU acceleration settings, including erosion and map rendering. Later edits are saved locally in the browser. **Custom → Continental atlas** additionally requires Rust/Cargo and a pinned sibling `world-builder-rs` checkout. Optional GPU erosion has separate dependencies. The installation guide documents these and configurable storage (`~/.cache/neural-earth` on Linux, `E:/TerrainDiffusionRuntime` on Windows).
 
 ## How it works
 
