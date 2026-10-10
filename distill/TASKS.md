@@ -126,9 +126,23 @@ toutes mixtes. Les 7 747 633 pixels train proches de la mer se répartissent ent
 Ces nombres décrivent le proxy intérieur de la loss, pas une nouvelle validation
 du terrain final. La loss actuelle comporte une MAE d'altitude normalisée par
 l'écart-type de chaque fenêtre, mais pas de terme explicite terre/mer. Le
-diagnostic justifie de préparer un essai côtier ciblé, à comparer au parent128
-préservé et à contrôler ensuite sur toute la banque physique. Aucun nouvel
-élève n'est encore entraîné ni ajouté au menu live par ce diagnostic.
+diagnostic justifie un essai côtier ciblé, à comparer au parent128
+préservé et à contrôler ensuite sur toute la banque physique.
+
+`shore_trial.py` lance désormais deux essais de **2000 étapes** depuis la même
+EMA parent128 : loss couplée témoin, puis même loss + KL terre/mer de poids 0,1
+dans la bande ±20 m (probabilités douces, température 2 m). Optimiseur réinitialisé,
+seed, sampler, données et budget identiques. Les 41 fenêtres de validation sont
+mesurées par `shore_probe.py`, dont les cinq fenêtres côtières ; ce proxy ne vaut
+pas acceptation physique. Le parent présente 35,25 % de désaccord équilibré près
+de la mer et 23,56 m de MAE moyenne intérieure sur ces 41 fenêtres. Ces nombres
+ne remplacent pas les mesures des vues finales.
+
+Job durable : `shore-loss-trial` sur **GPU0**, viewer conservé sur GPU1. État et
+rapports sous `~/data/distill/shore-trial/`. Arrêt propre par `distill.jobs stop`,
+reprise explicite du même job après vérification de son handle ; contrat SHA
+figé, checkpoints atomiques, interruptions transmises au trainer. Aucun de ces
+essais n'est promu ni ajouté au menu live. Les **46 tests** passent.
 
 ### Comparaison interactive
 
@@ -173,7 +187,7 @@ au compte `dunkean` et l'API confirme `permissions.push=true`. La branche
 `distill` est publiée sur `dunkean/neural-earth` ; son commit distant est vérifié.
 L'archive Git locale est rafraîchie après chaque commit de livraison. Aucun nouveau fork,
 changement de remote ni publication de poids n'est effectué sans destination
-autorisée. Ce blocage de publication ne change pas les résultats locaux.
+autorisée. Les expériences suivantes restent séparées du dossier final figé.
 
 Objectif initial : remplacer le base model à 2 étapes (254 M paramètres) par un élève une passe ×10 plus rapide, dans la tolérance BF16/FP32.
 

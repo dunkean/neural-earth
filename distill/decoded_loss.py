@@ -10,6 +10,7 @@ from dataclasses import asdict
 import hashlib
 import io
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -79,7 +80,39 @@ def reconstructed_height(residual, latents):
         return sqrt_height.sign()*sqrt_height.square()
 
 
-def paired_loss(decoder, prediction, target, gaussian, residual, mask, spectral=.02, gradient=.05, bands=.05):
+def shore_loss(prediction, target, mask, band_m=20., temperature_m=2.):
+    """Match soft land/sea probabilities near zero without changing their target.
+
+    KL equals BCE minus the target's entropy, so an exact height prediction has
+    zero loss. Each available land/sea class and each active window gets equal
+    weight. Far-away relief and invalid pixels have no contribution.
+    """
+    if (not math.isfinite(band_m) or not math.isfinite(temperature_m) or
+            min(band_m, temperature_m) <= 0):
+        raise ValueError('Positive finite shore band and temperature required.')
+    if prediction.shape != target.shape or prediction.shape != mask.shape:
+        raise ValueError('Shore height and mask shapes must agree.')
+    p, t = prediction.float(), target.detach().float()
+    valid = (mask > 0) & (t.abs() <= band_m)
+    probability = torch.sigmoid(t/temperature_m)
+    divergence = (F.binary_cross_entropy_with_logits(p/temperature_m, probability, reduction='none') -
+                  F.binary_cross_entropy_with_logits(t/temperature_m, probability, reduction='none'))
+    terms, present, errors = [], [], []
+    for land in (t > 0, t <= 0):
+        selected = (valid & land).float()
+        count = selected.sum((-3, -2, -1))
+        terms.append((divergence*selected).sum((-3, -2, -1))/count.clamp_min(1))
+        errors.append((((p > 0) != (t > 0)).float()*selected).sum((-3, -2, -1))/count.clamp_min(1))
+        present.append((count > 0).float())
+    classes = torch.stack(present).sum(0)
+    windows = (classes > 0).float()
+    loss = (torch.stack(terms).sum(0)/classes.clamp_min(1)*windows).sum()/windows.sum().clamp_min(1)
+    disagreement = (torch.stack(errors).sum(0)/classes.clamp_min(1)*windows).sum()/windows.sum().clamp_min(1)
+    return loss, disagreement
+
+
+def paired_loss(decoder, prediction, target, gaussian, residual, mask, spectral=.02, gradient=.05, bands=.05,
+                shore_weight=0.):
     from distill.train import losses, spectral_band_loss
     decoded = decode(decoder, prediction, gaussian)
     loss, values = losses(decoded, residual, mask, spectral, gradient)
@@ -91,8 +124,12 @@ def paired_loss(decoder, prediction, target, gaussian, residual, mask, spectral=
     scale = th.detach().std((-2,-1), unbiased=False).clamp_min(5.)
     relative_height = (per_window_mae/scale).mean()
     loss += .05*relative_height + bands*spectral_band_loss(ph, th, valid)
-    return loss, dict(decoded_loss=loss, decoded_mse=values['mse'],
-                      decoded_height_mae_m_proxy=per_window_mae.mean())
+    metrics = dict(decoded_mse=values['mse'], decoded_height_mae_m_proxy=per_window_mae.mean())
+    if shore_weight:
+        coast, disagreement = shore_loss(ph, th, valid)
+        loss += shore_weight*coast
+        metrics.update(decoded_coast_kl=coast, decoded_coast_disagreement=disagreement)
+    return loss, metrics | dict(decoded_loss=loss)
 
 
 def frozen_decoder(path, device):
