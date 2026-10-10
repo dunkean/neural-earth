@@ -90,6 +90,27 @@ continue d'être mesuré avec ses propres poids. Une archive Git vérifiée du c
 est préparée sous `delivery/distill-code.bundle`, à rafraîchir après les derniers
 commits ; elle constitue une livraison locale, sans masquer le push403 restant.
 
+Les chronométrages sont maintenant complets pour les quatre bases sur les
+deux GPU. Poids résidents, champs neufs, construction des entrées et transferts
+inclus, dépendances préchargées hors chronomètre, médiane de trois répétitions :
+
+| Étape / surface | 4090 teacher → élève | Gain | 5090 teacher → élève | Gain |
+| --- | --- | --- | --- | --- |
+| Base128 initial / 2048² | 16,272 → 2,217 s | ×7,34 | 12,728 → 1,842 s | ×6,91 |
+| Base128 couplé / 2048² | 16,282 → 2,250 s | ×7,24 | 12,769 → 1,848 s | ×6,91 |
+| Base128 +20k / 2048² | 16,277 → 2,248 s | ×7,24 | 12,813 → 1,849 s | ×6,93 |
+| Base192 +20k / 2048² | 16,230 → 3,134 s | ×5,18 | 12,842 → 2,328 s | ×5,52 |
+| Coarse8 / 128² | 0,430 → 0,216 s | ×1,99 | 0,279 → 0,195 s | ×1,43 |
+| Decoder / 1024² | 0,332 → 0,244 s | ×1,36 | 0,256 → 0,219 s | ×1,17 |
+
+Ce sont des gains **par étape**, pas un chronométrage d'affichage complet ; le
+seuil initial ×10 n'est pas atteint. Les secondes des évaluations de qualité
+ne remplacent pas ces mesures. Les exports d'inférence FP32 vérifiés font
+53,349 Mo (base128), 119,874 Mo (base192), 11,218 Mo (coarse8) et 13,360 Mo
+(decoder). Le 192 coûte davantage sans amélioration régulière sur les cas rares.
+Les captures physiques supplémentaires et l'assemblage des 18 planches restent
+en cours ; aucune acceptation stricte n'est revendiquée.
+
 Objectif initial : remplacer le base model à 2 étapes (254 M paramètres) par un élève une passe ×10 plus rapide, dans la tolérance BF16/FP32.
 
 Objectif étendu par l'utilisateur le 2026-10-10 : **trois modèles distillés de
