@@ -174,10 +174,33 @@ Contrat, états et mesures : `~/data/distill/gradient-trial/`. **49 tests** pass
 Le viewer GPU1 et les checkpoints retenus restent inchangés. Aucun nouveau
 candidat n'est accepté avant les vues physiques rares et les tuiles froides.
 
+Cet essai est maintenant terminé (exit0), et **rejeté** : MAE intérieure
+24,70 m (+4,9 % vs parent), erreur relative de gradient 0,659 contre 0,625,
+composante axiale d'erreur 5,49 contre 5,11 m RMS, désaccord côtier 36,74 % contre
+35,25 %. Le léger mieux face au témoin réentraîné ne dépasse pas le parent
+préservé. Décision sous `gradient-trial/decision.json`. Les métriques communes
+parent/témoin recalculées sont **exactement identiques** aux originales ; preuve
+`control-reprobe-equivalence.json`. Le code est conservé dans un bundle Git
+vérifié, au commit `f0e756d`, pour une reprise indépendante de l'historique local.
+Pas de nouveau passage couplé sans autre preuve utile.
+
+### Diagnostic des erreurs sur la grille
+
+`audit_lattice_error.py` mesure les erreurs des cinq canaux selon la phase
+sur la grille de huit pixels. Il utilise **300 crops train complets** répartis
+sur le jeu principal et **tous les crops val**, plutôt que le seul sous-ensemble
+couplé 64². Un biais périodique moyen est estimé sur train seulement, sans offset
+global, puis testé sur validation ; les variances par phase sont également
+mesurées. Une variance alternée de moyenne nulle ne se corrige pas par soustraction
+du biais. Pas d'altération du modèle, des données teacher, du runtime ni des poids
+retenus. Job durable `lattice-error-audit`, GPU0 ; résultats attendus sous
+`eval/lattice-error/`. Ce diagnostic doit déterminer le prochain geste, pas
+justifier une nouvelle série d'entraînements aveugles.
+
 Le suivi Autoresearch auxiliaire a été arrêté : sa résolution de la métrique
 secondaire baseline refuse les paquets après un `measure`, malgré la MAE présente
 dans le rapport. Aucun keep ni promotion n'a eu lieu. Les rapports complets des
-essais restent autoritatifs ; le seuil de +5 % de MAE n'est pas assoupli.
+essais font foi ; le seuil de +5 % de MAE n'est pas assoupli.
 
 ### Comparaison interactive
 
