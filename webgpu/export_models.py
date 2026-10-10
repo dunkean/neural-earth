@@ -6,6 +6,11 @@ deliberately kept outside the source tree by default.
 
 from __future__ import annotations
 
+from pathlib import Path as _RepositoryPath
+import sys as _repository_sys
+_repository_sys.path.insert(0, str(_RepositoryPath(__file__).resolve().parents[1] / "backend"))
+from terrain_paths import RUNTIME_ROOT, HF_HOME, HF_HUB_CACHE
+
 import argparse
 from collections import Counter
 import hashlib
@@ -20,7 +25,8 @@ if hasattr(sys.stdout, "reconfigure"):
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "terrain-diffusion"))
-os.environ.setdefault("HF_HOME", "E:/TerrainDiffusionRuntime/huggingface")
+os.environ["HF_HOME"] = str(HF_HOME)
+os.environ["HF_HUB_CACHE"] = str(HF_HUB_CACHE)
 os.environ.setdefault("MPLBACKEND", "Agg")
 os.chdir(ROOT / "terrain-diffusion")
 
@@ -36,8 +42,8 @@ from terrain_diffusion.onnx.export import _dummy_inputs, export_model
 import terrain_diffusion.onnx.export as upstream_export
 
 REVISION = "9ef8030cb805b433b98ec25c5dddefbac07a9e26"
-SNAPSHOT = Path(os.environ["HF_HOME"]) / "hub" / "models--xandergos--terrain-diffusion-30m" / "snapshots" / REVISION
-DEFAULT_OUTPUT = Path("E:/TerrainDiffusionRuntime/webgpu-models")
+SNAPSHOT = HF_HUB_CACHE / "models--xandergos--terrain-diffusion-30m" / "snapshots" / REVISION
+DEFAULT_OUTPUT = (RUNTIME_ROOT / 'webgpu-models')
 NAMES = ("coarse_model", "base_model", "decoder_model")
 SIZES = {"coarse_model": 64, "base_model": 64, "decoder_model": 512}
 MAX_ABS = 0.003

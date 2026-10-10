@@ -6,6 +6,11 @@ as a substitute for completing the crop dependency graph.
 
 from __future__ import annotations
 
+from pathlib import Path as _RepositoryPath
+import sys as _repository_sys
+_repository_sys.path.insert(0, str(_RepositoryPath(__file__).resolve().parents[1] / "backend"))
+from terrain_paths import RUNTIME_ROOT, HF_HOME, HF_HUB_CACHE
+
 import hashlib
 import json
 import os
@@ -16,7 +21,8 @@ import types
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "terrain-diffusion"))
-os.environ.setdefault("HF_HOME", "E:/TerrainDiffusionRuntime/huggingface")
+os.environ["HF_HOME"] = str(HF_HOME)
+os.environ["HF_HUB_CACHE"] = str(HF_HUB_CACHE)
 os.environ.setdefault("MPLBACKEND", "Agg")
 os.chdir(ROOT / "terrain-diffusion")
 
@@ -26,8 +32,8 @@ import torch
 from terrain_diffusion.inference.world_pipeline import WorldPipeline
 
 REVISION = "9ef8030cb805b433b98ec25c5dddefbac07a9e26"
-SNAPSHOT = Path(os.environ["HF_HOME"]) / "hub" / "models--xandergos--terrain-diffusion-30m" / "snapshots" / REVISION
-DEST = Path("E:/TerrainDiffusionRuntime/webgpu-models")
+SNAPSHOT = HF_HUB_CACHE / "models--xandergos--terrain-diffusion-30m" / "snapshots" / REVISION
+DEST = (RUNTIME_ROOT / 'webgpu-models')
 CROP = (2560, -3584, 2624, -3520)
 SEED = 42
 PREFIX = "crop64-coast"

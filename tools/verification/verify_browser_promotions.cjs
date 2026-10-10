@@ -1,12 +1,13 @@
+const {loadPlaywright, browserExecutable, runtimePath} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Real browser: a cached conditioning preview must eventually promote after
 // whole-world coarse preparation; presentation remains available meanwhile.
-const {chromium}=require('E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const fs=require('node:fs'),assert=require('node:assert/strict');
 (async()=>{
- const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--enable-unsafe-webgpu']});
+ const browser=await chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu']});
  const page=await browser.newPage({viewport:{width:900,height:650}}),errors=[],samples=[];
  page.on('pageerror',e=>errors.push(e.message));
  const start=Date.now();
@@ -24,8 +25,8 @@ const fs=require('node:fs'),assert=require('node:assert/strict');
   const after=await(await page.request.get('http://127.0.0.1:8765/api/status')).json();
   const passed=snapshot.visible.pending===0&&snapshot.rendered.sources.length===1&&snapshot.rendered.sources[0]==='coarse-area-mean'&&errors.length===0;
   const report={passed,wall_ms:Date.now()-start,samples,errors,nn_before:statusBefore.cuda_forward_calls,nn_after:after.cuda_forward_calls,chrome_version:browser.version(),implementation_sha256:Object.fromEntries(['index.html','terrain_lod.js','terrain_renderer.js','tools/verification/verify_browser_promotions.cjs'].map(n=>[n,require('node:crypto').createHash('sha256').update(readRepositoryFile(n)).digest('hex')])),note:'Seed 42 learned coarse already fully persisted; automatic preparation disabled. Polls live rendered source, not merely HTTP arrival. Existing preview and overview are retained during replacement. No cold-preparation or sustained-pan claim.'};
-  fs.writeFileSync('E:/TerrainDiffusionRuntime/audit-implementation/browser-promotions.json',JSON.stringify(report,null,2));
-  await page.screenshot({path:'E:/TerrainDiffusionRuntime/audit-implementation/browser-promotions.png'});
+  fs.writeFileSync(runtimePath('audit-implementation/browser-promotions.json'),JSON.stringify(report,null,2));
+  await page.screenshot({path:runtimePath('audit-implementation/browser-promotions.png')});
   assert(passed,'Visible world tiles did not all promote to learned coarse');
   assert.deepEqual(report.nn_after,report.nn_before,'Promotion required additional NN work');
   console.log(JSON.stringify({passed,wall_ms:report.wall_ms,samples:samples.length,initial_sources:samples[0].snapshot.rendered.sources,final_sources:snapshot.rendered.sources}));

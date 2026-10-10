@@ -1,5 +1,10 @@
 """Extract early decoder graph prefixes for CPU/WebGPU divergence localization."""
 
+from pathlib import Path as _RepositoryPath
+import sys as _repository_sys
+_repository_sys.path.insert(0, str(_RepositoryPath(__file__).resolve().parents[1] / "backend"))
+from terrain_paths import RUNTIME_ROOT
+
 from pathlib import Path
 from copy import deepcopy
 import json
@@ -8,7 +13,7 @@ import numpy as np
 import onnx
 import onnxruntime as ort
 
-DEST = Path("E:/TerrainDiffusionRuntime/webgpu-models")
+DEST = (RUNTIME_ROOT / 'webgpu-models')
 SOURCE = DEST / "decoder_model.onnx"
 FIXTURE = json.loads((DEST / "crop64-coast-manifest.json").read_text())
 FEEDS = FIXTURE["first_real_forward"]["decoder_model"]

@@ -1,10 +1,11 @@
+const {loadPlaywright, browserExecutable} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 // Real browser rendering and subscriptions, with distinct chart fixtures.
-const {chromium}=require(NEURAL_EARTH_ROOT + '/webgpu/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const assert=require('node:assert/strict');
 (async()=>{
- const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
+ const browser=await chromium.launch({executablePath:browserExecutable(),headless:true});
  try{
   const page=await browser.newPage({viewport:{width:1000,height:720}}),errors=[],views=[],requests=[];
   await page.addInitScript(()=>Object.defineProperty(navigator,'gpu',{value:undefined}));

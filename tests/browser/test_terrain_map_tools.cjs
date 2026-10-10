@@ -1,3 +1,4 @@
+const {loadPlaywright, browserExecutable} = require('../../tools/platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
@@ -6,7 +7,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const {sampleHeight, distanceLabel} = require(NEURAL_EARTH_ROOT + '/web/terrain_map_tools.js');
-const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium} = loadPlaywright();
 
 // Bilinear sampling respects pixel centres, halo, and negative map coordinates.
 const grid = new Float32Array(16);
@@ -19,7 +20,7 @@ assert.equal(sampleHeight({}, {x:0,y:0}),null);
 assert.equal(distanceLabel(1500),'1.50 km');
 
 (async () => {
-  const browser = await chromium.launch({headless:true, executablePath:process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe',args:['--disable-gpu']});
+  const browser = await chromium.launch({headless:true, executablePath:browserExecutable(),args:['--disable-gpu']});
   try {
     const page = await browser.newPage({viewport:{width:1280,height:900}});
     const errors = [], requests = [];let pauseWorld=false,releaseWorld,snrHeightRequests=0,computing=0;

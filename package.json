@@ -1,0 +1,14 @@
+{
+  "name": "neural-earth",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node tools/run-tests.cjs tests/browser",
+    "test:webgpu": "node tools/run-tests.cjs webgpu"
+  },
+  "devDependencies": {
+    "playwright": "1.63.0"
+  }
+}

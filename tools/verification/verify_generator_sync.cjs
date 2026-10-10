@@ -1,14 +1,15 @@
+const {loadPlaywright, browserExecutable, pythonExecutable} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
-const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 
 const fs=require('node:fs'),assert=require('node:assert/strict');
 
-const schema=JSON.parse(require('node:child_process').execFileSync('.venv/Scripts/python.exe',['-c','import json; from terrain_generation import generator_schema; print(json.dumps(generator_schema()))'],{encoding:'utf8'}));
+const schema=JSON.parse(require('node:child_process').execFileSync(pythonExecutable(),['-c','import json; from terrain_generation import generator_schema; print(json.dumps(generator_schema()))'],{encoding:'utf8'}));
 const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM0LJrHwMDAxAAGAA7JAUW48M0QAAAAAElFTkSuQmCC','base64');
 
-(async()=>{const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});try{
+(async()=>{const browser=await chromium.launch({executablePath:browserExecutable(),headless:true});try{
 
  const page=await browser.newPage({viewport:{width:1440,height:900}}),errors=[],worldRequests=[],generationRequests=[];let appliedSettings=null,failNextGeneration=false;page.setDefaultTimeout(10000);page.on('pageerror',e=>errors.push(e.message));
 

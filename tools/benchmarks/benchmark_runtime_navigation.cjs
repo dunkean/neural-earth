@@ -1,18 +1,19 @@
+const {loadPlaywright, browserExecutable, runtimePath} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile, repositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Actual server/Chrome probe: time to successive submitted terrain stages.
 // HTTP and snapshots are measured; GPU execution/presentation is not timed.
-const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const fs=require('node:fs'),crypto=require('node:crypto'),assert=require('node:assert/strict');
-const output=process.env.TERRAIN_RUNTIME_NAV_REPORT||'E:/TerrainDiffusionRuntime/runtime-lod-optimization/browser-progressive.json';
+const output=process.env.TERRAIN_RUNTIME_NAV_REPORT||runtimePath('runtime-lod-optimization/browser-progressive.json');
 const serverURL=process.env.TERRAIN_RUNTIME_URL||'http://127.0.0.1:8765';
 const sourceRoot=process.env.TERRAIN_RUNTIME_SOURCE_DIR||'.';
 const profile=process.env.TERRAIN_RUNTIME_PROFILE||'natural',seed=process.env.TERRAIN_RUNTIME_SEED||'20261007117';
 const x=Number(process.env.TERRAIN_RUNTIME_X||'-103680'),y=Number(process.env.TERRAIN_RUNTIME_Y||'80640');
 const sourceFiles=['index.html','terrain_lod.js','terrain_renderer.js','terrain_inference.py','terrain_nn_constants.py','terrain_server.py','tools/benchmarks/benchmark_runtime_navigation.cjs',...['terrain_cuda_kernels.py','terrain_interpolation.py'].filter(p=>fs.existsSync(repositoryFile(require('node:path').join(sourceRoot,p))))];
 (async()=>{
- const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--enable-unsafe-webgpu']});
+ const browser=await chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu']});
  const page=await browser.newPage({viewport:{width:900,height:650}}),responses=[],worldResponses=[],headerPromises=[],errors=[],requestPhases=new WeakMap();
  let phase='startup';
  page.on('pageerror',e=>errors.push(e.message));

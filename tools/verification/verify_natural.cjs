@@ -1,8 +1,9 @@
+const {loadPlaywright, browserExecutable, runtimePath} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
-const {chromium}=require('E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const assert=require('node:assert/strict');
-(async()=>{const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});try{
+(async()=>{const browser=await chromium.launch({executablePath:browserExecutable(),headless:true});try{
  const page=await browser.newPage({viewport:{width:1000,height:700}}),errors=[],urls=[];
  page.on('pageerror',e=>errors.push(e.message));page.on('request',r=>urls.push(r.url()));
  await page.goto('http://127.0.0.1:8765/?seed=42&profile=natural&mode=relief');
@@ -17,6 +18,6 @@ const assert=require('node:assert/strict');
  await page.waitForFunction(previous=>{const s=window.terrainDebug.snapshot();return s.cameraEpoch>previous&&s.camera.lod===0&&s.visible.lod===0&&s.visible.wanted>0&&s.visible.pending===0},cameraEpoch,{timeout:120000});
  await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
  assert((await page.locator('header').innerText()).includes('Monde procédural'));
- await page.screenshot({path:'E:/TerrainDiffusionRuntime/realtime-qa/natural-viewer.png'});
+ await page.screenshot({path:runtimePath('realtime-qa/natural-viewer.png')});
  assert.deepEqual(errors,[]);console.log('PASS: original region, natural tiles, native30m, no JS errors');
 }finally{await browser.close()}})().catch(e=>{console.error(e);process.exit(1)});

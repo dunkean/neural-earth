@@ -1,8 +1,9 @@
+const {loadPlaywright, browserExecutable} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Real inline client and coverage planner, mocked transport/renderer only.
-const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const assert=require('node:assert/strict'),fs=require('node:fs'),crypto=require('node:crypto');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM0LJrHwMDAxAAGAA7JAUW48M0QAAAAAElFTkSuQmCC','base64');
 const physical=Buffer.from(new Float32Array(304*304+5*33*33).fill(100).buffer);
@@ -10,7 +11,7 @@ const html=readRepositoryFile('index.html','utf8'),lodScript=readRepositoryFile(
 const renderer=`window.createTerrainRenderer=async()=>{const tiles=new Set();return{available:true,clear(){tiles.clear()},deleteTile(k){tiles.delete(k)},hasTile:k=>tiles.has(k),uploadTile(k){tiles.add(k)},draw(rects){this.lastDrawnRects=rects.filter(r=>tiles.has(r.key));return true},getStats(){return{}}}}`;
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 (async()=>{
- const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--disable-gpu']});
+ const browser=await chromium.launch({executablePath:browserExecutable(),headless:true,args:['--disable-gpu']});
  try{
   const page=await browser.newPage({viewport:{width:1000,height:720}}),requests=[],errors=[];
   page.on('pageerror',e=>errors.push(e.message));

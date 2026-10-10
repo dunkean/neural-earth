@@ -1,12 +1,13 @@
+const {loadPlaywright, browserExecutable} = require('../../tools/platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Real client/coverage/renderer, held network packets during coarse promotion.
 const assert=require('node:assert/strict'),fs=require('node:fs');
-const {chromium}=require('E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM0LJrHwMDAxAAGAA7JAUW48M0QAAAAAElFTkSuQmCC','base64');
 (async()=>{
- const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',args:['--enable-unsafe-webgpu']});
+ const browser=await chromium.launch({headless:true,executablePath:browserExecutable(),args:['--enable-unsafe-webgpu']});
  try{
   const page=await browser.newPage({viewport:{width:1000,height:720}}),errors=[],requests=[];
   page.on('pageerror',e=>errors.push(e.message));

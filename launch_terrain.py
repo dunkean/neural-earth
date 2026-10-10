@@ -2,6 +2,7 @@
 import subprocess
 import argparse
 import json
+import os
 import sys
 import time
 import urllib.request
@@ -10,9 +11,6 @@ from pathlib import Path
 
 root = Path(__file__).resolve().parent
 url = 'http://127.0.0.1:8765'
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--no-open', action='store_true', help='Start without opening a browser (verification).')
-args = parser.parse_args()
 
 
 def alive():
@@ -20,20 +18,36 @@ def alive():
         with urllib.request.urlopen(url + '/api/status', timeout=2) as response:
             data = json.load(response)
             return response.status == 200 and str(data.get('version', '')).startswith('natural-')
-    except OSError:
+    except (OSError, ValueError):
         return False
 
 
-if not alive():
+def start_server():
+    options = ({'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt'
+               else {'start_new_session': True})
     with open(root / 'server.log', 'a', encoding='utf-8') as out, open(root / 'server-error.log', 'a', encoding='utf-8') as err:
-        subprocess.Popen([sys.executable, '-u', str(root / 'backend' / 'terrain_server.py')], cwd=root,
-                         stdout=out, stderr=err, creationflags=subprocess.CREATE_NO_WINDOW)
-    for _ in range(120):
-        if alive():
-            break
-        time.sleep(.5)
-    else:
-        raise SystemExit('Server failed to start. See server-error.log.')
-if not args.no_open:
-    webbrowser.open(url)
-print('Neural Earth available: ' + url)
+        return subprocess.Popen([sys.executable, '-u', str(root / 'backend' / 'terrain_server.py')], cwd=root,
+                                stdin=subprocess.DEVNULL, stdout=out, stderr=err, **options)
+
+
+def main(argv=None):
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--no-open', action='store_true', help='Start without opening a browser (verification).')
+    args = parser.parse_args(argv)
+    if not alive():
+        process = start_server()
+        for _ in range(120):
+            if alive():
+                break
+            if process.poll() is not None:
+                raise SystemExit('Server failed to start. See server-error.log.')
+            time.sleep(.5)
+        else:
+            raise SystemExit('Server failed to start. See server-error.log.')
+    if not args.no_open:
+        webbrowser.open(url)
+    print('Neural Earth available: ' + url)
+
+
+if __name__ == '__main__':
+    main()

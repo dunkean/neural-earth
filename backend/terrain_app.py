@@ -1,12 +1,13 @@
-"""Local CUDA Terrain Diffusion demo; weights and large artifacts live on E:."""
+"""Local CUDA Terrain Diffusion demo with configurable external storage."""
 
-from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path, RUNTIME_ROOT, HF_HOME, HF_HUB_CACHE, OUTPUT_ROOT, model_snapshot
 import os
 from pathlib import Path
 
 ROOT = REPO_ROOT
-RUNTIME = Path('E:/TerrainDiffusionRuntime')
-os.environ['HF_HOME'] = str(RUNTIME / 'huggingface')
+RUNTIME = RUNTIME_ROOT
+os.environ['HF_HOME'] = str(HF_HOME)
+os.environ['HF_HUB_CACHE'] = str(HF_HUB_CACHE)
 os.environ['MPLBACKEND'] = 'Agg'
 os.environ['HF_HUB_DISABLE_SYMLINKS_WARNING'] = '1'
 import sys
@@ -29,12 +30,12 @@ from terrain_diffusion.inference.world_pipeline import WorldPipeline
 from terrain_diffusion.inference.relief_map import get_relief_map
 from terrain_inference import configure_world
 
-OUTPUT = ROOT / 'generated'
-OUTPUT.mkdir(exist_ok=True)
+OUTPUT = OUTPUT_ROOT
+OUTPUT.mkdir(parents=True, exist_ok=True)
 MODEL = 'xandergos/terrain-diffusion-30m'
 MODEL_REVISION = '9ef8030cb805b433b98ec25c5dddefbac07a9e26'
 # Installed immutable snapshot: avoid Hub HTTP validation on every server boot.
-_installed_model = RUNTIME / 'huggingface' / 'hub' / 'models--xandergos--terrain-diffusion-30m' / 'snapshots' / MODEL_REVISION
+_installed_model = model_snapshot(MODEL_REVISION)
 _required_model_files = ['config.json'] + [f'{stage}/{name}' for stage in
     ('coarse_model', 'base_model', 'decoder_model') for name in
     ('config.json', 'diffusion_pytorch_model.safetensors')]

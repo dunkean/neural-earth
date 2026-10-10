@@ -9,8 +9,9 @@ _activate_repository()
 
 import os
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from concurrent.futures import ThreadPoolExecutor
+from types import SimpleNamespace
 
 import torch
 
@@ -18,6 +19,30 @@ import terrain_cuda_kernels as kernels
 
 
 class AdmissionTests(unittest.TestCase):
+    def test_linux_loads_wheel_compiler_and_driver_with_cdecl(self):
+        with patch.object(kernels, 'os', SimpleNamespace(name='posix', environ={})), \
+                patch.object(kernels.sys, 'platform', 'linux'), \
+                patch.object(kernels.Path, 'glob', return_value=[kernels.Path('/wheel/libnvrtc.so.12')]), \
+                patch.object(kernels, 'find_library', return_value=None), \
+                patch.object(kernels.C, 'CDLL') as load:
+            kernels._cuda_libraries()
+            self.assertEqual([c.args[0] for c in load.call_args_list],
+                             [str(kernels.Path('/wheel/libnvrtc.so.12')), 'libcuda.so.1'])
+
+    def test_windows_keeps_dll_loader(self):
+        with patch.object(kernels, 'os', SimpleNamespace(name='nt', environ={})), \
+                patch.object(kernels.C, 'WinDLL', create=True) as load:
+            kernels._cuda_libraries()
+            self.assertTrue(load.call_args_list[0].args[0].endswith('nvrtc64_120_0.dll'))
+            self.assertEqual(load.call_args_list[1].args, ('nvcuda.dll',))
+
+    def test_library_lookup_continues_after_failure_and_reports_missing_library(self):
+        load = Mock(side_effect=[OSError('missing'), 'library'])
+        self.assertEqual(kernels._load_library(load, ['missing', 'missing', None, 'found'], 'NVRTC'), 'library')
+        self.assertEqual(load.call_count, 2)
+        with self.assertRaisesRegex(kernels.KernelUnavailable, 'NVRTC unavailable'):
+            kernels._load_library(Mock(side_effect=OSError('missing')), ['missing'], 'NVRTC')
+
     def test_cpu_training_and_shapes_are_not_admitted(self):
         x = torch.ones(2, 3, 4, 4, dtype=torch.bfloat16)
         self.assertIsNone(kernels.binary_sum(x, x, torch.ones(2), torch.ones(())))

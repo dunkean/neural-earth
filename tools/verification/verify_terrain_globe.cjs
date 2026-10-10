@@ -1,10 +1,11 @@
+const {loadPlaywright, browserExecutable} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 // Browser regression using the local viewer, synthetic NN tiles and real WebGL.
-const {chromium}=require(NEURAL_EARTH_ROOT + '/webgpu/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const fs=require('node:fs'),assert=require('node:assert/strict');
 (async()=>{
- const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
+ const browser=await chromium.launch({executablePath:browserExecutable(),headless:true});
  try{
   const page=await browser.newPage({viewport:{width:1100,height:760}}),errors=[],subscriptions=[],tileRequests=[],preparations=[];
   await page.addInitScript(()=>Object.defineProperty(navigator,'gpu',{value:undefined}));

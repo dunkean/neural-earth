@@ -1,3 +1,4 @@
+const {loadPlaywright, browserExecutable} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
@@ -6,7 +7,7 @@ const assert=require('node:assert/strict');
 const fs=require('node:fs');
 const http=require('node:http');
 const path=require('node:path');
-const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 (async()=>{
   const source=readRepositoryFile(path.join(NEURAL_EARTH_ROOT,'terrain_renderer.js'));
   const server=http.createServer((req,res)=>{
@@ -16,7 +17,7 @@ const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntim
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   let browser;
   try {
-    browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--enable-unsafe-webgpu']});
+    browser=await chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu']});
     const page=await browser.newPage();const errors=[];page.on('pageerror',e=>errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     const report=await page.evaluate(async()=>{

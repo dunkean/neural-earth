@@ -1,12 +1,13 @@
+const {loadPlaywright, browserExecutable} = require('../../tools/platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Compare the real WebGL projection with float64 spherical coordinates.
 const fs=require('node:fs'),assert=require('node:assert/strict');
-const {chromium}=require(NEURAL_EARTH_ROOT + '/webgpu/node_modules/playwright');
+const {chromium}=loadPlaywright();
 
 (async()=>{
-  const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
+  const browser=await chromium.launch({executablePath:browserExecutable(),headless:true});
   try{
     const page=await browser.newPage();
     await page.setContent('<canvas id="globe" width="512" height="512"></canvas>');

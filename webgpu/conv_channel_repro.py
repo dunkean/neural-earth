@@ -1,5 +1,10 @@
 """Build minimal first-Conv channel/layout probes without touching the GPU."""
 
+from pathlib import Path as _RepositoryPath
+import sys as _repository_sys
+_repository_sys.path.insert(0, str(_RepositoryPath(__file__).resolve().parents[1] / "backend"))
+from terrain_paths import RUNTIME_ROOT
+
 from copy import deepcopy
 import hashlib
 import json
@@ -9,7 +14,7 @@ import numpy as np
 import onnx
 import onnxruntime as ort
 
-OUT = Path("E:/TerrainDiffusionRuntime/webgpu-models")
+OUT = (RUNTIME_ROOT / 'webgpu-models')
 
 
 def sha256(path):

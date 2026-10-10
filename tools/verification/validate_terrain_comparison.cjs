@@ -1,13 +1,14 @@
+const {loadPlaywright, browserExecutable, runtimePath} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 // Actual Chrome selector changes, equal camera/seed and binary height comparison.
-const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
-const out=process.env.TERRAIN_COMPARISON_OUTPUT||'E:/TerrainDiffusionRuntime/inference-engine-20261008/ui-comparison';
+const out=process.env.TERRAIN_COMPARISON_OUTPUT||runtimePath('inference-engine-20261008/ui-comparison');
 const base=process.env.TERRAIN_RUNTIME_URL||'http://127.0.0.1:8765';
 fs.mkdirSync(out,{recursive:true});
 (async()=>{
- const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--enable-unsafe-webgpu']});
+ const browser=await chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu']});
  const page=await browser.newPage({viewport:{width:900,height:650}}),errors=[],payloads={},pending=[];
  let phase='startup';const phases=new WeakMap(),report={status:'running',states:[],errors};
  const save=()=>fs.writeFileSync(path.join(out,'report.json'),JSON.stringify(report,null,2));

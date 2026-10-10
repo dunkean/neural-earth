@@ -6,6 +6,7 @@ _REPO_ROOT = _BootstrapPath(__file__).resolve().parents[2]
 _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
+from terrain_paths import RUNTIME_ROOT
 
 import json
 from pathlib import Path
@@ -13,7 +14,7 @@ import time
 import urllib.request
 
 BASE='http://127.0.0.1:8765'
-OUTPUT=Path('E:/TerrainDiffusionRuntime/audit-implementation/coarse-world.json')
+OUTPUT=(RUNTIME_ROOT / 'audit-implementation/coarse-world.json')
 
 def read(path,data=None):
     request=urllib.request.Request(BASE+path,

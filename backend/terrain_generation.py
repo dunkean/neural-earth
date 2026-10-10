@@ -5,7 +5,7 @@ landform size or a quality preset. Continental replacement is a soft prototype.
 """
 from __future__ import annotations
 
-from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path, RUNTIME_ROOT, configured_path
 
 from dataclasses import dataclass
 import hashlib
@@ -18,7 +18,7 @@ import tempfile
 from terrain_geometry import DEFAULT_DIAMETER_KM
 
 GENERATION_VERSION = "terrain-generation-v1"
-REGISTRY_ROOT = Path(os.environ.get("TERRAIN_GENERATION_ROOT", "E:/TerrainDiffusionRuntime/generation-settings"))
+REGISTRY_ROOT = configured_path("TERRAIN_GENERATION_ROOT", RUNTIME_ROOT / "generation-settings")
 BASE_PROFILES = ("natural", "orogen", "terrestrial-gondwana", "terrestrial-continents",
                  "terrestrial-earthlike", "terrestrial-archipelago")
 STYLES = ("gondwana", "continents", "earthlike", "archipelago")

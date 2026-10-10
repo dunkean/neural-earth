@@ -6,7 +6,7 @@ Reads interpolate the same immutable raster at every neural request and LOD.
 """
 from __future__ import annotations
 
-from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path, RUNTIME_ROOT, configured_path
 
 from copy import deepcopy
 from functools import lru_cache
@@ -33,7 +33,7 @@ UPSTREAM = ROOT.parent / 'world-builder-rs'
 NATIVE = ROOT / 'native' / 'terrain_bootstrap'
 BINARY = NATIVE / 'target' / 'release' / ('terrain-bootstrap.exe' if os.name == 'nt' else 'terrain-bootstrap')
 ETOPO = ROOT / 'terrain-diffusion' / 'data' / 'global' / 'etopo_10m.tif'
-CACHE_ROOT = Path(os.environ.get('TERRAIN_BOOTSTRAP_CACHE', 'E:/TerrainDiffusionRuntime/heightmap-bootstrap' if os.name == 'nt' else str(ROOT / 'generated' / 'heightmap-bootstrap')))
+CACHE_ROOT = configured_path('TERRAIN_BOOTSTRAP_CACHE', RUNTIME_ROOT / 'heightmap-bootstrap')
 NATIVE_RESOLUTION = 256
 RASTER_WIDTH, RASTER_HEIGHT = 1024, 512
 _LOCK = threading.RLock()

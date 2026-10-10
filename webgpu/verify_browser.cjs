@@ -1,4 +1,5 @@
-const { chromium } = require('playwright');
+const {loadPlaywright, browserExecutable, runtimePath} = require('../tools/platform.cjs');
+const { chromium } = loadPlaywright();
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
@@ -11,7 +12,7 @@ async function main() {
   const staticBatch = process.argv.includes('--static');
   const resizeUp = process.argv.includes('--resize');
   const url = process.env.TERRAIN_PROBE_URL || 'http://127.0.0.1:8770/webgpu/probe.html';
-  const chrome = process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe';
+  const chrome = browserExecutable();
   const browser = await chromium.launch({
     executablePath: chrome,
     headless: true,
@@ -52,7 +53,7 @@ async function main() {
   const chromeVersion = browser.version();
   const userAgent = await page.evaluate(() => navigator.userAgent).catch(() => null);
   await browser.close();
-  const artifacts = 'E:/TerrainDiffusionRuntime/webgpu-models';
+  const artifacts = runtimePath('webgpu-models');
   const exported = JSON.parse(fs.readFileSync(path.join(artifacts, 'export-report.json')));
   const fixture = JSON.parse(fs.readFileSync(path.join(artifacts, 'crop64-coast-manifest.json')));
   const lock = JSON.parse(fs.readFileSync(path.join(__dirname, 'package-lock.json')));
@@ -83,7 +84,7 @@ async function main() {
       fixtureManifestVerification: await verifyFixtureManifest(artifacts, fixture),
     },
   };
-  const outfile = path.join('E:/TerrainDiffusionRuntime/webgpu-models', `browser-${model}${useReference ? '-reference' : ''}${requireGraphCapture ? '' : '-nocapture'}${staticBatch ? '-static' : ''}${resizeUp ? '-resize' : ''}.json`);
+  const outfile = path.join(runtimePath('webgpu-models'), `browser-${model}${useReference ? '-reference' : ''}${requireGraphCapture ? '' : '-nocapture'}${staticBatch ? '-static' : ''}${resizeUp ? '-resize' : ''}.json`);
   const serialized = JSON.stringify(report, null, 2);
   fs.writeFileSync(outfile, serialized);
   const archive = outfile.replace(/\.json$/, `-${new Date().toISOString().replace(/[:.]/g, '-')}.json`);

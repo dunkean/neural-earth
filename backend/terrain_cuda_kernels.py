@@ -7,8 +7,10 @@ Only inference, contiguous BF16 CUDA tensors are admitted. No CPU copy occurs.
 from __future__ import annotations
 
 import ctypes as C
+from ctypes.util import find_library
 import hashlib
 import os
+import sys
 from pathlib import Path
 import threading
 
@@ -64,10 +66,39 @@ def _signature(dll, name, restype, argtypes):
     return function
 
 
+def _load_library(loader, candidates, label):
+    errors = []
+    for candidate in dict.fromkeys(str(p) for p in candidates if p):
+        try:
+            return loader(candidate)
+        except OSError as error:
+            errors.append(f'{candidate}: {error}')
+    raise KernelUnavailable(f'{label} unavailable: ' + '; '.join(errors))
+
+
+def _cuda_libraries():
+    root = Path(torch.__file__).resolve().parent
+    if os.name == 'nt':
+        return (_load_library(C.WinDLL, [root / 'lib' / 'nvrtc64_120_0.dll',
+                                        *sorted((root / 'lib').glob('nvrtc64_*.dll'))], 'NVRTC'),
+                _load_library(C.WinDLL, ['nvcuda.dll'], 'CUDA driver'))
+    if not sys.platform.startswith('linux'):
+        raise KernelUnavailable('Native CUDA kernels support Windows and Linux')
+    # Linux Torch wheels install NVRTC in the sibling nvidia namespace package.
+    # Prefer the compiler bundled with Torch before trying a system toolkit.
+    libraries = [*sorted((root.parent / 'nvidia' / 'cuda_nvrtc' / 'lib').glob('libnvrtc.so*')),
+                 *sorted((root / 'lib').glob('libnvrtc.so*'))]
+    for variable in ('CUDA_HOME', 'CUDA_PATH'):
+        if os.environ.get(variable):
+            libraries.extend(sorted((Path(os.environ[variable]) / 'lib64').glob('libnvrtc.so*')))
+    libraries.extend([find_library('nvrtc'), 'libnvrtc.so.12', 'libnvrtc.so'])
+    return (_load_library(C.CDLL, libraries, 'NVRTC'),
+            _load_library(C.CDLL, [find_library('cuda'), 'libcuda.so.1',
+                                  '/usr/lib/wsl/lib/libcuda.so.1'], 'CUDA driver'))
+
+
 class KernelPack:
     def __init__(self, device):
-        if os.name != 'nt':
-            raise KernelUnavailable('This NVRTC loader currently targets Windows')
         self.device = torch.device(device)
         with torch.cuda.device(self.device):
             # Ask Torch to initialize CUDA; verify the current driver context below.
@@ -75,12 +106,7 @@ class KernelPack:
             capability = torch.cuda.get_device_capability(self.device)
             if capability[0] < 8:
                 raise KernelUnavailable('BF16 kernels require compute capability >= 8')
-            root = Path(torch.__file__).parent / 'lib'
-            try:
-                self.nvrtc = C.WinDLL(str(root / 'nvrtc64_120_0.dll'))
-                self.driver = C.WinDLL('nvcuda.dll')
-            except OSError as error:
-                raise KernelUnavailable(f'CUDA compiler/driver library unavailable: {error}') from error
+            self.nvrtc, self.driver = _cuda_libraries()
             self._bind()
             context = C.c_void_p()
             self.check(self.ctx_current(C.byref(context)))

@@ -1,15 +1,16 @@
+const {loadPlaywright, browserExecutable, runtimePath} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
-const {chromium} = require(process.env.PLAYWRIGHT_PATH || 'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium} = loadPlaywright();
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
 (async () => {
-  const output = process.env.TERRAIN_QA_OUTPUT || 'E:/TerrainDiffusionRuntime/realtime-qa';
+  const output = process.env.TERRAIN_QA_OUTPUT || runtimePath('realtime-qa');
   fs.mkdirSync(output, {recursive: true});
   const browser = await chromium.launch({
-    executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    executablePath: browserExecutable(),
     headless: true,
   });
   const errors = [], views = [], heights = [];

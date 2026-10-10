@@ -1,12 +1,13 @@
+const {loadPlaywright, browserExecutable, pythonExecutable} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Real WebGPU pixel parity against the CPU biome implementation and UI routing.
 const assert=require('node:assert/strict'),fs=require('node:fs'),http=require('node:http'),path=require('node:path');
 const {execFileSync}=require('node:child_process');
-const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
-const fixtures=JSON.parse(execFileSync(path.join(NEURAL_EARTH_ROOT,'.venv/Scripts/python.exe'),['tests/python/test_terrain_biomes.py','--fixtures'],{cwd:NEURAL_EARTH_ROOT,encoding:'utf8'}));
-const koppenFixtures=JSON.parse(execFileSync(path.join(NEURAL_EARTH_ROOT,'.venv/Scripts/python.exe'),['tests/python/test_terrain_koppen.py','--fixtures'],{cwd:NEURAL_EARTH_ROOT,encoding:'utf8'}));
+const {chromium}=loadPlaywright();
+const fixtures=JSON.parse(execFileSync(pythonExecutable(),['tests/python/test_terrain_biomes.py','--fixtures'],{cwd:NEURAL_EARTH_ROOT,encoding:'utf8'}));
+const koppenFixtures=JSON.parse(execFileSync(pythonExecutable(),['tests/python/test_terrain_koppen.py','--fixtures'],{cwd:NEURAL_EARTH_ROOT,encoding:'utf8'}));
 (async()=>{
   const server=http.createServer((req,res)=>{
     res.setHeader('Content-Type',req.url.endsWith('.js')?'application/javascript':'text/html');
@@ -15,7 +16,7 @@ const koppenFixtures=JSON.parse(execFileSync(path.join(NEURAL_EARTH_ROOT,'.venv/
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let browser;
   try{
-    browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--enable-unsafe-webgpu']});
+    browser=await chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu']});
     const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     const report=await page.evaluate(async ({fixtures,koppenFixtures})=>{

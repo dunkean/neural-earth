@@ -7,6 +7,11 @@ materializes the inline graph or all weights in memory.
 
 from __future__ import annotations
 
+from pathlib import Path as _RepositoryPath
+import sys as _repository_sys
+_repository_sys.path.insert(0, str(_RepositoryPath(__file__).resolve().parents[1] / "backend"))
+from terrain_paths import RUNTIME_ROOT
+
 import hashlib
 import json
 from pathlib import Path
@@ -154,6 +159,6 @@ def verify_pair(inline: Path, model_path: Path, data_path: Path) -> dict:
 
 
 if __name__ == "__main__":
-    root = Path("E:/TerrainDiffusionRuntime/webgpu-models")
+    root = (RUNTIME_ROOT / 'webgpu-models')
     print(json.dumps(verify_pair(root / "base_model.onnx", root / "base_model_external.onnx",
                                  root / "base_model_external.data"), indent=2))

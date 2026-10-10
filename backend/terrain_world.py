@@ -5,7 +5,7 @@ lives in terrain_conditioning. This module supplies measured raster statistics.
 """
 from __future__ import annotations
 
-from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path, RUNTIME_ROOT
 
 from functools import lru_cache
 import hashlib
@@ -29,7 +29,7 @@ SOURCE_FILES = ('etopo_10m.tif', 'wc2.1_10m_bio_1.tif',
                 'wc2.1_10m_bio_15.tif')
 CHANNEL_NAMES = ('elevation_m', 'temperature_c', 'temperature_std_c_x100',
                  'precipitation_mm_year', 'precipitation_cv_percent')
-SOURCE_STATS_CACHE_ROOT = Path('E:/TerrainDiffusionRuntime/source-statistics-cache')
+SOURCE_STATS_CACHE_ROOT = RUNTIME_ROOT / 'source-statistics-cache'
 SOURCE_STATS_CACHE_SCHEMA = 2
 _STATS_ARRAY_KEYS = ('probabilities', 'elevation', 'land_elevation',
                      'latitudes', 'climate', 'noise_quantiles', 'sea_probability')

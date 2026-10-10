@@ -1,11 +1,12 @@
+const {loadPlaywright, browserExecutable} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Complete viewer with synthetic physical tiles, real WebGPU/WebGL and PNG fallback.
-const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 (async()=>{
-  const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--enable-unsafe-webgpu']});
+  const browser=await chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu']});
   try{
     for(const gpu of [true,false]){
       const page=await browser.newPage({viewport:{width:1200,height:800}}),errors=[],requests=[],views=[],physicalRequests=[];

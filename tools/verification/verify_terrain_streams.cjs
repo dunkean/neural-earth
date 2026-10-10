@@ -1,10 +1,11 @@
+const {loadPlaywright, browserExecutable} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 const assert=require('node:assert/strict'),fs=require('node:fs');
-const {chromium}=require('E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 (async()=>{
- const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',args:['--disable-gpu']});
+ const browser=await chromium.launch({headless:true,executablePath:browserExecutable(),args:['--disable-gpu']});
  try{
   const page=await browser.newPage(),errors=[];
   page.on('pageerror',error=>errors.push(error.message));

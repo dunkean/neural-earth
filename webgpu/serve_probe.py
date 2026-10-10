@@ -1,11 +1,16 @@
 """Standalone static server for the WebGPU feasibility page (no terrain worker)."""
 
+from pathlib import Path as _RepositoryPath
+import sys as _repository_sys
+_repository_sys.path.insert(0, str(_RepositoryPath(__file__).resolve().parents[1] / "backend"))
+from terrain_paths import RUNTIME_ROOT
+
 from pathlib import Path
 
 from flask import Flask, abort, redirect, send_from_directory
 
 ROOT = Path(__file__).resolve().parent
-MODELS = Path("E:/TerrainDiffusionRuntime/webgpu-models")
+MODELS = (RUNTIME_ROOT / 'webgpu-models')
 app = Flask(__name__)
 
 

@@ -31,7 +31,7 @@ assert(run('queue.length===16&&queue.every(t=>t.lod===7)'));
 run('for(const t of queue)ready(t);refresh();drawFrame();updateActivity()');
 assert(run('refinementProgress().complete'));
 assert.equal(elements.get('loadingIndicator').hidden,true);
-assert.match(elements.get('lodIndicator').textContent,/LOD 9.*cible 7.*terminé/);
+assert.match(elements.get('lodIndicator').textContent,/LOD 9.*target 7.*complete/);
 for(let i=0;i<5;i++){
  run('refresh();drawFrame()');
  assert(run('visiblePlan.every(p=>p.tile.lod===7)'),'historical LOD4 must stay hidden at the configured depth');
@@ -70,5 +70,5 @@ assert.equal(run('[...tiles.values()].filter(t=>t.lod>=7).length'),336);
 run("$('refinementDepth').value='14';refresh()");
 assert(run('refinementPolicy().budgetLimited'));
 assert.equal(run('refinementPolicy().cacheBytes'),run('MAX_BYTES'));
-assert.match(run('refinementProgress().text'),/limite mémoire/);
+assert.match(run('refinementProgress().text'),/memory limit/);
 console.log('LOD9 depth2 finishes LOD7, stable grid, persistent progress, prefetch and bounded cache: OK');

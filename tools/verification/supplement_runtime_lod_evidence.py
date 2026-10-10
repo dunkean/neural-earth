@@ -6,6 +6,7 @@ _REPO_ROOT = _BootstrapPath(__file__).resolve().parents[2]
 _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
+from terrain_paths import RUNTIME_ROOT
 
 from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
 
@@ -93,5 +94,5 @@ def supplement(directory):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
-    parser.add_argument('--directory',default='E:/TerrainDiffusionRuntime/runtime-lod-optimization')
+    parser.add_argument('--directory',default=str(RUNTIME_ROOT / 'runtime-lod-optimization'))
     supplement(Path(parser.parse_args().directory).resolve())

@@ -1,10 +1,11 @@
 // Diagnose browser input assembly against first real forwards, without a GPU.
 import fs from 'node:fs';
 import path from 'node:path';
+import platform from '../tools/platform.cjs';
 import { coarseInputs, baseFeeds, decoderFeeds } from './crop.mjs';
 import { createSolver, noiseLabel, preconditionInput } from './scheduler.mjs';
 
-const root = process.env.TERRAIN_WEBGPU_MODELS || 'E:/TerrainDiffusionRuntime/webgpu-models';
+const root = process.env.TERRAIN_WEBGPU_MODELS || platform.runtimePath('webgpu-models');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'crop64-coast-manifest.json')));
 const f32 = Math.fround;
 

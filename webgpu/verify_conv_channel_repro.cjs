@@ -1,9 +1,10 @@
-const { chromium } = require('playwright');
+const {loadPlaywright, browserExecutable, runtimePath} = require('../tools/platform.cjs');
+const { chromium } = loadPlaywright();
 const fs = require('node:fs');
 
 async function main() {
   const browser = await chromium.launch({
-    executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    executablePath: browserExecutable(),
     headless: true, args: ['--enable-unsafe-webgpu'],
   });
   const page = await browser.newPage();
@@ -65,7 +66,7 @@ async function main() {
     report.chromeVersion = browser.version();
     report.ortWebVersion = '1.30.0';
     report.messages = messages;
-    fs.writeFileSync('E:/TerrainDiffusionRuntime/webgpu-models/conv-channel-browser.json', JSON.stringify(report, null, 2));
+    fs.writeFileSync(runtimePath('webgpu-models/conv-channel-browser.json'), JSON.stringify(report, null, 2));
     console.log(JSON.stringify(report.results, null, 2));
     if (report.results.some(item => item.error)) process.exitCode = 1;
   } finally {

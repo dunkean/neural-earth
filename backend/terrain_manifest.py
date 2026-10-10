@@ -1,7 +1,7 @@
 """Canonical, content-addressed identity for reference and experimental worlds."""
 from __future__ import annotations
 
-from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
+from terrain_paths import REPO_ROOT, WEB_ROOT, source_path, model_snapshot
 
 import hashlib
 import importlib.metadata
@@ -23,8 +23,7 @@ from terrain_generation import resolve_generation
 
 ROOT = REPO_ROOT
 MODEL_REVISION = "9ef8030cb805b433b98ec25c5dddefbac07a9e26"
-MODEL_ROOT = (Path("E:/TerrainDiffusionRuntime/huggingface/hub") /
-              "models--xandergos--terrain-diffusion-30m/snapshots" / MODEL_REVISION)
+MODEL_ROOT = model_snapshot(MODEL_REVISION)
 MANIFEST_SCHEMA = "terrain-world-manifest-v2"
 
 

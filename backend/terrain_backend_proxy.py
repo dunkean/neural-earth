@@ -118,7 +118,8 @@ class ReferenceWorker:
             raise ValueError('Reference endpoint fixed at127.0.0.1:8766 with bounded timeouts')
         self.base_url='http://127.0.0.1:8766'
         self.startup_timeout,self.request_timeout=startup_timeout,request_timeout
-        self.log_path=Path(log_path or 'E:/TerrainDiffusionRuntime/reference-worker.log')
+        from terrain_paths import RUNTIME_ROOT
+        self.log_path=Path(log_path or RUNTIME_ROOT / 'reference-worker.log')
         self.condition=threading.Condition()
         self.process=None;self.job=None;self.log=None
         self.actual_pid=None

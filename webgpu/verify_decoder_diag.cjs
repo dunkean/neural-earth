@@ -1,8 +1,9 @@
-const { chromium } = require('playwright');
+const {loadPlaywright, browserExecutable, runtimePath} = require('../tools/platform.cjs');
+const { chromium } = loadPlaywright();
 const fs = require('node:fs');
 
 async function main() {
-  const browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true, args: ['--enable-unsafe-webgpu'] });
+  const browser = await chromium.launch({ executablePath: browserExecutable(), headless: true, args: ['--enable-unsafe-webgpu'] });
   const page = await browser.newPage();
   const messages = [];
   page.on('console', entry => messages.push(`${entry.type()}: ${entry.text()}`));
@@ -39,7 +40,7 @@ async function main() {
     return results;
   });
   await browser.close();
-  fs.writeFileSync('E:/TerrainDiffusionRuntime/webgpu-models/decoder-diagnostic-browser.json', JSON.stringify({ report, messages }, null, 2));
+  fs.writeFileSync(runtimePath('webgpu-models/decoder-diagnostic-browser.json'), JSON.stringify({ report, messages }, null, 2));
   console.log(JSON.stringify({ report, messages }, null, 2));
 }
 

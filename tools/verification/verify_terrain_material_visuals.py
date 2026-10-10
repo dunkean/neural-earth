@@ -43,7 +43,10 @@ scenes=[
     ('distant-ecotone',2000,900,700,[24,180,.0065,4,220,.0065],.5),
     ('southern-summer',120,2200,1500,[7,500,.006,29,600,.006],0),
 ]
-font=ImageFont.truetype('C:/Windows/Fonts/arial.ttf',16)
+try:
+    font=ImageFont.truetype('arial.ttf',16)
+except OSError:
+    font=ImageFont.load_default(size=16)
 rows=[]
 for name,r,base,amplitude,climate,season in scenes:
     xs=(np.arange(n)+.5-n/2)*r+2e6;ys=(np.arange(n)+.5-n/2)*r-4e6

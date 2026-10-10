@@ -1,13 +1,14 @@
+const {loadPlaywright, browserExecutable} = require('../../tools/platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Real WebGPU shader and camera integration; no checkpoint/network inference.
 const assert=require('node:assert/strict'),fs=require('node:fs');
-const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const {sampleHeight}=require(NEURAL_EARTH_ROOT + '/web/terrain_map_tools.js');
 assert.equal(sampleHeight({heights:new Float32Array(16).fill(-10),heightOptions:{width:4,halo:1,encoding:'signed-sqrt'},b:[0,0,2,2]},{x:1,y:1}),-100);
 (async()=>{
-  const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--enable-unsafe-webgpu']});
+  const browser=await chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu']});
   try{
     const page=await browser.newPage({viewport:{width:1024,height:768}}),errors=[],requests=[],subscriptions=[];
     page.on('pageerror',e=>errors.push(e.message));

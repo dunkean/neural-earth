@@ -12,6 +12,7 @@ _REPO_ROOT = _BootstrapPath(__file__).resolve().parents[2]
 _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
+from terrain_paths import RUNTIME_ROOT
 
 from terrain_paths import REPO_ROOT, WEB_ROOT, source_path
 
@@ -31,7 +32,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter, map_coordinates
 
 ROOT=_REPO_ROOT
-RUNTIME=Path('E:/TerrainDiffusionRuntime/inference-engine-20261008/lod4-interpolation')
+RUNTIME=(RUNTIME_ROOT / 'inference-engine-20261008/lod4-interpolation')
 IMAGES=ROOT/'output/coarse-interpolation'
 TILE,HALO,LOD,STEP,NATIVE,COARSE_STRIDE=256,24,4,16,30,256
 

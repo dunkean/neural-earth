@@ -46,9 +46,22 @@ The menu also includes seasonal climate, crust types, plate boundaries, converge
 
 ## Install and run
 
-This is a **local Windows/Python application**. Neural inference requires an **NVIDIA GPU with CUDA and BF16 support**. A **24 GB GPU such as the RTX 3090** is the tested reference for comfortable exploration; smaller cards have no certified minimum configuration. Browser WebGPU accelerates rendering; the neural networks run on the Python server. PNG fallback still needs CUDA.
+This is a **local Linux/Windows Python application**. Neural inference requires an **NVIDIA GPU with CUDA and BF16 support**. A **24 GB GPU such as the RTX 3090** is the tested reference for comfortable exploration; smaller cards have no certified minimum configuration. Browser WebGPU accelerates rendering; the neural networks run on the Python server. PNG fallback still needs CUDA.
 
-Install Python 3.12, Node.js and an NVIDIA driver compatible with the locked CUDA 12.8 build:
+Install Python 3.12, Node.js 20+ and an NVIDIA driver compatible with the locked CUDA 12.8 build:
+
+Linux:
+
+```bash
+git clone --recurse-submodules https://github.com/dunkean/neural-earth.git
+cd neural-earth
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -r requirements-lock.txt --extra-index-url https://download.pytorch.org/whl/cu128
+```
+
+Windows:
 
 ```powershell
 git clone --recurse-submodules https://github.com/dunkean/neural-earth.git
@@ -64,9 +77,9 @@ Prepare the geography inputs and runtime directory using the [installation guide
 .\.venv\Scripts\python.exe launch_terrain.py
 ```
 
-Or double-click **start-neural-earth.cmd**. Open **http://127.0.0.1:8765**. Pinned model weights download on first use; loading all three networks and preparing CUDA Graphs takes time.
+On Linux, use `./start-neural-earth.sh` (add `--no-open` for unattended startup). On Windows, double-click **start-neural-earth.cmd**. Open **http://127.0.0.1:8765**. Pinned model weights download on first use; loading all three networks and preparing CUDA Graphs takes time.
 
-The default **Tectonic** generator uses bundled Orogen code. **Custom → Continental atlas** additionally requires Rust/Cargo and a pinned sibling `world-builder-rs` checkout. Optional GPU erosion has separate dependencies. The installation guide documents these and the current `E:/TerrainDiffusionRuntime` storage convention.
+The default **Tectonic** generator uses bundled Orogen code. **Custom → Continental atlas** additionally requires Rust/Cargo and a pinned sibling `world-builder-rs` checkout. Optional GPU erosion has separate dependencies. The installation guide documents these and configurable storage (`~/.cache/neural-earth` on Linux, `E:/TerrainDiffusionRuntime` on Windows).
 
 ## How it works
 

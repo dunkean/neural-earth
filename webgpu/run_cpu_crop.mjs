@@ -7,10 +7,11 @@ import { fileURLToPath } from 'node:url';
 import * as ort from 'onnxruntime-node';
 import { runCrop } from './crop.mjs';
 import provenance from './provenance.cjs';
+import platform from '../tools/platform.cjs';
 
 const { hashFile, sourceHashes, verifyFixtureManifest } = provenance;
 
-const root = process.env.TERRAIN_WEBGPU_MODELS || 'E:/TerrainDiffusionRuntime/webgpu-models';
+const root = process.env.TERRAIN_WEBGPU_MODELS || platform.runtimePath('webgpu-models');
 const manifest = JSON.parse(fs.readFileSync(path.join(root, 'crop64-coast-manifest.json')));
 const exportReport = JSON.parse(fs.readFileSync(path.join(root, 'export-report.json')));
 const npmLock = JSON.parse(fs.readFileSync(new URL('./package-lock.json', import.meta.url)));

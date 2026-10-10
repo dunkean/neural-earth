@@ -1,12 +1,13 @@
+const {loadPlaywright, browserExecutable, runtimePath} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Real local HTTP server and renderer; stays at world scale to bound NN work.
-const {chromium}=require('E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const assert=require('node:assert/strict'),fs=require('node:fs'),crypto=require('node:crypto');
 (async()=>{
- const root='E:/TerrainDiffusionRuntime/terrestrial-bootstrap-runtime/',harness=readRepositoryFile(__filename);
- const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});
+ const root=runtimePath('terrestrial-bootstrap-runtime/'),harness=readRepositoryFile(__filename);
+ const browser=await chromium.launch({executablePath:browserExecutable(),headless:true});
  const errors=[],requests=[],worldResponses=[];
  try{
   const page=await browser.newPage({viewport:{width:1400,height:950}});

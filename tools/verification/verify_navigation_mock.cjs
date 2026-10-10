@@ -1,9 +1,10 @@
+const {loadPlaywright, browserExecutable, runtimePath} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Browser UX tests use mocked geography/transport and a fake renderer.
 // No neural inference or hardware GPU work takes place.
-const {chromium}=require(process.env.PLAYWRIGHT_PATH||'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const assert=require('node:assert/strict'),fs=require('node:fs'),crypto=require('node:crypto'),path=require('node:path');
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM0LJrHwMDAxAAGAA7JAUW48M0QAAAAAElFTkSuQmCC','base64');
 const physical=new Float32Array(304*304+5*33*33);
@@ -17,12 +18,12 @@ async function settled(page,after=-1){
   await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
 }
 (async()=>{
-  const reportPath=process.env.NAVIGATION_MOCK_REPORT||'E:/TerrainDiffusionRuntime/terrestrial-bootstrap-runtime/generation-controls-browser.json';
+  const reportPath=process.env.NAVIGATION_MOCK_REPORT||runtimePath('terrestrial-bootstrap-runtime/generation-controls-browser.json');
   fs.mkdirSync(path.dirname(reportPath),{recursive:true});
   const harness=readRepositoryFile(__filename),harnessSnapshot=reportPath.replace(/\.json$/, '-harness.cjs');
   fs.writeFileSync(harnessSnapshot,harness);
   const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
-  const browser=await chromium.launch({executablePath:process.env.CHROME_PATH||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--disable-gpu']});
+  const browser=await chromium.launch({executablePath:browserExecutable(),headless:true,args:['--disable-gpu']});
   try{
     const page=await browser.newPage({viewport:{width:5760,height:3240},locale:'fr-FR'}),errors=[],requests=[],epochs=[];
     let heightDelay=0,rejectNextWorld=false;
@@ -200,7 +201,7 @@ async function settled(page,after=-1){
     const report={passed:true,browser:browser.version(),gpuUsed:false,nnInferencePerformed:false,api:'fully mocked',preparationPolicy,
       generationControls,controlsScreenshot,controlsSourceSha256:sha(readRepositoryFile('terrain_generation_controls.js')),
       htmlSha256:sha(readRepositoryFile('index.html')),harnessSha256:sha(harness),harnessSnapshot,
-      htmlBeforePolicySha256:sha(readRepositoryFile('E:/TerrainDiffusionRuntime/terrestrial-bootstrap-runtime/index-before-manual-world-preparation.html')),
+      htmlBeforePolicySha256:sha(readRepositoryFile(runtimePath('terrestrial-bootstrap-runtime/index-before-manual-world-preparation.html'))),
       harnessUnchangedDuringRun:sha(readRepositoryFile(__filename))===sha(harness),
       wideViewport:[5760,3240],native:{camera:nativeState.camera,cacheBytes:nativeState.cache.bytes},final:{camera:state.camera,profile:state.profile,mode:state.mode,rendered:state.rendered},requests:requests.length,cameraPosts:epochs.length};
     fs.writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');

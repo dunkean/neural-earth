@@ -86,7 +86,7 @@ class OrogenHeightCalibrationTests(unittest.TestCase):
             if annotation is not None:metadata['height_convention']=annotation
             parent={'metadata':metadata,'arrays':{'snapshot':np.zeros(1,np.uint8)}}
             with patch.object(core,'implementation_identity',return_value={'cuda_device':{'index':0}}), \
-                 patch.object(stages.subprocess,'run',side_effect=intercept):
+                 patch.object(stages,'run_process',side_effect=intercept):
                 with self.assertRaisesRegex(RuntimeError,'captured Node request'):
                     stages._execute('climate',1,'earthlike',config,4,2,parent,parent)
         self.assertEqual([r['legacyHeightConvention'] for r in captured],[True,False])

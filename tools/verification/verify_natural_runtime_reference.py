@@ -6,6 +6,7 @@ _REPO_ROOT = _BootstrapPath(__file__).resolve().parents[2]
 _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
+from terrain_paths import RUNTIME_ROOT
 
 import argparse
 from copy import deepcopy
@@ -65,7 +66,7 @@ def _sample_actual_server(server, torch):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--reference', type=Path, default=Path('E:/TerrainDiffusionRuntime/runtime-lod-optimization/baseline.npz'))
+    parser.add_argument('--reference', type=Path, default=(RUNTIME_ROOT / 'runtime-lod-optimization/baseline.npz'))
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     start = time.perf_counter()

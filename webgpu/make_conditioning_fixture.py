@@ -1,10 +1,15 @@
 """Extract a small real first-base-window conditioning fixture from the capture."""
 
+from pathlib import Path as _RepositoryPath
+import sys as _repository_sys
+_repository_sys.path.insert(0, str(_RepositoryPath(__file__).resolve().parents[1] / "backend"))
+from terrain_paths import RUNTIME_ROOT
+
 from pathlib import Path
 import json
 import numpy as np
 
-ARTIFACTS = Path("E:/TerrainDiffusionRuntime/webgpu-models")
+ARTIFACTS = (RUNTIME_ROOT / 'webgpu-models')
 MANIFEST = json.loads((ARTIFACTS / "crop64-coast-manifest.json").read_text())
 OUT = Path(__file__).with_name("conditioning-fixture.json")
 

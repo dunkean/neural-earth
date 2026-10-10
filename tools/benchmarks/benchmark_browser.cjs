@@ -1,14 +1,15 @@
+const {loadPlaywright, browserExecutable, runtimePath} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-files.cjs');
 // Hardware browser measurement of camera work, display cadence, and coverage.
 // GPU execution and presentation latency are not timed here.
-const { chromium } = require(process.env.PLAYWRIGHT_PATH || 'E:/TerrainDiffusionRuntime/ui-test/node_modules/playwright');
+const { chromium } = loadPlaywright();
 const fs = require('node:fs');
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 
-const destination = process.env.TERRAIN_BROWSER_REPORT || 'E:/TerrainDiffusionRuntime/audit-implementation/browser-continuous-pan.json';
+const destination = process.env.TERRAIN_BROWSER_REPORT || runtimePath('audit-implementation/browser-continuous-pan.json');
 const quantile = (values, q) => values.length
   ? [...values].sort((a, b) => a - b)[Math.max(0, Math.ceil(q * values.length) - 1)] : null;
 const cacheCounts = responses => responses.reduce((counts, response) => {
@@ -19,7 +20,7 @@ const cacheCounts = responses => responses.reduce((counts, response) => {
 
 (async () => {
   const browser = await chromium.launch({
-    executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe',
+    executablePath: browserExecutable(),
     headless: true, args: ['--enable-unsafe-webgpu'],
   });
   const page = await browser.newPage({ viewport: { width: 900, height: 650 } });

@@ -1,10 +1,11 @@
+const {loadPlaywright, browserExecutable} = require('../platform.cjs');
 const NEURAL_EARTH_ROOT = require('node:path').resolve(__dirname, '../..');
 process.chdir(NEURAL_EARTH_ROOT);
 // Shared physical tiles and shaded textures across map/WebGPU and globe/WebGL.
-const {chromium}=require(NEURAL_EARTH_ROOT + '/webgpu/node_modules/playwright');
+const {chromium}=loadPlaywright();
 const assert=require('node:assert/strict');
 (async()=>{
- const browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true,args:['--enable-unsafe-webgpu']});
+ const browser=await chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu']});
  try{
   const page=await browser.newPage({viewport:{width:640,height:540}}),errors=[],requests=[];
   page.on('pageerror',e=>errors.push(e.message));
