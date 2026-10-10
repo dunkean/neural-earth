@@ -3,8 +3,8 @@ window.TerrainGenerationControls=(()=>{
   const clone=value=>value==null?null:JSON.parse(JSON.stringify(value));
   const channels=['Elevation','Temperature','Temperature variation','Precipitation','Precipitation variation'];
   const cityFields=[['city_erosion_strength','Dose',0,2,.01,1],['city_erosion_iterations','Iterations',1,64,1,12],['city_erosion_talus','Talus slope',.01,4,.01,.6],['city_erosion_motif_km','Drainage scale (km)',10,5000,10,300]];
-  const gpuFields=[['orogen_gpu_relief','Relief · plates, collisions, noise'],['orogen_gpu_propagation','Propagation · stress and distances'],['orogen_gpu_post','Orogent postprocessing · local passes'],['orogen_gpu_climate','Climate · winds, currents, rain, temperature'],['orogen_gpu_raster','Projection · GPU spatial search']];
-  const tectonicFields=[["orogen_plate_count", "Plate count", 4, 120, true], ["orogen_continent_count", "Continent count", 1, 10, true], ["orogen_land_coverage", "Land coverage", 0.05, 0.9, false], ["orogen_continent_variety", "Continent variety", 0.0, 1.0, false], ["orogen_motion_strength", "Motion strength", 0.0, 4.0, false], ["orogen_convergence_threshold", "Convergence threshold", 0.05, 4.0, false], ["orogen_detail", "Mesh vertices", 20000, 1000000, true], ["orogen_spread", "Orogent propagation", 1.0, 12.0, false], ["orogen_roughness", "Roughness", 0.0, 1.0, false], ["orogen_warp", "Terrain warp", 0.0, 1.0, false], ["orogen_smoothing", "Smoothing", 0.0, 1.0, false], ["orogen_hydraulic", "Hydraulic erosion", 0.0, 1.0, false], ["orogen_thermal", "Thermal erosion", 0.0, 1.0, false], ["orogen_glacial", "Glacial erosion", 0.0, 1.0, false], ["orogen_sharpening", "Ridge sharpening", 0.0, 1.0, false], ["orogen_temperature_offset", "Temperature offset (C)", -15.0, 15.0, false], ["orogen_precipitation_offset", "Precipitation offset", -1.0, 1.0, false]];
+  const gpuFields=[['orogen_gpu_relief','Relief · plates, collisions, noise'],['orogen_gpu_propagation','Propagation · stress and distances'],['orogen_gpu_post','Orogen postprocessing · local passes'],['orogen_gpu_climate','Climate · winds, currents, rain, temperature'],['orogen_gpu_raster','Projection · GPU spatial search']];
+  const tectonicFields=[["orogen_plate_count", "Plate count", 4, 120, true], ["orogen_continent_count", "Continent count", 1, 10, true], ["orogen_land_coverage", "Land coverage", 0.05, 0.9, false], ["orogen_continent_variety", "Continent variety", 0.0, 1.0, false], ["orogen_motion_strength", "Motion strength", 0.0, 4.0, false], ["orogen_convergence_threshold", "Convergence threshold", 0.05, 4.0, false], ["orogen_detail", "Mesh vertices", 20000, 1000000, true], ["orogen_spread", "Orogen propagation", 1.0, 12.0, false], ["orogen_roughness", "Roughness", 0.0, 1.0, false], ["orogen_warp", "Terrain warp", 0.0, 1.0, false], ["orogen_smoothing", "Smoothing", 0.0, 1.0, false], ["orogen_hydraulic", "Hydraulic erosion", 0.0, 1.0, false], ["orogen_thermal", "Thermal erosion", 0.0, 1.0, false], ["orogen_glacial", "Glacial erosion", 0.0, 1.0, false], ["orogen_sharpening", "Ridge sharpening", 0.0, 1.0, false], ["orogen_temperature_offset", "Temperature offset (C)", -15.0, 15.0, false], ["orogen_precipitation_offset", "Precipitation offset", -1.0, 1.0, false]];
   let schema=null;
   const preferencesKey='neural-earth-preferences-v1';
   function localPreferences(){
@@ -25,7 +25,7 @@ window.TerrainGenerationControls=(()=>{
     let preferences=localPreferences();
     if(typeof preferences.gpuAcceleration==='boolean')return {preferences,firstLaunch:false};
     const dialog=document.createElement('dialog');dialog.id='gpuWelcome';
-    dialog.innerHTML='<form method="dialog"><h2>Enable GPU acceleration?</h2><p>Enable all GPU options for Orogent relief, propagation, erosion, climate and projection, plus map rendering?</p><p>Orogent acceleration uses NVIDIA CUDA. Map rendering uses WebGPU. You can adjust each option later in Settings and Rendering. Your choices are saved on this browser.</p><div class="panelActions"><button value="no" autofocus>Use CPU options</button><button value="yes">Enable GPU acceleration</button></div></form>';
+    dialog.innerHTML='<form method="dialog"><h2>Enable GPU acceleration?</h2><p>Enable all GPU options for Orogen relief, propagation, erosion, climate and projection, plus map rendering?</p><p>Orogen acceleration uses NVIDIA CUDA. Map rendering uses WebGPU. You can adjust each option later in Settings and Rendering. Your choices are saved on this browser.</p><div class="panelActions"><button value="no" autofocus>Use CPU options</button><button value="yes">Enable GPU acceleration</button></div></form>';
     document.body.append(dialog);
     const enabled=await new Promise(resolve=>{dialog.addEventListener('close',()=>resolve(dialog.returnValue==='yes'),{once:true});dialog.showModal()});
     dialog.remove();
@@ -51,15 +51,15 @@ window.TerrainGenerationControls=(()=>{
     const panel=document.createElement('details');panel.id='generationPanel';
     panel.innerHTML=`<summary>Generation settings <span id="generationSummary">Default profile</span></summary>
       <div class="generationBody"><div class="generationSources">
-      <label>Elevation <select id="heightSource"><option value="natural">Natural</option><option value="native">Earth atlas</option><option value="orogen">Orogent</option><option value="natural-continental">Natural continental · experimental</option></select></label>
-      <label>Relief processing <select id="reliefPipeline"><option value="original">None</option><option value="orogen-gpu">Orogent · GPU</option><option value="orogen">Orogent · CPU</option><option value="city-gpu">City · GPU</option></select></label>
-      <label>Climate <select id="climateSource"><option value="natural">Natural</option><option value="native">Terrestrial</option><option value="orogen">Orogent</option></select></label>
+      <label>Elevation <select id="heightSource"><option value="natural">Natural</option><option value="native">Earth atlas</option><option value="orogen">Orogen</option><option value="natural-continental">Natural continental · experimental</option></select></label>
+      <label>Relief processing <select id="reliefPipeline"><option value="original">None</option><option value="orogen-gpu">Orogen · GPU</option><option value="orogen">Orogen · CPU</option><option value="city-gpu">City · GPU</option></select></label>
+      <label>Climate <select id="climateSource"><option value="natural">Natural</option><option value="native">Terrestrial</option><option value="orogen">Orogen</option></select></label>
       <label>Continents <select id="continentalStyle"><option value="gondwana">Gondwana</option><option value="continents">3 continents</option><option value="earthlike">Terrestrial</option><option value="archipelago">Archipelago</option></select></label>
       <label>Continental strength <input id="continentalStrength" aria-label="Continental strength" type="text" inputmode="decimal" required></label>
       <label>Smoothing radius (km) <input id="macroScale" aria-label="Smoothing radius" type="text" inputmode="decimal" required></label>
       <label title="0: original population; 1: land only; 0.5: historical reference.">Land / sea bias <input id="dropWater" aria-label="Land / sea bias" type="text" inputmode="decimal" required></label></div>
       <small id="generationSourceHelp"></small>
-      <fieldset id="orogenParameters" hidden><legend>Orogent · plates</legend><div class="generationSources">${tectonicFields.map(([key,label])=>`<label>${label} <input id="${key}" aria-label="${label}" type="text" inputmode="decimal" required></label>`).join('')}</div><small>Original Orogent relief, superplates and seasonal climate. Plate settings apply to the Orogent initial source; relief processing and climate work with every source. Mesh vertices control detail and initial generation time. Save A / Show A compares configurations.</small></fieldset>
+      <fieldset id="orogenParameters" hidden><legend>Orogen · plates</legend><div class="generationSources">${tectonicFields.map(([key,label])=>`<label>${label} <input id="${key}" aria-label="${label}" type="text" inputmode="decimal" required></label>`).join('')}</div><small>Original Orogen relief, superplates and seasonal climate. Plate settings apply to the Orogen initial source; relief processing and climate work with every source. Mesh vertices control detail and initial generation time. Save A / Show A compares configurations.</small></fieldset>
       <table class="generationChannels"><thead><tr><th>Channel</th>${channels.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>
       ${[['Frequency','frequency'],['Octaves','octaves'],['Allowed noise (SNR)','snr'],['Mountain noise multiplier','snrAltitude'],['Climate noise multiplier','snrDriver']].map(([label,key])=>`<tr><th>${label}</th>${channels.map((channel,i)=>`<td><input id="${key}${i}" aria-label="${label} · ${channel}" type="text" inputmode="${key==='octaves'?'numeric':'decimal'}" required></td>`).join('')}</tr>`).join('')}</tbody></table>
       <div class="generationSources"><label>Altitude ramp starts <input id="snrAltitudeLow" aria-label="SNR altitude start" type="text" inputmode="decimal"> m</label>
@@ -80,8 +80,8 @@ window.TerrainGenerationControls=(()=>{
     heading.innerHTML='<strong>Generation settings</strong><button type="button" class="panelClose" aria-label="Close panel">×</button>';
     body.prepend(heading);
     const orogen=body.querySelector('#orogenParameters'),tectonics=orogen.querySelector('.generationSources');
-    orogen.querySelector('legend').textContent='Orogent · source parameters';
-    for(const [title,fields,open] of [['Orogent plates',tectonicFields.slice(0,8),false],['Initial relief · shape',tectonicFields.slice(8,10),false],['Erosion Orogent',tectonicFields.slice(10,15),false],['Climate offsets',tectonicFields.slice(15),false]]){
+    orogen.querySelector('legend').textContent='Orogen · source parameters';
+    for(const [title,fields,open] of [['Orogen plates',tectonicFields.slice(0,8),false],['Initial relief · shape',tectonicFields.slice(8,10),false],['Erosion Orogen',tectonicFields.slice(10,15),false],['Climate offsets',tectonicFields.slice(15),false]]){
       const section=document.createElement('details');section.className='advancedSettings';section.open=open;
       const summary=document.createElement('summary');summary.textContent=title;section.append(summary);
       const controls=document.createElement('div');controls.className='generationSources';
@@ -94,17 +94,17 @@ window.TerrainGenerationControls=(()=>{
     function group(title,nodes){const field=document.createElement('fieldset'),legend=document.createElement('legend');legend.textContent=title;field.append(legend);nodes[0].before(field);field.append(...nodes);return field;}
     const sourceOverrides=group('Source overrides',[body.querySelector('.generationSources')]);
     const erosionSection=document.createElement('fieldset');erosionSection.id='erosionSettings';
-    erosionSection.innerHTML='<legend>Erosion</legend><div class="generationSources"></div><small>Erosion runs before climate and neural refinement. Choose None, Orogent CPU or GPU, or City GPU.</small>';
+    erosionSection.innerHTML='<legend>Erosion</legend><div class="generationSources"></div><small>Erosion runs before climate and neural refinement. Choose None, Orogen CPU or GPU, or City GPU.</small>';
     orogen.before(erosionSection);
     erosionSection.querySelector('.generationSources').append(document.getElementById('reliefPipeline').closest('label'));
     const cityControls=document.createElement('details');cityControls.id='cityErosionParameters';cityControls.className='advancedSettings';cityControls.open=true;
     cityControls.innerHTML='<summary>City · GPU settings</summary><div class="generationSources">'+cityFields.map(([key,label])=>`<label>${label} <input id="${key}" aria-label="City erosion · ${label}" type="text" inputmode="decimal"></label>`).join('')+'</div><small>Hydraulic incision, thermal relaxation and diffusion. Strength 0 preserves relief; the engine preserves sea level and oceans.</small>';
     erosionSection.append(cityControls);
     const gpuControls=document.createElement('details');gpuControls.id='orogenGpuParameters';gpuControls.className='advancedSettings';gpuControls.open=true;
-    gpuControls.innerHTML='<summary>Orogent · optional GPU acceleration</summary><div class="generationSources">'+gpuFields.map(([key,label])=>`<label><input id="${key}" type="checkbox" aria-label="GPU · ${label}"> ${label}</label>`).join('')+'</div><small>GPU options follow your saved local settings. NVIDIA CUDA; unported stages run on CPU. GPU propagation and erosion change terrain shape. City is a separate erosion engine. Apply, then Save A / Show A to compare.</small>';
+    gpuControls.innerHTML='<summary>Orogen · optional GPU acceleration</summary><div class="generationSources">'+gpuFields.map(([key,label])=>`<label><input id="${key}" type="checkbox" aria-label="GPU · ${label}"> ${label}</label>`).join('')+'</div><small>GPU options follow your saved local settings. NVIDIA CUDA; unported stages run on CPU. GPU propagation and erosion change terrain shape. City is a separate erosion engine. Apply, then Save A / Show A to compare.</small>';
     erosionSection.after(gpuControls);
     const sourceSection=document.createElement('fieldset');sourceSection.id='sourceSettings';
-    sourceSection.innerHTML='<legend>1 · World source</legend><div class="generationSources"><label>Generator <select id="generatorType"><option value="natural">noise</option><option value="custom">Custom</option><option value="orogen">Orogent</option><option value="mixed" disabled>Mixed sources · advanced</option></select></label><label id="customSourceLabel">Custom relief <select id="customSource"><option value="native">Continental atlas</option><option value="natural-continental">Procedural continents</option></select></label></div>';
+    sourceSection.innerHTML='<legend>1 · World source</legend><div class="generationSources"><label>Generator <select id="generatorType"><option value="natural">noise</option><option value="custom">Custom</option><option value="orogen">Orogen</option><option value="mixed" disabled>Mixed sources · advanced</option></select></label><label id="customSourceLabel">Custom relief <select id="customSource"><option value="native">Continental atlas</option><option value="natural-continental">Procedural continents</option></select></label></div>';
     sourceOverrides.before(sourceSection);
     const geometry=document.createElement('fieldset');geometry.id='worldGeometry';
     geometry.innerHTML='<legend>World creation</legend><div class="generationSources"><label>Geometry <select id="worldTopology"><option value="sphere">Spherical planet</option><option value="plane">Plane · unprojected map</option></select></label><label>Diameter (km) <input id="worldDiameter" type="number" min="10" max="100000" step="any" aria-label="World diameter in km"></label></div><small>Planet: equirectangular map with width pi times diameter. Plane: a square with side equal to diameter, Cartesian distances and finite edges. Globe view is disabled. The selected generator supplies elevations. Applying these settings creates a new world and its caches.</small>';
@@ -151,15 +151,15 @@ window.TerrainGenerationControls=(()=>{
     const summaryStatus=document.createElement('span');summaryStatus.id='generationSummary';summaryStatus.hidden=true;panel.querySelector('summary').append(summaryStatus);
     heading.querySelector('strong').textContent='Generation · initial relief';
     mixing.hidden=true;sourceOverrides.hidden=true;document.getElementById('generatorType').querySelector('[value=mixed]').remove();
-    const climateSource=document.getElementById('climateSource');climateSource.innerHTML='<option value="orogen">Orogent</option>';
+    const climateSource=document.getElementById('climateSource');climateSource.innerHTML='<option value="orogen">Orogen</option>';
     const erosionToggle=document.getElementById('reliefPipeline').closest('label');sourceSection.append(erosionToggle);
-    erosionToggle.firstChild.textContent='Erosion Orogent ';
+    erosionToggle.firstChild.textContent='Erosion Orogen ';
     document.getElementById('reliefPipeline').options[0].textContent='None';
     const layoutLabel=document.getElementById('continentalStyle').closest('label');layoutLabel.firstChild.textContent='Continents · preset ';
-    const layoutHelp=document.createElement('small');layoutHelp.textContent='Presets initialize plates (Orogent), noise (Noise), or the atlas (Custom). Custom retains the choice of atlas or procedural continents.';layoutLabel.after(layoutHelp);
+    const layoutHelp=document.createElement('small');layoutHelp.textContent='Presets initialize plates (Orogen), noise (Noise), or the atlas (Custom). Custom retains the choice of atlas or procedural continents.';layoutLabel.after(layoutHelp);
     orogen.querySelector('legend').textContent='Relief · options';sourceSection.append(orogen);
     const offsets=[document.getElementById('orogen_temperature_offset').closest('details')];climateBody.append(...offsets);
-    const intro=document.createElement('small');intro.textContent='Orogent supplies the shared climate for Noise, Orogent and Custom: seasons, winds, rain, classification and biomes.';climateBody.querySelector('.panelHeading').after(intro);
+    const intro=document.createElement('small');intro.textContent='Orogen supplies the shared climate for Noise, Orogen and Custom: seasons, winds, rain, classification and biomes.';climateBody.querySelector('.panelHeading').after(intro);
     for(const id of ['snrAltitudeLow','snrAltitudeHigh']){const label=document.getElementById(id).closest('label');label.firstChild.textContent+=' (m) ';label.lastChild.remove();}
     noiseBody.append(channelField);for(const note of [...body.querySelectorAll(':scope > small')])noiseBody.append(note);channelField.querySelector('legend').textContent='Relief noise · SNR';
     channelField.querySelector('small').textContent='SNR here means noise / signal amplitude. Lower values constrain relief more closely to its inputs. Climate remains shared.';
@@ -183,7 +183,7 @@ window.TerrainGenerationControls=(()=>{
       const properties=Object.entries(schema.properties).filter(([id,spec])=>id.startsWith('orogen_')&&spec.group);
       if(!properties.length)return;
       const section=document.createElement('details');section.className='advancedSettings';
-      section.open=true;section.innerHTML='<summary>Climate parameters</summary><label class="climateSearch">Find <input id="orogenClimateSearch" type="search" placeholder="Rain, snow, pressure…" aria-label="Find Orogent settings"></label><label class="channelSelect">Section <select id="orogenClimateSection"></select></label><div class="climateFields"></div><small>Source climate and Original Orogent biomes. Changes take effect with Apply.</small>';
+      section.open=true;section.innerHTML='<summary>Climate parameters</summary><label class="climateSearch">Find <input id="orogenClimateSearch" type="search" placeholder="Rain, snow, pressure…" aria-label="Find Orogen settings"></label><label class="channelSelect">Section <select id="orogenClimateSection"></select></label><div class="climateFields"></div><small>Source climate and Original Orogen biomes. Changes take effect with Apply.</small>';
       climateBody.querySelector('.generationActions').before(section);
       const select=section.querySelector('select'),container=section.querySelector('.climateFields'),groups=new Map();
       for(const [id,spec] of properties){
@@ -233,8 +233,8 @@ window.TerrainGenerationControls=(()=>{
       for(const section of orogen.querySelectorAll(':scope > details')){section.hidden=height!=='orogen';for(const input of section.querySelectorAll('input'))input.disabled=height!=='orogen';}
       for(const id of ['orogen_warp','orogen_smoothing','orogen_hydraulic','orogen_thermal','orogen_glacial','orogen_sharpening','orogen_gpu_post']){$(id).disabled=!orogenErosion;$(id).closest('label').hidden=!orogenErosion;}
       for(const [id] of extraFields)$(id).disabled=false;
-      $('generationSourceHelp').textContent=type==='orogen'?'Orogent plates → initial relief.':type==='custom'?(continental?'Procedural continents → initial relief.':'Continental atlas → initial relief.'):'Procedural noise → initial neural inputs.';
-      $('generationSourceHelp').textContent+=' Then optional erosion and shared Orogent climate.';
+      $('generationSourceHelp').textContent=type==='orogen'?'Orogen plates → initial relief.':type==='custom'?(continental?'Procedural continents → initial relief.':'Continental atlas → initial relief.'):'Procedural noise → initial neural inputs.';
+      $('generationSourceHelp').textContent+=' Then optional erosion and shared Orogen climate.';
 
       const adaptive=$('snrAdaptive').checked;advanced.hidden=!adaptive;
       for(const id of ['snrAltitudeLow','snrAltitudeHigh','snrDriverChannel','snrDriverLow','snrDriverHigh','snrBins','snrLatitudeGain','snrLatitudeLow','snrLatitudeHigh',...channels.flatMap((_,i)=>['snrAltitude'+i,'snrDriver'+i])]){$(id).disabled=!adaptive;if(id.startsWith('snrAltitude')&&/^snrAltitude\d$/.test(id)||/^snrDriver\d$/.test(id))$(id).closest('label').hidden=!adaptive;}

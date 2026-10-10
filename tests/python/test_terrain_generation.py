@@ -17,7 +17,7 @@ import terrain_generation as generation
 
 
 class GenerationRegistryTests(unittest.TestCase):
-    def test_orogent_startup_defaults(self):
+    def test_orogen_startup_defaults(self):
         settings = generation.generator_schema()['defaults_by_profile']['orogen']
         self.assertEqual(settings['height_source'], 'orogen')
         self.assertEqual(settings['relief_pipeline'], 'orogen')

@@ -100,14 +100,14 @@ The Linux launcher also works from outside the checkout. On Windows, use `start-
 
 ## Optional dependencies
 
-The default Orogent source needs Node.js, without npm installation. **Custom → Continental atlas** additionally needs Rust/Cargo and this pinned sibling source:
+The default Orogen source needs Node.js, without npm installation. **Custom → Continental atlas** additionally needs Rust/Cargo and this pinned sibling source:
 
 ```powershell
 git clone https://github.com/dunkean/world-builder-rs.git ../world-builder-rs
 git -C ../world-builder-rs checkout 009efe18c457757da12ffc8a6215806efb87f012
 ```
 
-The bridge checks the pinned clean source and compiles with `cargo build --locked` on first use. Its local crate dependency expects the sibling layout. Noise and Orogent sources do not require it.
+The bridge checks the pinned clean source and compiles with `cargo build --locked` on first use. Its local crate dependency expects the sibling layout. Noise and Orogen sources do not require it.
 
 ```powershell
 # Experimental Orogen NVIDIA acceleration:
@@ -118,7 +118,7 @@ The bridge checks the pinned clean source and compiles with `cargo build --locke
 
 On Linux, use `python -m pip install -r requirements-orogen-gpu.txt` or `python -m pip install -r requirements-city-gpu.txt` in the activated environment.
 
-The first-launch GPU choice enables or disables all optional Orogent GPU switches and map rendering before generating the world. Individual settings are then saved locally. Orogent stages can fall back to CPU. Parallel propagation and erosion can change source terrain. City is an independent surface erosion engine. [Provenance](../THIRD_PARTY_NOTICES.md).
+The first-launch GPU choice enables or disables all optional Orogen GPU switches and map rendering before generating the world. Individual settings are then saved locally. Orogen stages can fall back to CPU. Parallel propagation and erosion can change source terrain. City is an independent surface erosion engine. [Provenance](../THIRD_PARTY_NOTICES.md).
 
 ## Troubleshooting
 

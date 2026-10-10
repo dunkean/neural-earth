@@ -55,7 +55,7 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
  assert.equal(await page.locator('#controls > #climatePanel, #controls > #noisePanel').count(),0);
  const before=worldRequests.length;
 
- await page.getByRole('button',{name:'Orogent',exact:true}).click();
+ await page.getByRole('button',{name:'Orogen',exact:true}).click();
 
  assert.equal(await page.inputValue('#generatorType'),'orogen');
 
@@ -74,7 +74,7 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
  assert.equal(await page.inputValue('#climateSource'),'orogen');
  assert.equal(await page.locator('#climateSource option').count(),1);
  await page.click('#tabErosion');
- assert.deepEqual(await page.locator('#reliefPipeline option').allTextContents(),['None','Orogent · GPU','Orogent · CPU','City · GPU']);
+ assert.deepEqual(await page.locator('#reliefPipeline option').allTextContents(),['None','Orogen · GPU','Orogen · CPU','City · GPU']);
  await page.selectOption('#reliefPipeline','orogen-gpu');
  assert.equal(await page.evaluate(()=>generationControls.read().orogen_gpu_erosion),true);
  assert.equal(await page.evaluate(()=>generationControls.read().relief_pipeline),'orogen');

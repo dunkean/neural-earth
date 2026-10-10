@@ -33,7 +33,7 @@ window.TerrainToolbar=(()=>{
       ['Seasonal climate',['orogen-temperature-summer','orogen-temperature-winter','orogen-precip-summer','orogen-precip-winter']],
       ['Atmosphere',['orogen-pressure-summer','orogen-pressure-winter','orogen-wind-summer','orogen-wind-winter','orogen-rain-shadow','orogen-continentality']],
       ['Oceans',['orogen-currents-summer','orogen-currents-winter']],
-      ['Orogent plates',['orogen-plates','orogen-superplates','orogen-crust','orogen-boundaries','orogen-convergence']],
+      ['Orogen plates',['orogen-plates','orogen-superplates','orogen-crust','orogen-boundaries','orogen-convergence']],
       ['Relief formation',['orogen-height','orogen-uplift','orogen-orogeny','orogen-back-arc','orogen-fold-ridges','orogen-hotspots','orogen-erosion']]
     ];
     const options=new Map();
@@ -49,7 +49,7 @@ window.TerrainToolbar=(()=>{
     }
     const generators=document.createElement('div');generators.className='generatorIcons';generators.setAttribute('role','group');generators.setAttribute('aria-label','Initial relief');
     const generatorButtons=[];
-    for(const [value,icon,name] of [['natural','▧','noise'],['orogen','⛰','Orogent'],['custom','⚙','Custom']]){const button=document.createElement('button');button.type='button';button.textContent=icon;button.title=name;button.setAttribute('aria-label',name);button.onclick=()=>{$('worldGenerator').value=value;$('worldGenerator').dispatchEvent(new Event('change',{bubbles:true}));sync();};generators.append(button);generatorButtons.push([button,value]);}
+    for(const [value,icon,name] of [['natural','▧','noise'],['orogen','⛰','Orogen'],['custom','⚙','Custom']]){const button=document.createElement('button');button.type='button';button.textContent=icon;button.title=name;button.setAttribute('aria-label',name);button.onclick=()=>{$('worldGenerator').value=value;$('worldGenerator').dispatchEvent(new Event('change',{bubbles:true}));sync();};generators.append(button);generatorButtons.push([button,value]);}
     $('worldGenerator').closest('label').after(generators);
     sync=()=>{pedologyLegend.hidden=select.value!=='pedology';for(const [button,option] of buttons){button.disabled=option.disabled;button.setAttribute('aria-pressed',String(select.value===option.value));}for(const [button,value] of generatorButtons)button.setAttribute('aria-pressed',String($('worldGenerator').value===value));const selected=labels.get(select.value)||select.selectedOptions[0]?.textContent||'Relief';panel.querySelector('.selectedLayer').textContent=selected;panel.querySelector('summary').title='Layer visible · '+selected;panel.querySelector('summary').setAttribute('aria-label','Layer visible · '+selected);};
     select.addEventListener('change',sync);new MutationObserver(sync).observe(select,{subtree:true,attributes:true});sync();

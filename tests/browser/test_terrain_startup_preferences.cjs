@@ -13,6 +13,8 @@ const storageKey='neural-earth-preferences-v1';
  try{
   for(const enabled of [true,false]){
    const context=await browser.newContext(),page=await context.newPage(),errors=[],worldRequests=[];
+   let holdFirstWorld=true,releaseFirstWorld;
+   const firstWorldGate=new Promise(resolve=>{releaseFirstWorld=resolve});
    page.on('pageerror',error=>errors.push(error.message));
    await page.route('https://startup.test/**',async route=>{
     const u=new URL(route.request().url());
@@ -23,6 +25,7 @@ const storageKey='neural-earth-preferences-v1';
     if(u.pathname==='/api/world'){
      const profile=u.searchParams.get('world_profile'),settings=JSON.parse(u.searchParams.get('generation'));
      worldRequests.push({profile,settings});
+     if(holdFirstWorld)await firstWorldGate;
      return route.fulfill({json:{seed:'42',version:'test',cache_profile:'test',world_profile:profile,generation_profile:profile,generation_schema:schema,generation_settings:settings,world_bounds:[-20e6,-10e6,20e6,10e6],overview_bounds:[-20e6,-10e6,20e6,10e6],overview:'/overview.png',gpu:'Mock'}});
     }
     if(u.pathname==='/api/generation/run')return route.fulfill({json:{world_profile:route.request().postDataJSON().profile,generation_settings:route.request().postDataJSON().settings}});
@@ -34,7 +37,19 @@ const storageKey='neural-earth-preferences-v1';
    await page.locator('#gpuWelcome').waitFor({state:'visible'});
    assert.equal(worldRequests.length,0,'No world generation before the first GPU choice');
    assert.equal(await page.evaluate(()=>renderer),null,'Renderer also waits for the choice');
+   const orogenButton=page.getByRole('button',{name:'Orogen',exact:true});
+   assert.equal(await page.inputValue('#worldGenerator'),'orogen','Orogen is selected before onboarding');
+   assert.equal(await page.inputValue('#generatorType'),'orogen');
+   assert.equal(await orogenButton.getAttribute('aria-pressed'),'true','Menubar highlights Orogen immediately');
+   assert.equal(await page.evaluate(()=>/orogent/i.test(document.documentElement.outerHTML)),false);
+   const firstWorldRequest=page.waitForRequest(request=>new URL(request.url()).pathname==='/api/world');
    await page.locator('#gpuWelcome button[value='+(enabled?'yes':'no')+']').click();
+   await firstWorldRequest;
+   assert.equal(await page.inputValue('#worldGenerator'),'orogen','Menubar selection does not wait for the world response');
+   assert.equal(await orogenButton.getAttribute('aria-pressed'),'true');
+   assert.equal(await page.evaluate(()=>world),null,'Initial world request is still held');
+   assert.equal(await page.inputValue('#reliefPipeline'),enabled?'orogen-gpu':'orogen','GPU choice is reflected while generating');
+   holdFirstWorld=false;releaseFirstWorld();
    await page.waitForFunction(()=>world?.seed==='42'&&rendererReady);
    const initial=worldRequests[0];
    assert.equal(initial.profile,'orogen');
@@ -47,7 +62,7 @@ const storageKey='neural-earth-preferences-v1';
    assert.equal(await page.inputValue('#generatorType'),'orogen');
    assert.equal(await page.inputValue('#reliefPipeline'),enabled?'orogen-gpu':'orogen');
    for(const key of gpuKeys.filter(key=>key!=='orogen_gpu_erosion'))assert.equal(await page.isChecked('#'+key),enabled);
-   assert.equal(await page.getByRole('button',{name:'Orogent',exact:true}).getAttribute('aria-pressed'),'true');
+   assert.equal(await page.getByRole('button',{name:'Orogen',exact:true}).getAttribute('aria-pressed'),'true');
    assert.equal(await page.evaluate(()=>document.body.textContent.includes('Tectonic')),false);
 
    // The prompt is one-time, and the complete settings are restored on a new visit.
@@ -86,6 +101,6 @@ const storageKey='neural-earth-preferences-v1';
    assert.deepEqual(errors,[]);
    await context.close();
   }
-  console.log('First-launch GPU choice, Orogent defaults and local preferences: OK');
+  console.log('First-launch GPU choice, Orogen defaults and local preferences: OK');
  }finally{await browser.close()}
 })().catch(error=>{console.error(error);process.exitCode=1});
