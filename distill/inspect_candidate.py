@@ -21,18 +21,22 @@ def main():
     parser.add_argument('--stage', choices=['coarse', 'base', 'decoder'], required=True)
     parser.add_argument('--minimum-step', type=int, required=True)
     parser.add_argument('--checkpoint-dir', type=Path, help='Separate architecture trial directory.')
+    parser.add_argument('--interim', action='store_true', help='Inspect a frozen best checkpoint during training; no completion claim.')
     parser.add_argument('--tag', required=True)
     parser.add_argument('--rare-manifest', type=Path, default=DATA/'eval/rare-sites-coherent.json')
     args = parser.parse_args()
     directory = external_path(args.checkpoint_dir or DATA/'ckpt'/args.stage)
     status = json.loads((directory/'status.json').read_text())
-    if status['status'] != 'complete' or status['step'] < args.minimum_step:
+    if (status['status'] != 'complete' and not (args.interim and status['status'] == 'running')) or status['step'] < args.minimum_step:
         raise ValueError('The requested training pass has not completed; inspect its live handle first.')
     payload = (directory/'best.pt').read_bytes()
     digest = hashlib.sha256(payload).hexdigest()
     saved = torch.load(io.BytesIO(payload), map_location='cpu', weights_only=True)
-    if saved['config']['stage'] != args.stage or saved['step'] > status['step']:
-        raise ValueError('Candidate is inconsistent with the completed stage.')
+    if (saved['config']['stage'] != args.stage or saved['step'] > saved['arguments']['steps'] or
+            (not args.interim and saved['step'] > status['step'])):
+        raise ValueError('Candidate is inconsistent with the training stage.')
+    if args.interim and saved['step'] < args.minimum_step:
+        raise ValueError('The best interim checkpoint predates the requested minimum step.')
     candidate = DATA/'ckpt/candidates'/f'{args.stage}-step{saved["step"]}-{digest[:12]}.pt'
     if candidate.exists() and hashlib.sha256(candidate.read_bytes()).hexdigest() != digest:
         raise ValueError('Frozen candidate bytes changed.')
@@ -55,7 +59,8 @@ def main():
     sheet(rare_output)
     rare = rare_audit(args.rare_manifest, rare_output, variant, rare_output/'physical-audit.json')
     atomic_json(output/'inspection.json', dict(candidate=str(candidate), sha256=digest,
-        completed_training_step=status['step'], original_passed=result['physical_passed'],
+        training_status=status['status'], training_step=status['step'], interim=args.interim,
+        original_passed=result['physical_passed'],
         rare_passed=rare['physical_passed'], accepted=False,
         note='Physical inspection only; combined models, seam and speed gates still required.'))
     print(json.dumps(dict(candidate=str(candidate), original_passed=result['physical_passed'],

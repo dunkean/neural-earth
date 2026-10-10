@@ -328,6 +328,8 @@ def main():
                      dict(dataset=str(args.dataset), output=str(output), resume=str(args.resume) if args.resume else None))
         state['seed_plan'] = seed_plan
         state['sampling_policy'] = sampling_policy
+        if saved and saved.get('warm_start'):
+            state['warm_start'] = saved['warm_start']
         if device.type == 'cuda':
             state['cuda_rng'] = torch.cuda.get_rng_state_all()
         atomic_write(output/name, lambda handle: torch.save(state, handle))

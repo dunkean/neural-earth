@@ -17,6 +17,7 @@ from distill.evaluate import artifact_audit, audit, pipeline_speed_audit
 from distill.rare_cases import additional_evidence, load_sites, local_errors, qualifies, sampling_policy, KINDS
 from distill.common import source_digest
 from distill.coarse_solver import CoarseSolver
+from distill.widen import expand_state, expanded_config
 
 
 class DistillationTests(unittest.TestCase):
@@ -88,6 +89,23 @@ class DistillationTests(unittest.TestCase):
         self.assertEqual([p._version for p in solver.parameters()], versions)
         self.assertTrue(all(v.grad is not None and torch.isfinite(v.grad).all() for v in solver.parameters()))
         self.assertGreater(sum(float(v.grad.abs().sum()) for v in solver.parameters()), 0.)
+
+    def test_widening_preserves_learned_field_and_unet_skip_layout(self):
+        torch.manual_seed(88)
+        old = Student(StudentConfig('base', 48, 3, (1, 2))).eval()
+        torch.nn.init.normal_(old.head.weight, std=.1)
+        torch.nn.init.normal_(old.direct.weight, std=.01)
+        new = Student(expanded_config(old.config, 64)).eval()
+        new.load_state_dict(expand_state(old, new, old.state_dict(), jitter=0))
+        x = torch.randn(1, 32, 64, 64)
+        with torch.no_grad():
+            expected, actual = old(x), new(x)
+        self.assertGreater(float(expected.std()), .01)
+        torch.testing.assert_close(actual, expected, rtol=1e-5, atol=1e-5)
+        torch.testing.assert_close(new.direct.weight, old.direct.weight, rtol=0, atol=0)
+        self.assertEqual(new.halo, old.halo)
+        with self.assertRaises(ValueError):
+            expanded_config(old.config, 32)
 
     def test_rare_sampling_policy_keeps_validation_and_holdout_out(self):
         import json

@@ -145,11 +145,21 @@ def main():
         progress('coarse-full-data')
         train('train-coarse', 'coarse', DATA/'crops/main', DATA/'ckpt/coarse', 300000, 64, 8)
         progress('base-full-data')
-        train('train-base', 'base', DATA/'crops/main', DATA/'ckpt/base', 400000, 96, 1, size=256)
+        # The 265k physical inspection still smooths fine relief despite improved
+        # LOD 3 bands. Finish this pass, then retain its learned field in a wider
+        # architecture trial rather than prolonging the same capacity to 400k.
+        train('train-base', 'base', DATA/'crops/main', DATA/'ckpt/base', 300000, 96, 1, size=256)
+        progress('base-wider-data')
+        wider = DATA/'ckpt/base128'
+        if not (wider/'latest.pt').exists():
+            from distill.widen import initialize
+            initialize(DATA/'ckpt/base/best.pt', wider, 128)
+        train('train-base128', 'base', DATA/'crops/main', wider, 100000, 128, 1, size=256)
         progress('decoder-full-data')
         train('train-decoder', 'decoder', DATA/'crops/main', DATA/'ckpt/decoder', 200000, 64, 1)
         atomic_json(progress_path, dict(status='candidates-ready-for-physical-evaluation',
-                    checkpoints={stage:str(DATA/'ckpt'/stage/'best.pt') for stage in ('coarse','base','decoder')},
+                    checkpoints={stage:str(DATA/'ckpt'/('base128' if stage == 'base' else stage)/'best.pt')
+                                 for stage in ('coarse','base','decoder')},
                     accepted=False, updated_at=time.time()))
         print('Three candidates ready. Physical, seam and speed gates remain required.', flush=True)
     except Exception as exc:

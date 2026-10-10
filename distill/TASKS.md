@@ -501,6 +501,42 @@ Empreintes du nouveau module ajoutées aux rapports physiques, benchmarks et
 preuves de joints pour empêcher l'acceptation de résultats issus d'un autre
 code de solveur.
 
+### Base 128 initialisé depuis les poids appris
+
+Inspection intermédiaire du base, EMA du pas **265000** : **0/14 historiques et 0/16
+rares**, dans `eval/base-rare-interim{,-rare}`. Plusieurs bandes LOD 3 se
+rapprochent de la référence, mais les plaines et rivages LOD 0 restent très
+lissés (certaines bandes à 0,01–0,09×). Prolonger seul le 96 à 400000 pas est
+remplacé par une fin de passe à 300000, puis un essai **base 128**, 100000 pas,
+dans `ckpt/base128`. Les poids précédents restent conservés.
+
+`distill/widen.py` initialise ce nouveau modèle depuis l'EMA : canaux appris
+copiés, nouveaux canaux activés par de petits poids, skips concaténés remappés,
+variance/epsilon PixelNorm compensés. Même champ récepteur/halo, sans filtrage
+du terrain. Test FP32 sur un vrai réseau à sorties non nulles : champ préservé
+à 1e-5. Test BF16 4090 sur trois crops val : MAE latente 0,0011–0,0017 et écart
+proxy hauteur 2,18–3,58 m, enregistré dans `preparation/base-widening-check.json`.
+Taille base 128 : **13331237 paramètres**, ~53,3 Mo de poids FP32, contre
+7507077 / ~30,0 Mo pour le 96. Le gain d'inférence de cette version reste à mesurer.
+
+L'élargissement est une **nouvelle architecture avec un nouvel optimiseur**,
+pas une reprise prétendant conserver des moments de formes différentes.
+Le checkpoint source intégral est figé dans `source.pt`, avec son SHA, seed et
+recette dans `warm-start.json` et les checkpoints suivants. Les probabilités
+train/val et le plan de seeds sont repris ; les futurs arrêts/reprises de ce
+nouvel essai conserveront son propre optimiseur/RNG. **24 tests passent**,
+dont le remappage des skips et la préservation du champ.
+Smoke GPU élargi : 32 pas finis, gradients/losses finies, policy rare restaurée
+du checkpoint, provenance de warm start conservée. Dossier `ckpt/base128-smoke`
+distinct de l'essai principal ; il ne sert pas de preuve physique d'acceptation.
+
+Le coordinateur attend la fin base 96→300000, initialise base128 une fois,
+puis entraîne base128 et passe au decoder→200000. Le solveur coarse 4 en
+parallèle a reçu la loss des cinq bandes (.05), après un diagnostic de pente
+proxy +32 % au pas 10000 : reprise propre, optimiseur/RNG conservés, meilleur
+score réinitialisé pour le nouvel objectif. Les seuils d'acceptation physiques
+restent inchangés.
+
 ```bash
 python -m distill.rare_cases survey ~/data/distill/eval/rare-proposals.json --count 12
 python tools/verification/compare_base_variants.py run ~/data/distill/eval/rare-teacher-survey \

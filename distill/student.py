@@ -1,4 +1,4 @@
-"""Local convolutional students: no spatial normalization or attention.
+"""Local convolutional students and a short coarse solver trial.
 
 The base student predicts the final blended T=2 field. Coarse and decoder
 students initially replace complete production windows, preserving their fusion.
@@ -20,6 +20,7 @@ class StudentConfig:
     depth: int = 4
     dilations: tuple[int, ...] = (1, 2, 4)
     solver_steps: int = 0
+    norm_eps: float = 1e-6
 
     @property
     def in_channels(self):
@@ -32,17 +33,21 @@ class StudentConfig:
 
 class PixelNorm(nn.Module):
     """Only normalize channels of the same pixel; arbitrary tiles stay local."""
+    def __init__(self, eps=1e-6):
+        super().__init__()
+        self.eps = eps
+
     def forward(self, x):
-        return x * torch.rsqrt(x.float().square().mean(1, keepdim=True) + 1e-6).to(x.dtype)
+        return x * torch.rsqrt(x.float().square().mean(1, keepdim=True) + self.eps).to(x.dtype)
 
 
 class Block(nn.Module):
-    def __init__(self, cin, cout, dilation=1):
+    def __init__(self, cin, cout, dilation=1, norm_eps=1e-6):
         super().__init__()
         self.skip = nn.Conv2d(cin, cout, 1) if cin != cout else nn.Identity()
         self.layers = nn.Sequential(
-            PixelNorm(), nn.Conv2d(cin, cout, 3, padding=dilation, dilation=dilation), nn.SiLU(),
-            PixelNorm(), nn.Conv2d(cout, cout, 3, padding=dilation, dilation=dilation), nn.SiLU())
+            PixelNorm(norm_eps), nn.Conv2d(cin, cout, 3, padding=dilation, dilation=dilation), nn.SiLU(),
+            PixelNorm(norm_eps), nn.Conv2d(cout, cout, 3, padding=dilation, dilation=dilation), nn.SiLU())
 
     def forward(self, x):
         return (self.skip(x) + self.layers(x)) * (2 ** -.5)
@@ -55,6 +60,8 @@ class Student(nn.Module):
             raise ValueError(config.stage)
         if config.width < 16 or config.width % 16 or not 2 <= config.depth <= 5:
             raise ValueError('Width must be a multiple of 16; depth must be 2–5.')
+        if not math.isfinite(config.norm_eps) or config.norm_eps <= 0:
+            raise ValueError('Pixel normalization epsilon must be finite and positive.')
         self.config = config
         if config.solver_steps:
             if config.stage != 'coarse' or config.width != 128:
@@ -64,11 +71,11 @@ class Student(nn.Module):
             return
         widths = [config.width * min(2 ** i, 2) for i in range(config.depth)]
         self.stem = nn.Conv2d(config.in_channels, widths[0], 3, padding=1)
-        self.encoders = nn.ModuleList(Block(w, w) for w in widths)
+        self.encoders = nn.ModuleList(Block(w, w, norm_eps=config.norm_eps) for w in widths)
         self.down = nn.ModuleList(nn.Conv2d(a, b, 3, stride=2, padding=1)
                                   for a, b in zip(widths, widths[1:]))
-        self.middle = nn.Sequential(*(Block(widths[-1], widths[-1], d) for d in config.dilations))
-        self.decoders = nn.ModuleList(Block(a + b, b) for a, b in zip(widths[:0:-1], widths[-2::-1]))
+        self.middle = nn.Sequential(*(Block(widths[-1], widths[-1], d, config.norm_eps) for d in config.dilations))
+        self.decoders = nn.ModuleList(Block(a + b, b, norm_eps=config.norm_eps) for a, b in zip(widths[:0:-1], widths[-2::-1]))
         self.head = nn.Conv2d(widths[0], config.out_channels, 1)
         # Predict a residual on deterministic noise. This aids fitting high frequencies.
         self.direct = nn.Conv2d(config.in_channels, config.out_channels, 1, bias=False)
