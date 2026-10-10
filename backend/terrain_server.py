@@ -221,7 +221,8 @@ profile_data.update(model_revision=getattr(terrain_runtime, 'MODEL_REVISION', 'u
     driver=GPU_SELECTION.get('driver') if GPU_SELECTION else None)
 if COARSE_GPU:
     profile_data.update(gpu_name=COARSE_GPU['name'],gpu_uuid=COARSE_GPU['uuid'])
-profile_data.update(physical_lod_version='bandlimit-climate-v3')
+from terrain_coastline import VERSION as COASTLINE_VERSION
+profile_data.update(physical_lod_version='bandlimit-climate-v3', coastline_version=COASTLINE_VERSION)
 profile_data.update(refinement_version=REFINEMENT_VERSION, refinement_min_lod=MIN_LOD)
 from terrain_world import WORLD_VERSION, profile_metadata
 from terrain_geometry import profile_bounds, geometry_heightmap
@@ -786,12 +787,14 @@ def sample_elevation(world, lod, tx, ty, halo=HALO, *, xs=None, ys=None,
         elevation, stage = data.cpu().numpy(), 'decoder-refinement'
     else:
         i0, j0 = y0-halo*step, x0-halo*step
+        from terrain_coastline import read_native
         scheduler=getattr(world,'_terrain_window_scheduler',None)
+        # Native DEM with coherent land/sea signs at near-zero coasts.
         if scheduler:
             with scheduler.scope(jobs.check_current_interest):
-                data = world.get(i0, j0, i0+size*step, j0+size*step, with_climate=False)['elev']
+                data = read_native(world, i0, j0, i0+size*step, j0+size*step)
         else:
-            data = world.get(i0, j0, i0+size*step, j0+size*step, with_climate=False)['elev']
+            data = read_native(world, i0, j0, i0+size*step, j0+size*step)
         # Reduction stays on CUDA; transfer only the display-sized height tile.
         elevation = data.float().reshape(size, step, size, step).mean(dim=(1, 3)).cpu().numpy()
         stage = 'decoder'

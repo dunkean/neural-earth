@@ -17,7 +17,7 @@ from infinite_tensor import InfiniteTensor, TensorWindow
 from terrain_diffusion.inference.world_pipeline import linear_weight_window
 from terrain_diffusion.scheduler.dpmsolver import EDMDPMSolverMultistepScheduler
 
-VERSION = 'decoder-cascade-v4-native-coast'
+VERSION = 'decoder-cascade-v5-native-coast-sign'
 MIN_LOD = -3
 
 
@@ -132,7 +132,7 @@ def _detail_field(world, level):
 
 @torch.inference_mode()
 def sample_refined(world, level, i1, j1, i2, j2, *, check=None):
-    """Read fine-grid cells; level 0 is the unchanged native 30 m DEM.
+    """Read fine-grid cells; level 0 is the native 30 m DEM (coherent coast signs).
 
     Integer coordinates refer to cell edges at 30 / 2**level metres. Parent
     interpolation and detail projection include a halo, so overlapping tile
@@ -149,7 +149,9 @@ def sample_refined(world, level, i1, j1, i2, j2, *, check=None):
     observer = getattr(world, '_terrain_window_scheduler', None)
     with observer.scope(check) if observer is not None else nullcontext():
         if level == 0:
-            return world.get(i1, j1, i2, j2, with_climate=False)['elev'].float()
+            # The same coherent-sign native DEM as LOD 0-2 decoder tiles.
+            from terrain_coastline import read_native
+            return read_native(world, i1, j1, i2, j2).float()
 
         # One parent cell beyond each aligned child block is enough for both
         # bilinear filters. Cropping removes their outer edge clamping.
