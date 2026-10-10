@@ -100,7 +100,7 @@ def main():
     if model.config.stage != 'base':
         parser.error('This benchmark measures the base stage.')
     sources = {'code:'+name: hashlib.sha256((REPO/name).read_bytes()).hexdigest()
-               for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py')}
+               for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py')}
     signature = dict(gpu=torch.cuda.get_device_name(), torch=torch.__version__,
                      checkpoint_digest=hashlib.sha256(payload).hexdigest(), student_source_digests=sources,
                      stage='base', dtype='bf16', step=saved['step'], sizes=args.sizes, repeats=args.repeats,

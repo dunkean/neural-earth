@@ -16,6 +16,7 @@ from distill.train import coarse_delta_loss, coarse_height_mae, losses, lowfreq_
 from distill.evaluate import artifact_audit, audit, pipeline_speed_audit
 from distill.rare_cases import additional_evidence, load_sites, local_errors, qualifies, sampling_policy, KINDS
 from distill.common import source_digest
+from distill.coarse_solver import CoarseSolver
 
 
 class DistillationTests(unittest.TestCase):
@@ -66,6 +67,27 @@ class DistillationTests(unittest.TestCase):
         for weights in ([1., 2.], [0.] * 4, [1., -1., 1., 1.], [1., float('nan'), 1., 1.]):
             with self.assertRaises(ValueError):
                 StepBatches(4, 1, 0, 10, 333, weights)
+
+    def test_short_solver_backpropagates_without_mutating_weights_or_autocast_drift(self):
+        class SmallDenoiser(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(11, 6, 1)
+            def forward(self, x, noise_labels, conditional_inputs):
+                return self.conv(x)
+        solver = CoarseSolver.__new__(CoarseSolver)
+        torch.nn.Module.__init__(solver)
+        solver.net, solver.steps, solver.delta_ratio = SmallDenoiser(), 4, .044
+        x = torch.randn(1, 16, 64, 64)
+        versions = [p._version for p in solver.parameters()]
+        p = solver(x)
+        with torch.autocast('cpu', dtype=torch.bfloat16):
+            actual = solver(x)
+        torch.testing.assert_close(actual, p, rtol=0, atol=0)
+        p.square().mean().backward()
+        self.assertEqual([p._version for p in solver.parameters()], versions)
+        self.assertTrue(all(v.grad is not None and torch.isfinite(v.grad).all() for v in solver.parameters()))
+        self.assertGreater(sum(float(v.grad.abs().sum()) for v in solver.parameters()), 0.)
 
     def test_rare_sampling_policy_keeps_validation_and_holdout_out(self):
         import json

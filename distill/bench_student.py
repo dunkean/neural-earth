@@ -98,7 +98,7 @@ def main():
         report['checkpoint_digest'] = hashlib.sha256(payload).hexdigest()
         report['student_source_digests'] = {
             'code:'+name: hashlib.sha256((REPO/name).read_bytes()).hexdigest()
-            for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py')}
+            for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py')}
         for channels_last in (False, True):
             model.to(memory_format=torch.channels_last if channels_last else torch.contiguous_format)
             inputs = torch.randn(args.batch, model.config.in_channels, total, total, device='cuda')

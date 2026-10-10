@@ -460,6 +460,47 @@ puis reprise de 8 pas sans fichier policy (probabilités restaurées du checkpoi
 puis 8 pas avec les 14 exemples de validation rares supplémentaires ; losses
 finies et états optimiseur/RNG conservés, sans modifier le checkpoint base principal.
 
+### Coarse : diagnostic de généralisation et essai à quatre étapes
+
+Coarse 128 a terminé ses 100000 pas ; EMA retenue au pas 90000,
+`coarse-step90000-829e2f9847b1.pt`. La MAE proxy passe de 39,2 m (coarse 64)
+à 32,8 m. L'inspection physique `eval/coarse128-pilot{,-rare}` rejette encore
+les 14 vues historiques et les 16 rares : améliorations locales, mais côtes
+humides jusqu'à 114 m au LOD 0. Prolonger la même recette seule n'est pas
+considéré comme un résultat.
+
+Diagnostic indépendant sur **un exemple train natural** : coarse 64, 5000 pas,
+LR .001, validation sur ce même exemple uniquement. MAE proxy 1,705 m,
+MSE 0,000048, pentes/spectre ~1. Le réseau peut ajuster précisément une cible ;
+ce test ne prouve aucune généralisation. Dossiers `crops/coarse-single-diagnostic`
+et `ckpt/coarse-single-diagnostic`, sans modification du jeu principal.
+
+Nouvel essai : `distill/coarse_solver.py`, teacher coarse initialisé puis
+**20→4 évaluations** du solveur, optimisé par régression sur les cibles finales
+existantes, à travers les quatre appels. Architecture et taille du teacher
+coarse conservées (2797960 paramètres) ; ce n'est pas une compression des poids
+ni une passe unique. Gain réel à mesurer, pas de promesse ×5 du pipeline.
+Les poids teacher sur disque et le sous-module restent inchangés. Les masters
+optimiseur sont FP32, les paramètres/buffers de chaque forward sont convertis
+fonctionnellement en BF16 ; le mode eval des couches MP conserve les gradients
+et évite de muter les poids entre plusieurs appels avant backward.
+
+Contrôle du solveur au réglage **20 étapes**, sur la cible sauvegardée du même
+exemple : MSE 9,72e-9 et MAE proxy 0,213 m, compatible avec la cible FP16.
+L'autocast global créait ~16 m d'écart en modifiant des opérations scalaires/
+embeddings ; il est désactivé à l'intérieur de ce solveur, dont les kernels
+utilisent explicitement BF16. Métadonnées : `preparation/coarse-solver-parity.json`.
+Un test CPU vérifie backward fini, absence de mutations et invariance à
+l'autocast englobant ; **23 tests passent**. Smoke GPU 32 pas réussi après cette
+correction, sans changer les checkpoints de candidats précédents.
+
+Job `coarse-solver4-pilot` sur la 4090 : 50000 pas, batch 4, LR 2e-5,
+checkpoints complets/EMA/RNG dans `ckpt/coarse-solver4`. Les seuils physiques et
+la banque rare restent inchangés. La 5090 poursuit la passe du base en parallèle.
+Empreintes du nouveau module ajoutées aux rapports physiques, benchmarks et
+preuves de joints pour empêcher l'acceptation de résultats issus d'un autre
+code de solveur.
+
 ```bash
 python -m distill.rare_cases survey ~/data/distill/eval/rare-proposals.json --count 12
 python tools/verification/compare_base_variants.py run ~/data/distill/eval/rare-teacher-survey \

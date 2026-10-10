@@ -90,7 +90,7 @@ def main():
     report = dict(stage='base', checkpoint_digest=hashlib.sha256(payload).hexdigest(), step=saved['step'],
                   student_source_digests={
                       'code:'+name: hashlib.sha256((REPO/name).read_bytes()).hexdigest()
-                      for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py')},
+                      for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py')},
                   device=device, gpu=None if args.cpu else torch.cuda.get_device_name(),
                   dtype='bf16 autocast with FP32 output heads', core=args.core, halo=model.halo,
                   tolerance=args.tolerance, split=args.split, rows=rows,

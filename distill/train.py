@@ -9,7 +9,7 @@ SIGINT/SIGTERM save the next step and optimizer state before exiting.
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
+from dataclasses import asdict, replace
 import json
 import math
 from pathlib import Path
@@ -196,6 +196,7 @@ def main():
     parser.add_argument('--output', type=Path)
     parser.add_argument('--resume', type=Path)
     parser.add_argument('--width', type=int)
+    parser.add_argument('--coarse-solver-steps', type=int)
     parser.add_argument('--steps', type=int, default=200000)
     parser.add_argument('--batch', type=int, default=1)
     parser.add_argument('--lr', type=float, default=2e-4)
@@ -241,8 +242,12 @@ def main():
         config = StudentConfig(**config_dict)
         if config.stage != args.stage or (args.width and config.width != args.width):
             raise ValueError('Resume stage/width differ from the checkpoint.')
+        if args.coarse_solver_steps is not None and config.solver_steps != args.coarse_solver_steps:
+            raise ValueError('Resumed solver steps differ from the checkpoint.')
     else:
         config = defaults(args.stage, args.width)
+        if args.coarse_solver_steps is not None:
+            config = replace(config, solver_steps=args.coarse_solver_steps)
     model = Student(config).to(device)
     halo = model.halo if args.stage == 'base' else 0
     train = Crops(dataset_root, args.stage, halo=halo, train_size=args.train_size)

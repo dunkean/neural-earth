@@ -19,6 +19,7 @@ class StudentConfig:
     width: int = 96
     depth: int = 4
     dilations: tuple[int, ...] = (1, 2, 4)
+    solver_steps: int = 0
 
     @property
     def in_channels(self):
@@ -55,6 +56,12 @@ class Student(nn.Module):
         if config.width < 16 or config.width % 16 or not 2 <= config.depth <= 5:
             raise ValueError('Width must be a multiple of 16; depth must be 2–5.')
         self.config = config
+        if config.solver_steps:
+            if config.stage != 'coarse' or config.width != 128:
+                raise ValueError('The solver trial uses the pinned coarse teacher architecture (width 128).')
+            from distill.coarse_solver import CoarseSolver
+            self.solver = CoarseSolver(config.solver_steps)
+            return
         widths = [config.width * min(2 ** i, 2) for i in range(config.depth)]
         self.stem = nn.Conv2d(config.in_channels, widths[0], 3, padding=1)
         self.encoders = nn.ModuleList(Block(w, w) for w in widths)
@@ -71,10 +78,14 @@ class Student(nn.Module):
 
     @property
     def alignment(self):
+        if self.config.solver_steps:
+            return 64
         return 2 ** (self.config.depth - 1)
 
     @property
     def halo(self):
+        if self.config.solver_steps:
+            return 0  # Complete original coarse windows, with their retained blending.
         # Conservative support radius: all conv paths, including nearest upsampling
         # alignment uncertainty. Rounded to the conditioning grid for base.
         jump, radius = 1, 1  # stem
@@ -92,6 +103,8 @@ class Student(nn.Module):
         return math.ceil(radius / alignment) * alignment
 
     def forward(self, x):
+        if self.config.solver_steps:
+            return self.solver(x)
         if x.shape[-1] % self.alignment or x.shape[-2] % self.alignment:
             raise ValueError(f'Input must align to {self.alignment}.')
         original = x

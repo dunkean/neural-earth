@@ -188,7 +188,7 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
                 with torch.inference_mode(False):
                     frozen_models[stage], _ = load_student(io.BytesIO(payload), 'cuda')
                 del payload
-            for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py'):
+            for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py'):
                 fingerprint['code:'+name] = hashlib.sha256((REPO_ROOT/name).read_bytes()).hexdigest()
         previous = report.setdefault('checkpoint_digests', {}).get(variant, {})
         reusable = resume and previous == fingerprint
