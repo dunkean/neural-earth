@@ -12,7 +12,7 @@ from distill.dataset import StepBatches
 from distill.features import base_features, noise
 from distill.jobs import proc_identity
 from distill.resume_teacher import validate_resume_plan
-from distill.student import Student, StudentConfig
+from distill.student import Student, StudentConfig, load_student
 from distill.train import coarse_delta_loss, coarse_height_mae, losses, lowfreq_height_mae, spectral_band_loss
 from distill.evaluate import artifact_audit, audit, pipeline_speed_audit
 from distill.rare_cases import additional_evidence, augment, load_sites, local_errors, qualifies, sampling_policy, KINDS
@@ -20,6 +20,7 @@ from distill.common import source_digest
 from distill.coarse_solver import CoarseSolver
 from distill.widen import expand_state, expanded_config
 from distill.check_physical_seams import partition_stats
+from distill.export import export_bundle
 
 
 class DistillationTests(unittest.TestCase):
@@ -292,6 +293,37 @@ class DistillationTests(unittest.TestCase):
         values, _ = partition_stats(full, tiles, halo)
         self.assertGreaterEqual(values['max_jump_error_m'], 3.)
         self.assertGreaterEqual(values['overlap_max_m'], 3.)
+
+    def test_inference_export_preserves_ema_predictions_and_bundle_identity(self):
+        from dataclasses import asdict
+        with tempfile.TemporaryDirectory() as directory:
+            root, sources, expected = Path(directory), {}, {}
+            for stage in ('base', 'coarse', 'decoder'):
+                config = StudentConfig(stage, 16, 2, (1,))
+                model = Student(config).eval()
+                raw = {k:v.clone() for k,v in model.state_dict().items()}
+                torch.nn.init.normal_(model.head.weight, std=.1)
+                inputs = torch.randn(1, config.in_channels, 64, 64)
+                with torch.no_grad():
+                    expected[stage] = (inputs, model(inputs))
+                source = root/(stage+'-source.pt')
+                torch.save(dict(config=asdict(config), model=raw, ema=model.state_dict(), step=1,
+                                optimizer={'state':'must not ship'}), source)
+                sources[stage] = source
+            bundle = export_bundle(sources, root/'bundle')
+            self.assertFalse(bundle['accepted'])
+            for stage in sources:
+                model, saved = load_student(root/'bundle'/(stage+'.pt'))
+                self.assertNotIn('optimizer', saved)
+                self.assertNotIn('ema', saved)
+                with torch.no_grad():
+                    torch.testing.assert_close(model(expected[stage][0]), expected[stage][1], atol=0, rtol=0)
+            self.assertEqual(export_bundle(sources, root/'bundle')['exports'], bundle['exports'])
+            saved = torch.load(sources['base'], weights_only=True)
+            saved['step'] = 2
+            torch.save(saved, sources['base'])
+            with self.assertRaises(ValueError):
+                export_bundle(sources, root/'bundle')
 
     def test_rare_bank_excludes_training_worlds_and_cannot_replace_original_bank(self):
         self.assertFalse(additional_evidence({}, 'student_all')['passed'])

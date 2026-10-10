@@ -630,6 +630,23 @@ historiques et rares, avec les mêmes SHA que la preuve de continuité.
 La variante coarse 4 de ce premier assemblage reste explicitement un
 compromis à comparer, pas un modèle accepté par les seuils stricts.
 
+Le contrôle de continuité final utilise désormais un **monde neuf pour chaque
+tuile viewer**, pour éviter qu'un cache voisin ne masque les écarts. Smoke
+teacher plus sévère `eval/physical-seam-cold-teacher-smoke` : erreur des halos
+max ~0,444 m au LOD 3, ~0,442 m au LOD 0 ; MAE LOD 0 0,000148 m, max du saut
+0,0447 m. Ces petits écarts du teacher seront publiés à côté des mesures élèves.
+L'ancien smoke avec cache partagé reste conservé et n'est pas présenté comme
+une preuve à cache froid.
+
+`distill/export.py` prépare des bundles d'inférence immuables avec l'EMA exacte,
+sans optimiseur ni seconde copie des poids. Test : sorties non nulles conservées
+à l'identique pour les trois étages, EMA distincte des poids courants, refus de
+réécrire un bundle avec un autre checkpoint ; **27 tests passent**.
+Premier export **provisoire**, sans acceptation :
+`exports/preview-base128-45000-coarse4-50000-decoder145000/`.
+Poids FP32 : base 53,35 Mo, coarse 11,22 Mo, decoder 13,36 Mo ; manifest avec
+SHA de chaque source et fichier. Les checkpoints complets/RNG restent conservés.
+
 ```bash
 python -m distill.rare_cases survey ~/data/distill/eval/rare-proposals.json --count 12
 python tools/verification/compare_base_variants.py run ~/data/distill/eval/rare-teacher-survey \

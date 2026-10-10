@@ -127,12 +127,14 @@ def main():
     report = dict(gpu=torch.cuda.get_device_name(), sites=sites, lods=args.lods, rows=[],
                   checkpoint_digests=fingerprint, teacher_sources=source_digest(),
                   site_manifest_digest=hashlib.sha256(args.site_manifest.read_bytes()).hexdigest(),
-                  fresh_world_per_partition=True, tile_size=256, halo=24, accepted=False,
+                  fresh_world_per_partition=True, fresh_world_per_viewer_tile=True,
+                  tile_size=256, halo=24, accepted=False,
                   visual_review=dict(passed=False, reason='Review whole/tiled physical images before selection.'))
     if (output/'report.json').exists():
         old = json.loads((output/'report.json').read_text())
-        for key in ('gpu', 'sites', 'lods', 'checkpoint_digests', 'teacher_sources', 'site_manifest_digest'):
-            if old[key] != report[key]:
+        for key in ('gpu', 'sites', 'lods', 'checkpoint_digests', 'teacher_sources', 'site_manifest_digest',
+                    'fresh_world_per_viewer_tile'):
+            if old.get(key) != report[key]:
                 raise ValueError('Seam evidence changed; use a new output directory.')
         report = old
     from terrain_app import load_pipeline
@@ -172,17 +174,18 @@ def main():
                 del whole_world
                 gc.collect()
                 torch.cuda.empty_cache()
-                tile_world = world_for(site, variant)
                 tiles = {}
-                # Deliberately traverse the grid in reverse order.
+                # Each viewer tile starts cold too: a shared neighbouring cache
+                # must not hide a disagreement caused by request partitioning.
                 for y, x in [(1, 1), (1, 0), (0, 1), (0, 0)]:
+                    tile_world = world_for(site, variant)
                     value, _, stage = server.sample_physical(tile_world, site['seed'], site['profile'], lod, tx+x, ty+y)
                     if stage not in ('latent', 'decoder'):
                         raise ValueError(f'Unexpected cached/preview stage: {stage}')
                     tiles[(y, x)] = value
-                del tile_world
-                gc.collect()
-                torch.cuda.empty_cache()
+                    del tile_world
+                    gc.collect()
+                    torch.cuda.empty_cache()
                 metrics, mosaic = partition_stats(whole, tiles)
                 row = dict(site=site['name'], lod=lod, variant=variant, **metrics)
                 report['rows'].append(row)
