@@ -3,7 +3,11 @@
 Le serveur de revue utilise le viewer existant, avec un menu **NN** dans la barre
 du haut. Coarse, base et decoder se sélectionnent séparément. Les quatre bases
 du dossier final sont disponibles, ainsi que les modèles d'origine, coarse8
-et decoder200k. Les choix sont communs aux onglets de ce serveur.
+et decoder200k. Le coarse **4 étapes · essai** est également proposé lorsque
+son export vérifié existe sous `~/data/distill/live/weights/coarse4/`.
+Ce checkpoint a fini 50 000 étapes d'entraînement ; il reste expérimental
+et n'a pas passé les seuils physiques stricts. Les choix sont communs aux
+onglets de ce serveur.
 
 **Appliquer les NN** recharge le moteur et rouvre la même vue. **Reset après
 Orogen** change le namespace des caches neuronaux : coarse, latent, decoder et

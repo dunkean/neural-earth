@@ -16,7 +16,10 @@ STAGES = ('coarse', 'base', 'decoder')
 def catalog(root=DATA):
     weights = Path(root)/'final/weights'
     specifications = {
-        'coarse': [('solver8', 'Distillé · 8 étapes', weights/'candidate-1/coarse.pt')],
+        'coarse': [
+            ('solver8', 'Distillé · 8 étapes', weights/'candidate-1/coarse.pt'),
+            ('solver4', 'Distillé · 4 étapes · essai', Path(root)/'live/weights/coarse4/coarse.pt'),
+        ],
         'base': [
             ('initial128', '128 initial · 53 Mo · plus lisse', weights/'candidate-1/base.pt'),
             ('coupled128', '128 couplé · 53 Mo', weights/'candidate-2/base.pt'),

@@ -2,6 +2,23 @@
 
 2026-10-10 · Grégory Beurier
 
+## État actuel après les tests live utilisateur
+
+Coarse8 et decoder distillés conviennent visuellement à l'utilisateur.
+**Tous les bases distillés actuels sont insuffisants**, y compris128 initial :
+outre les lignes, ils ne reproduisent pas correctement les formes d'érosion.
+Le compromis « plus lisse » n'est donc pas une acceptation. L'objectif reste
+trois modèles distillés de qualité, avec possibilité de revoir les choix
+techniques et le gain visé. Pas de nouvel entraînement tant que la revue
+indépendante demandée n'a pas été analysée et la stratégie exposée.
+
+Rapport de passation : [REVIEW_OPUS_20261010.md](REVIEW_OPUS_20261010.md),
+résultats, expériences rejetées et chemins des données/preuves.
+Consultation CLI en lecture seule, modèle explicitement confirmé
+`claude-opus-5-5`, effort max ; job durable `opus-base-review` CPU.
+Session et transcrit sous `~/data/distill/review/opus-20261010/`.
+Le coarse4 est laissé à l'appréciation de l'utilisateur après son test live.
+
 ## Livraison finale — résultats et limites
 
 L'utilisateur demande les planches **à la fin** : paysages différents et
@@ -193,9 +210,41 @@ couplé 64². Un biais périodique moyen est estimé sur train seulement, sans o
 global, puis testé sur validation ; les variances par phase sont également
 mesurées. Une variance alternée de moyenne nulle ne se corrige pas par soustraction
 du biais. Pas d'altération du modèle, des données teacher, du runtime ni des poids
-retenus. Job durable `lattice-error-audit`, GPU0 ; résultats attendus sous
-`eval/lattice-error/`. Ce diagnostic doit déterminer le prochain geste, pas
-justifier une nouvelle série d'entraînements aveugles.
+retenus. Les jobs durables `lattice-error-audit` (période8) et
+`lattice-error-32` sont terminés, GPU0 ; rapports sous `eval/lattice-error/`
+et `eval/lattice-error-32/`.
+
+Le biais moyen périodique ne fournit pas une correction utile : à période32,
+MAE basse fréquence 23,7911 → 23,7896 m, avec une MSE latente légèrement pire.
+En revanche, la variance d'erreur du canal d'altitude présente un rapport
+max/min de **1,80 sur train / 2,33 sur validation**, et culmine près des
+frontières de cellules32. Les groupes côtiers restent petits (3 et 5 fenêtres
+val), donc leurs rapports élevés ne prouvent pas une généralisation.
+Cette variance brute peut aussi refléter un teacher plus variable aux frontières.
+
+`audit_coarse_skip.py` teste causalement le bypass coarse direct du canal
+d'altitude, sans toucher au CNN. Sur 500 fenêtres train, le coefficient optimal
+de remplacement nearest→bilinéaire n'est que **0,0271**. Sur les 384 fenêtres
+val séparées : MAE proxy 23,7911 → 23,7898 m, erreur relative de gradient
+0,42817 → 0,42787. Le remplacement complet dégrade la MAE à **35,6376 m**
+et l'erreur de gradient à **0,71080**. Cette correction est écartée ;
+résultats sous `eval/coarse-skip-audit/`. Ni poids ni inférence live modifiés.
+
+Le diagnostic suivant, `audit_boundary_gradient.py`, compare les erreurs
+d'incréments aux incréments du teacher, phase par phase. Il doit distinguer
+un artefact des frontières d'une simple hausse de difficulté locale avant
+de choisir un objectif d'apprentissage. Train : 500 fenêtres tirées selon
+les probabilités du parent ; validation : les 384 fenêtres complètes,
+seeds indépendantes. Job `boundary-gradient-audit` terminé, rapport sous
+`eval/boundary-gradient/`. L'erreur normalisée du canal altitude aux frontières
+est0,57764 contre0,41778 à l'intérieur en validation (+38,3%) ; train
+0,68403 contre0,49327 (+38,7%). L'énergie teacher val varie beaucoup moins :
+frontières1,0246 contre intérieur0,9831. Le défaut est donc mesuré au-delà
+de la seule difficulté du teacher aux frontières. Les deux essais courts
+de loss aux frontières envisagés **n'ont pas été codés ni lancés** : le retour
+live sur la perte d'érosion demande de revoir le problème plus largement.
+Aucun de ces proxies ne remplace la validation
+physique des cas rares et des raccords froids.
 
 Le suivi Autoresearch auxiliaire a été arrêté : sa résolution de la métrique
 secondaire baseline refuse les paquets après un `measure`, malgré la MAE présente
@@ -219,6 +268,16 @@ Chromium vérifie changement et reset, conservation seed/caméra/réglages,
 absence d'erreur JavaScript. **43 tests** passent. Rapports sous
 `~/data/distill/live/`, instructions dans `distill/LIVE.md`. Ces tests prouvent
 l'intégration interactive, pas une nouvelle acceptation globale de qualité.
+
+Coarse4 est maintenant une option live séparée (« 4 étapes · essai »),
+checkpoint immuable50k, export sous `live/weights/coarse4/`. Le checkpoint
+et l'export donnent une sortie exactement identique sur une fenêtre GPU0.
+Le catalogue HTTP après redémarrage présente `solver4` et conserve la sélection
+coarse8/base original/decoder200k ainsi que le nonce de reset. Rapports
+`export-equivalence.json` et `catalog-verification.json`. L'utilisateur décide
+s'il le garde ; ni seuils stricts ni performance pipeline finale ne sont
+revendiqués pour ce nouvel essai. **53 tests** passent avec les diagnostics et
+le catalogue étendu.
 
 ### Résultats du dossier final
 

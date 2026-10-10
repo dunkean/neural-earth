@@ -5,7 +5,7 @@ import tempfile
 import unittest
 
 from distill.common import atomic_json
-from distill.live_runtime import LiveModels, STAGES, validate_selection
+from distill.live_runtime import LiveModels, STAGES, catalog, validate_selection
 
 
 class LiveModelTests(unittest.TestCase):
@@ -44,6 +44,19 @@ class LiveModelTests(unittest.TestCase):
         self.assertNotEqual(new.identity()['reset'], old.identity()['reset'])
         self.assertNotEqual(new.public()['revision'], old.public()['revision'])
         self.assertEqual(json.loads(self.path.read_text())['selection'], self.selection)
+
+    def test_coarse_four_is_optional_and_keeps_other_choices(self):
+        root = Path(self.directory.name)
+        self.assertNotIn('solver4', catalog(root)['coarse'])
+        path = root/'live/weights/coarse4/coarse.pt'
+        path.parent.mkdir(parents=True)
+        path.write_bytes(b'fixed-four-step-export')
+        options = catalog(root)
+        selection = dict(self.selection, coarse='solver4')
+        self.assertEqual(validate_selection(selection, options), selection)
+        self.assertEqual(options['coarse']['solver4']['path'], str(path))
+        self.assertNotIn('solver4', options['base'])
+        self.assertNotIn('solver4', options['decoder'])
 
 
 if __name__ == '__main__':
