@@ -23,6 +23,20 @@ distillés sont retirés du catalogue. À la demande explicite de l'utilisateur,
 les poids coarse8/coarse4/decoder sont maintenant versionnés sous
 `distill/weights/`, avec SHA et provenance ; aucun poids base n'est versionné.
 
+La reprise initiale est terminée : les deux coarse ont fini5 000 pas chacun,
+leur export donne un écart maximal nul sur une fenêtre complète en CUDA Graph,
+et le catalogue HTTP propose original/8/4/2/1 après redémarrage du serveur.
+Preuve : `live/coarse-short-delivery.json`. Aucun audit physique détaillé des
+coarse2/1 n'a été lancé ; leur qualité reste à juger par l'utilisateur.
+
+Le pilote base natif a terminé1 000 pas, exit0 :199 M paramètres au lieu de254 M,
+300 fenêtres train et150 val issues de mondes distincts, phases d'initialisation
+et de raffinement équilibrées au sampling. Initial, pas250, pas1000, best et
+latest sont conservés sous `ckpt/base-native-pilot/`, avec optimiseur et RNG.
+La validation de l'opérateur s'améliore ; le rendu physique et la conservation
+des vallées n'ont pas encore été vérifiés. Ce prototype n'est pas promu dans
+l'app et ses poids ne sont pas dans Git. Les63 tests CPU passent.
+
 ## État avant cette reprise, après les tests live utilisateur
 
 Coarse8 et decoder distillés conviennent visuellement à l'utilisateur.
