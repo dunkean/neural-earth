@@ -117,6 +117,8 @@ def main():
     parser.add_argument('--sites', nargs='+', help='Otherwise one site per category; prefer warmer plains.')
     parser.add_argument('--historical-sites', nargs='+', choices=('snow', 'desert', 'coast'),
                         help='Capture the original held-out screenshot locations instead of the rare bank.')
+    parser.add_argument('--include-rare-sites', nargs='+',
+                        help='Also capture explicitly named frozen rare cases alongside historical sites.')
     parser.add_argument('--lods', nargs='+', type=int, choices=(0, 3), default=[3, 0])
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
@@ -125,13 +127,24 @@ def main():
         parser.error('Supply all three candidate stages together, or run teacher only.')
     if args.historical_sites and args.sites:
         parser.error('Choose historical sites or names from the rare bank.')
+    if args.include_rare_sites and not args.historical_sites:
+        parser.error('--include-rare-sites requires --historical-sites; otherwise use --sites.')
     if args.historical_sites:
         if len(set(args.historical_sites)) != len(args.historical_sites):
             parser.error('Historical site names must be distinct.')
         sites, manifest_path = historical_sites(args.historical_sites)
+        manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+        if args.include_rare_sites:
+            rare = load_sites(args.site_manifest)
+            if len(set(args.include_rare_sites)) != len(args.include_rare_sites) or set(args.include_rare_sites)-{s['name'] for s in rare}:
+                parser.error('Additional rare site names must be distinct and present in the frozen bank.')
+            sites += [s for s in rare if s['name'] in args.include_rare_sites]
+            manifest_digest = dict(historical=manifest_digest,
+                rare=hashlib.sha256(args.site_manifest.read_bytes()).hexdigest())
     else:
         sites = load_sites(args.site_manifest)
         manifest_path = args.site_manifest
+        manifest_digest = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     if args.sites:
         if set(args.sites) - {s['name'] for s in sites}:
             parser.error('Unknown site in the frozen bank.')
@@ -154,7 +167,7 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     report = dict(gpu=torch.cuda.get_device_name(), sites=sites, lods=args.lods, rows=[],
                   checkpoint_digests=fingerprint, teacher_sources=source_digest(),
-                  site_manifest_digest=hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+                  site_manifest_digest=manifest_digest,
                   fresh_world_per_partition=True, fresh_world_per_viewer_tile=True,
                   tile_size=256, halo=24, accepted=False,
                   visual_review=dict(passed=False, reason='Review whole/tiled physical images before selection.'))

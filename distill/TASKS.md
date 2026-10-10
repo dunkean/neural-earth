@@ -11,7 +11,12 @@ PNG/PDF à partir des champs physiques **512² natifs**, quatre catégories
 critiques × LOD 3/0, mêmes cadrages/lumière, détails centraux et erreurs
 signées avec une échelle commune par vue. Deux lieux historiques supplémentaires,
 montagnes enneigées et relief aride, sont désormais ordonnancés après les
-chronométrages, sur les mêmes poids : **12 planches** au total. Leur capture
+chronométrages, sur les mêmes poids. Trois cas difficiles déjà présents dans
+la banque figée sont ajoutés : seconde côte humide, seconde plaine basse/mer,
+plaine tempérée très plate au grain excessif. **18 planches** au total. Ces
+vues supplémentaires servent à montrer les limites mesurées ; elles ne
+remplacent aucun cas d'acceptation et leur sélection est explicitement motivée
+par les erreurs observées. Leur capture
 utilise les coordonnées et le seed42 réservés de `screenshots.json`, sans
 changer ni requalifier la banque rare. Les CSV constituent l'alternative
 textuelle. `decision_pack.py` réunit aussi les 38 vues de chaque candidat,
