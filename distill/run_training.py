@@ -72,10 +72,11 @@ def train(name, stage, dataset, output, steps, width, batch, size=None, overfit=
     if overfit:
         command.append('--overfit')
     if stage == 'base' and not overfit:
-        # The first main pass achieved good slopes but still ~50 m physical MAE
-        # and excess high-frequency power. Prioritize the small height channel
-        # and supervise its nonlinear metre conversion directly.
-        command.extend(['--height-weight', '32', '--height-mae-weight', '.02'])
+        # The 200k pilot reduced natural-site height errors but smoothed land
+        # relief (physical PSD down to 0.18x). Keep metre supervision while
+        # restoring auxiliary detail gradients and per-band power supervision.
+        command.extend(['--height-weight', '8', '--height-mae-weight', '.02',
+                        '--spectral-band-weight', '.05'])
     if stage == 'decoder' and not overfit and steps > 100000:
         # Initial physical MAE is small, but separate PSD bands still deviate
         # by up to 55%. Supervise their relative power explicitly.

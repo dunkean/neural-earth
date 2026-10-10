@@ -268,7 +268,21 @@ l'entraînement pendant que le reste du dataset est généré.
   Entrées CPU et I/O exclus. Cela ne prouve ni la qualité ni le débit de la
   pipeline réelle ; la mesure finale avec les checkpoints retenus reste requise.
   Mesure antérieure à l'ajout des têtes FP32, donc à refaire avec le modèle final.
-- [ ] Dataset principal : 20000 triples sur GPU 0 dans `tmux`.
+- [x] Dataset principal : 20000 triples générés, 19616 train / 384 val,
+  613 mondes train et 12 mondes val. Audit complet des 60000 NPZ réussi :
+  formes, valeurs finies, profils, séparation des mondes, seeds réservées,
+  correspondance de remplacement et échelles coarse invariantes.
+  Rapport : `~/data/distill/crops/main/dataset-audit.json`.
+- [x] Base élargi terminé à 200000 pas sur 12512 crops ; proxy MAE ~28,81 m.
+  Diagnostic des 14 cas sur 4090, `eval/base-expanded-pilot/` : MAE
+  **15,4–125,05 m**, 14 cas refusés. Sur natural LOD 3, MAE 35,51 m et les
+  anciennes grilles sont moins visibles, mais les reliefs orogen LOD 0 sont
+  trop lissés (bandes PSD jusqu'à 0,18×). EMA du pas 200000 conservée sous
+  `ckpt/candidates/base-expanded-step200000-e145587ec614.pt`.
+  Prochaine reprise : poids hauteur 8 plutôt que 32, MAE mètres .02 conservée,
+  bandes PSD .05 appliquées aussi au base, pour restaurer les gradients des
+  quatre canaux de détail. Essai CUDA de 32 pas réussi dans
+  `ckpt/base-balance-smoke`, aucun checkpoint principal modifié.
 - [ ] Entraînements principaux sur GPU 1 : les trois passages initiaux à 100000
   pas sont terminés. Dès 8192 crops train disponibles, passages intermédiaires
   coarse 200000, base 200000 (crop 256 et nouvelle loss hauteur), decoder
@@ -276,8 +290,8 @@ l'entraînement pendant que le reste du dataset est généré.
   Chaque liste reste figée et les ajouts sont explicitement admis. Les passages
   finaux coarse 300000 / base 400000 / decoder 200000 exigent toujours le jeu
   complet audité ; validation physique finale toujours requise.
-- [ ] Audit complet des 20000 triples, qualité des trois modèles séparément
-  et ensemble, sur 7 sites × LOD 3/0, avec un étalon BF16/FP32 sur la carte
+- [ ] Qualité des trois modèles séparément et ensemble, sur 7 sites × LOD 3/0,
+  avec un étalon BF16/FP32 sur la carte
   d'évaluation (4090).
 - [ ] Vérification/captures des joints, benchmarks BF16 finaux sur les deux
   cartes et mesure du coût réel de construction des entrées.
