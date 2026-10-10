@@ -1,0 +1,72 @@
+{
+  "schema": 1,
+  "teacher_model": "xandergos/terrain-diffusion-30m",
+  "teacher_revision": "9ef8030cb805b433b98ec25c5dddefbac07a9e26",
+  "inference_only": true,
+  "exports": {
+    "coarse8": {
+      "file": "coarse8.pt",
+      "bytes": 11218177,
+      "sha256": "17d7c752c8d4f9693c6b5aa210418f79ab4749bd0b0c3e2c06ebe058efc7458f",
+      "stage": "coarse",
+      "source_checkpoint_sha256": "10010316d2d157df4e02ab9e852eaa6a97659e01e4574ce6f2d2877c2e6014fb",
+      "training_step": 22500,
+      "config": {
+        "stage": "coarse",
+        "width": 128,
+        "depth": 3,
+        "dilations": [
+          1,
+          2,
+          4
+        ],
+        "solver_steps": 8,
+        "norm_eps": 1e-06
+      },
+      "selected_weights": "ema"
+    },
+    "coarse4": {
+      "file": "coarse4.pt",
+      "bytes": 11218177,
+      "sha256": "a9288d7266cdde292e04b15619054476c04bcd17b06d646ba475381179547436",
+      "stage": "coarse",
+      "source_checkpoint_sha256": "4e5f9a33177779dd23b65a7e3ec46422bcb237a6f69b82e5d47a7994d0ea8a3c",
+      "training_step": 50000,
+      "config": {
+        "stage": "coarse",
+        "width": 128,
+        "depth": 3,
+        "dilations": [
+          1,
+          2,
+          4
+        ],
+        "solver_steps": 4,
+        "norm_eps": 1e-06
+      },
+      "selected_weights": "ema"
+    },
+    "decoder": {
+      "file": "decoder.pt",
+      "bytes": 13360312,
+      "sha256": "7eaf1596641ae0027e255a7a71c8418571ab93ef577bedaf3ff7df2153165833",
+      "stage": "decoder",
+      "source_checkpoint_sha256": "3a6303b22b45af0c62f9ea4bd81957699823d245caa77f62c4895d8c4bf57e10",
+      "training_step": 200000,
+      "config": {
+        "stage": "decoder",
+        "width": 64,
+        "depth": 4,
+        "dilations": [
+          1,
+          2,
+          4
+        ],
+        "solver_steps": 0,
+        "norm_eps": 1e-06
+      },
+      "selected_weights": "ema"
+    }
+  },
+  "note": "User-authorized Git distribution of coarse8, coarse4 and decoder. No distilled base weights."
+}

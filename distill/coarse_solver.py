@@ -22,8 +22,8 @@ class CoarseSolver(nn.Module):
         super().__init__()
         from terrain_app import resolve_model_source
         from terrain_diffusion.models.edm_unet import EDMUnet2D
-        if not 2 <= steps <= 20:
-            raise ValueError('The coarse solver trial requires 2–20 evaluations.')
+        if not 1 <= steps <= 20:
+            raise ValueError('The coarse solver trial requires 1–20 evaluations.')
         source = Path(resolve_model_source())
         self.net = EDMUnet2D.from_pretrained(str(source/'coarse_model'))
         # Production casts weights and Fourier buffers to BF16 before any
