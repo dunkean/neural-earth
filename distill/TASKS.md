@@ -738,6 +738,31 @@ rapport et permet quand même les mesures de vitesse : ce rejet ne devient pas
 une validation. Un crash, un rapport incomplet ou antérieur au job bloque la
 coordination. Ce comportement est testé ; 31 tests de distillation passent.
 
+Le bundle provisoire base128 **100000** (`f25dbf12474a…`), coarse4 **50000**
+(`4e5f9a331777…`), decoder **200000** (`3a6303b22b45…`) a terminé le contrôle
+physique à froid `eval/candidate-bundle-seams` : quatre catégories rares,
+LOD 3 et 0, quatre tuiles indépendantes contre une grande requête. Pour les
+huit vues de ce bundle, différence maximale, erreur des sauts aux joints et
+désaccord des halos **exactement nuls**. Cela ne valide pas sa fidélité au teacher.
+Le contrôle latent 128² contre 256², avec BF16 et des formes de convolution
+différentes, dépasse le seuil initial 1e-4 ; son rapport est conservé dans
+`eval/base128-cuda-seams.json`, sans transformer ce rejet en réussite.
+
+`review_gallery.py` crée des comparaisons hors ligne avec curseur référence/élève
+et les métriques physiques en tableau. `eval/review-current/index.html` contient
+72 vues rares (base, decoder, bundle provisoire). Vérification dans Chromium :
+chargement des 48 vues initiales, extrémités du curseur, écran mobile, aucune
+erreur JavaScript ; la galerie a ensuite été étendue au bundle. Le job
+`decoded-bundle-gallery` produira la galerie du prochain bundle après son
+évaluation. Le base couplé au decoder est en entraînement sur les mêmes cibles
+teacher alignées ; son checkpoint du pas 5000 est déjà conservé séparément.
+
+Capacité : 128/192/256 canaux donnent respectivement **13 331 237 / 29 962 341 /
+53 237 157 paramètres**, soit **53,32 / 119,85 / 212,95 Mo** de poids FP32 seuls.
+192 et 256 sont des options mesurées par comptage, pas des modèles entraînés.
+53 Mo ne constitue pas une contrainte : comparer un élève plus large si la
+supervision du relief décodé ne préserve pas suffisamment les détails visibles.
+
 ## Préparation du 2026-10-10 — en attente du top
 
 La passation a été reçue en texte dans la conversation. Les performances de la
