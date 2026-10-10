@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from distill.common import DATA, HOLDOUT_SEEDS, SCHEMA, atomic_json
+from distill.resume_teacher import load_plan
 
 
 def check(root, expected=20000):
@@ -16,6 +17,11 @@ def check(root, expected=20000):
     if manifest['schema'] != SCHEMA:
         raise ValueError('Unsupported dataset schema.')
     worlds = {'train': set(), 'val': set()}
+    plan = load_plan(root, manifest)
+    replacements = plan.get('replacements', {})
+    original_limit = manifest['seed_base']+(expected+manifest['samples_per_world']-1)//manifest['samples_per_world']
+    if any(manifest['seed_base'] <= r['seed'] < original_limit for r in replacements.values()):
+        raise ValueError('Replacement seed collides with the original world range.')
     stages, profiles = {}, defaultdict(lambda: dict(train=0, val=0, land_sum=0., count=0))
     for stage in manifest['stages']:
         seen = set()
@@ -29,6 +35,7 @@ def check(root, expected=20000):
                 seen.add(index)
                 world = index//manifest['samples_per_world']
                 seed = manifest['seed_base']+world
+                seed = replacements.get(str(seed), {}).get('seed', seed)
                 profile = manifest['profiles'][world % len(manifest['profiles'])]
                 split = 'val' if world//len(manifest['profiles']) % 50 == 49 else 'train'
                 if metadata['seed'] != seed or seed in HOLDOUT_SEEDS or metadata['profile'] != profile or metadata['split'] != split:
@@ -67,6 +74,7 @@ def check(root, expected=20000):
     if worlds['train'] & worlds['val']:
         raise ValueError('Validation/training worlds overlap.')
     return dict(passed=True, count=expected, stages=stages, schema=SCHEMA,
+                seed_replacements=plan,
                 training_worlds=len(worlds['train']), validation_worlds=len(worlds['val']),
                 holdout_seeds_excluded=sorted(HOLDOUT_SEEDS),
                 profiles={name:dict(train=value['train'], val=value['val'],

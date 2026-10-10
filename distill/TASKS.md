@@ -228,6 +228,17 @@ l'entraînement pendant que le reste du dataset est généré.
   Carte partagée avec le decoder pendant ce diagnostic : aucun chiffre de
   débit ne doit être tiré de ses secondes. La recette suivante priorise la
   hauteur et sa conversion physique ; validation complète toujours requise.
+- [x] Decoder initial terminé à 100000 pas : MSE de validation 0,001276,
+  pente 0,9588× et spectre agrégé 0,9761×. Diagnostic physique LOD 0 lancé ;
+  ces proxies ne constituent pas une acceptation.
+- [x] Reprise après rejet topologique du monde continents seed 10322, avant
+  tout crop de ce monde : `resume_teacher.py` remplace cette seed par 1010322
+  du même profil. La correspondance est atomiquement enregistrée dans
+  `seed-replacements.json`, auditée et attachée aux prochains checkpoints.
+  Les six fichiers témoins gardent leurs SHA ; `teacher.py` et sa provenance
+  restent identiques. Une substitution ne peut modifier un exemple existant.
+  Les 15 tests de distillation passent. Le coordinateur arrêté à cet incident
+  a été inspecté puis relancé, sans refaire les trois passages initiaux.
 - [x] Borne architecture base96, **poids non entraînés, mesure de coût seulement** :
   512² utiles + halo 192 → entrée 896² ; 47,244 ms (graph, channels_last) sur
   4090, 0,738 ms par surface 64², ~19,05× vs huit forwards teacher BF16.
@@ -235,9 +246,9 @@ l'entraînement pendant que le reste du dataset est généré.
   pipeline réelle ; la mesure finale avec les checkpoints retenus reste requise.
   Mesure antérieure à l'ajout des têtes FP32, donc à refaire avec le modèle final.
 - [ ] Dataset principal : 20000 triples sur GPU 0 dans `tmux`.
-- [ ] Entraînements principaux sur GPU 1 : coarse en cours, premier passage
-  sur le dataset disponible, reprise explicite avec les exemples ajoutés,
-  entraînements finaux sur le jeu complet.
+- [ ] Entraînements principaux sur GPU 1 : les trois passages initiaux à 100000
+  pas sont terminés ; reprise explicite avec les exemples ajoutés et
+  entraînements finaux sur le jeu complet restent à effectuer.
 - [ ] Audit complet des 20000 triples, qualité des trois modèles séparément
   et ensemble, sur 7 sites × LOD 3/0, avec un étalon BF16/FP32 sur la carte
   d'évaluation (4090).
@@ -256,7 +267,7 @@ l'utilisateur. Cette limitation de livraison n'arrête pas les calculs locaux.
 
 ### Commandes de reprise et inspection espacée
 
-Coarse et base initiaux terminés à 100000 pas chacun. Les probes
+Les trois passages initiaux sont terminés à 100000 pas chacun. Les probes
 `architecture-pipeline` et `base-initial-pipeline` sont terminaux en échec :
 `nvidia-smi` attribue le PID teacher 49270 aux deux cartes, y compris à la
 transition après fin du trainer, donc la garde GPU refuse la mesure. Déplacer
@@ -278,7 +289,7 @@ python -m distill.jobs status training-workflow --compact
 cat ~/data/distill/training-workflow.json
 
 # Après avoir constaté que le handle teacher est terminal/manquant :
-python -m distill.jobs start teacher-main --gpu 0 -- python -m distill.teacher \
+python -m distill.jobs start teacher-main --gpu 0 -- python -m distill.resume_teacher \
   --output ~/data/distill/crops/main --count 20000 \
   --profiles natural orogen terrestrial-earthlike terrestrial-archipelago \
   terrestrial-continents terrestrial-gondwana

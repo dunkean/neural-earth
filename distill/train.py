@@ -23,6 +23,7 @@ from torch.utils.data import DataLoader
 from distill.common import DATA, append_json, atomic_json, atomic_write, external_path
 from distill.dataset import Crops, StepBatches
 from distill.student import Student, StudentConfig, defaults
+from distill.resume_teacher import load_plan, validate_resume_plan
 
 STOP = False
 
@@ -193,9 +194,11 @@ def main():
     # The exact list is checkpointed. Appending new data requires explicit admission.
     files = [path.name for path in train.paths]
     manifest = json.loads((dataset_root/'manifest.json').read_text())
+    seed_plan = load_plan(dataset_root, manifest)
     if saved:
         if saved['dataset_manifest'] != manifest:
             raise ValueError('Dataset provenance differs from the checkpoint.')
+        validate_resume_plan(saved.get('seed_plan', {}), seed_plan, saved['train_files'], manifest, args.allow_data_growth)
         if saved['train_files'] != files:
             if not args.allow_data_growth or not set(saved['train_files']).issubset(files):
                 raise ValueError('Training files changed; allow-data-growth admits only added files.')
@@ -240,6 +243,7 @@ def main():
                      rng=torch.get_rng_state(), validation=last_validation,
                      train_files=files, dataset_manifest=manifest, arguments=vars(args) |
                      dict(dataset=str(args.dataset), output=str(output), resume=str(args.resume) if args.resume else None))
+        state['seed_plan'] = seed_plan
         if device.type == 'cuda':
             state['cuda_rng'] = torch.cuda.get_rng_state_all()
         atomic_write(output/name, lambda handle: torch.save(state, handle))

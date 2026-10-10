@@ -10,6 +10,7 @@ from distill.common import atomic_json, atomic_write, HOLDOUT_SEEDS
 from distill.dataset import StepBatches
 from distill.features import base_features, noise
 from distill.jobs import proc_identity
+from distill.resume_teacher import validate_resume_plan
 from distill.student import Student, StudentConfig
 from distill.train import coarse_delta_loss, losses, lowfreq_height_mae
 from distill.evaluate import artifact_audit, audit, pipeline_speed_audit
@@ -175,6 +176,18 @@ class DistillationTests(unittest.TestCase):
         self.assertFalse(pipeline_speed_audit(benchmark)['passed'])
         benchmark['rows'].pop()
         self.assertFalse(pipeline_speed_audit(benchmark)['passed'])
+
+    def test_seed_replacement_growth_never_changes_existing_examples(self):
+        manifest = dict(seed_base=10000, samples_per_world=32)
+        current = dict(policy=dict(stride=1000000), replacements={'10001':dict(seed=1010001)})
+        validate_resume_plan({}, current, ['train-0000000.npz'], manifest, True)
+        with self.assertRaises(ValueError):
+            validate_resume_plan({}, current, ['train-0000032.npz'], manifest, True)
+        with self.assertRaises(ValueError):
+            validate_resume_plan({}, current, ['train-0000000.npz'], manifest, False)
+        changed = dict(policy=current['policy'], replacements={'10001':dict(seed=2010001)})
+        with self.assertRaises(ValueError):
+            validate_resume_plan(current, changed, ['train-0000000.npz'], manifest, True)
 
 
 if __name__ == '__main__':
