@@ -120,6 +120,10 @@ def read_speed(label, directory, shared, seam):
 def build(candidates, shared, output, additional=None):
     output=external_path(output)
     output.mkdir(parents=True,exist_ok=True)
+    reuse=Path(shared)/'reused-component-measurements.json'
+    if reuse.exists():
+        (output/'evidence').mkdir(parents=True,exist_ok=True)
+        shutil.copy2(reuse,output/'evidence/shared-measurements.json')
     quality,speed,sizes,sources=[],[],[],[]
     galleries=[]
     gallery_labels={}
@@ -197,6 +201,8 @@ Toutes les bandes, les erreurs près des côtes et sur les terres de 0–20 m so
 <div class="scroll">'''+summary_table(summarized)+'''</div>
 <h2>Vitesse mesurée</h2><p>Chaque étape est chronométrée séparément, sur des champs neufs, construction des entrées et transferts inclus.
 Les dépendances sont préchargées, les poids résidents et le warmup exclu. Médiane de trois répétitions, deux GPU libres.
+Le coarse et le decoder ont les mêmes poids dans les quatre bundles : leurs mesures communes sont réutilisées,
+avec provenance enregistrée, sans les présenter comme des répétitions indépendantes.
 Ces gains ne sont pas une mesure du temps d’affichage complet.</p><div class="scroll">'''+table+'</div></html>'
     atomic_write(output/'index.html',lambda f:f.write(page.encode('utf-8')))
     return dict(output=str(output),quality_rows=len(quality),speed_rows=len(speed),gallery_views=count,accepted=False)

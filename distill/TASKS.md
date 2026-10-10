@@ -76,6 +76,15 @@ que les mesures de pipeline complètes et les preuves physiques restent
 valides (leurs chemins utilisent déjà le mode d'inférence). Aucun poids ni
 code d'inférence n'a changé pour cette correction de mesure.
 
+Le benchmark192 est complet sur les deux GPU. Les huit rapports réseau/pipeline
+coarse/decoder sont réutilisés pour le bundle128 optimisé : mêmes checkpoints
+figés, GPU et SHA des scripts, système au repos, rapports complets. Le sidecar
+`bench/optimized-bundle/reused-component-measurements.json` conserve les sources
+et empreintes ; ce ne sont **pas** des répétitions indépendantes. Chaque base
+continue d'être mesuré avec ses propres poids. Une archive Git vérifiée du code
+est préparée sous `delivery/distill-code.bundle`, à rafraîchir après les derniers
+commits ; elle constitue une livraison locale, sans masquer le push403 restant.
+
 Objectif initial : remplacer le base model à 2 étapes (254 M paramètres) par un élève une passe ×10 plus rapide, dans la tolérance BF16/FP32.
 
 Objectif étendu par l'utilisateur le 2026-10-10 : **trois modèles distillés de
