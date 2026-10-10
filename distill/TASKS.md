@@ -859,6 +859,22 @@ réintroduit du relief mais amplifie trop le grain sur certaines plaines
 Le parent100k reste préservé comme alternative plus lisse. **15 checkpoints
 figés** sont inventoriés dans `ckpt/candidates/inventory.json`.
 
+Régression complète après l'optimisation : **377 tests passent, 33 ignorés,
+291 sous-tests passent** (`tests/python` + `distill/test_distill.py`, GPU masqués,
+mock de `torch.cuda.current_device()` pour les tests scheduler CPU). Log :
+`logs/inference-optimization-cpu-tests.log`.
+
+Tailles vérifiées des fichiers de poids **FP32**, hors états d'optimiseur :
+
+| Modèle | Teacher épinglé | Export élève actuel |
+| --- | --- | --- |
+| Base | 1014,77 Mo | 53,35 Mo (128) ; ~120 Mo (192 en cours) |
+| Coarse | 11,20 Mo | 11,22 Mo (même architecture, 20 → 8 étapes) |
+| Decoder | 111,71 Mo | 13,36 Mo |
+
+Le teacher est bien stocké en FP32, vérifié dans les en-têtes safetensors ; les
+tailles élève viennent des exports d'inférence, sans optimizer ni EMA dupliquée.
+
 ## Préparation du 2026-10-10 — en attente du top
 
 La passation a été reçue en texte dans la conversation. Les performances de la
