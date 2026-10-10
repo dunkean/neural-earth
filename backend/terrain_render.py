@@ -27,7 +27,7 @@ def appearance_identity(root=None):
     """Display revision, separate from the immutable neural terrain identity."""
     root=Path(root) if root is not None else REPO_ROOT
     digest=hashlib.sha256()
-    for name in ('terrain_render.py','terrain_renderer.js','terrain_render_controls.js','terrain_soil.py','terrain_pedology.py'):
+    for name in ('terrain_render.py','terrain_render_torch.py','terrain_renderer.js','terrain_render_controls.js','terrain_soil.py','terrain_pedology.py'):
         digest.update(name.encode());digest.update((source_path(name, root=root)).read_bytes())
     return digest.hexdigest()[:16]
 
@@ -284,5 +284,16 @@ def colorize_surface(world,xs,ys,elevation,resolution,generation_settings,settin
     north = np.stack((nx,ny),axis=-1)
     north /= np.maximum(np.linalg.norm(north,axis=-1,keepdims=True),1e-5)
     if not spherical:north.fill(0)
-    return surface_material(elevation,gradient,tpi,point,north,step,soil,seasons,
-                            seed_value(getattr(getattr(world,'source',world),'seed',0)),settings,mode=='soil',pedology)
+    return material(elevation,gradient,tpi,point,north,step,soil,seasons,
+                    seed_value(getattr(getattr(world,'source',world),'seed',0)),settings,mode=='soil',pedology)
+
+
+def material(*args):
+    """``surface_material`` on CUDA when available (milliseconds rather than
+    seconds per tile); this NumPy module remains the reference and fallback."""
+    import os
+    if os.environ.get('TERRAIN_RENDER_DEVICE','auto').lower()!='cpu':
+        import terrain_render_torch
+        if terrain_render_torch.available():
+            return terrain_render_torch.surface_material(*args)
+    return surface_material(*args)

@@ -34,7 +34,7 @@ The source resolution and display spacing are different quantities. Parent tiles
 
 ## Rendering and polar sampling
 
-The Flask server returns FP32 heights and compact climate/appearance planes. `web/terrain_renderer.js` shades them in WebGPU. `backend/terrain_render.py` is the independent CPU/PNG material reference. `web/terrain_globe.js` projects the same physical terrain onto a sphere. Above 60° latitude at local zoom, the globe uses a 90° rotated chart so the geographic poles lie near its equator. This improves sampling geometry without retraining the model on polar terrain.
+The Flask server returns FP32 heights and compact climate/appearance planes. `web/terrain_renderer.js` shades them in WebGPU. `backend/terrain_render.py` is the independent NumPy material reference; `backend/terrain_render_torch.py` runs it on CUDA for PNG tiles and overviews. `web/terrain_globe.js` projects the same physical terrain onto a sphere. Above 60° latitude at local zoom, the globe uses a 90° rotated chart so the geographic poles lie near its equator. This improves sampling geometry without retraining the model on polar terrain.
 
 Biomes sample source Köppen classes and recompute altitude/slope appearance on the visible DEM. Climate diagnostic layers keep a stable coarse view. Render materials combine climate, slope, terrain position and filtered deterministic noise; pedology remains a regional source-world diagnostic.
 

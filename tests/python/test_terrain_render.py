@@ -214,7 +214,7 @@ class SurfaceTests(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
-            for name in ('terrain_render.py','terrain_renderer.js','terrain_render_controls.js','terrain_soil.py','terrain_pedology.py'):
+            for name in ('terrain_render.py','terrain_render_torch.py','terrain_renderer.js','terrain_render_controls.js','terrain_soil.py','terrain_pedology.py'):
                 (source_path(name, root=root)).write_text('original',encoding='utf-8')
             a=appearance_identity(root)
             (source_path('terrain_render.py', root=root)).write_text('new CPU material',encoding='utf-8')

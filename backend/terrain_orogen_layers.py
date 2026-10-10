@@ -59,12 +59,18 @@ def sample(world, field, xs, ys, *, categorical=False):
     j0 = ix % world.width if periodic else np.clip(ix, 0, world.width-1)
     j1 = (ix+1) % world.width if periodic else np.clip(ix+1, 0, world.width-1)
     tx, ty = (xx-ix)[None,:], (yy-iy)[:,None]
-    a = field[iy[:,None], j0[None,:]]*(1-tx)+field[
-        iy[:,None], j1[None,:]]*tx
-    by = np.minimum(iy+1, world.height-1)[:,None]
-    b = field[by, j0[None,:]]*(1-tx)+field[
-        by, j1[None,:]]*tx
-    return np.asarray(a*(1-ty)+b*ty, np.float32)
+    by = np.minimum(iy+1, world.height-1)
+    # Separable: interpolate each distinct source row once, then blend rows.
+    # Same float64 operations as a per-pixel gather, hence identical values.
+    rows = np.unique(np.concatenate((iy, by)))
+    source = field[rows]
+    across = source[:, j0]*(1-tx)
+    across += source[:, j1]*tx
+    a, b = across[np.searchsorted(rows, iy)], across[np.searchsorted(rows, by)]
+    a *= 1-ty
+    b *= ty
+    a += b
+    return a.astype(np.float32)
 
 
 def render(world, mode, xs, ys):

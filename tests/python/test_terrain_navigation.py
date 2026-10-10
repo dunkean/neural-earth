@@ -441,6 +441,22 @@ class ProtocolTests(unittest.TestCase):
             self.assertEqual(physical.call_count,1)
             self.assertEqual(material.call_count,2)
 
+    def test_overview_lighting_edit_relights_cached_material(self):
+        import json
+        self.server.physical_overview.cache_clear()
+        self.addCleanup(self.server.physical_overview.cache_clear)
+        self.server._OVERVIEW_ALBEDO.clear()
+        values={'elev':np.ones((2,2),np.float32),'climate':np.zeros((5,2,2),np.float32)}
+        with patch.object(self.server,'metadata',return_value={'overview_bounds':[-20e6,-10e6,20e6,10e6],'world_identity':'lit-world'}),\
+             patch.object(self.server,'conditioning_preview',return_value=values),\
+             patch.object(self.server,'biome_atlas',return_value=(object(),{})),\
+             patch.object(self.server,'colorize_surface',return_value=np.full((2,2,3),.5,np.float32)) as material:
+            for ambient in (.2,.6):
+                lighting=json.dumps({'ambient':ambient})
+                response=self.client.get(f'/api/overview/natural-v1/9395.png?mode=render&world_profile=orogen&lighting={lighting}')
+                self.assertEqual(response.status_code,200);response.close()
+            self.assertEqual(material.call_count,1)
+
     def test_overview_identity_receipts_are_per_display_mode(self):
         self.server.physical_overview.cache_clear()
         self.addCleanup(self.server.physical_overview.cache_clear)

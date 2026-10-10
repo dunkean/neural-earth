@@ -2218,6 +2218,25 @@ def _remember_overview(key, value):
         while len(_OVERVIEW_BYTES)>12:_OVERVIEW_BYTES.popitem(last=False)
 
 
+# Render/Soil albedo is independent of lighting and contours; a lighting edit
+# only relights this cached 2048x1024 material instead of recomputing it.
+_OVERVIEW_ALBEDO=OrderedDict()
+
+
+def overview_albedo(key, compute):
+    with _OVERVIEW_LOCK:
+        albedo=_OVERVIEW_ALBEDO.get(key)
+        if albedo is not None:
+            _OVERVIEW_ALBEDO.move_to_end(key)
+            return albedo
+    albedo=compute()
+    albedo.flags.writeable=False
+    with _OVERVIEW_LOCK:
+        _OVERVIEW_ALBEDO[key]=albedo;_OVERVIEW_ALBEDO.move_to_end(key)
+        while len(_OVERVIEW_ALBEDO)>4:_OVERVIEW_ALBEDO.popitem(last=False)
+    return albedo
+
+
 @app.get('/api/overview/natural-v1/<int:seed>.png')
 @pin_cache_io(lambda seed: f'{VERSION}/{generation_profile()}/{seed}/overview')
 def overview(seed):
@@ -2291,10 +2310,10 @@ def overview(seed):
                 rgb=physical_koppen_colors(seed,wp,xs,ys,elevation)
             elif mode in ('render','soil'):
                 atlas,settings=biome_atlas(seed,wp)
-                rgb=colorize_surface(atlas,xs,ys,elevation,((x1-x0)/2048,(y1-y0)/1024),settings,render_settings,mode=mode)
-                if mode in ('render','soil'):
-                    from terrain_lighting import relief_intensity
-                    rgb*=np.where(elevation<0,1,relief_intensity(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting))[...,None]
+                albedo=overview_albedo((identity,APPEARANCE_IDENTITY,wp,seed,mode,json.dumps(render_settings,sort_keys=True)),
+                    lambda:colorize_surface(atlas,xs,ys,elevation,((x1-x0)/2048,(y1-y0)/1024),settings,render_settings,mode=mode))
+                from terrain_lighting import relief_intensity
+                rgb=albedo*np.where(elevation<0,1,relief_intensity(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting))[...,None]
             else:
                 fields=physical_biome_fields(seed,wp,xs,ys,elevation)
                 rgb=colorize_biomes(elevation,fields,resolution)
