@@ -590,5 +590,32 @@ class DistillationTests(unittest.TestCase):
             validate_resume_plan(current, changed, ['train-0000000.npz'], manifest, True)
 
 
+class FinalEvidenceTests(unittest.TestCase):
+    def test_equal_budget_inspection_rejects_smoke_checkpoint(self):
+        from distill.inspect_candidate import validate_candidate
+        saved = dict(config=dict(stage='base'), arguments=dict(steps=32), step=32)
+        status = dict(step=20000)
+        with self.assertRaises(ValueError):
+            validate_candidate(saved, status, 'base', 20000, selection='latest')
+        # The best validation candidate can be earlier, with its step disclosed.
+        validate_candidate(saved, status, 'base', 20000, selection='best')
+        completed = dict(saved, step=20000, arguments=dict(steps=20000))
+        validate_candidate(completed, status, 'base', 20000, selection='latest')
+
+    def test_final_plates_reject_changed_reference_and_context(self):
+        from distill.final_plates import validate_banks
+        report = {key: 'same' for key in ('gpu', 'sites', 'lods', 'teacher_sources',
+                                         'site_manifest_digest', 'tile_size', 'halo')}
+        reference = np.zeros((4, 4), dtype=np.float32)
+        bank = (report, {('site', 0, 'reference'): reference}, {})
+        validate_banks([bank, bank])
+        with self.assertRaises(ValueError):
+            validate_banks([bank, (dict(report, gpu='other'), bank[1], {})])
+        changed = reference.copy()
+        changed[0, 0] = 1
+        with self.assertRaises(ValueError):
+            validate_banks([bank, (report, {('site', 0, 'reference'): changed}, {})])
+
+
 if __name__ == '__main__':
     unittest.main()

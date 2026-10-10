@@ -2,6 +2,37 @@
 
 2026-10-10 · Grégory Beurier
 
+## Livraison finale demandée et comparaison en cours
+
+L'utilisateur demande les planches **à la fin** : paysages différents et
+contrastés, bonne qualité d'image, métriques permettant de choisir. Ne pas
+publier de planches intermédiaires. `final_plates.py` prépare huit planches
+PNG/PDF à partir des champs physiques **512² natifs**, quatre catégories
+critiques × LOD 3/0, mêmes cadrages/lumière, détails centraux et erreurs
+signées avec une échelle commune par vue. Les CSV constituent l'alternative
+textuelle. `decision_pack.py` réunit aussi les 38 vues de chaque candidat,
+un comparateur interactif, les exports EMA et les performances par étape.
+Il refuse d'associer des images, joints, exports ou chronométrages portant
+des poids ou du code différents. Les gains par étape ne sont pas des temps
+d'affichage complet.
+
+Les deux essais 128/192 ont fini leurs **20 000 étapes supplémentaires**.
+La sélection `best.pt` conservait dans les deux essais le checkpoint du
+smoke à 32 étapes ; leur loss de validation n'a pas été améliorée. Pour
+mesurer réellement la capacité à budget égal, les inspections utilisent
+maintenant `--checkpoint latest` et enregistrent `candidate_step` ; les
+preuves du contrôle initial à 32 étapes restent archivées sous
+`eval/*-initial32`. Rien n'est promu sur la seule loss. Les 38 tests dédiés
+passent, dont le refus d'un checkpoint smoke dans une comparaison `latest`
+à budget égal et le refus de planches utilisant des références différentes.
+
+La chaîne durable vérifie successivement contrôle 128, équivalence physique
+des optimisations sur les deux anciens bases, essai 192, puis chronométrages
+sur les deux cartes au repos. `final-review-pack` attend leur achèvement,
+mesure également le base 128 initial avec ses propres poids, puis assemble
+`~/data/distill/final/`. Ce dossier reste **à vérifier et à commenter après
+la fin des jobs** ; sa préparation n'est pas une acceptation de qualité.
+
 Objectif initial : remplacer le base model à 2 étapes (254 M paramètres) par un élève une passe ×10 plus rapide, dans la tolérance BF16/FP32.
 
 Objectif étendu par l'utilisateur le 2026-10-10 : **trois modèles distillés de

@@ -16,11 +16,21 @@ import torch
 from distill.common import DATA, atomic_json, atomic_write, external_path
 
 
+def validate_candidate(saved, status, stage, minimum_step, interim=False, selection='best'):
+    if (saved['config']['stage'] != stage or saved['step'] > saved['arguments']['steps'] or
+            (not interim and saved['step'] > status['step'])):
+        raise ValueError('Candidate is inconsistent with the training stage.')
+    if (interim or selection == 'latest') and saved['step'] < minimum_step:
+        raise ValueError('Selected checkpoint predates the requested training budget.')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stage', choices=['coarse', 'base', 'decoder'], required=True)
     parser.add_argument('--minimum-step', type=int, required=True)
     parser.add_argument('--checkpoint-dir', type=Path, help='Separate architecture trial directory.')
+    parser.add_argument('--checkpoint', choices=['best', 'latest'], default='best',
+                        help='Use latest for a comparison at the same completed training budget.')
     parser.add_argument('--interim', action='store_true', help='Inspect a frozen best checkpoint during training; no completion claim.')
     parser.add_argument('--tag', required=True)
     parser.add_argument('--rare-manifest', type=Path, default=DATA/'eval/rare-sites-complete.json')
@@ -29,14 +39,11 @@ def main():
     status = json.loads((directory/'status.json').read_text())
     if (status['status'] != 'complete' and not (args.interim and status['status'] == 'running')) or status['step'] < args.minimum_step:
         raise ValueError('The requested training pass has not completed; inspect its live handle first.')
-    payload = (directory/'best.pt').read_bytes()
+    payload = (directory/(args.checkpoint+'.pt')).read_bytes()
     digest = hashlib.sha256(payload).hexdigest()
     saved = torch.load(io.BytesIO(payload), map_location='cpu', weights_only=True)
-    if (saved['config']['stage'] != args.stage or saved['step'] > saved['arguments']['steps'] or
-            (not args.interim and saved['step'] > status['step'])):
-        raise ValueError('Candidate is inconsistent with the training stage.')
-    if args.interim and saved['step'] < args.minimum_step:
-        raise ValueError('The best interim checkpoint predates the requested minimum step.')
+    validate_candidate(saved, status, args.stage, args.minimum_step, args.interim, args.checkpoint)
+    candidate_step = saved['step']
     candidate = DATA/'ckpt/candidates'/f'{args.stage}-step{saved["step"]}-{digest[:12]}.pt'
     if candidate.exists() and hashlib.sha256(candidate.read_bytes()).hexdigest() != digest:
         raise ValueError('Frozen candidate bytes changed.')
@@ -60,6 +67,7 @@ def main():
     rare = rare_audit(args.rare_manifest, rare_output, variant, rare_output/'physical-audit.json')
     atomic_json(output/'inspection.json', dict(candidate=str(candidate), sha256=digest,
         training_status=status['status'], training_step=status['step'], interim=args.interim,
+        checkpoint_selection=args.checkpoint, candidate_step=candidate_step,
         original_passed=result['physical_passed'],
         rare_passed=rare['physical_passed'], accepted=False,
         note='Physical inspection only; combined models, seam and speed gates still required.'))
