@@ -11,6 +11,8 @@ import threading
 from distill.common import DATA, REPO, REVISION, atomic_json
 
 STAGES = ('coarse', 'base', 'decoder')
+DEFAULT_SELECTION = dict(coarse='solver4', base='teacher', decoder='distilled200k')
+RETIRED_BASE_CHOICES = {'initial128', 'coupled128', 'refined128', 'refined192'}
 
 
 def catalog(root=DATA):
@@ -18,14 +20,9 @@ def catalog(root=DATA):
     specifications = {
         'coarse': [
             ('solver8', 'Distillé · 8 étapes', weights/'candidate-1/coarse.pt'),
-            ('solver4', 'Distillé · 4 étapes · essai', Path(root)/'live/weights/coarse4/coarse.pt'),
+            ('solver4', 'Distillé · 4 étapes', Path(root)/'live/weights/coarse4/coarse.pt'),
         ],
-        'base': [
-            ('initial128', '128 initial · 53 Mo · plus lisse', weights/'candidate-1/base.pt'),
-            ('coupled128', '128 couplé · 53 Mo', weights/'candidate-2/base.pt'),
-            ('refined128', '128 affiné · 53 Mo', weights/'candidate-3/base.pt'),
-            ('refined192', '192 affiné · 120 Mo', weights/'candidate-4/base.pt'),
-        ],
+        'base': [],
         'decoder': [('distilled200k', 'Distillé · 13 Mo', weights/'candidate-1/decoder.pt')],
     }
     result = {}
@@ -46,11 +43,35 @@ def validate_selection(value, options):
     return dict(value)
 
 
+def prepare_config(config_path, options):
+    """Start with the approved models and retire previous base experiments."""
+    import uuid
+    path = Path(config_path)
+    if not path.exists():
+        missing = [f'{stage}/{choice}' for stage, choice in DEFAULT_SELECTION.items()
+                   if choice not in options[stage]]
+        if missing:
+            raise ValueError('Missing default model exports: ' + ', '.join(missing) +
+                             '. Install the weights described in distill/LIVE.md.')
+        config = dict(selection=dict(DEFAULT_SELECTION), revision=uuid.uuid4().hex, reset='initial')
+        atomic_json(path, config)
+    else:
+        config = json.loads(path.read_text())
+        selection = config.get('selection')
+        if isinstance(selection, dict) and selection.get('base') in RETIRED_BASE_CHOICES:
+            selection = dict(selection, base='teacher')
+            validate_selection(selection, options)
+            config = dict(config, selection=selection, revision=uuid.uuid4().hex)
+            atomic_json(path, config)
+    validate_selection(config['selection'], options)
+    return config
+
+
 class LiveModels:
     def __init__(self, config_path, options=None):
         self.path = Path(config_path)
         self.options = catalog() if options is None else options
-        self.config = json.loads(self.path.read_text())
+        self.config = prepare_config(self.path, self.options)
         self.selection = validate_selection(self.config['selection'], self.options)
         self.models = {}
         self.lock = threading.Lock()

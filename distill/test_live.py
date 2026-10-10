@@ -5,7 +5,8 @@ import tempfile
 import unittest
 
 from distill.common import atomic_json
-from distill.live_runtime import LiveModels, STAGES, catalog, validate_selection
+from distill.live_runtime import (DEFAULT_SELECTION, LiveModels, STAGES, catalog,
+                                 prepare_config, validate_selection)
 
 
 class LiveModelTests(unittest.TestCase):
@@ -57,6 +58,52 @@ class LiveModelTests(unittest.TestCase):
         self.assertEqual(options['coarse']['solver4']['path'], str(path))
         self.assertNotIn('solver4', options['base'])
         self.assertNotIn('solver4', options['decoder'])
+
+    def install_review_exports(self):
+        root = Path(self.directory.name)
+        for relative in ('live/weights/coarse4/coarse.pt',
+                         'final/weights/candidate-1/decoder.pt'):
+            path = root/relative
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'fixed-export')
+        return root
+
+    def test_fresh_config_uses_coarse_four_original_base_and_distilled_decoder(self):
+        root = self.install_review_exports()
+        path = root/'new-config.json'
+        models = LiveModels(path, catalog(root))
+        self.assertEqual(models.selection, DEFAULT_SELECTION)
+        self.assertEqual(json.loads(path.read_text())['selection'], DEFAULT_SELECTION)
+        self.assertEqual(prepare_config(path, catalog(root)), models.config)
+
+    def test_missing_default_export_fails_without_writing_config(self):
+        path = Path(self.directory.name)/'new-config.json'
+        with self.assertRaisesRegex(ValueError, 'Missing default model exports:.*coarse/solver4'):
+            prepare_config(path, catalog(self.directory.name))
+        self.assertFalse(path.exists())
+
+    def test_base_exports_are_never_selectable(self):
+        root = self.install_review_exports()
+        for number in range(1, 5):
+            path = root/f'final/weights/candidate-{number}/base.pt'
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b'retired-base')
+        options = catalog(root)
+        self.assertEqual(set(options['base']), {'teacher'})
+        with self.assertRaises(ValueError):
+            validate_selection(dict(DEFAULT_SELECTION, base='initial128'), options)
+
+    def test_legacy_base_is_retired_without_resetting_or_changing_other_choices(self):
+        root = self.install_review_exports()
+        for choice in ('initial128', 'coupled128', 'refined128', 'refined192'):
+            with self.subTest(choice=choice):
+                atomic_json(self.path, dict(selection=dict(DEFAULT_SELECTION, base=choice),
+                                           revision='old', reset='keep-cache-namespace'))
+                models = LiveModels(self.path, catalog(root))
+                self.assertEqual(models.selection, DEFAULT_SELECTION)
+                self.assertEqual(models.config['reset'], 'keep-cache-namespace')
+                self.assertNotEqual(models.config['revision'], 'old')
+                self.assertEqual(json.loads(self.path.read_text()), models.config)
 
 
 if __name__ == '__main__':

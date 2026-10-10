@@ -6,7 +6,6 @@ CUDA_VISIBLE_DEVICES=1 python -m distill.live_server --port 8765
 from __future__ import annotations
 
 import argparse
-import json
 import os
 from pathlib import Path
 import signal
@@ -14,9 +13,8 @@ import subprocess
 import sys
 import threading
 import time
-import uuid
 
-from distill.common import DATA, REPO, atomic_json
+from distill.common import DATA, REPO
 
 
 def serve(port, config):
@@ -106,9 +104,8 @@ def main():
     if args.child:
         serve(args.port, config)
         return
-    if not config.exists():
-        atomic_json(config, dict(selection={stage: 'teacher' for stage in ('coarse', 'base', 'decoder')},
-                                 revision=uuid.uuid4().hex, reset='initial'))
+    from distill.live_runtime import catalog, prepare_config
+    prepare_config(config, catalog())
     stopped = False
     process = None
 
