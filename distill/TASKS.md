@@ -1,0 +1,290 @@
+# Neural Earth — distillation des trois modèles
+
+2026-10-10 · Grégory Beurier
+
+Objectif initial : remplacer le base model à 2 étapes (254 M paramètres) par un élève une passe ×10 plus rapide, dans la tolérance BF16/FP32.
+
+Objectif étendu par l'utilisateur le 2026-10-10 : **trois modèles distillés de
+qualité : coarse, base, decoder**. Adapter les tâches contre-productives, éviter
+la surveillance coûteuse, anticiper les interruptions et les reprises. Aucun
+checkpoint n'est accepté sur la seule base d'une loss d'entraînement.
+
+## Contexte
+
+Lis d'abord le doc de passation : [Neural Earth — handoff accélération du base model](https://claude.ai/code/artifact/0bd29cbe-5009-4628-845e-4fed483653ba). Il contient les mesures, les variantes déjà rejetées et le raisonnement ; ce doc-ci n'est que la liste d'exécution.
+
+- **Repo :** `/home/delete/self/neural-earth` (WSL2 Ubuntu, système de fichiers Linux), sous-module `terrain-diffusion` initialisé. Push via le credential helper déjà configuré.
+- **GPU :** `0` = RTX 4090 24 Go, `1` = RTX 5090 32 Go. Pas de P2P : 4090 = génération teacher et évaluation, 5090 = entraînement. Toujours `CUDA_DEVICE_ORDER=PCI_BUS_ID` + `CUDA_VISIBLE_DEVICES`.
+- **Le teacher est déjà un modèle de consistance** (`terrain-diffusion/configs/diffusion_base/consistency_base_192-3.cfg`) exécuté en 2 étapes : `t_init`, puis `t = atan(0.35/0.5)`, avec blending des fenêtres 64 au pas de 32. Code : `_build_latent_stage` et `_latent_inference` dans `terrain-diffusion/terrain_diffusion/inference/world_pipeline.py`.
+- **Cible de l'élève :** la sortie latente finale à 2 étapes, blending compris. Pas la sortie onestep, pas une seule fenêtre.
+- **Règles :** ne pas modifier les poids ni le code amont de `terrain-diffusion` ; tout le nouveau code va dans `distill/` à la racine du repo. Données et checkpoints dans `~/data/distill/`, jamais sous `/mnt/*`. Jobs longs dans `tmux`.
+
+## Phase 0 — environnement
+
+Rien n'est installé : pas de venv, checkpoint absent du cache Hugging Face.
+
+```bash
+cd ~/self/neural-earth
+uv venv --python 3.12 .venv && source .venv/bin/activate
+uv pip install -r requirements-lock.txt --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match
+huggingface-cli download xandergos/terrain-diffusion-30m --revision 9ef8030cb805b433b98ec25c5dddefbac07a9e26
+python -c "import torch; print(torch.__version__, [torch.cuda.get_device_name(i) for i in range(torch.cuda.device_count())])"
+```
+
+- [x] venv créé, torch voit les deux cartes
+- [x] Compatibilité du lock Linux vérifiée : `uv pip install --dry-run` audite 118 paquets, aucune modification ni exception au lock nécessaire.
+- [x] Checkpoint téléchargé ; `resolve_model_source()` trouve le snapshot épinglé sous Linux, avec les sept fichiers requis présents.
+- [x] `python -m pytest tests/python -x -q` passe : **353 tests et 333 sous-tests passent, 22 tests ignorés**, Node 22, GPU 0 visible, serveur arrêté (log `~/data/distill/preparation/python-tests-standard.log`).
+
+**Pièges Linux déjà repérés :**
+
+- `RUNTIME = Path('E:/TerrainDiffusionRuntime')` est codé en dur (`backend/terrain_app.py:8`, plus `terrain_world.py`, `terrain_manifest.py`, `terrain_backend_proxy.py`) ; sous Linux cela crée un dossier `E:` relatif. Les rendre configurables par une variable d'environnement `TERRAIN_RUNTIME` (défaut inchangé sous Windows), pointer sur `~/data/runtime`.
+- Node système = v12.22, trop vieux pour Orogen (requis par les sites `orogen` des scripts de mesure). Installer Node 22 LTS via `nvm`.
+
+## Phase 1 — mesures de référence
+
+Avant tout code de distillation : mesurer le vrai débit des deux cartes et confirmer la tolérance BF16/FP32 sur Blackwell. Serveur Neural Earth arrêté, rien d'autre sur la carte mesurée.
+
+```bash
+export CUDA_DEVICE_ORDER=PCI_BUS_ID
+CUDA_VISIBLE_DEVICES=0 python tools/benchmarks/benchmark_base_model.py --output ~/data/distill/bench/base-4090.json
+CUDA_VISIBLE_DEVICES=1 python tools/benchmarks/benchmark_base_model.py --output ~/data/distill/bench/base-5090.json
+CUDA_VISIBLE_DEVICES=1 python tools/verification/compare_base_variants.py run ~/data/distill/eval/fp32-5090 --variants reference fp32base
+python tools/verification/compare_base_variants.py sheet ~/data/distill/eval/fp32-5090
+```
+
+- [x] ms par fenêtre et TFLOPS pour chaque carte, reportés dans le tableau ci-dessous (repère 3090 : 4,96 ms, 39,1 TFLOPS)
+- [x] Borne de gain FP8 brut mesurée séparément avec `torch._scaled_mm`, via `distill/bench_student.py --fp8-only`. Une convolution BF16 n'est pas présentée comme une convolution FP8.
+- [x] Comparaison BF16/FP32 sur les 14 cas de la 5090 et investigation des deux écarts >36 m : répétitions identiques octet pour octet, 41,38 m et 36,32 m aux deux holdouts terrestres LOD 0. Décision : utiliser le seuil MAE **mesuré par site et par carte**, sans relever les seuils ±5 % de pente/spectre de l'élève.
+
+| Carte | ms / fenêtre BF16 (batch 16, graph) | TFLOPS | Erreur FP32 vs BF16 |
+| --- | --- | --- | --- |
+| RTX 3090 (ancienne machine) | 4,96 | 39,1 | 7–36 m |
+| RTX 4090 | 1,758 (contiguous) | 110,2 | à mesurer lors de l'évaluation finale sur cette carte |
+| RTX 5090 | 1,295 (channels_last ; contiguous : 1,324) | 149,6 | LOD 3 : 7,21–35,36 m ; LOD 0 : 9,10–41,38 m |
+
+Attention : le FP32 lui-même diffère du BF16 jusqu'à +12,1 % en pente et +42,9 %
+dans une bande spectrale, sur certains holdouts terrestres. Ces observations
+ne relâchent pas les critères de distribution de l'élève par rapport au teacher
+BF16. Résultats complets : `~/data/distill/eval/fp32-5090/report.json` ; répétition
+des deux LOD 0 : `fp32-recheck-5090/arrays.npz` (différence max 0).
+
+Gain FP8/BF16 GEMM brut, trois dimensions représentatives : 4090 ~1,56–1,92×,
+5090 ~1,27–2,57×. Ces chiffres excluent conversion et abaissement des convolutions
+et ne démontrent pas un gain FP8 du réseau complet. Le backend FP8 complet/QAT
+reste après la validation de qualité ; priorité aux trois élèves BF16.
+
+## Phase 2 — scripts à écrire
+
+Quatre scripts dans `distill/`, plus une variante dans l'outil de comparaison existant. Branche `distill`.
+
+**Faits utiles sur le teacher** (`world_pipeline.py`) :
+
+- Le bruit est un champ global déterministe : `gaussian_noise_patch(seed + 5819, y, x, …, channels=5)` pour l'étape 1, `seed + 5820` pour l'étape 2. On peut le recalculer à la volée : inutile de le stocker.
+- Le conditionnement par fenêtre (`_process_latent_conditioning`) se déduit de champs coarse denses : moyenne et p5 d'élévation, 4 canaux climat, masque, plus le scalaire `histogram_raw`. Le bruit de conditionnement est désactivé (`COND_MAX_NOISE = 0`).
+- La sortie du teacher n'est invariante par translation que modulo la grille de 32 latents (fenêtres et cellules coarse alignées dessus). Aligner les crops sur cette grille et donner à l'élève la phase de position modulo 64 (sin/cos).
+
+| Script | Rôle | Points clés |
+| --- | --- | --- |
+| `distill/teacher.py` | Génère les paires (entrées denses → latent final à 2 étapes) | Réutiliser la construction de monde de `compare_base_variants.py`. Crops de 256×256 latents alignés sur 32, avec un halo suffisant pour le blending. Stocker la cible (5 canaux, FP16) + les champs coarse + (seed, x, y) ; recalculer le bruit. Profils variés (`orogen`, `natural`, `terrestrial-*`), équilibre terre/mer. **Exclure** les seeds 42, 101, 202, 303, 404 (sites d'évaluation). Reprise sur interruption. |
+| `distill/student.py` | Modèle élève | U-Net entièrement convolutif, 96–128 canaux, sans attention globale ni embedding de temps. Entrée : bruit étape 1 + bruit étape 2 + champs coarse sur-échantillonnés + phase de position + scalaires diffusés. Canaux multiples de 16 (FP8). Exposer le champ récepteur pour fixer le halo. |
+| `distill/train.py` | Entraînement sur la 5090 | BF16 autocast, MSE sur les latents + loss spectrale multi-échelle contre le lissage (adversarial seulement si le lissage persiste). Checkpoints réguliers, reprise, logs de loss et de pente/spectre sur un petit jeu de validation. |
+| `distill/bench_student.py` | Vitesse de l'élève | Temps par surface équivalente à une fenêtre 64×64, même méthode que `benchmark_base_model.py` (CUDA Graphs, BF16, puis FP8). |
+| `compare_base_variants.py` (variante `student`) | Évaluation physique | Remplacer l'étage latent par l'élève (tuiles larges + halo, sans blending) via un hook sur `_build_latent_stage`, sans toucher au code amont. Mêmes sites, mêmes métriques, même planche. |
+
+## Phase 3 — lancements et acceptation
+
+1. **Test rapide :** 50 crops sur la 4090, sur-apprentissage d'un petit élève (64 canaux) sur ces crops : la loss doit tomber près de zéro. Mesurer le temps par crop pour dimensionner la suite.
+2. **Jeu de données :** ~20 000 crops sur la 4090 dans `tmux` (cible FP16 seule ≈ 640 Ko par crop, ≈ 13 Go). Ajuster le nombre selon le temps mesuré en 1 ; garder 2 % en validation.
+3. **Entraînement :** sur la 5090 dans `tmux`, d'abord 96 canaux. Passer à 128 seulement si les critères ne sont pas atteints.
+4. **Évaluation :** `compare_base_variants.py run <dossier> --variants reference fp32base student` puis `sheet`, sur la 4090.
+5. **Vitesse :** `bench_student.py` sur les deux cartes, BF16 puis FP8.
+
+| Critère (LOD 3 et LOD 0, 7 sites) | Seuil |
+| --- | --- |
+| Erreur moyenne élève vs `reference` | dans la plage `fp32base` vs `reference` du même site (~10–35 m) |
+| `slope_mean`, `slope_p90` | ±5 % de `reference` |
+| Bandes du spectre (`psd`) | ratio 0,95–1,05 vs `reference` |
+| Trait de côte (`coast`) | ≤ valeur de `fp32base` |
+| Jointures entre tuiles sur la planche | aucune visible |
+| Vitesse, même carte, BF16 | ≥ ×10 vs `reference` |
+
+**Livrables :** branche `distill` poussée, checkpoint retenu sous `~/data/distill/ckpt/`, chiffres reportés dans les tableaux de ce doc, planches jointes.
+
+Hors périmètre tant que les élèves ne sont pas acceptés : quantization FP8 en
+entraînement (QAT) et intégration dans le runtime. La distillation du coarse et
+du decoder fait désormais partie du périmètre demandé.
+
+## Exécution active du 2026-10-10
+
+Branche : `distill`. Code amont et poids teacher inchangés. Les sections de
+préparation ci-dessous sont conservées comme historique ; les jobs ont reçu le top.
+
+### Implémentation et choix
+
+- [x] `teacher.py` : triples base/coarse/decoder, écriture NPZ atomique, reprise
+  par index, 256² latents et halo 192, conditionnement dense, seeds réservées
+  exclues, mélange de six profils et propositions terre/mer équilibrées.
+- [x] `student.py` : U-Net local, largeur 96 pour base, 64 pour coarse/decoder,
+  sans normalisation spatiale ni attention globale. Halo exposé et validé.
+- [x] `train.py` : autocast BF16, MSE, gradient/spectre multi-échelle, EMA,
+  checkpoints atomiques toutes les deux minutes, états optimiseur/RNG repris,
+  batch/crop déterministes par numéro de pas, diagnostics par canal et composante
+  d'altitude. Pondérer davantage les canaux d'altitude évite de sélectionner
+  un modèle sur les seuls canaux latents du decoder.
+- [x] `bench_student.py` : eager/CUDA Graphs BF16, coût du halo inclus, borne
+  GEMM FP8 séparée. Pas de prétention de convolution FP8 sans backend dédié.
+- [x] `inference.py` et variantes `student`, `student_coarse`, `student_decoder`,
+  `student_all` dans l'outil existant. Base sans blending ; coarse remplace les
+  20 pas du solveur d'une fenêtre ; decoder remplace sa fenêtre 512/384.
+  Le blending coarse/decoder est conservé dans ce premier prototype pour
+  préserver le comportement aux bords. Les checkpoints évalués sont figés en
+  mémoire, empreintes des mêmes octets, pour éviter des sites évalués sur des
+  poids différents pendant un entraînement concurrent.
+- [x] Comparaisons physiques reprenables par (variante, site, LOD), fichiers
+  atomiques, erreurs non silencieuses, planches à colonnes réellement présentes
+  et table `sheet-summary.csv` comme équivalent textuel.
+- [x] `jobs.py` : tmux, PID et identité `/proc` vérifiés, état terminal/code retour
+  durable. `run_training.py` : coordination par minute, logs de transition,
+  arrêt sur erreur. `check_dataset.py` : audit complet des triples et de la
+  séparation par monde. `evaluate.py` : refuse une acceptation sans les 14 cas,
+  les seuils physiques, la vitesse sur même carte et la vérification des joints.
+- [x] Neuf tests dédiés : bruit/crops négatifs, features globales, invariance
+  avec halo, échantillonnage repris, losses masquées/gradients finis, écriture
+  interrompue, identité des processus et refus d'une validation incomplète.
+
+Le masque du conditionnement base upstream est constant (ones), ce n'est pas
+un masque terre/mer ; `histogram_raw` est un vecteur de cinq valeurs. Les données
+de validation viennent de mondes distincts, répartis entre les six profils
+(384 crops sur 20 000, 1,92 %), et sont produits en premier pour permettre
+l'entraînement pendant que le reste du dataset est généré.
+
+### Preuves et état des résultats
+
+- [x] 50 triples natural (deux mondes, seeds 10000000–10000001), audit complet
+  réussi ; ~0,9 s par triple après chargement, ~51 s pour le test initial.
+- [x] Sur-apprentissage coarse 5000 pas : MSE validation sur les exemples
+  d'entraînement ~0,00199, ratio pente ~0,971, ratio puissance ~0,998.
+  Ce n'est pas une acceptation physique. Le coarse principal a un champ
+  récepteur agrandi pour couvrir toute la fenêtre 64².
+- [x] Arrêt/reprise réel base au pas 9092, sauvegarde des 57 états optimiseur
+  et RNG, reprise confirmée au pas suivant. Smoke base total prévu : 20000 pas.
+- [x] Arrêt/reprise réel teacher principal après 673 triples, conservation
+  vérifiée par SHA-256 sur des cibles existantes. Aucun crop durable ne doit
+  être régénéré à la reprise.
+- [x] Hooks évalués sur un holdout natural LOD 3 : aucun appel teacher base
+  dans `student`, appels coarse remplacés dans `student_coarse`. Les checkpoints
+  smoke testés sont **rejetés pour qualité** : MAE ~95 m et ~223 m,
+  vs étalon ~7 m. Résultats dans `~/data/distill/eval/hook-check/`.
+- [x] Borne architecture base96, **poids non entraînés, mesure de coût seulement** :
+  512² utiles + halo 192 → entrée 896² ; 47,244 ms (graph, channels_last) sur
+  4090, 0,738 ms par surface 64², ~19,05× vs huit forwards teacher BF16.
+  Entrées CPU et I/O exclus. Cela ne prouve ni la qualité ni le débit de la
+  pipeline réelle ; la mesure finale avec les checkpoints retenus reste requise.
+- [ ] Dataset principal : 20000 triples sur GPU 0 dans `tmux`.
+- [ ] Smoke decoder, puis entraînements principaux sur GPU 1 : premier passage
+  sur le dataset disponible, reprise explicite avec les exemples ajoutés,
+  entraînements finaux sur le jeu complet.
+- [ ] Audit complet des 20000 triples, qualité des trois modèles séparément
+  et ensemble, sur 7 sites × LOD 3/0, avec un étalon BF16/FP32 sur la carte
+  d'évaluation (4090).
+- [ ] Vérification/captures des joints, benchmarks BF16 finaux sur les deux
+  cartes et mesure du coût réel de construction des entrées.
+- [ ] Checkpoints sélectionnés immuables, tableaux et planches finaux, branche
+  poussée à jour. Le but reste actif : **aucun modèle accepté à ce stade**.
+
+### Commandes de reprise et inspection espacée
+
+```bash
+source distill/env.sh
+# Etat vivant vérifié (pas seulement un fichier de verrou).
+python -m distill.jobs status teacher-main --compact
+python -m distill.jobs status training-workflow --compact
+cat ~/data/distill/training-workflow.json
+
+# Après avoir constaté que le handle teacher est terminal/manquant :
+python -m distill.jobs start teacher-main --gpu 0 -- python -m distill.teacher \
+  --output ~/data/distill/crops/main --count 20000 \
+  --profiles natural orogen terrestrial-earthlike terrestrial-archipelago \
+  terrestrial-continents terrestrial-gondwana
+
+# Après avoir constaté que le coordinateur est terminal/manquant :
+python -m distill.jobs start training-workflow --gpu cpu -- python -m distill.run_training
+```
+
+Les logs sont sous `~/data/distill/jobs/<nom>/output.log`, les checkpoints sous
+`~/data/distill/ckpt/<stage>/`. Le coordinateur réutilise les checkpoints existants
+et n'arrête pas les étapes sur la seule présence d'un fichier d'état. Les plans
+de pas sont des points d'inspection, pas des preuves de qualité : adapter ou
+prolonger après les mesures physiques. Un arrêt du coordinateur laisse les jobs
+teacher/trainer indépendants en tmux ; inspecter et arrêter aussi leurs handles
+si une pause globale est demandée.
+
+## Préparation du 2026-10-10 — en attente du top
+
+La passation a été reçue en texte dans la conversation. Les performances de la
+3090 restent des références historiques ; les gains des nouvelles cartes ne
+sont pas encore mesurés. La cible reste le latent final à deux étapes, blending
+compris. `onestep` et FP16 base ont déjà été rejetés pour leur qualité.
+
+- Python 3.12.12, Torch 2.11.0+cu128, Triton 3.6.0 ; CUDA voit la RTX 4090
+  (sm_89) et la RTX 5090 (sm_120). `torch._scaled_mm` est disponible ; ses
+  performances FP8 ne sont pas encore mesurées.
+- Node 22.21.1 est déjà installé via nvm. `source distill/env.sh` sélectionne
+  ce Node et le venv, sans changer la configuration globale du shell.
+- Le runtime existant accepte déjà `TERRAIN_RUNTIME_ROOT`. L'environnement
+  de distillation le fixe à `~/data/runtime` et fournit aussi `TERRAIN_RUNTIME`.
+  Le cache HF existant sous `~/.cache/neural-earth/huggingface` est réutilisé.
+- Snapshot : `9ef8030cb805b433b98ec25c5dddefbac07a9e26`. Les rasters ETOPO et
+  WorldClim requis sont présents. Les répertoires `bench`, `eval`, `crops`,
+  `ckpt`, `logs` et `preparation` sont créés sous `~/data/distill/`.
+- `pytest` 9.1.1 et ses dépendances ont été ajoutés au venv ; aucun paquet du
+  lock n'a été remplacé.
+- Vérification sans GPU : **332 tests passent, 33 sont ignorés, 291 sous-tests
+  passent**. Commande ci-dessous. Avec les GPU masqués, un test du scheduler
+  demande `torch.cuda.current_device()` malgré ses mocks de capacité/mémoire ;
+  le mock du périphérique ci-dessous permet de finir la vérification CPU.
+  La commande standard sans ce mock et les vérifications CUDA dédiées restent
+  à exécuter lorsque les cartes seront libres.
+- `uv pip check` confirme la compatibilité des 147 paquets installés.
+- Vérification navigateur sous Node 22 : 12 fichiers de tests passent, deux
+  échouent aussi en exécution séquentielle (`test_terrain_coarse_gpu.cjs:38`,
+  option coarse GPU non cochée, et `test_terrain_tile_continuity.cjs:68`,
+  rétention du parent). Aucun fichier du viewer n'a été modifié pour cette
+  préparation. Logs : `~/data/distill/preparation/browser-tests.log` et
+  `browser-recheck.log`. Ces échecs du viewer sont séparés des futurs critères
+  physiques de distillation.
+- Les scripts teacher/student/train/bench_student et la variante `student`
+  n'existent pas encore. Les deux outils de référence sont présents ; le
+  benchmark base n'implémente pas encore le FP8. Rien n'a été mesuré ou entraîné.
+- Le serveur Neural Earth est actif et occupe les cartes. Il n'a pas été arrêté.
+  Les modifications déjà présentes dans le dépôt sont conservées ; aucun
+  changement de branche, commit ou push n'a été effectué.
+
+Contrôles déjà exécutés :
+
+```bash
+source distill/env.sh
+CUDA_VISIBLE_DEVICES='' python - <<'PY'
+from unittest.mock import patch
+import pytest
+with patch('torch.cuda.current_device', return_value=0):
+    raise SystemExit(pytest.main(['tests/python', '-x', '-q', '--disable-warnings']))
+PY
+bash -n distill/env.sh distill/phase1.sh
+bash distill/phase1.sh --dry-run
+```
+
+Au top : arrêter le serveur et libérer les GPU, puis lancer la première phase :
+
+```bash
+bash distill/phase1.sh --run
+tmux attach -t neural-earth-distill-reference
+```
+
+Ce lanceur mesure les deux cartes puis compare `reference`/`fp32base` sur les
+sept sites aux deux LODs. Il écrit `logs/phase1.log` et `logs/phase1.exit` et
+s'arrête sur une mesure manquante, en erreur, ou une MAE BF16/FP32 supérieure à
+36 m. Une MAE inférieure à 7 m est acceptable. La borne de gain FP8 brut reste
+à mesurer séparément avant de conclure la phase 1. Le lanceur ne démarre aucune
+génération de dataset ni aucun entraînement.

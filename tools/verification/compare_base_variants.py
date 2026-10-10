@@ -20,6 +20,9 @@ from terrain_paths import REPO_ROOT
 
 import argparse
 import gc
+import csv
+import hashlib
+import io
 import json
 from pathlib import Path
 import time
@@ -28,7 +31,8 @@ import numpy as np
 import torch
 from torch import nn
 
-VARIANTS = ['reference', 'fp32base', 'onestep', 'fp16base', 'fp16dec']
+VARIANTS = ['reference', 'fp32base', 'onestep', 'fp16base', 'fp16dec', 'fp32coarse', 'fp32dec',
+            'student', 'student_coarse', 'student_decoder', 'student_all']
 LODS = (3, 0)
 # Quantization holdout sites (LOD 3 tiles); their centre is used at every LOD.
 HOLDOUT = [dict(seed=101, profile='natural', tx=17, ty=-23),
@@ -113,7 +117,8 @@ def describe(e, lod):
 
 
 @torch.inference_mode()
-def run(output, variants):
+def run(output, variants, *, student=None, coarse_student=None, decoder_student=None,
+        site_names=None, lods=LODS, resume=True):
     from dataclasses import replace
     from terrain_app import load_pipeline
     from terrain_diffusion.inference.world_pipeline import WorldPipeline
@@ -125,23 +130,77 @@ def run(output, variants):
     loaded = load_pipeline(site_list[0]['seed'])
     config = {k: v for k, v in dict(loaded.config).items() if not k.startswith('_')}
     unwrap = lambda m: m.model if hasattr(m, '_buckets') else m
-    raw_base, raw_decoder = unwrap(loaded.base_model), unwrap(loaded.decoder_model)
+    raw_coarse, raw_base, raw_decoder = (unwrap(loaded.coarse_model), unwrap(loaded.base_model),
+                                       unwrap(loaded.decoder_model))
     report_path, arrays_path = output / 'report.json', output / 'arrays.npz'
     report = json.loads(report_path.read_text()) if report_path.exists() else dict(
         sites=site_list, gpu=torch.cuda.get_device_name(), torch=torch.__version__, variants={},
         note='Fresh in-memory worlds; seconds are indicative when another GPU process runs.')
     arrays = dict(np.load(arrays_path)) if arrays_path.exists() else {}
+    if report['gpu'] != torch.cuda.get_device_name():
+        raise ValueError('Evaluation GPU differs from the saved report; use a new output directory.')
+    sources = {name: hashlib.sha256((REPO_ROOT / name).read_bytes()).hexdigest() for name in
+               ('backend/terrain_inference.py', 'backend/terrain_server.py',
+                'backend/terrain_conditioning.py', 'terrain-diffusion/terrain_diffusion/inference/world_pipeline.py')}
+    if 'source_digests' in report and report['source_digests'] != sources:
+        raise ValueError('Teacher/runtime changed since this report; use a new output directory.')
+    report['source_digests'] = sources
+    if site_names:
+        if set(site_names)-{s['name'] for s in site_list}:
+            raise ValueError('Unknown evaluation site.')
+        selected = [s for s in site_list if s['name'] in site_names]
+    else:
+        selected = site_list
+    from distill.common import atomic_json, atomic_write
+    failures = []
     for variant in variants:
-        base, decoder = raw_base, raw_decoder
+        coarse, base, decoder = raw_coarse, raw_base, raw_decoder
+        checkpoints = {}
+        if variant in ('student', 'student_all'):
+            checkpoints['base'] = student
+        if variant in ('student_coarse', 'student_all'):
+            checkpoints['coarse'] = coarse_student
+        if variant in ('student_decoder', 'student_all'):
+            checkpoints['decoder'] = decoder_student
+        if any(path is None for path in checkpoints.values()):
+            raise ValueError(f'{variant}: supply the corresponding --student/--coarse-student/--decoder-student.')
+        frozen_models, fingerprint = {}, {}
+        if checkpoints:
+            from distill.student import load_student
+            for stage, path in checkpoints.items():
+                # Hash and load the same bytes once. Training can atomically
+                # replace best.pt without mixing checkpoints across eval sites.
+                payload = Path(path).read_bytes()
+                fingerprint[stage] = hashlib.sha256(payload).hexdigest()
+                with torch.inference_mode(False):
+                    frozen_models[stage], _ = load_student(io.BytesIO(payload), 'cuda')
+                del payload
+            for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py'):
+                fingerprint['code:'+name] = hashlib.sha256((REPO_ROOT/name).read_bytes()).hexdigest()
+        previous = report.setdefault('checkpoint_digests', {}).get(variant, {})
+        reusable = resume and previous == fingerprint
+        report['checkpoint_digests'][variant] = fingerprint
+        if previous != fingerprint:
+            report['variants'][variant] = []
+            arrays = {key: value for key, value in arrays.items() if not key.startswith(variant+'|')}
         if variant == 'fp32base':
             base = Cast(load_copy('base_model', torch.float32), torch.float32)
         elif variant == 'fp16base':
             base = Cast(load_copy('base_model', torch.float16), torch.float16)
         elif variant == 'fp16dec':
             decoder = Cast(load_copy('decoder_model', torch.float16), torch.float16)
-        results = report['variants'][variant] = []
-        for site in site_list:
-            for lod in LODS:
+        elif variant == 'fp32coarse':
+            coarse = Cast(load_copy('coarse_model', torch.float32), torch.float32)
+        elif variant == 'fp32dec':
+            decoder = Cast(load_copy('decoder_model', torch.float32), torch.float32)
+        results = report['variants'].setdefault(variant, [])
+        for site in selected:
+            for lod in lods:
+                key = f"{variant}|{site['name']}|{lod}"
+                previous_item = next((i for i in results if i['site'] == site['name'] and i['lod'] == lod), None)
+                if reusable and previous_item is not None and 'error' not in previous_item and key in arrays:
+                    print(json.dumps(dict(variant=variant, site=site['name'], lod=lod, resumed=True)), flush=True)
+                    continue
                 tx, ty = tile(site['x'], lod), tile(site['y'], lod)
                 item, world = dict(site=site['name'], lod=lod, tx=tx, ty=ty), None
                 try:
@@ -152,8 +211,13 @@ def run(output, variants):
                         loaded.coarse_model, loaded.base_model, loaded.decoder_model)
                     configure_world(world, replace(loaded._terrain_profile, cuda_graphs=False),
                                     world_profile=site['profile'])
+                    if variant == 'fp32coarse':
+                        world._terrain_profile = replace(world._terrain_profile, cached_coarse_embeddings=False)
                     counter = Count(base)
-                    world.base_model, world.decoder_model = counter, decoder
+                    world.coarse_model, world.base_model, world.decoder_model = coarse, counter, decoder
+                    if checkpoints:
+                        from distill.inference import install
+                        install(world, frozen_models)
                     world.bind()
                     torch.cuda.synchronize()
                     started = time.perf_counter()
@@ -161,29 +225,40 @@ def run(output, variants):
                     torch.cuda.synchronize()
                     item.update(stage=stage, seconds=time.perf_counter() - started,
                                 base_windows=counter.windows, base_calls=counter.calls, **describe(elevation, lod))
+                    if checkpoints:
+                        item['student_counts'] = world._distill_counts
                     arrays[f"{variant}|{site['name']}|{lod}"] = elevation
                     reference = arrays.get(f"reference|{site['name']}|{lod}")
                     if variant != 'reference' and reference is not None:
                         item['vs_reference'] = errors(elevation, reference)
                 except Exception as exc:  # keep the sweep going; record failures
                     item['error'] = f'{type(exc).__name__}: {exc}'[:500]
+                    failures.append(item)
                 finally:
                     if world is not None:
                         world.close()
                     gc.collect()
+                if previous_item is not None:
+                    results.remove(previous_item)
                 results.append(item)
-                print(json.dumps({k: v for k, v in item.items() if k != 'psd'}), flush=True)
-                report_path.write_text(json.dumps(report, indent=1))
-                np.savez_compressed(arrays_path, **arrays)
-        del base, decoder
+                print(json.dumps(dict(variant=variant) | {k: v for k, v in item.items() if k != 'psd'}), flush=True)
+                # Commit arrays before the matching report row. A partial run is
+                # resumed only when both durable artifacts contain the same key.
+                atomic_write(arrays_path, lambda handle: np.savez_compressed(handle, **arrays))
+                atomic_json(report_path, report)
+        del coarse, base, decoder, frozen_models
         gc.collect()
         torch.cuda.empty_cache()
+    if failures:
+        raise RuntimeError(f'{len(failures)} failed measurements; inspect report.json and resume.')
 
 
 def sheet(output):
     """One hillshade sheet per site group: rows = site x LOD, columns = variants."""
     from PIL import Image, ImageDraw
     arrays = np.load(output / 'arrays.npz')
+    report = json.loads((output / 'report.json').read_text())
+    variants = list(report['variants'])
     names = [s['name'] for s in sites()]
     def shade(e, spacing, exaggeration):
         gy, gx = np.gradient(e.astype(np.float64) * exaggeration, spacing)
@@ -194,30 +269,49 @@ def sheet(output):
         return (colour * (0.25 + 0.75 * light[..., None]) * 255).astype(np.uint8)
     for label, group in (('land', names[:3]), ('holdout', names[3:])):
         size, pad, head = 304, 6, 22
-        image = Image.new('RGB', (len(VARIANTS) * (size + pad) + 160, len(group) * len(LODS) * (size + pad) + head),
+        image = Image.new('RGB', (len(variants) * (size + pad) + 160, len(group) * len(LODS) * (size + pad) + head),
                           (25, 25, 25))
         draw = ImageDraw.Draw(image)
-        for c, variant in enumerate(VARIANTS):
+        for c, variant in enumerate(variants):
             draw.text((160 + c * (size + pad) + 4, 4), variant, fill=(255, 255, 255))
         for row, (name, lod) in enumerate((n, l) for n in group for l in LODS):
             y = head + row * (size + pad)
             draw.text((4, y + size // 2), f'{name[:20]}\nLOD {lod}', fill=(255, 255, 255))
-            for c, variant in enumerate(VARIANTS):
+            for c, variant in enumerate(variants):
                 key = f'{variant}|{name}|{lod}'
                 if key in arrays:
                     image.paste(Image.fromarray(shade(arrays[key], 30 * 2**lod, 3 if lod == 3 else 1.5)),
                                 (160 + c * (size + pad), y))
         image.save(output / f'sheet-{label}.png')
+    # Text/table equivalent for the rendered physical comparison sheets.
+    with (output / 'sheet-summary.csv').open('w', newline='') as handle:
+        fields = ['variant', 'site', 'lod', 'mae_m', 'coast', 'slope_mean_deg', 'slope_p90_deg',
+                  *[f'psd_band_{i}' for i in range(5)], 'error']
+        writer = csv.DictWriter(handle, fieldnames=fields)
+        writer.writeheader()
+        for variant, rows in report['variants'].items():
+            for row in rows:
+                writer.writerow(dict(variant=variant, site=row['site'], lod=row['lod'],
+                    mae_m=row.get('vs_reference', {}).get('mae'), coast=row.get('vs_reference', {}).get('coast'),
+                    slope_mean_deg=row.get('slope_mean'), slope_p90_deg=row.get('slope_p90'),
+                    error=row.get('error', ''), **{f'psd_band_{i}': v for i, v in enumerate(row.get('psd', []))}))
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('command', choices=['run', 'sheet'])
     parser.add_argument('output', type=Path)
-    parser.add_argument('--variants', nargs='+', default=VARIANTS, choices=VARIANTS)
+    parser.add_argument('--variants', nargs='+', default=['reference', 'fp32base'], choices=VARIANTS)
+    parser.add_argument('--student', type=Path)
+    parser.add_argument('--coarse-student', type=Path)
+    parser.add_argument('--decoder-student', type=Path)
+    parser.add_argument('--sites', nargs='+')
+    parser.add_argument('--lods', nargs='+', type=int, choices=LODS, default=list(LODS))
+    parser.add_argument('--fresh', action='store_true', help='Recompute requested rows instead of resuming them.')
     args = parser.parse_args()
     if args.command == 'run':
-        run(args.output, args.variants)
+        run(args.output, args.variants, student=args.student, coarse_student=args.coarse_student,
+            decoder_student=args.decoder_student, site_names=args.sites, lods=args.lods, resume=not args.fresh)
     else:
         sheet(args.output)
 
