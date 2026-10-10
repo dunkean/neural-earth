@@ -875,6 +875,20 @@ Tailles vérifiées des fichiers de poids **FP32**, hors états d'optimiseur :
 Le teacher est bien stocké en FP32, vérifié dans les en-têtes safetensors ; les
 tailles élève viennent des exports d'inférence, sans optimizer ni EMA dupliquée.
 
+Les assemblages GPU des **trois** types d'entrées passent désormais leurs six
+comparaisons exactes ; le coarse évite aussi le retour CPU des conditions et des
+cinq scalaires. **36 tests de distillation passent.** Le diagnostic
+`grid_artifacts.py` mesure les projections cohérentes horizontales/verticales
+aux périodes **32 et 64 latents** en LOD3, après retrait du halo et des variations
+larges. CSV et JSON portent les empreintes des vues et des modèles ; ce n'est
+pas un seuil d'acceptation ni une preuve de cause. Il sera calculé sur les quatre
+bases comparées après les dernières mesures.
+
+La preuve d'équivalence physique couvrira aussi le **parent128100k**, dans
+`optimized-parent-physical{-rare}` et `optimized-parent-seams`. Les références
+BF16/FP32 déjà mesurées sont réutilisées après vérification de leurs identités ;
+les vues élève sont recalculées sous la nouvelle empreinte d'inférence.
+
 ## Préparation du 2026-10-10 — en attente du top
 
 La passation a été reçue en texte dans la conversation. Les performances de la

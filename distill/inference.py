@@ -5,7 +5,6 @@ from pathlib import Path
 from types import MethodType
 import threading
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from infinite_tensor import InfiniteTensor, TensorWindow
@@ -43,6 +42,16 @@ def decoder_inputs(latents, seed, y, x, size, device):
     inputs[:1].copy_(noise(seed+5819, y, x, size, size, 1, tile=size))
     fields = torch.as_tensor(latents, dtype=torch.float32, device=device)
     inputs[1:5].copy_(F.interpolate(fields[None], size=(size, size), mode='nearest')[0])
+    return inputs
+
+
+def coarse_inputs(condition, labels, seed, y, x, device):
+    condition = torch.as_tensor(condition, dtype=torch.float32, device=device)
+    h, w = condition.shape[-2:]
+    inputs = torch.zeros(16, h, w, device=device, dtype=torch.float32)
+    inputs[:6].copy_(noise(seed+1, y, x, h, w, 6))
+    inputs[6:11].copy_(condition)
+    inputs[11:].copy_(torch.as_tensor(labels, dtype=torch.float32, device=device)[:, None, None])
     return inputs
 
 
@@ -156,13 +165,9 @@ def install(world, checkpoints, tile_size=512):
                 outputs = []
                 for ctx in ctxs:
                     prepared = _coarse_batch(self, [ctx], scheduler, weight, t_cond, labels, 1, prepare_only=True)
-                    condition = prepared.conditions[0][0].float().cpu().numpy()
-                    scalars = np.array([float(v[0]) for v in prepared.conditions[1:]], np.float32)
-                    # Preserve the prepared BF16 conditions and scalar values.
-                    features = torch.zeros(16, 64, 64, device=self.device, dtype=torch.float32)
-                    features[:6].copy_(noise(self.seed+1, ctx[1]*48, ctx[2]*48, 64, 64, 6))
-                    features[6:11].copy_(torch.as_tensor(condition, device=self.device))
-                    features[11:].copy_(torch.as_tensor(scalars, device=self.device)[:, None, None])
+                    condition = prepared.conditions[0][0]
+                    scalars = torch.stack([v[0] for v in prepared.conditions[1:]])
+                    features = coarse_inputs(condition, scalars, self.seed, ctx[1]*48, ctx[2]*48, self.device)
                     pred = forward('coarse', features)*stds+means
                     self._distill_counts['coarse']['output_pixels'] += 64**2
                     outputs.append(torch.cat([pred*weight[None], weight[None]]))

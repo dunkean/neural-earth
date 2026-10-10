@@ -11,8 +11,8 @@ import torch
 
 from distill.common import atomic_json, atomic_write, HOLDOUT_SEEDS
 from distill.dataset import StepBatches
-from distill.features import base_features, decoder_features, noise
-from distill.inference import base_inputs, decoder_inputs
+from distill.features import base_features, coarse_features, decoder_features, noise
+from distill.inference import base_inputs, coarse_inputs, decoder_inputs
 from distill.jobs import proc_identity
 from distill.resume_teacher import validate_resume_plan
 from distill.student import Student, StudentConfig, load_student
@@ -28,6 +28,7 @@ from distill.decoded_loss import PairedCrops, decode, reconstructed_height
 from distill.benchmark_candidates import wait_seam_diagnostic
 from distill.bench_pipeline import StageCount, release_counter_graphs
 from distill.verify_equivalence import compare as compare_physical_optimization
+from distill.grid_artifacts import axis_grid_rms
 
 
 class DistillationTests(unittest.TestCase):
@@ -138,6 +139,9 @@ class DistillationTests(unittest.TestCase):
         for y, x in [(-384, 384), (768, -768)]:
             torch.testing.assert_close(decoder_inputs(latents, 8173, y, x, 512, 'cpu'),
                                        decoder_features(latents, 8173, y, x), rtol=0, atol=0)
+        condition, labels = torch.randn(5, 64, 64), torch.randn(5)
+        torch.testing.assert_close(coarse_inputs(condition, labels, 8173, -48, 96, 'cpu'),
+                                   coarse_features(condition, labels, 8173, -48, 96), rtol=0, atol=0)
 
     def test_optimization_equivalence_requires_same_weights_and_complete_arrays(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -163,6 +167,14 @@ class DistillationTests(unittest.TestCase):
                                           'student_all|extra|0':np.zeros((4, 4), np.float32)})
             with self.assertRaises(ValueError):
                 compare_physical_optimization(before, after)
+
+    def test_grid_metric_detects_coherent_axes_without_counting_other_frequencies(self):
+        x = np.arange(256, dtype=np.float64)
+        field = 2*np.cos(2*np.pi*x[:, None]/32)+np.sin(2*np.pi*x[None, :]/64)
+        self.assertAlmostEqual(axis_grid_rms(field), np.sqrt(2.5), places=12)
+        other = np.broadcast_to(np.cos(2*np.pi*x[:, None]/16), (256, 256))
+        self.assertLess(axis_grid_rms(other), 1e-12)
+        self.assertEqual(axis_grid_rms(np.zeros((256, 256))), 0.)
 
     def test_student_valid_halo_removes_tile_boundary_effects(self):
         torch.manual_seed(17)

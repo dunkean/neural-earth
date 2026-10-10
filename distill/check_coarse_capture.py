@@ -17,7 +17,7 @@ import torch
 from distill.common import REPO, atomic_json, external_path
 from distill.dataset import Crops
 from distill.features import base_features, decoder_features
-from distill.inference import base_inputs, decoder_inputs, coarse_graph_forward
+from distill.inference import base_inputs, coarse_inputs, decoder_inputs, coarse_graph_forward
 from distill.student import load_student
 
 
@@ -89,6 +89,12 @@ def main():
     report['feature_rows'] = []
     for index in indices:
         path = dataset.paths[index]
+        with np.load(path, allow_pickle=False) as sample:
+            m = json.loads(str(sample['metadata']))
+            original = dataset[index][0]
+            features = coarse_inputs(original[6:11].to('cuda:0'), original[11:, 0, 0].to('cuda:0'),
+                                     m['seed'], m['y'], m['x'], 'cuda:0')
+            coarse_exact = torch.equal(features.cpu(), original)
         with np.load(Path(args.dataset)/'base'/path.name, allow_pickle=False) as sample:
             m = json.loads(str(sample['metadata']))
             size = 256+2*192
@@ -103,9 +109,10 @@ def main():
             reference_features = decoder_features(latents, m['seed'], m['y'], m['x'])
             features = decoder_inputs(latents.to('cuda:0'), m['seed'], m['y'], m['x'], 512, 'cuda:0')
             decoder_exact = torch.equal(features.cpu(), reference_features)
-        report['feature_rows'].append(dict(file=path.name, base_exact=base_exact, decoder_exact=decoder_exact))
+        report['feature_rows'].append(dict(file=path.name, base_exact=base_exact, decoder_exact=decoder_exact,
+                                          coarse_exact=coarse_exact))
     report['exact_passed'] = all(r['eager_exact'] and r['graph_exact'] and r['runtime_graph_exact'] for r in report['rows'])
-    report['exact_passed'] &= all(r['base_exact'] and r['decoder_exact'] for r in report['feature_rows'])
+    report['exact_passed'] &= all(r['base_exact'] and r['decoder_exact'] and r['coarse_exact'] for r in report['feature_rows'])
     atomic_json(external_path(args.output), report)
     if not report['exact_passed']:
         raise SystemExit(1)
