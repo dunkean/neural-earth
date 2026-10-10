@@ -33,6 +33,16 @@ mesure également le base 128 initial avec ses propres poids, puis assemble
 `~/data/distill/final/`. Ce dossier reste **à vérifier et à commenter après
 la fin des jobs** ; sa préparation n'est pas une acceptation de qualité.
 
+Résultats désormais acquis : contrôle128 mesuré sur les 14 vues historiques
+et 24 vues rares, avec huit raccords physiques froids **exactement identiques**
+(joints et halos compris). Le contrôle améliore certains lieux, mais sa plaine
+tempérée très plate présente encore davantage de grain : il n'est pas promu
+sur la seule durée d'entraînement. Le bundle128 couplé sous l'inférence
+optimisée est **identique octet pour octet sur ses 38 vues** à la version
+antérieure (`optimized-bundle-physical{,-rare}/optimization-equivalence.json`) ;
+ses huit contrôles de raccords sont également à écart maximal zéro. La preuve
+du parent128 initial et les mesures du 192 restent en cours.
+
 Objectif initial : remplacer le base model à 2 étapes (254 M paramètres) par un élève une passe ×10 plus rapide, dans la tolérance BF16/FP32.
 
 Objectif étendu par l'utilisateur le 2026-10-10 : **trois modèles distillés de
