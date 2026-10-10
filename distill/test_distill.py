@@ -362,6 +362,7 @@ class DistillationTests(unittest.TestCase):
             self.assertEqual(path.read_bytes(), before)
             self.assertEqual(list(Path(directory).glob('*.tmp')), [])
 
+    @unittest.skipUnless(Path('/proc/self/stat').exists(), 'Job supervision uses Linux /proc')
     def test_live_process_identity_is_verified(self):
         import os
         self.assertIsNotNone(proc_identity(os.getpid()))
