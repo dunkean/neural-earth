@@ -14,7 +14,8 @@ from pathlib import Path
 import torch
 
 from distill.common import DATA, REPO, atomic_json, external_path
-from distill.decoded_loss import PairedCrops, decode, frozen_decoder, reconstructed_height, shore_loss
+from distill.decoded_loss import (PairedCrops, decode, frozen_decoder, reconstructed_height,
+                                  relative_height_gradient_loss, shore_loss)
 from distill.student import load_student
 from distill.train import centre
 
@@ -50,6 +51,15 @@ def measure(checkpoint, decoder_path, audit, output):
             if not valid_count:
                 raise ValueError('An audited validation window has no valid interior.')
             error = (ph-th).abs()
+            relative_gradient = relative_height_gradient_loss(ph, th, valid)
+            # Base's 8/16-latent lattice corresponds to 64/128 native pixels.
+            # These projections describe this unblended interior only.
+            difference = (ph-th)*valid
+            axial_power = difference.new_zeros(())
+            for profile in (difference.mean(-1), difference.mean(-2)):
+                spectrum = torch.fft.rfft(profile.float(), dim=-1, norm='forward')
+                for period in (64, 128):
+                    axial_power += 2*spectrum[..., profile.shape[-1]//period].abs().square().mean()
             def slope(height):
                 mx = (valid[..., 1:] > 0) & (valid[..., :-1] > 0)
                 my = (valid[..., 1:, :] > 0) & (valid[..., :-1, :] > 0)
@@ -60,6 +70,8 @@ def measure(checkpoint, decoder_path, audit, output):
                 near_error_sum_m=float(error[near].sum()),
                 near_wrong_pixels=int((((ph > 0) != (th > 0)) & near).sum()),
                 coast_kl=float(coast_kl), coast_balanced_disagreement=float(coast_disagreement),
+                relative_height_gradient_proxy=float(relative_gradient),
+                axial_error_8_16_latent_rms_m_proxy=float(axial_power.sqrt()),
                 slope_ratio_proxy=float(slope(ph)/slope(th).clamp_min(1e-8))))
     coastal = [row for row in rows if row['near_pixels']]
     if not coastal:
@@ -69,7 +81,9 @@ def measure(checkpoint, decoder_path, audit, output):
         coast_kl=sum(r['coast_kl'] for r in coastal)/len(coastal),
         near_mae_m_proxy=sum(r['near_error_sum_m'] for r in coastal)/near_count,
         near_pixel_disagreement=sum(r['near_wrong_pixels'] for r in coastal)/near_count,
-        height_mae_m_proxy=sum(r['height_mae_m_proxy'] for r in rows)/len(rows))
+        height_mae_m_proxy=sum(r['height_mae_m_proxy'] for r in rows)/len(rows),
+        relative_height_gradient_proxy=sum(r['relative_height_gradient_proxy'] for r in rows)/len(rows),
+        axial_error_8_16_latent_rms_m_proxy=sum(r['axial_error_8_16_latent_rms_m_proxy'] for r in rows)/len(rows))
     result = dict(metrics=metrics, rows=rows, windows=len(rows), coastal_windows=len(coastal),
         checkpoint=dict(path=str(Path(checkpoint).resolve()), sha256=hashlib.sha256(payload).hexdigest(),
                         step=saved['step'], weights='EMA'), decoder=decoder_identity,

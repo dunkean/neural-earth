@@ -142,7 +142,42 @@ Job durable : `shore-loss-trial` sur **GPU0**, viewer conservé sur GPU1. État 
 rapports sous `~/data/distill/shore-trial/`. Arrêt propre par `distill.jobs stop`,
 reprise explicite du même job après vérification de son handle ; contrat SHA
 figé, checkpoints atomiques, interruptions transmises au trainer. Aucun de ces
-essais n'est promu ni ajouté au menu live. Les **46 tests** passent.
+essais n'est promu ni ajouté au menu live. Les **46 tests** passaient pour cet essai.
+
+Les deux essais sont terminés (exit0), résultats sous `shore-trial/decision.json`.
+Le témoin dégrade le désaccord équilibré près de la mer de 35,25 à **36,05 %**,
+la KL côtière à **37,52 %** ; MAE globale intérieure : 23,56 → **25,11 / 26,09 m**
+(+6,6 / +10,8 %). La KL réduit un peu la MAE près de la mer, mais augmente les
+erreurs de signe et le grain de plusieurs fenêtres plates. **Les deux candidats
+sont rejetés**, parent préservé ; pas de prolongation ni de promotion.
+
+### Reprise qualité — gradients des plaines
+
+Le diagnostic CPU `eval/aliasing-frequency-diagnostic.json` élargit la projection
+axiale des 48 champs LOD3 existants aux périodes 2/4/8/16/32/64/128. À la première
+plaine désertique, la composante à huit pixels latents du parent atteint
+0,077 m RMS contre 0,020 m teacher. Ce diagnostic n'attribue pas causalement les
+lignes à un étage du réseau et ne remplace pas les images. Les erreurs de phase
+sin/cos en FP32 et le bypass direct ont également été examinés, sans changement
+des entrées ou du modèle faute de preuve suffisante.
+
+`relative_height_gradient_loss` compare les gradients physiques reconstruits,
+normalisés par le gradient teacher de chaque direction et fenêtre, plancher
+1 mm/pixel natif. Les voisinages invalides sont exclus. L'objectif est de rendre
+le grain des plaines plates visible à la loss sans pondérer davantage les reliefs
+forts. Le job durable **`relative-height-gradient`**, GPU0, lance un seul essai
+de 2000 étapes, poids 0,01, depuis la même EMA parent que le témoin précédent.
+Source, architecture, sampler et hyperparamètres communs sont vérifiés ; seule
+cette loss diffère. Les probes communs parent/témoin sont recalculés avec les
+diagnostics supplémentaires, sans écraser les rapports côtiers archivés.
+Contrat, états et mesures : `~/data/distill/gradient-trial/`. **49 tests** passent.
+Le viewer GPU1 et les checkpoints retenus restent inchangés. Aucun nouveau
+candidat n'est accepté avant les vues physiques rares et les tuiles froides.
+
+Le suivi Autoresearch auxiliaire a été arrêté : sa résolution de la métrique
+secondaire baseline refuse les paquets après un `measure`, malgré la MAE présente
+dans le rapport. Aucun keep ni promotion n'a eu lieu. Les rapports complets des
+essais restent autoritatifs ; le seuil de +5 % de MAE n'est pas assoupli.
 
 ### Comparaison interactive
 

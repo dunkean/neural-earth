@@ -111,8 +111,33 @@ def shore_loss(prediction, target, mask, band_m=20., temperature_m=2.):
     return loss, disagreement
 
 
+def relative_height_gradient_loss(prediction, target, mask, floor_m=.001):
+    """Match physical gradients relative to each window's directional relief.
+
+    Adjacent valid pixels only. A millimetre/native-pixel floor bounds the
+    weight of perfectly flat targets; target scales carry no gradient.
+    """
+    if not math.isfinite(floor_m) or floor_m <= 0:
+        raise ValueError('Positive finite physical gradient floor required.')
+    if prediction.shape != target.shape or prediction.shape != mask.shape:
+        raise ValueError('Height and mask shapes must agree.')
+    p, t = prediction.float(), target.detach().float()
+    terms, present = [], []
+    for axis in (-1, -2):
+        dp, dt = p.diff(dim=axis), t.diff(dim=axis)
+        valid = (mask.narrow(axis, 0, mask.shape[axis]-1) > 0) & (mask.narrow(axis, 1, mask.shape[axis]-1) > 0)
+        count = valid.sum((-3, -2, -1))
+        error = ((dp-dt).abs()*valid).sum((-3, -2, -1))/count.clamp_min(1)
+        scale = ((dt.abs()*valid).sum((-3, -2, -1))/count.clamp_min(1)).clamp_min(floor_m)
+        terms.append(error/scale)
+        present.append((count > 0).float())
+    axes = torch.stack(present).sum(0)
+    active = (axes > 0).float()
+    return (torch.stack(terms).sum(0)/axes.clamp_min(1)*active).sum()/active.sum().clamp_min(1)
+
+
 def paired_loss(decoder, prediction, target, gaussian, residual, mask, spectral=.02, gradient=.05, bands=.05,
-                shore_weight=0.):
+                shore_weight=0., decoded_gradient_weight=0.):
     from distill.train import losses, spectral_band_loss
     decoded = decode(decoder, prediction, gaussian)
     loss, values = losses(decoded, residual, mask, spectral, gradient)
@@ -129,6 +154,10 @@ def paired_loss(decoder, prediction, target, gaussian, residual, mask, spectral=
         coast, disagreement = shore_loss(ph, th, valid)
         loss += shore_weight*coast
         metrics.update(decoded_coast_kl=coast, decoded_coast_disagreement=disagreement)
+    if decoded_gradient_weight:
+        physical_gradient = relative_height_gradient_loss(ph, th, valid)
+        loss += decoded_gradient_weight*physical_gradient
+        metrics['decoded_relative_height_gradient'] = physical_gradient
     return loss, metrics | dict(decoded_loss=loss)
 
 

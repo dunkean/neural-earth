@@ -126,7 +126,7 @@ def centre(prediction, target):
 
 @torch.no_grad()
 def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_scaling=None, extra_files=(), decoder=None,
-             decoded_weights=(.02, .05), shore_weight=0.):
+             decoded_weights=(.02, .05), shore_weight=0., decoded_gradient_weight=0.):
     was_training = model.training
     model.eval()
     totals = dict(mse=0., gradient=0., spectral=0., slope_ratio=0., spectrum_ratio=0.)
@@ -142,6 +142,8 @@ def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_s
         totals['decoded_height_mae_m_proxy'] = 0.
         if shore_weight:
             totals.update(decoded_coast_kl=0., decoded_coast_disagreement=0.)
+        if decoded_gradient_weight:
+            totals['decoded_relative_height_gradient'] = 0.
     count = min(count, len(dataset))
     # Cover the sorted validation index range, rather than only its first profile.
     indices = torch.linspace(0, len(dataset)-1, count).round().long().tolist()
@@ -165,7 +167,7 @@ def validate(model, dataset, device, count=12, spectral_band_weight=0., coarse_s
             gaussian, residual, residual_mask = (v[None].to(device) for v in sample[3:])
             with torch.autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == 'cuda'):
                 _, decoded_values = paired_loss(decoder, pred, target, gaussian, residual, residual_mask,
-                                                *decoded_weights, spectral_band_weight, shore_weight)
+                                                *decoded_weights, spectral_band_weight, shore_weight, decoded_gradient_weight)
             for key, value in decoded_values.items():
                 totals[key] += float(value)/count
         if spectral_band_weight:
@@ -239,11 +241,13 @@ def main():
     parser.add_argument('--decoder-loss-weight', type=float, default=0.)
     parser.add_argument('--shore-weight', type=float, default=0.,
                         help='Optional soft land/sea KL weight in the paired interior height proxy.')
+    parser.add_argument('--decoded-gradient-weight', type=float, default=0.,
+                        help='Optional relative physical gradient weight for paired height interiors.')
     parser.add_argument('--cpu', action='store_true')
     args = parser.parse_args()
     if min(args.steps, args.batch, args.eval_every, args.val_count) < 1 or args.workers < 0:
         parser.error('Positive steps/batch/evaluation intervals and nonnegative workers required.')
-    if args.height_weight <= 0 or args.lr <= 0 or not math.isfinite(args.shore_weight) or min(args.spectral_weight, args.spectral_band_weight, args.gradient_weight, args.coarse_delta_weight, args.height_mae_weight, args.decoder_loss_weight, args.shore_weight) < 0:
+    if args.height_weight <= 0 or args.lr <= 0 or not all(math.isfinite(v) for v in (args.shore_weight, args.decoded_gradient_weight)) or min(args.spectral_weight, args.spectral_band_weight, args.gradient_weight, args.coarse_delta_weight, args.height_mae_weight, args.decoder_loss_weight, args.shore_weight, args.decoded_gradient_weight) < 0:
         parser.error('Positive height weight/LR and nonnegative spectral/gradient weights required.')
     device = torch.device('cpu' if args.cpu else 'cuda:0')
     torch.set_num_threads(8)
@@ -267,6 +271,8 @@ def main():
         parser.error('Supply the frozen paired decoder for decoded loss.')
     if args.shore_weight and not args.paired_decoder:
         parser.error('Shore loss requires paired decoded supervision.')
+    if args.decoded_gradient_weight and not args.paired_decoder:
+        parser.error('Physical gradient loss requires paired decoded supervision.')
     if saved:
         if saved['arguments']['seed'] != args.seed:
             raise ValueError('Sampler seed differs from the resumed checkpoint.')
@@ -351,6 +357,7 @@ def main():
                   saved['arguments'].get('spectral_weight', .02) != args.spectral_weight or
                   saved['arguments'].get('decoder_loss_weight', 0.) != args.decoder_loss_weight or
                   saved['arguments'].get('shore_weight', 0.) != args.shore_weight or
+                  saved['arguments'].get('decoded_gradient_weight', 0.) != args.decoded_gradient_weight or
                   saved.get('sampling_policy') != sampling_policy):
         # A new target crop changes the validation footprint. Do not compare its
         # best score to the old crop's score; retain model/optimizer/EMA states.
@@ -412,7 +419,7 @@ def main():
                     gaussian, residual, residual_mask = (v.to(device, non_blocking=True) for v in batch[3:])
                     decoded_loss, decoded_values = paired_loss(decoder, prediction, target, gaussian, residual, residual_mask,
                                                                args.spectral_weight, args.gradient_weight, args.spectral_band_weight,
-                                                               args.shore_weight)
+                                                               args.shore_weight, args.decoded_gradient_weight)
                     loss += args.decoder_loss_weight*decoded_loss
                     values.update(decoded_values)
                 if args.stage == 'coarse' and args.coarse_delta_weight:
@@ -446,7 +453,7 @@ def main():
             if step % args.eval_every == 0 or step == args.steps:
                 last_validation = validate(ema, validation, device, args.val_count, args.spectral_band_weight,
                                            coarse_scaling, rare_validation_files, decoder,
-                                           (args.spectral_weight, args.gradient_weight), args.shore_weight)
+                                           (args.spectral_weight, args.gradient_weight), args.shore_weight, args.decoded_gradient_weight)
                 weighted_mse = sum(w*v for w, v in zip(channel_weights, last_validation['channel_mse']))/sum(channel_weights)
                 score = weighted_mse+args.gradient_weight*last_validation['gradient']+args.spectral_weight*last_validation['spectral']
                 score += args.spectral_band_weight*last_validation.get('spectral_bands', 0.)
