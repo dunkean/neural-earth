@@ -17,7 +17,18 @@ résultats, expériences rejetées et chemins des données/preuves.
 Consultation CLI en lecture seule, modèle explicitement confirmé
 `claude-opus-5-5`, effort max ; job durable `opus-base-review` CPU.
 Session et transcrit sous `~/data/distill/review/opus-20261010/`.
-Le coarse4 est laissé à l'appréciation de l'utilisateur après son test live.
+La revue est maintenant **terminée** : `OPUS_REVIEW.md` et `status.json`
+confirment le succès et le modèle5.5. Analyse et suite ordonnée dans
+[STRATEGY_20261010.md](STRATEGY_20261010.md) : fidélité des formes et contrôle
+de reconstruction, prototype hérité du teacher, puis compression/performance.
+Les hypothèses causales et les estimations de coût d'Opus ne sont pas prises
+pour des mesures. Aucune loss supplémentaire ni prolongation192 lancée.
+Après son test live, l'utilisateur juge également le **coarse4 très bon
+visuellement** et suggère d'essayer2, voire1 étape. Le4 est conservé comme
+référence pratique ; le viewer affiche ce choix par sélection de l'utilisateur.
+Ce retour et l'état HTTP sont enregistrés sous
+`review/opus-20261010/user-feedback.json`. Les mesures strictes restent
+séparées de cette appréciation visuelle ; aucun nouveau coarse n'est encore entraîné.
 
 ## Livraison finale — résultats et limites
 
