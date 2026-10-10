@@ -1,6 +1,6 @@
 # Comparaison des NN en direct
 
-Le serveur de revue utilise le viewer existant, avec un menu **NN** dans la barre
+Le lancement habituel de Neural Earth affiche le menu **NN** dans la barre
 du haut. Au premier lancement, les choix sont **coarse distillé 4 étapes,
 base original et decoder distillé**. Coarse et decoder peuvent être comparés
 à leurs modèles d'origine ; coarse8 reste disponible si son export existe.
@@ -49,8 +49,11 @@ sur la 5090 seule ; le changement de modèles prend quelques secondes. Il est
 supervisé dans tmux et conserve les choix dans `~/data/distill/live/config.json`.
 Les exports sont lus aux chemins indiqués ci-dessus.
 
-Les deux hooks du serveur de production sont actifs uniquement sous
-`TERRAIN_DISTILL_LIVE=1`. Le lancement habituel reste sur les modèles d'origine.
+Les choix NN du lancement habituel sont conservés dans `nn-models.json` sous
+le répertoire de sortie (`generated/` par défaut). Le changement de modèles
+utilise le redémarrage standard et conserve les réglages GPU. Le serveur de
+revue supervisé ci-dessus reste utilisable avec sa configuration séparée.
+`TERRAIN_DISTILL_LIVE=0` désactive le panneau et utilise les modèles d'origine.
 L'identité des poids et du code participe à chaque cache neuronal ; les poids
 sont revérifiés avant chargement. Les candidats restent expérimentaux : ouvrir
 ce serveur ne constitue pas une acceptation des seuils de qualité.

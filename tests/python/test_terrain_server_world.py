@@ -92,7 +92,7 @@ class ServerWorldConstructionTests(unittest.TestCase):
             profile_data=profile_data, deepcopy=deepcopy, _reference_manifest=reference,
             terrestrial_file_snapshot=lambda generator='native':deepcopy(reference['files']),
             lru_cache=lru_cache, hashlib=hashlib, json=json,
-            os=SimpleNamespace(environ={}),
+            os=SimpleNamespace(environ={'TERRAIN_DISTILL_LIVE': '0'}),
             load_pipeline=self.loader, WorldPipeline=WorldPipeline, COARSE_DEVICE=0,
             runtime_profile=profile, coarse_stream_setting={'coarse':1}, OUTPUT=Path(self.temporary.name),
             WORLD_BOUNDS=(-20e6, -10e6, 20e6, 10e6), profile_bounds=profile_bounds,

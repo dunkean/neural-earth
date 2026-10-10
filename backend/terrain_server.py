@@ -241,7 +241,10 @@ else:
     profile_data.pop('name', None)  # Free memory is not an identity of numerical output.
     profile_data.pop('coarse_streams', None)  # Batch-one execution count preserves physical output.
 coarse_stream_setting = {'coarse': runtime_profile.coarse_streams if runtime_profile else 1}
-if os.environ.get('TERRAIN_DISTILL_LIVE') == '1':
+if os.environ.get('TERRAIN_DISTILL_LIVE', '1') == '1':
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    os.environ.setdefault('DISTILL_LIVE_CONFIG', str(OUTPUT / 'nn-models.json'))
     from distill.live_runtime import current as live_models
     profile_data['distillation_review'] = live_models().identity()
 # Numerical identity follows the coarse device: it decides every learned coarse
@@ -423,7 +426,7 @@ def _create_world(seed, world_profile, cache_limit, *, polar=False):
             from terrain_polar import conditioning
             world._terrain_polar_conditioning = conditioning(seed,world_profile)
         configure_world(world, runtime_profile, world_profile=world_profile)
-        if os.environ.get('TERRAIN_DISTILL_LIVE') == '1':
+        if os.environ.get('TERRAIN_DISTILL_LIVE', '1') == '1':
             live_models().install(world)
         world.bind()
         from terrain_inference import set_coarse_streams
@@ -2489,6 +2492,11 @@ def wait_for_replaced_server(port=8765):
                 return
             except OSError:
                 time.sleep(.2)
+
+
+if os.environ.get('TERRAIN_DISTILL_LIVE', '1') == '1' and os.environ.get('TERRAIN_DISTILL_SUPERVISED') != '1':
+    from distill.live_server import register_review_routes
+    register_review_routes(sys.modules[__name__], restart_request=server_restart)
 
 
 if __name__ == '__main__':

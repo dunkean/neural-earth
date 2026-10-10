@@ -148,6 +148,7 @@ The camera remains responsive while visible regions receive priority. Parent til
 - **Settings** controls source relief, erosion and climate. Each tab generates its stage; **Generate full pipeline** runs all three.
 - **Layer menu** selects surface, climate, geology and cartographic views.
 - **Rendering** controls lighting, contours, materials, cache budget and refinement depth.
+- **NN** selects original or distilled coarse and decoder models. **Apply NN** reloads the same view; **Reset after Orogen** recalculates neural terrain while retaining the generated world. The initial selection uses coarse at four steps, the original base and the distilled decoder. [Model controls](distill/LIVE.md).
 - **SNR** controls allowed conditioning noise: lower values follow the source more closely. Per-LOD controls separately scale displayed relief detail.
 - **Tools → Prepare neural world** enables optional global coarse preparation. Visible regions remain prioritized.
 - Share the URL to preserve seed, generation settings, camera and display preferences. **Save A / Show A** compares applied variants.

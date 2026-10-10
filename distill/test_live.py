@@ -2,11 +2,17 @@
 import json
 from pathlib import Path
 import tempfile
+import threading
+from types import SimpleNamespace
 import unittest
+from unittest.mock import Mock, patch
+
+from flask import Flask
 
 from distill.common import atomic_json
 from distill.live_runtime import (DEFAULT_SELECTION, LiveModels, STAGES, catalog,
                                  prepare_config, validate_selection)
+from distill.live_server import register_review_routes
 
 
 class LiveModelTests(unittest.TestCase):
@@ -133,6 +139,84 @@ class LiveModelTests(unittest.TestCase):
                 self.assertEqual(models.config['reset'], 'keep-cache-namespace')
                 self.assertNotEqual(models.config['revision'], 'old')
                 self.assertEqual(json.loads(self.path.read_text()), models.config)
+
+
+class StandardViewerTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        self.path = Path(directory.name)/'models.json'
+        self.selection = dict(DEFAULT_SELECTION)
+        self.options = catalog()
+        atomic_json(self.path, dict(selection=self.selection, revision='initial', reset='keep-orogen'))
+        self.models = LiveModels(self.path, self.options)
+        self.server = SimpleNamespace(app=Flask(__name__), PROFILE='test-profile',
+            RESTART_COMMAND=['python', 'terrain_server.py'], runtimes={}, runtimes_lock=threading.RLock(),
+            generation_coordinator=SimpleNamespace(lock=threading.RLock(), suspend=Mock()))
+        self.server.app.add_url_rule('/', view_func=lambda: '<html></html>')
+        self.restart = Mock()
+        with patch('distill.live_runtime.current', return_value=self.models):
+            register_review_routes(self.server, restart_request=self.restart)
+        self.client = self.server.app.test_client()
+
+    def test_standard_viewer_exposes_menu_choices_and_controls(self):
+        response = self.client.get('/')
+        self.assertIn(b'/distill/live-controls.js', response.data)
+        self.assertIn(b'url.searchParams.set("nn_engine","exact")', response.data)
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        with self.client.get('/distill/live-controls.js') as controls:
+            self.assertEqual(controls.status_code, 200)
+        response = self.client.get('/api/distill/models')
+        self.assertEqual(response.json['selection'], DEFAULT_SELECTION)
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        self.assertIn('teacher', {option['id'] for option in response.json['options']['coarse']})
+        self.assertIn('solver4', {option['id'] for option in response.json['options']['coarse']})
+
+    def test_applying_original_models_uses_standard_restart_and_preserves_cache_reset(self):
+        selection = {stage: 'teacher' for stage in STAGES}
+        response = self.client.post('/api/distill/models', json=dict(selection=selection))
+        self.assertEqual(response.status_code, 202)
+        self.restart.assert_called_once_with()
+        saved = json.loads(self.path.read_text())
+        self.assertEqual(saved['selection'], selection)
+        self.assertEqual(saved['reset'], 'keep-orogen')
+        self.assertEqual(saved['revision'], response.json['revision'])
+        self.assertEqual(self.models.selection, DEFAULT_SELECTION, 'Old process remains immutable until restart')
+        self.assertEqual(self.client.post('/api/distill/models', json=dict(selection=selection)).status_code, 409)
+
+    def test_choices_remain_accessible_while_the_gpu_is_busy(self):
+        runtime = SimpleNamespace(lock=threading.Lock(), live_worlds=Mock())
+        runtime.lock.acquire()
+        self.addCleanup(runtime.lock.release)
+        self.server.runtimes[0] = runtime
+        response = self.client.get('/api/distill/models')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['selection'], DEFAULT_SELECTION)
+        runtime.live_worlds.assert_not_called()
+
+    def test_reset_retains_selected_models_and_changes_only_the_neural_namespace(self):
+        response = self.client.post('/api/distill/models', json=dict(selection=self.selection, reset=True))
+        self.assertEqual(response.status_code, 202)
+        saved = json.loads(self.path.read_text())
+        self.assertEqual(saved['selection'], self.selection)
+        self.assertNotEqual(saved['reset'], 'keep-orogen')
+
+    def test_invalid_choice_or_unavailable_restart_does_not_change_models(self):
+        before = self.path.read_bytes()
+        response = self.client.post('/api/distill/models', json=dict(selection=dict(self.selection, base='solver4')))
+        self.assertEqual(response.status_code, 400)
+        self.server.RESTART_COMMAND = None
+        response = self.client.post('/api/distill/models', json=dict(selection=self.selection))
+        self.assertEqual(response.status_code, 501)
+        self.restart.assert_not_called()
+        self.assertEqual(self.path.read_bytes(), before)
+
+    def test_distillation_import_preserves_standard_runtime_environment(self):
+        from distill.common import bootstrap
+        with patch.dict('sys.modules', terrain_app=Mock()), patch.dict('os.environ', {}, clear=True):
+            bootstrap()
+            import os
+            self.assertEqual(dict(os.environ), {})
 
 
 if __name__ == '__main__':
