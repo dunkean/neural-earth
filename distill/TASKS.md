@@ -61,7 +61,7 @@ python tools/verification/compare_base_variants.py sheet ~/data/distill/eval/fp3
 | Carte | ms / fenêtre BF16 (batch 16, graph) | TFLOPS | Erreur FP32 vs BF16 |
 | --- | --- | --- | --- |
 | RTX 3090 (ancienne machine) | 4,96 | 39,1 | 7–36 m |
-| RTX 4090 | 1,758 (contiguous) | 110,2 | à mesurer lors de l'évaluation finale sur cette carte |
+| RTX 4090 | 1,758 (contiguous) | 110,2 | LOD 3 : 7,10–36,23 m ; LOD 0 : 7,25–38,79 m |
 | RTX 5090 | 1,295 (channels_last ; contiguous : 1,324) | 149,6 | LOD 3 : 7,21–35,36 m ; LOD 0 : 9,10–41,38 m |
 
 Attention : le FP32 lui-même diffère du BF16 jusqu'à +12,1 % en pente et +42,9 %
@@ -69,6 +69,9 @@ dans une bande spectrale, sur certains holdouts terrestres. Ces observations
 ne relâchent pas les critères de distribution de l'élève par rapport au teacher
 BF16. Résultats complets : `~/data/distill/eval/fp32-5090/report.json` ; répétition
 des deux LOD 0 : `fp32-recheck-5090/arrays.npz` (différence max 0).
+L'étalon 4090 comporte aussi les 14 cas dans `eval/fp32-4090/report.json`.
+La comparaison physique a partagé la carte avec la génération teacher ; ses
+secondes ne sont pas utilisées comme mesures de débit.
 
 Gain FP8/BF16 GEMM brut, trois dimensions représentatives : 4090 ~1,56–1,92×,
 5090 ~1,27–2,57×. Ces chiffres excluent conversion et abaissement des convolutions
