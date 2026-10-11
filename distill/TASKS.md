@@ -4,10 +4,10 @@
 
 ## Livraison coarse1/coarse2 complets
 
-Les deux entraînements ont terminé200 000 étapes. Poids best EMA sur384
-crops : coarse1 pas200000, coarse2 pas200000.
+Les deux entraînements ont terminé 200 000 étapes. Poids best EMA sur 384
+crops : coarse1 pas 200000, coarse2 pas 200000.
 Les trois contrôles export/CUDA Graph par modèle donnent une différence
-maximale0 ; provenance/SHA et statut complet dans `weights/manifest.json`.
+maximale 0 ; provenance/SHA et statut complet dans `weights/manifest.json`.
 Best/latest et jalons conservés sous `~/data/distill/ckpt/coarse-full/`.
 Aucun poids base livré. Reprendre maintenant la stratégie base décrite
 ci-dessous : supervision LOD3/LOD0, cas rares, coarse original/4/2.
@@ -18,9 +18,10 @@ Le 2026-10-11, l'utilisateur demande explicitement de finir les deux coarse
 avant de reprendre le base. Les jobs `coarse-full1` (4090) et `coarse-full2`
 (5090) reprennent leurs checkpoints latest aux pas54 669 et37 180, avec états
 optimiseur/EMA/RNG, jusqu'à200 000 étapes chacun. Les compteurs ont effectivement
-repris au-delà de ces jalons. Les poids Git restent pour l'instant les EMA
-partielles50k/35k. Une fois les deux runs terminés, vérifier les exports et leur
-équivalence CUDA Graph, remplacer les poids/provenances Git et pousser `distill`.
+repris au-delà de ces jalons. Les poids Git étaient alors les EMA partielles
+50k/35k. Cette attente est maintenant terminée : les EMA 200k des deux
+modèles, leurs exports vérifiés et les provenances sont poussés sur `distill`,
+commit `93100542873bf64f7eea2d7404b670633b93fb4f` (SHA distant contrôlé).
 Ne lancer aucun nouvel entraînement base avant cette livraison. Aucun ancien
 superviseur base n'est relancé : ils ne constituent pas le prochain plan.
 
@@ -38,6 +39,13 @@ l'attente, un staging déjà rempli, un arrêt incomplet ou des preuves altéré
 Il met à jour poids/provenances et documentation, commit/push `distill`, vérifie
 le SHA distant et écrit `~/data/distill/coarse-delivery-next.json`. Il ne lance
 ni serveur ni base. En cas d'échec, inspecter avant toute reprise.
+
+La priorité confirmée est maintenant le base. Les optimisations du runtime
+d'inférence sont laissées à l'utilisateur ; le benchmark automatique coarse
+supplémentaire a été annulé. Le contrôle coarse1 200k, hors Git sous
+`eval/coarse1-full-continuity/`, donne une identité exacte champ128 / quatre
+tuiles64 avec halos16, deux axes et caches neufs, sur les quatre catégories
+rares. Ce contrôle ne certifie pas le terrain final base/decoder.
 
 L'utilisateur propose ensuite d'entraîner le base aussi avec les coarse
 distillés4/2. Le prochain entraînement base mélangera original/4/2, avec des
@@ -63,6 +71,46 @@ explicitement la morphologie du canal4 au LOD3, ainsi que le terrain décodé,
 et équilibrer les cas rares. Preuves sous `~/data/distill/eval/` :
 `native-decoded-rare-validation-500.json`, `native-rare-fp32-floor.json` ;
 banque `~/data/distill/crops/native-rare-scenes-v1/qualification.json`.
+
+## Base : reprise après livraison des coarse complets
+
+`native_mixed_bank.py` fige 700 positions (624 scènes générales, 56 train et
+20 val rares qualifiées) et capture trois branches à chaque position : coarse
+original, coarse4 livré et coarse2 EMA200k. Les 2100 scènes gardent le même
+split par monde : 1896 train, 204 val. Les scènes originales sont hard-linkées
+sans modification ; les deux autres cibles sont recalculées par le base
+teacher original T2 avec leur propre coarse. SHA des sources, poids et code
+figés dans manifest/contrat, aucune graine du banc final. Le job
+`base-native-mixed-capture` génère les données sur4090, sous
+`~/data/distill/crops/native-mixed-scenes-v2/`.
+
+`native_multilod.py` supervise directement la hauteur du canal4 (LOD3), ses
+gradients et sa position topographique aux sigma1/2/4/8 ; le decoder ORIGINAL
+gelé supervise la hauteur fine (LOD0), gradients et sigma2/8/32. Les erreurs
+de hauteur sont relatives au relief teacher avec un plancher10m ; les termes
+absolus en mètres restent enregistrés. Des planchers de gradients/TPI bornent
+les champs plats. Les ancrages latent, canaux0–3, opérateurs on-policy et
+recouvrement empêchent de compenser un défaut du base par un autre défaut.
+La variance est celle des576 scènes TRAIN originales, fixe pour les trois
+coarse et sans moments de validation.
+
+`native_multilod_train.py` part de l'EMA native128×2 opérateur5000 propre,
+avec optimiseur neuf. Les coarse sont équiprobables ;25% des tirages sont
+réservés aux quatre cas rares équiprobables,25% reçoivent de nouveaux bruits
+avec cibles teacher recalculées. La sélection utilise le pire groupe
+coarse/profil ou coarse/cas rare sur les deux LOD. Le garde-fou canaux0–3
+compare toujours au même point de départ, globalement et par coarse. Best,
+latest et jalons sont conservés hors Git. Un premier palier physique2000 pas
+doit décider de la suite ; il ne suffit pas à déclarer le base accepté.
+
+`base-native-multilod-smoke` vérifie un backward par branche, gradients finis
+et non nuls vers les25+9 fenêtres, et decoder gelé. Le job
+`base-native-multilod-next` attend son succès et la capture complète, vérifie
+les SHA de cette preuve puis devient le trainer (même PID et arrêts propres).
+Sorties : `eval/native-multilod-mixed-smoke/`,
+`ckpt/native128x2-multilod-mixed-pilot/`, `native-multilod-next.json`.
+Ni serveur ni optimisation d'inférence ni poids base distribués à ce stade.
+Les évaluations finales complètes, raccords froids et planches restent requis.
 
 ## Base natif — supervision physique du 2026-10-11
 
