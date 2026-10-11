@@ -44,6 +44,19 @@ def historical_sites(names):
     return result, path
 
 
+def stage_paths(base=None, native_base=None, coarse=None, decoder=None,
+                conditioning_coarse=None, conditioning_decoder=None):
+    candidates = {k:v for k,v in dict(base=base, coarse=coarse, decoder=decoder).items() if v}
+    shared = {k:v for k,v in dict(coarse=conditioning_coarse, decoder=conditioning_decoder).items() if v}
+    if native_base and candidates:
+        raise ValueError('Use --conditioning-coarse/--conditioning-decoder with a native base.')
+    if candidates and set(candidates) != {'base', 'coarse', 'decoder'}:
+        raise ValueError('Supply all three candidate stages together, or use a native base.')
+    if shared and candidates:
+        raise ValueError('Shared stages support teacher/native base comparisons only.')
+    return candidates, shared
+
+
 def partition_stats(full, tiles, halo=24):
     """Use cores for the mosaic and shared halo pixels for overlap checks."""
     size = tiles[(0, 0)].shape[0] - 2 * halo
@@ -111,9 +124,11 @@ def preview(path, full, mosaic, lod, title):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base', type=Path)
-    parser.add_argument('--native-base', type=Path, help='Native base EMA, with original coarse and decoder.')
+    parser.add_argument('--native-base', type=Path, help='Native base EMA; optionally share frozen coarse/decoder stages.')
     parser.add_argument('--coarse', type=Path)
     parser.add_argument('--decoder', type=Path)
+    parser.add_argument('--conditioning-coarse', type=Path, help='Use these coarse weights in BOTH reference and native chains.')
+    parser.add_argument('--conditioning-decoder', type=Path, help='Use these decoder weights in BOTH reference and native chains.')
     parser.add_argument('--site-manifest', type=Path, default=DATA/'eval/rare-sites-complete.json')
     parser.add_argument('--sites', nargs='+', help='Otherwise one site per category; prefer warmer plains.')
     parser.add_argument('--historical-sites', nargs='+', choices=('snow', 'desert', 'coast'),
@@ -124,11 +139,17 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--no-preview', action='store_true', help='Keep numerical/raw evidence only; final plates are produced separately.')
     args = parser.parse_args()
-    paths = {k:v for k,v in dict(base=args.base, coarse=args.coarse, decoder=args.decoder).items() if v}
-    if args.native_base and paths:
-        parser.error('Native base comparison uses original coarse/decoder; omit other weights.')
-    if paths and set(paths) != {'base', 'coarse', 'decoder'}:
-        parser.error('Supply all three candidate stages together, or run teacher only.')
+    # The backend changes cwd when importing upstream geography assets.
+    for name in ('base', 'native_base', 'coarse', 'decoder', 'conditioning_coarse',
+                 'conditioning_decoder', 'site_manifest', 'output'):
+        value = getattr(args, name)
+        if value is not None:
+            setattr(args, name, value.expanduser().resolve())
+    try:
+        paths, shared_paths = stage_paths(args.base,args.native_base,args.coarse,args.decoder,
+            args.conditioning_coarse,args.conditioning_decoder)
+    except ValueError as error:
+        parser.error(str(error))
     if args.historical_sites and args.sites:
         parser.error('Choose historical sites or names from the rare bank.')
     if args.include_rare_sites and not args.historical_sites:
@@ -159,12 +180,22 @@ def main():
             choices = [s for s in sites if s['kind'] == kind]
             selected.append(next((s for s in choices if s.get('climate_archetype')), choices[0]))
         sites = selected
-    models, fingerprint = {}, {}
+    models, shared_models, fingerprint, shared_fingerprint = {}, {}, {}, {}
     for stage, path in paths.items():
         payload = path.read_bytes()
         fingerprint[stage] = hashlib.sha256(payload).hexdigest()
         with torch.inference_mode(False):
             models[stage], _ = load_student(io.BytesIO(payload), 'cuda')
+    for stage, path in shared_paths.items():
+        payload = path.read_bytes()
+        with torch.inference_mode(False):
+            shared_models[stage], saved = load_student(io.BytesIO(payload), 'cuda')
+        if shared_models[stage].config.stage != stage:
+            raise ValueError('Shared-stage checkpoint has the wrong stage.')
+        shared_fingerprint[stage] = dict(sha256=hashlib.sha256(payload).hexdigest(),
+            step=saved['step'], path=str(path))
+        del payload, saved
+    fingerprint['shared_stages'] = shared_fingerprint
     if args.native_base:
         from distill.native_inference import load_native
         payload = args.native_base.read_bytes()
@@ -178,10 +209,16 @@ def main():
                   ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py'))
     for name in code_files:
         fingerprint['code:'+name] = hashlib.sha256((REPO/name).read_bytes()).hexdigest()
+    fingerprint['code:distill/check_physical_seams.py'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    if shared_paths:
+        for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py'):
+            fingerprint['code:'+name] = hashlib.sha256((REPO/name).read_bytes()).hexdigest()
     output = external_path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     report = dict(gpu=torch.cuda.get_device_name(), sites=sites, lods=args.lods, rows=[],
                   checkpoint_digests=fingerprint, teacher_sources=source_digest(),
+                  shared_stages=shared_fingerprint,
+                  reference_scope='Original base; supplied coarse/decoder shared by both chains.' if shared_paths else 'Original teacher chain.',
                   site_manifest_digest=manifest_digest,
                   fresh_world_per_partition=True, fresh_world_per_viewer_tile=True,
                   tile_size=256, halo=24, accepted=False,
@@ -208,6 +245,8 @@ def main():
         world.coarse_model, world.base_model, world.decoder_model = (
             loaded.coarse_model, loaded.base_model, loaded.decoder_model)
         configure_world(world, replace(loaded._terrain_profile, cuda_graphs=False), world_profile=site['profile'])
+        if shared_models:
+            install(world, shared_models)
         if variant == 'student_all':
             install(world, models)
         elif variant == 'native_student':

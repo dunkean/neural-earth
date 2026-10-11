@@ -122,7 +122,26 @@ les MAE sont263,02m et303,97m ; les vallées restent insuffisamment reproduites.
 La baisse du score proxy de validation ne suffit donc pas à accepter ce base.
 Rapport et quatre champs finis :
 `~/data/distill/eval/native-multilod-matched-500-coast-app/`.
-L'entraînement continue vers le palier2000 ; aucune planche finale publiée.
+Le garde-fou a arrêté ce pilote au pas1000 : MSE canaux0–3 de0,164876
+contre0,149701 au départ (+10,14%). Le score physique du pire groupe descend
+à12,998 contre20,976 ; cela ne certifie pas les vallées en terrain complet.
+Best500 et les jalons500/1000 sont conservés. Aucune planche finale publiée.
+
+Le job `base-native-operator-long` reprend le checkpoint propre opérateur5000
+dans un dossier séparé `ckpt/native128x2-operator-long/`, avec optimiseur,
+EMA et RNG identiques, jusqu'à15000 pour le prochain palier. Le run initial
+et ses poids restent inchangés. Ce palier renforce la régression directe
+du teacher avant de reprendre la supervision physique original/4/2 ; il ne
+constitue pas la fin de l'entraînement ni une acceptation du base.
+
+`check_physical_seams.py` accepte également les deux options de stages
+partagés pour comparer les requêtes froides sur les deux axes dans la chaîne
+de l'application. Quatre tests CPU couvrent les conflits de poids et les
+désaccords de halos horizontaux/verticaux. Contrôle coast pas500, coarse4 et
+decoder200k, sous `eval/native-multilod-matched-seams-500-coast-app/` :
+MAE champ entier/quatre tuiles LOD3 teacher4,769m / élève5,201m ;
+LOD0 teacher0,01824m / élève0,02175m. Les erreurs maximales et de raccord
+figurent dans le rapport ; ce résultat isolé ne certifie pas tous les sites.
 
 ## Base natif — supervision physique du 2026-10-11
 
