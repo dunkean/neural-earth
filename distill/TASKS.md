@@ -2,6 +2,40 @@
 
 2026-10-10 · Grégory Beurier
 
+## Résultat des continuations1000 et contrôle d'une base teacher factorisée
+
+Les continuations `opt1e4diag` et `opt5e5diag` sont terminées au garde-fou
+fin1000 (exit0), pas3000. Les3 variantes coarse perdent du rappel fin sur
+les cas Orogen,3 mondes, borne basse de baisse1,8–3,1 points. Coarse4
+canal0 VAL MSE progresse enfin :0,14213→0,13778 et0,14216→0,13988.
+Amplitude TPI native rare médiane descend à1,509 et1,770, mais rappel fin
+rare médian est0,386 et0,411, source~0,425. Aucun nouveau base accepté.
+Le500 n'a pas été remplacé ; images1000 dans `_base/opt*diag-*-001000.png`.
+Audit1000 : déplacement relatif global0,00326 et0,00189. Le gain de sortie
+scalaire explique les cosinus±1 du bloc agrégé ; convolution de sortie et
+blocs partagés ne montrent pas de conflit fortement négatif persistant.
+Ces1000 pas ne démontrent donc pas un plafond de capacité du160×3.
+
+Préparation d'un diagnostic différent, sans entraînement : toutes les
+features/skip/attention/embeddings du teacher192×3 conservées ;72
+convolutions internes3×3 remplacées par3×3→1×1. Normalisation MP calculée
+sur le poids COMPOSÉ, pas facteur par facteur. Têtes, convolutions groupées,
+resampling et conditionnement restent ceux du teacher.5 tests CPU vérifient
+normalisation/gain, équivalence plein rang, gradients tronqués et cas zéro.
+Base SVD plein rang produite sur5090 :
+`eval/native-lowrank-full-basis.pt`, SHA750462e2acffd3b249071d7998dbf61ea0a18554830026492da0b7bb4f238e57,
+274,7M paramètres contre253,7M : le plein rang est un contrôle, pas un gain.
+Fichier producteur initial exact conservé pour provenance :
+`preparation/native-lowrank-control-basis-source.py`.
+Les premiers contrôles physiques ont exposé un sous-ensemble insuffisant
+pour le vérificateur3-coarse ; corrigé pour couvrir les60 lignes rares des
+3 branches, sans enlever une strate du vérificateur. Les deux contrôles
+plein rang ont ensuite buté sur la borne max FP32 fixée à0,002 : maximum
+0,002354 factorisé et0,002476 recomposé, MSE relative~3,6e-9. BF16/relief
+non interprétés tant que le contrôle numérique n'est pas passé. Les facteurs
+non entraînés ne sont pas des modèles distillés et ne sont pas ajoutés au
+runtime. Cette première version reste dans Git pour sa provenance.
+
 ## Suite des pilotes d'optimisation : bornes diagnostiques explicites
 
 Les deux pilotes ci-dessous sont terminés au garde-fou500, exit0 ; pas une

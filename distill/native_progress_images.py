@@ -74,7 +74,12 @@ def main():
         saved = torch.load(io.BytesIO(payload), map_location='cpu', weights_only=True)
         if (saved.get('teacher_revision') or saved.get('dataset_manifest', {}).get('revision')) != REVISION:
             raise ValueError('Checkpoint teacher revision differs.')
-        model = NativeBase(saved['config']).cuda().eval().requires_grad_(False)
+        if saved.get('architecture') == 'native-lowrank':
+            from distill.native_lowrank import NativeLowrankBase
+            model = NativeLowrankBase(saved['config'], saved['factor_ranks'], saved['factor_mode'])
+        else:
+            model = NativeBase(saved['config'])
+        model = model.cuda().eval().requires_grad_(False)
         model.load_state_dict(saved['ema'])
         step = saved['step']; rows, fields = [], []
         stem = f'{args.label}-{step:06d}' if args.label else f'{step:06d}'
@@ -106,6 +111,8 @@ def main():
         if args.label and source_step is not None:
             context += f', source {source_step}'
         candidate_label = 'Teacher dans NativeBase' if saved.get('evaluation_only') else f'Eleve, 2 passes, etape {step}'
+        if saved.get('architecture') == 'native-lowrank':
+            candidate_label = f'Teacher factorise, rang {saved["rank_fraction"]:.3f}, sans entrainement'
         draw.text((12, 10), f'Etape {step}{context} | Base {model.config["model_channels"]}x{model.config["layers_per_block"]} | {args.coarse}', fill='white', font=font)
         draw.text((12, 39), 'Validation interne, decoder original fige. Meme bruit et memes scenes. Checkpoint '+sha[:12], fill='white', font=small)
         draw.text((12, 66), 'Ombrage fixe, sans lissage. LOD3 : 64 pixels natifs ; LOD0 : interieur 384 pixels.', fill='white', font=small)
