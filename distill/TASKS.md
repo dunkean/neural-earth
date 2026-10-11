@@ -134,6 +134,17 @@ et ses poids restent inchangés. Ce palier renforce la régression directe
 du teacher avant de reprendre la supervision physique original/4/2 ; il ne
 constitue pas la fin de l'entraînement ni une acceptation du base.
 
+`native_multilod_eval.py` mesure les EMA sur les204 scènes de validation
+original/4/2, avec variance TRAIN fixe, et la morphologie des60 scènes rares
+aux deux LOD. Il refuse le mélange de mondes train/val, les graines réservées,
+les statistiques d'une autre banque et un entraînement interrompu quand un
+palier complet est demandé. Trois tests CPU couvrent ces contaminations.
+Le contrôle GPU de l'opérateur5000 est terminé :204 lignes physiques et60
+lignes de morphologie sous `eval/native-operator5000-matched-validation.json`.
+La même évaluation du best du run prolongé est en attente de sa fin, dans
+le job `base-native-operator-long-validation`. Ces rapports numériques
+préparent la prochaine décision ; aucune planche finale n'est générée.
+
 `check_physical_seams.py` accepte également les deux options de stages
 partagés pour comparer les requêtes froides sur les deux axes dans la chaîne
 de l'application. Quatre tests CPU couvrent les conflits de poids et les
