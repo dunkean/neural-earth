@@ -112,6 +112,18 @@ Sorties : `eval/native-multilod-mixed-smoke/`,
 Ni serveur ni optimisation d'inférence ni poids base distribués à ce stade.
 Les évaluations finales complètes, raccords froids et planches restent requis.
 
+La comparaison complète accepte `--conditioning-coarse` et
+`--conditioning-decoder` : les deux chaînes utilisent exactement les mêmes
+poids partagés, seul le base change. SHA et étapes figurent dans le rapport.
+Les chemins sont résolus avant l'import du backend qui change de répertoire.
+Six tests CPU et un contrôle GPU coast aux LOD3/0 vérifient cette comparaison.
+Au pas500 du nouveau pilote, avec coarse4 et decoder200k de l'application,
+les MAE sont263,02m et303,97m ; les vallées restent insuffisamment reproduites.
+La baisse du score proxy de validation ne suffit donc pas à accepter ce base.
+Rapport et quatre champs finis :
+`~/data/distill/eval/native-multilod-matched-500-coast-app/`.
+L'entraînement continue vers le palier2000 ; aucune planche finale publiée.
+
 ## Base natif — supervision physique du 2026-10-11
 
 Les pilotes ne sont pas acceptés. Le128×2 opérateur5000 pas donne une MAE

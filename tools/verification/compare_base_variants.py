@@ -121,9 +121,33 @@ def describe(e, lod):
                 psd=[float(power[(radius >= lo) & (radius < hi)].mean()) for lo, hi in bands])
 
 
+def shared_stage_paths(variants, conditioning_coarse=None, conditioning_decoder=None,
+                       coarse_student=None, decoder_student=None):
+    paths = {stage:path for stage,path in dict(coarse=conditioning_coarse,decoder=conditioning_decoder).items()
+             if path is not None}
+    if paths and (any(v not in ('reference','native_student','fp32base') for v in variants) or
+                  coarse_student is not None or decoder_student is not None):
+        raise ValueError('Shared-stage comparison supports reference/native_student/fp32base; omit per-variant coarse/decoder weights.')
+    return paths
+
+
+def resolve_evaluation_paths(**paths):
+    # terrain_app changes cwd for upstream geography assets on first import.
+    # Freeze caller-relative paths before loading the backend or CUDA models.
+    return {name:None if path is None else Path(path).expanduser().resolve() for name,path in paths.items()}
+
+
 @torch.inference_mode()
 def run(output, variants, *, student=None, coarse_student=None, decoder_student=None,
-        native_student=None, site_names=None, lods=LODS, resume=True, site_manifest=None):
+        native_student=None, site_names=None, lods=LODS, resume=True, site_manifest=None,
+        conditioning_coarse=None, conditioning_decoder=None):
+    resolved = resolve_evaluation_paths(output=output,student=student,coarse_student=coarse_student,
+        decoder_student=decoder_student,native_student=native_student,site_manifest=site_manifest,
+        conditioning_coarse=conditioning_coarse,conditioning_decoder=conditioning_decoder)
+    output,student,coarse_student,decoder_student,native_student,site_manifest,conditioning_coarse,conditioning_decoder = (
+        resolved[name] for name in ('output','student','coarse_student','decoder_student','native_student',
+            'site_manifest','conditioning_coarse','conditioning_decoder'))
+    shared_paths = shared_stage_paths(variants,conditioning_coarse,conditioning_decoder,coarse_student,decoder_student)
     from dataclasses import replace
     from terrain_app import load_pipeline
     from terrain_diffusion.inference.world_pipeline import WorldPipeline
@@ -167,6 +191,25 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
     else:
         selected = site_list
     from distill.common import atomic_json, atomic_write
+    shared_models,shared_fingerprint = {},{}
+    if shared_paths:
+        from distill.student import load_student
+        for stage,path in shared_paths.items():
+            payload = Path(path).read_bytes()
+            with torch.inference_mode(False):
+                shared_models[stage],saved = load_student(io.BytesIO(payload),'cuda')
+            if shared_models[stage].config.stage != stage:
+                raise ValueError('Shared-stage checkpoint has the wrong stage.')
+            shared_fingerprint[stage] = dict(sha256=hashlib.sha256(payload).hexdigest(),
+                step=saved['step'],path=str(path))
+            del payload,saved
+        report['reference_scope'] = 'Original base with exactly the same supplied coarse/decoder stages as the student.'
+    else:
+        report['reference_scope'] = 'Original coarse, base and decoder.'
+    previous_shared = report.get('shared_stages',{})
+    if previous_shared != shared_fingerprint and report['variants']:
+        raise ValueError('Shared reference stages changed; use a new output directory.')
+    report['shared_stages'] = shared_fingerprint
     failures = []
     for variant in variants:
         coarse, base, decoder = raw_coarse, raw_base, raw_decoder
@@ -180,6 +223,11 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
         if any(path is None for path in checkpoints.values()):
             raise ValueError(f'{variant}: supply the corresponding --student/--coarse-student/--decoder-student.')
         frozen_models, fingerprint = {}, {}
+        fingerprint['code:tools/verification/compare_base_variants.py'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        if shared_paths:
+            fingerprint['shared_stages'] = shared_fingerprint
+            for name in ('distill/student.py','distill/features.py','distill/inference.py','distill/coarse_solver.py'):
+                fingerprint['code:'+name] = hashlib.sha256((REPO_ROOT/name).read_bytes()).hexdigest()
         if variant.startswith('native_'):
             if native_student is None:
                 raise ValueError('native_student requires --native-student.')
@@ -249,9 +297,9 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
                         world._terrain_profile = replace(world._terrain_profile, cached_coarse_embeddings=False)
                     counter = Count(base)
                     world.coarse_model, world.base_model, world.decoder_model = coarse, counter, decoder
-                    if checkpoints:
+                    if checkpoints or shared_models:
                         from distill.inference import install
-                        install(world, frozen_models)
+                        install(world, frozen_models | shared_models)
                     if variant in ('native_teacher_height','native_teacher_features','native_teacher_all'):
                         from distill.native_oracle import mixed_tensor
                         oracle_world = WorldPipeline(**(config | dict(seed=site['seed'], dtype='bf16',
@@ -269,7 +317,7 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
                     torch.cuda.synchronize()
                     item.update(stage=stage, seconds=time.perf_counter() - started,
                                 base_windows=counter.windows, base_calls=counter.calls, **describe(elevation, lod))
-                    if checkpoints:
+                    if checkpoints or shared_models:
                         item['student_counts'] = world._distill_counts
                     arrays[f"{variant}|{site['name']}|{lod}"] = elevation
                     reference = arrays.get(f"reference|{site['name']}|{lod}")
@@ -377,6 +425,10 @@ def main():
     parser.add_argument('--native-student', type=Path, help='Native base operator/fusion EMA checkpoint.')
     parser.add_argument('--coarse-student', type=Path)
     parser.add_argument('--decoder-student', type=Path)
+    parser.add_argument('--conditioning-coarse', type=Path,
+                        help='Use this frozen coarse for both the reference original base and native student.')
+    parser.add_argument('--conditioning-decoder', type=Path,
+                        help='Use this frozen decoder for both reference and native student, e.g. the app decoder.')
     parser.add_argument('--sites', nargs='+')
     parser.add_argument('--site-manifest', type=Path, help='Additional held-out case bank, in a separate report.')
     parser.add_argument('--lods', nargs='+', type=int, choices=LODS, default=list(LODS))
@@ -385,7 +437,8 @@ def main():
     if args.command == 'run':
         run(args.output, args.variants, student=args.student, coarse_student=args.coarse_student,
             decoder_student=args.decoder_student, native_student=args.native_student, site_names=args.sites, lods=args.lods,
-            resume=not args.fresh, site_manifest=args.site_manifest)
+            resume=not args.fresh, site_manifest=args.site_manifest,
+            conditioning_coarse=args.conditioning_coarse,conditioning_decoder=args.conditioning_decoder)
     else:
         sheet(args.output)
 
