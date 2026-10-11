@@ -2,6 +2,51 @@
 
 2026-10-10 · Grégory Beurier
 
+## Priorité utilisateur : terminer coarse1 et coarse2 avant le base
+
+Le 2026-10-11, l'utilisateur demande explicitement de finir les deux coarse
+avant de reprendre le base. Les jobs `coarse-full1` (4090) et `coarse-full2`
+(5090) reprennent leurs checkpoints latest aux pas54 669 et37 180, avec états
+optimiseur/EMA/RNG, jusqu'à200 000 étapes chacun. Les compteurs ont effectivement
+repris au-delà de ces jalons. Les poids Git restent pour l'instant les EMA
+partielles50k/35k. Une fois les deux runs terminés, vérifier les exports et leur
+équivalence CUDA Graph, remplacer les poids/provenances Git et pousser `distill`.
+Ne lancer aucun nouvel entraînement base avant cette livraison. Aucun ancien
+superviseur base n'est relancé : ils ne constituent pas le prochain plan.
+
+`python -m distill.bundle_coarse --write` prépare cette livraison : les DEUX
+runs doivent être complets, les exports correspondre aux preuves CUDA Graph
+et au best sélectionné sur384 crops, et leurs SHA être inchangés. Il conserve
+coarse4/8 et decoder et met à jour uniquement coarse1/2 et leur provenance.
+Ce script ne commit/push pas ; cette étape suit l'inspection des deux exports.
+Quatre tests CPU vérifient la sélection best d'un run complet et le refus
+des runs partiels, des poids modifiés ou d'une livraison manquante.
+
+L'utilisateur propose ensuite d'entraîner le base aussi avec les coarse
+distillés4/2. Le prochain entraînement base mélangera original/4/2, avec des
+poids coarse figés et identifiés. Chaque cible sera recalculée par le base
+teacher ORIGINAL sur exactement le même conditionnement coarse que l'élève :
+ne pas associer une entrée coarse distillée à une cible produite avec le coarse
+original. Évaluer chaque chaîne sur les mêmes mondes et garder une part de
+coarse original pour préserver la référence. Cela traite la robustesse de la
+chaîne ; les pertes de morphologie LOD3/LOD0 et les raccords restent nécessaires.
+
+Le dernier pilote base physique s'est arrêté automatiquement au pas1000 :
+la MSE relative des canaux0–3 dépasse de10% son point de départ (0,12984 contre
+0,11745). Best750 est conservé ; sa MAE médiane proxy LOD0 est71,07 m contre
+101,81 m au départ. Ce pilote n'est pas accepté et aucun poids base n'est livré.
+La banque rare complémentaire contient56 scènes train et20 val physiquement
+qualifiées par le teacher complet, dont les quatre cas demandés. Au pas500,
+la morphologie fine progresse mais certaines plaines se dégradent au LOD3.
+Le replay BF164090 de ces20 scènes est exact ; les corrélations topographiques
+BF16/FP32 à σ2 sont0,78–0,92 au LOD3 et~0,997 au LOD0 (médianes par cas),
+bien supérieures à celles de l'élève. Ce défaut n'est donc pas expliqué par
+le seul plancher numérique. La prochaine expérience base doit superviser
+explicitement la morphologie du canal4 au LOD3, ainsi que le terrain décodé,
+et équilibrer les cas rares. Preuves sous `~/data/distill/eval/` :
+`native-decoded-rare-validation-500.json`, `native-rare-fp32-floor.json` ;
+banque `~/data/distill/crops/native-rare-scenes-v1/qualification.json`.
+
 ## Base natif — supervision physique du 2026-10-11
 
 Les pilotes ne sont pas acceptés. Le128×2 opérateur5000 pas donne une MAE
