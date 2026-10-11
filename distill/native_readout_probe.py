@@ -88,20 +88,68 @@ def apply_readouts(prediction, hidden, labels, coefficients, mode):
     return output
 
 
+class FrozenFeatures:
+    def __init__(self, source, kind):
+        self.kind, self.values = kind, {}
+        self.handles = [source.net.out_conv.register_forward_pre_hook(self.last)]
+        self.names = ['out_conv:input']
+        if kind == 'multiscale':
+            prefix = next(iter(source.net.enc)).split('_')[0]
+            high = [name for name in source.net.enc if name.startswith(prefix+'_block')][-1]
+            middle = next(name for name in source.net.dec if name.endswith('_in1'))
+            self.names += ['enc.'+high, 'dec.'+middle]
+            self.handles += [source.net.enc[high].register_forward_hook(self.high),
+                             source.net.dec[middle].register_forward_hook(self.middle)]
+
+    def last(self, module, args):
+        self.values['last'] = args[0]
+
+    def high(self, module, args, output):
+        self.values['high'] = output
+
+    def middle(self, module, args, output):
+        self.values['middle'] = output
+
+    def patches(self):
+        last = self.values['last'].float()
+        pieces = [F.unfold(last, 3, padding=1)]
+        if self.kind == 'multiscale':
+            for key in ('high', 'middle'):
+                values = self.values[key].float()
+                if values.shape[-2:] != last.shape[-2:]:
+                    values = F.interpolate(values, size=last.shape[-2:], mode='bilinear', align_corners=False)
+                pieces.append(values.flatten(2))
+        return torch.cat(pieces, dim=1)
+
+    def remove(self):
+        for handle in self.handles:
+            handle.remove()
+
+
+def apply_feature_readouts(prediction, patches, labels, coefficients, mode):
+    correction = torch.einsum('bdn,kd->bkn', patches, coefficients[:, :-1])
+    correction += coefficients[:, -1][None, :, None]
+    correction = correction.reshape(len(prediction), 2, *prediction.shape[-2:])
+    output = prediction.clone()
+    for phase, channel, enabled in ((0, 0, mode in ('first', 'both')), (1, 4, mode in ('second', 'both'))):
+        if enabled:
+            mask = torch.isclose(labels.float(), labels.new_tensor(PHASE_LABELS[phase]).float())
+            output[:, channel] += correction[:, phase]*mask[:, None, None]
+    return output
+
+
 class ReadoutProbe(nn.Module):
-    def __init__(self, source, coefficients, mode):
+    def __init__(self, source, coefficients, mode, features='last'):
         super().__init__()
         self.source, self.mode, self.config = source, mode, source.config
         self.register_buffer('coefficients', coefficients)
-        self.hidden = None
-        self.handle = source.net.out_conv.register_forward_pre_hook(self.capture)
-
-    def capture(self, module, args):
-        self.hidden = args[0]
+        self.features = FrozenFeatures(source, features)
 
     def forward(self, inputs, labels, conditional_inputs):
         prediction = self.source(inputs, labels, conditional_inputs)
-        return apply_readouts(prediction, self.hidden, labels, self.coefficients, self.mode)
+        if self.features.kind == 'last':
+            return apply_readouts(prediction, self.features.values['last'], labels, self.coefficients, self.mode)
+        return apply_feature_readouts(prediction, self.features.patches(), labels, self.coefficients, self.mode)
 
 
 def load_source(path):
@@ -122,6 +170,7 @@ def main():
     parser.add_argument('--output', type=Path)
     parser.add_argument('--ridge', type=float, default=.01)
     parser.add_argument('--smoke', action='store_true')
+    parser.add_argument('--features', choices=('last', 'multiscale'), default='last')
     args = parser.parse_args()
     root = DATA/'crops/native-mixed-scenes-v2'
     manifest = json.loads((root/'manifest.json').read_text())
@@ -133,13 +182,12 @@ def main():
         raise ValueError('Matching TRAIN calibration inventory required.')
     source, step = load_source(args.source)
     torch.set_num_threads(8); torch.backends.cudnn.benchmark = True
-    hidden = []
-    handle = source.net.out_conv.register_forward_pre_hook(lambda module, inputs: hidden.append(inputs[0]))
-    dimensions = source.net.out_conv.weight[0].numel()
+    capture = FrozenFeatures(source, args.features)
     contract = dict(source=str(args.source.resolve()), source_sha256=digest(args.source), source_step=step,
         teacher_revision=REVISION, dataset_manifest_sha256=digest(root/'manifest.json'),
         calibration_sha256=digest(calibration_path), producer_sha256=digest(Path(__file__)),
-        ridge=args.ridge, fit_pixels_per_window=64, seed=17001,
+        ridge=args.ridge, ridge_grid=[.0001, .001, .01, .1, 1.], fit_pixels_per_window=64, seed=17001,
+        features=args.features, feature_modules=capture.names,
         channels=['first:0', 'second:4'], smoke=args.smoke, accepted=False)
     if args.action == 'fit':
         if args.probe.exists():
@@ -151,14 +199,16 @@ def main():
         if args.smoke:
             records = records[:3]
         folds = world_folds(records) if not args.smoke else {r['metadata']['seed']: 0 for r in records}
-        accumulators = [[RidgeStatistics(dimensions, 'cuda') for _ in range(3)] for _ in range(2)]
-        sanity = RidgeStatistics(dimensions, 'cuda')
+        accumulators = sanity = None
         for index, record in enumerate(records):
             generator = np.random.default_rng(17001+index)
             batch = balanced_windows(DecodedRegion(root/record['file'], 'cuda'), generator)
-            hidden.clear()
             prediction = source(batch['inputs'], batch['labels'], [batch['condition']])
-            patches = F.unfold(hidden[-1].float(), 3, padding=1).transpose(1, 2)
+            patches = capture.patches().transpose(1, 2)
+            if accumulators is None:
+                dimensions = patches.shape[-1]
+                accumulators = [[RidgeStatistics(dimensions, 'cuda') for _ in range(3)] for _ in range(2)]
+                sanity = RidgeStatistics(dimensions, 'cuda')
             eligible = np.arange(64*64).reshape(64, 64)[1:-1, 1:-1].ravel()
             for phase, channel in enumerate((0, 4)):
                 for window in range(2*phase, 2*phase+2):
@@ -203,13 +253,12 @@ def main():
         coefficients = saved['coefficients'].cuda(); rows = []; sanity_errors = []; sanity_targets = []
         for index, record in enumerate(records):
             batch = balanced_windows(DecodedRegion(root/record['file'], 'cuda'), np.random.default_rng(17001+index))
-            hidden.clear()
             prediction = source(batch['inputs'], batch['labels'], [batch['condition']])
-            candidate = apply_readouts(prediction, hidden[-1], batch['labels'], coefficients, 'both')
+            patches = capture.patches()
+            candidate = apply_feature_readouts(prediction, patches, batch['labels'], coefficients, 'both')
             sanity_coefficients = saved['sanity_coefficients'].cuda()
-            sanity_prediction = F.conv2d(hidden[-1][:2].float(),
-                sanity_coefficients[:-1].reshape(1, hidden[-1].shape[1], 3, 3),
-                sanity_coefficients[-1:].reshape(1), padding=1)[:, 0]
+            sanity_prediction = (torch.einsum('bdn,d->bn', patches[:2], sanity_coefficients[:-1])
+                                 +sanity_coefficients[-1]).reshape_as(prediction[:2, 0])
             sanity_errors.append(float((sanity_prediction-prediction[:2, 0]).square().mean()))
             sanity_targets.append(float(prediction[:2, 0].square().mean()))
             for phase, channel in enumerate((0, 4)):
@@ -229,7 +278,7 @@ def main():
             selected_ridges=saved['selected_ridges'], cv_scores=saved['cv_scores'],
             probe_sha256=digest(args.probe), gpu=torch.cuda.get_device_name(), accepted=False))
         print(json.dumps(groups), flush=True)
-    handle.remove()
+    capture.remove()
 
 
 if __name__ == '__main__':

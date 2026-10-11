@@ -45,8 +45,10 @@ def main():
     parser.add_argument('--probe', type=Path, required=True)
     parser.add_argument('--mode', choices=('first', 'second', 'both'), default='first')
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--operator-report', type=Path, default=DATA/'eval/native160-readout-operator-validation.json')
+    parser.add_argument('--label', default='readout')
     args = parser.parse_args()
-    operator = json.loads((DATA/'eval/native160-readout-operator-validation.json').read_text())
+    operator = json.loads(args.operator_report.read_text())
     if operator['status'] != 'complete' or operator['probe_sha256'] != digest(args.probe) or \
             operator['sanity_relative_mse'] > .001:
         raise ValueError('Exact independently validated probe with a passing reconstruction control required.')
@@ -55,7 +57,8 @@ def main():
     source, step = load_source(Path(contract['source']))
     if contract['source_sha256'] != digest(contract['source']) or contract['smoke']:
         raise ValueError('Full TRAIN probe and frozen source required.')
-    candidate = ReadoutProbe(source, saved['coefficients'].cuda(), args.mode).eval()
+    candidate = ReadoutProbe(source, saved['coefficients'].cuda(), args.mode,
+                            features=contract.get('features', 'last')).eval()
     root = DATA/'crops/native-mixed-scenes-v2'
     manifest = json.loads((root/'manifest.json').read_text())
     if contract['dataset_manifest_sha256'] != digest(root/'manifest.json'):
@@ -103,13 +106,15 @@ def main():
                     coast_disagreement=float(np.mean((elevation > 0) != (pair[0] > 0))),
                     tpi_correlation=tpi.get('tpi_correlation'), valley_retention=tpi.get('valley_retention'),
                     tpi_rms_ratio=tpi.get('tpi_rms_ratio')))
-    stem = f'readout-{args.mode}-000000'
+    if not args.label or any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for c in args.label):
+        parser.error('Use a simple lowercase strategy label.')
+    stem = f'{args.label}-{args.mode}-000000'
     output = DATA/'_base'; output.mkdir(exist_ok=True)
     image = Image.new('RGB', (250+3*524, 140+len(fields)*556), (24, 24, 24))
     draw = ImageDraw.Draw(image)
     font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 19)
     small = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 16)
-    draw.text((12, 10), f'Ridge TRAIN {args.mode} | source160x3 etape{step} | coarse4 | pas de fine-tuning', fill='white', font=font)
+    draw.text((12, 10), f'Ridge TRAIN {args.mode}, features {contract.get("features", "last")} | source160x3 etape{step} | coarse4', fill='white', font=font)
     draw.text((12, 39), 'Validation autonome interne, decoder original fige. Meme bruit. Aucun lissage.', fill='white', font=small)
     draw.text((12, 66), 'LOD3 :64 pixels natifs ; LOD0 :interieur384 pixels. Probe '+report['probe_sha256'][:12], fill='white', font=small)
     for column, label in enumerate(('Teacher original', 'Source figee', 'Source + readout TRAIN')):

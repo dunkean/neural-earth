@@ -2,6 +2,45 @@
 
 2026-10-10 · Grégory Beurier
 
+## Pilotes d'optimisation active du 11 octobre
+
+Avis Opus5.5 terminé, modèle réellement utilisé vérifié :
+`review/opus-native-readout-negative-20261011/OPUS_REVIEW.md`.
+Tester l'apprentissage avant une nouvelle architecture : deux pilotes3000 pas
+repartent de la même EMA160×3 au pas15000. Principal5090 lr0,0001,
+comparaison4090 lr0,00005 ; warmup200, AdamW, clip1, EMA0,999.
+Chaque batch contient8 fenêtres de8 mondes TRAIN distincts,4 par passe,
+les3 variantes coarse original/4/2 par passe et2 cas rares. Les cibles
+proviennent toujours du base teacher original de chaque branche coarse.
+Le chargement direct d'une fenêtre évite des transferts et constructions
+inutiles pendant l'entraînement ; l'inférence runtime reste inchangée.
+
+Tests :12 régressions CPU réussies ; smokes GPU5090 et4090,3 batches chacun,
+gradients finis et audit des deux objectifs, pic5,36Go. Contrats exacts :
+`eval/native160-opt{1e4,5e5}-smoke-v2/gpu-smoke.json`.
+Jobs : `base-native160-opt1e4-train`, `base-native160-opt5e5-train`.
+Poids hors Git : `ckpt/native160x3-opt{1e4,5e5}-pilot/`.
+Audit tous les250 pas :16 batches TRAIN fixes, normes/cosinus des gradients
+par bloc, déplacements des poids et fraction changée après arrondi BF16.
+La tête présente déjà des gradients opposés dans le contrôle court ; un
+batch ne suffit pas à conclure, les audits répétés doivent le confirmer.
+
+Évaluation indépendante tous les500 pas sur204 scènes VAL, poids bruts
+et EMA séparés, contrôle opérateur par canal et bandes, relief autonome.
+Images progressives : `_base/opt{1e4,5e5}-{raw,ema}-000500.png`, puis les
+steps suivantes, avec fichiers CSV/JSON/TXT ; référence au pas0 également.
+Conserver le premier couple500, le meilleur couple et le dernier couple,
+plus un état complet de reprise. Les garde-fous servent à arrêter une
+régression manifeste ; ils ne constituent pas l'acceptation finale.
+Un candidat prometteur devra encore passer les cas rares réservés, la
+chaîne réelle et de nouveaux tests de continuité entre tuiles. Les timings
+pendant ces jobs concurrents ne sont pas des benchmarks d'inférence.
+
+Si les poids bougent réellement sans récupérer les features manquantes,
+prochain choix à discuter avec Opus : conserver la largeur native192×3 et
+comprimer progressivement les convolutions, sans changer leurs bases de
+features. Aucun nouveau base accepté ou ajouté à la pile runtime.
+
 ## Diagnostic du 11 octobre : sorties linéaires conditionnées par passe
 
 Avis Opus5.5 terminé, modèle réellement utilisé vérifié :
@@ -17,7 +56,8 @@ sortie du modèle lui-même : MSE relative0,000002996, contrôle réussi.
 Coarse4 première passe : MSE vélocité0,142159→0,142337, aucune récupération.
 Le readout H4 séparé dégrade aussi la validation0,001974→0,003815 ; ne pas
 l'ajouter au modèle. Deux petites corrections, tronc/poids source figés,
-sorties des autres phases/canaux exactement protégées.
+correction limitée aux canaux/passes ciblés pour une même entrée opérateur.
+L'inférence autonome consomme normalement l'état élève modifié ensuite.
 
 Contrôle autonome première passe sur20 cas rares coarse4,5090 : rappel fin
 σ2 médian source0,41808→readout0,41677, amplitude0,68360→0,67876,
@@ -28,9 +68,35 @@ négatif, aucun base accepté. Rendu teacher/source/readout :
 Poids minuscules de diagnostic : `eval/native160-readout-train.pt`,
 opérateur : `eval/native160-readout-operator-validation.json`, relief :
 `eval/native160-readout-first-rare-validation.json`.
-Prochain contrôle : concaténer features finales, skip haute résolution et
-bloc central, même TRAIN/VAL. Un échec ne prouverait pas l'absence de toute
-information non linéaire dans le tronc, seulement la limite de ces readouts.
+Le contrôle multiscale a aussi terminé : features finales3×3, skip haute
+résolution1×1 et bloc central1×1 suréchantillonné. Même TRAIN/VAL ; contrôle
+de reconstruction MSE relative0,000003221. Coarse4 première passe MSE
+vélocité0,142151→0,142322 ; aucune récupération. Relief autonome : rappel
+finσ2 source0,41843→0,41577, amplitude0,68412→0,67815. Bootstrap par11mondes,
+changement moyen−0,00111, intervalle95 % [−0,00276;+0,00050]. Cet échec ne
+prouve pas l'absence de toute information non linéaire dans le tronc.
+Rapports : `eval/native160-multiscale-readout-{operator-validation,first-rare-validation}.json` ;
+image : `_base/multiscale-readout-first-000000.png`, valeurs CSV/JSON/TXT.
+La première version du readout, avant ajout multiscale, est conservée au
+commit `09006aa` pour reproduire son contrat et ses résultats.
+
+Inspection des convolutions originales254M sur4090 :
+`eval/native-teacher-conv-rank-statistics.json`. Conserver toutes les dimensions
+de features avec des facteurs3×3→1×1 à demi-rang donnerait environ150,2M
+éléments dans l'état, énergie des poids retenue moyenne77,1 %, minimum61,7 %.
+Ce calcul n'est ni une mesure de qualité ni un benchmark. Les têtes, attention,
+embeddings et resampling sont exclus ; MPConv normalise GLOBALement ses poids,
+pas séparément chaque ligne ou facteur.
+
+Diagnostic des mises à jour du pilote500 : poids de RMS~1, déplacements RMS
+0,0002–0,0009 dans les couches échantillonnées, mais11–35 % de leurs valeurs
+BF16 ont changé. Le réseau n'était pas totalement figé par l'arrondi.
+Configurations upstream, sans preuve des hyperparamètres réels du checkpoint :
+diffusion base lr0,001, consistency base0,00005, pilote actuel0,00001.
+Avis terminé sur optimisation plus active versus
+tronc conservant toutes les features avec convolutions factorisées :
+`review/opus-native-readout-negative-20261011/`. Tous ces readouts sont rejetés
+pour livraison ; aucun modèle n'est ajouté à la pile runtime.
 
 ## Pilote canal0 du 11 octobre : cible causale, statistiques TRAIN figées
 

@@ -2,7 +2,8 @@ import unittest
 
 import torch
 
-from distill.native_readout_probe import RidgeStatistics, apply_readouts, world_folds, combine_statistics
+from distill.native_readout_probe import (RidgeStatistics, apply_readouts, apply_feature_readouts,
+                                        world_folds, combine_statistics)
 
 
 class ReadoutProbeTests(unittest.TestCase):
@@ -30,6 +31,17 @@ class ReadoutProbeTests(unittest.TestCase):
         first = apply_readouts(prediction, hidden, labels, coefficients, 'first')
         self.assertTrue(torch.equal(first[:, 1:], prediction[:, 1:]))
         self.assertTrue(torch.equal(first[[1, 2]], prediction[[1, 2]]))
+
+    def test_feature_readout_matches_convolution_and_phase_gating(self):
+        torch.manual_seed(7)
+        prediction, hidden = torch.randn(4, 5, 16, 16), torch.randn(4, 2, 16, 16)
+        coefficients = torch.randn(2, 19)
+        labels = torch.tensor([1.5625, .609375, .609375, 1.5625])
+        patches = torch.nn.functional.unfold(hidden, 3, padding=1)
+        for mode in ('first', 'second', 'both'):
+            expected = apply_readouts(prediction, hidden, labels, coefficients, mode)
+            actual = apply_feature_readouts(prediction, patches, labels, coefficients, mode)
+            torch.testing.assert_close(actual, expected)
 
     def test_empty_fit_and_invalid_regularization_are_rejected(self):
         fit = RidgeStatistics(2, 'cpu')
