@@ -4,10 +4,10 @@ The checkpoint is not a super-resolution model. LOD -1 reuses the 30 m
 decoder once, with its appearance latents over half the footprint. Finer
 levels would feed it latents stretched beyond its training distribution, so
 LOD -2 to -6 add deterministic procedural octaves instead: sparse convolution
-of zero-mean kernels, partly elongated down steep slopes, scaled from the local
-roughness of the decoder and native octaves and rougher on steep and convex
-ground. Finer octaves gather in patches set by a low-frequency noise and the
-relief, with heavy-tailed weights, so metre-scale grain is not uniform. All
+of zero-mean kernels, scaled from the local roughness of the decoder and
+native octaves and rougher on steep and convex ground. Each finer octave is
+markedly fainter in slope, so zooming in adds little grain, and patches set
+by a low-frequency noise and the relief only modulate it gently. All
 surfaces are continuous functions of position, sampled directly at the
 requested spacing: hillshading shows no grid of the 30 m source or of
 coarser levels. Composition happens in the checkpoint's signed-sqrt height.
@@ -27,7 +27,7 @@ from infinite_tensor import InfiniteTensor, TensorWindow
 from terrain_diffusion.inference.world_pipeline import linear_weight_window
 from terrain_diffusion.scheduler.dpmsolver import EDMDPMSolverMultistepScheduler
 
-VERSION = 'decoder-v9-patchy-detail'
+VERSION = 'decoder-v12-nyquist-notch'
 MIN_LOD = -6
 # Finest level whose octave comes from the decoder; finer ones are procedural.
 DECODER_LEVELS = 1
@@ -46,6 +46,18 @@ _HALF_BAND = [.5 if n == 0 else math.sin(math.pi*n/2)/(math.pi*n) *
                .08*math.cos(2*math.pi*n/(HALF_BAND_RADIUS+1)))
               for n in range(-HALF_BAND_RADIUS, HALF_BAND_RADIUS+1)]
 _HALF_BAND = [tap / math.fsum(_HALF_BAND) for tap in _HALF_BAND]
+# Nyquist notch: identity minus a Blackman low-pass shifted to the grid's
+# Nyquist (flat to 0.4 cycles/sample, zero at 0.5). The decoders leave
+# alternating row and column stripes there; an interpolating spline keeps
+# them, and magnified hillshading turned them into a 60 m and 30 m grid.
+NOTCH_RADIUS = 12
+_NOTCH = [.42 + .5*math.cos(math.pi*n/(NOTCH_RADIUS+1)) + .08*math.cos(2*math.pi*n/(NOTCH_RADIUS+1))
+          for n in range(-NOTCH_RADIUS, NOTCH_RADIUS+1)]
+_NOTCH = [(n == 0) - (-1)**n * tap / math.fsum(_NOTCH) for n, tap in zip(range(-NOTCH_RADIUS, NOTCH_RADIUS+1), _NOTCH)]
+# Spline coefficients of the notched samples, as one FIR.
+_INTERPOLATE = [math.fsum(_NOTCH[i]*_PREFILTER[k-i] for i in range(len(_NOTCH)) if 0 <= k-i < len(_PREFILTER))
+                for k in range(len(_NOTCH) + len(_PREFILTER) - 1)]
+SPLINE_RADIUS = PREFILTER_RADIUS + NOTCH_RADIUS
 # Binomial smoothing (radius 4, ~120 m on the native grid) for terrain fields.
 _SMOOTH = [math.comb(8, n) / 256 for n in range(9)]
 SMOOTH_RADIUS = 4
@@ -57,34 +69,39 @@ SMOOTH_RADIUS = 4
 # p(v) = (1-26v^2+65v^4)(1-v^2)^4 and q(u) = (1-u^2)^4. Both have two
 # vanishing moments (power ~k^4 near zero), so coarser features stay in
 # place, and peak at 2.83 cells: the octave between this grid's and its
-# parent's Nyquist. Slopes favour oriented kernels at the two coarsest
-# octaves only: finer, they combed slopes like fur. Only polynomials,
+# parent's Nyquist. Only a few kernels at the coarsest octave follow
+# slopes: more, or finer, they combed slopes into streaks. Only polynomials,
 # division and square roots: results do not depend on tile shape.
 RADIAL_RADIUS = 3.66
 ACROSS_RADIUS = 3.55
-ALONG_GAIN = 1.4                 # along-slope elongation on steep ground
+ALONG_GAIN = 1.25                # along-slope elongation on steep ground
 REACH = 6                        # cells searched each side: ACROSS_RADIUS*ALONG_GAIN + jitter
 _RADIAL_POWER = math.pi * 5 / 143                            # int K^2 dA / radius^2
 _ORIENTED_POWER = 0.4386831965240903 * 0.5990767402532109    # int p^2 * int q^2
-# Per-octave amplitude decay 2**-H from the reference roughness: near-
-# constant slope per octave keeps the hillshade detailed at every zoom; steep
-# ground decays more slowly. The reference adds NATIVE_SHARE of the 30 m
+# Per-octave amplitude decay 2**-H from the reference roughness. H = 1 keeps
+# each octave's slope constant; above it, finer octaves fade in the hillshade.
+# The newest octave of a level peaks at ~3 samples: at equal slope it read as
+# pixel-scale orange peel. Steep ground decays a little more slowly. The reference adds NATIVE_SHARE of the 30 m
 # octave to the LOD -1 decoder octave.
-HURST_GENTLE, HURST_STEEP = 0.9, 0.8
+HURST_GENTLE, HURST_STEEP = 1.35, 1.25
 NATIVE_SHARE = .3
 # Soft cap on each octave's RMS slope, decoder octave included: a cliff's
-# decoder ringing must not become a comb of metre-high ribs.
+# decoder ringing must not become a comb of metre-high ribs. Each procedural
+# octave halves it: rough ground sits at the cap, and equal caps summed into a
+# grain that grew with every level.
 SLOPE_CAP = .4
+CAP_DECAY = .5
 # Patches. Finer octaves are not everywhere: a value noise of PATCH_NOISE
 # octaves (spacing in native cells, weight), shared by every octave, plus a
 # relief term (steep and convex ground) decides where they keep their
-# amplitude. Octave o loses up to PATCH_CUT[o-1] of it elsewhere, so metre-
-# scale grain gathers in rocky patches instead of covering slopes like skin.
+# amplitude. Octave o loses up to PATCH_CUT[o-1] of it elsewhere. Deeper cuts
+# left blurred ground beside patches many times rougher.
 PATCH_NOISE = ((4., .55), (1.7, .3), (.7, .15))
 PATCH_LOW, PATCH_HIGH = -.05, .3
-PATCH_CUT = (.3, .55, .75, .88, .92)
-# Share of heavy-tailed (cubed uniform) impulse weights per octave.
-TAIL = (0., .25, .5, .8, 1.)
+PATCH_CUT = (.15, .25, .3, .35, .4)
+# Share of heavy-tailed (cubed uniform) impulse weights per octave. More
+# read as scattered dots.
+TAIL = (0., .1, .2, .25, .3)
 # Coastline. Within COAST_NEAR native cells of sea level the base comes from
 # signed-sqrt heights smoothed by COAST_SMOOTH and a cubic B-spline (sigma ~0.9
 # cell), fading to the exact spline by COAST_FAR cells. That zero line is one
@@ -198,9 +215,9 @@ def _coastal_base(native, level, i1, j1, i2, j2):
     times an offset moves the zero line by that many native cells.
     """
     n0, m0, n1, m1 = _base_bounds(level, i1, j1, i2, j2)
-    radius = PREFILTER_RADIUS
+    radius = SPLINE_RADIUS
     q = _signed_sqrt(native(n0-radius, m0-radius, n1+radius, m1+radius))
-    interpolating = _filter(q, _PREFILTER)
+    interpolating = _filter(q, _INTERPOLATE)
     smooth = _filter(_trim(q, radius-2), COAST_SMOOTH)
     gy = (smooth[2:, 1:-1] - smooth[:-2, 1:-1]) / 2
     gx = (smooth[1:-1, 2:] - smooth[1:-1, :-2]) / 2
@@ -231,14 +248,14 @@ def _level_detail(world, source, level, i1, j1, i2, j2):
     between the parent's and this level's Nyquist frequencies. Prefiltered spline coefficients reproduce it on its own
     grid and interpolate it smoothly on every finer grid.
     """
-    scale, radius = 2**(level-source), PREFILTER_RADIUS + HALF_BAND_RADIUS
+    scale, radius = 2**(level-source), SPLINE_RADIUS + HALF_BAND_RADIUS
     r0, r1, rows, fy = _axis(i1, i2, scale, world.device)
     c0, c1, cols, fx = _axis(j1, j2, scale, world.device)
     fused = _detail_field(world, source)[:, r0-radius:r1+radius+1, c0-radius:c1+radius+1]
     fused = fused.to(world.device, dtype=torch.float64)
     detail = (fused[0] / fused[1]).clamp(-3, 3)
     band = detail[HALF_BAND_RADIUS:-HALF_BAND_RADIUS, HALF_BAND_RADIUS:-HALF_BAND_RADIUS] - _filter(detail, _HALF_BAND)
-    coefficients = _filter(band, _PREFILTER)
+    coefficients = _filter(band, _INTERPOLATE)
     return _evaluate(coefficients, _cubic_taps(rows, fy), _cubic_taps(cols, fx))
 
 
@@ -294,8 +311,9 @@ def _patch_noise(seed, y, x):
 
 
 def _slope_cap(source):
-    """Amplitude whose octave at 2.83 cells of level `source` has RMS slope SLOPE_CAP."""
-    return SLOPE_CAP * 2**1.5 * (30 / 2**source) / (2*math.pi)
+    """Amplitude whose octave at 2.83 cells of level `source` has its capped RMS slope."""
+    cap = SLOPE_CAP * CAP_DECAY**max(0, source - DECODER_LEVELS)
+    return cap * 2**1.5 * (30 / 2**source) / (2*math.pi)
 
 
 def _soft_cap(values, cap):
@@ -376,7 +394,7 @@ def _impulses(world, source, a0, b0, a1, b1, fields, origin):
     device = world.device
     octave = source - DECODER_LEVELS
     seed = (int(getattr(world, 'seed', 0)) * 1000003 + source * 7919) & _MASK
-    orient = max(0., .6 - .35*(octave-1))
+    orient = .1 if octave == 1 else 0.
     patch_seed = _hash_int((int(getattr(world, 'seed', 0)) * 1000003 + 4241) & _MASK)
     cut = PATCH_CUT[octave-1]
     tail = TAIL[octave-1]
@@ -402,8 +420,8 @@ def _impulses(world, source, a0, b0, a1, b1, fields, origin):
     gy, gx, curvature, roughness = _bilinear(fields, y, x)
     slope = (gy*gy + gx*gx).sqrt()
     dy, dx = gy / (slope + 1e-12), gx / (slope + 1e-12)
-    # Some oriented kernels on slopes at 7.5 m and 3.75 m, none from 1.9 m:
-    # metre-scale debris has no preferred direction.
+    # Rare oriented kernels on slopes at 7.5 m, none from 3.75 m: they
+    # streaked slopes, and finer debris has no preferred direction.
     steep = _smoothstep(.15, .7, slope)
     # Rocky patches: noise, raised on steep and convex ground. Outside them
     # finer octaves fade, and so do gullies and ribs down the slope.
@@ -814,7 +832,7 @@ def sample_refined(world, level, i1, j1, i2, j2, *, check=None):
         if level > DECODER_LEVELS:
             box = _procedural_box(level, i1, j1, i2, j2)
             lo, left, hi, right = min(lo, box[0]), min(left, box[1]), max(hi, box[2]), max(right, box[3])
-        margin = max(PREFILTER_RADIUS, SMOOTH_RADIUS + HALF_BAND_RADIUS, 2*SMOOTH_RADIUS + 1)
+        margin = max(SPLINE_RADIUS, SMOOTH_RADIUS + HALF_BAND_RADIUS, 2*SMOOTH_RADIUS + 1)
         native = _NativeWindow(world, lo-margin, left-margin, hi+margin, right+margin, check)
         native_rms, decoder_rms = _roughness(world, native, lo, left, hi, right)
         # Composition in the checkpoint's signed-sqrt height space s. Only the

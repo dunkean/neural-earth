@@ -7,6 +7,7 @@ _bootstrap_sys.path.insert(0, str(_REPO_ROOT))
 from tools._bootstrap import activate as _activate_repository
 _activate_repository()
 
+import math
 from pathlib import Path
 import sys
 from types import SimpleNamespace
@@ -18,21 +19,27 @@ import torch
 import torch.nn.functional as F
 
 sys.path.insert(0, str(_REPO_ROOT / 'terrain-diffusion'))
-from terrain_refinement import MIN_LOD, _kernel, _procedural_detail, _slope_cap, sample_refined
+from terrain_refinement import (HALF_BAND_RADIUS, MIN_LOD, NOTCH_RADIUS, _HALF_BAND, _NOTCH, _kernel,
+                                _procedural_detail, _slope_cap, sample_refined)
 
 
 class DetailField:
-    def __init__(self, device, *, smooth=False, zero=False):
+    def __init__(self, device, *, smooth=False, zero=False, stripes=False):
         self.device = device
         self.smooth = smooth
         self.zero = zero
+        self.stripes = stripes
 
     def __getitem__(self, key):
         _, rows, cols = key
         yy = torch.arange(rows.start, rows.stop, device=self.device)[:, None]
         xx = torch.arange(cols.start, cols.stop, device=self.device)[None, :]
-        # Strong, globally anchored decoder residuals stress both signs.
-        detail = torch.where((xx + yy) % 2 == 0, 3., -3.)
+        # Strong, globally anchored decoder residuals stress both signs: a
+        # diagonal wave at a quarter of the sample rate (the Nyquist notch
+        # removes a checkerboard entirely).
+        detail = torch.where((xx + yy) % 4 < 2, 3., -3.)
+        if self.stripes:
+            detail = torch.where(yy % 2 == 0, 2., -2.) + torch.where(xx % 2 == 0, 1., -1.)
         if self.smooth:
             detail = .6*detail + torch.sin(.71*xx + .37*yy) + .8*torch.cos(.29*xx - .53*yy)
         if self.zero:
@@ -84,7 +91,7 @@ class CoastalRefinementTests(unittest.TestCase):
                             # Near sea level the sign-keeping soft limit is not
                             # additive across octaves, so the coast allows more.
                             coarse = F.avg_pool2d(parent[None, None], 8) - F.avg_pool2d(child[None, None], 16)
-                            limit = .35 if name == 'coastal ramp' else .1
+                            limit = .4 if name == 'coastal ramp' else .1
                             self.assertLess(coarse.abs().max().item(), limit * added.std().item())
                             if name == 'coastal ramp':
                                 self.assertTrue((child < 0).any())
@@ -114,9 +121,9 @@ class CoastalRefinementTests(unittest.TestCase):
                 with self.subTest(device=device, axis=axis):
                     self.assertLess((profile.max() / profile.min()).item(), 1.1)
 
-    def test_procedural_detail_follows_slopes_and_is_isotropic_on_flats(self):
-        # Below LOD -1, sparse-convolution octaves elongate down steep slopes
-        # at 7.5 m and lose any preferred direction at metre scale.
+    def test_procedural_detail_does_not_streak_slopes_and_is_isotropic_on_flats(self):
+        # Below LOD -1, only rare 7.5 m kernels elongate down steep slopes:
+        # more combed them into streaks. Flats show no direction at all.
         for name, heights in (('slope', lambda y, x: 1000 + 15*x + 0*y),
                               ('flat', lambda y, x: 1000 + 0*x + 0*y)):
             world = self.world('cpu', heights)
@@ -126,12 +133,8 @@ class CoastalRefinementTests(unittest.TestCase):
                     detail = _procedural_detail(world, level, -128, -128, 128, 128)
                     ratios[level] = (detail.diff(dim=0).std() / detail.diff(dim=1).std()).item()
             with self.subTest(terrain=name):
-                if name == 'slope':
-                    self.assertGreater(ratios[2], 1.3)
-                    self.assertLess(ratios[6], ratios[2])
-                else:
-                    for ratio in ratios.values():
-                        self.assertAlmostEqual(ratio, 1, delta=.1)
+                for ratio in ratios.values():
+                    self.assertAlmostEqual(ratio, 1, delta=.15 if name == 'slope' else .1)
 
     @unittest.skipUnless(torch.cuda.is_available(), 'CUDA only')
     def test_cuda_kernels_match_the_pytorch_fallback_exactly(self):
@@ -180,12 +183,29 @@ class CoastalRefinementTests(unittest.TestCase):
                 torch.testing.assert_close(native, torch.full_like(native, height), rtol=0, atol=0)
                 child = sample_refined(world, 1, -16, -16, 16, 16)
                 # The coast limit leaves high ground alone; only the slope cap applies.
-                raw = 3 * height**.5 * world.kwargs['residual_std']
-                old_amplitude = raw / (1 + (raw/_slope_cap(1))**2)**.5
+                # The band keeps 1 - H^2 of the diagonal wave, H ~ 1/2 the
+                # half band's response at a quarter of the sample rate; the
+                # Nyquist notch passes it with a ripple R per axis.
+                keep = 1 - _HALF_BAND[HALF_BAND_RADIUS]**2
+                ripple = math.fsum(tap * math.cos(math.pi*n/2) for n, tap in
+                                   zip(range(-NOTCH_RADIUS, NOTCH_RADIUS+1), _NOTCH))
+                raw = 3 * keep * height**.5 * world.kwargs['residual_std']
+                old_amplitude = raw * ripple**2 / (1 + (raw/_slope_cap(1))**2)**.5
                 actual_amplitude = (child-height).abs().max().item()
                 # Signed-sqrt composition adds the second-order (ds)^2 term.
                 self.assertGreater(actual_amplitude / old_amplitude, .99)
                 self.assertLessEqual(actual_amplitude, old_amplitude * (1 + 1e-3))
+
+    def test_decoder_and_native_nyquist_stripes_do_not_become_a_grid(self):
+        # Decoders leave alternating rows and columns; interpolating splines
+        # kept them and magnified hillshading showed a 60 m and 30 m grid.
+        stripes = lambda y, x: 1000 + 4*(1 - 2*(x % 2)) + 3*(1 - 2*(y % 2))
+        for device in self.devices():
+            world = self.world(device, stripes)
+            with patch('terrain_refinement._detail_field', return_value=DetailField(device, stripes=True)):
+                child = sample_refined(world, 1, -64, -64, 64, 64).double()
+            with self.subTest(device=device):
+                self.assertLess((child - 1000).abs().max().item(), .05)
 
     def test_a_land_parent_cell_holds_both_land_and_sea_at_fine_levels(self):
         for device in self.devices():

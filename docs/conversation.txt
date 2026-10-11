@@ -3,8 +3,106 @@ A faire:
 - LOD -2/-3: faire une tentative de remplacement > surtout le lod 3 pixellize donc on va avoir des problèmes de rivieres. On peut pas tricher en faisant croire que c'est un plus gros ?
 - Application de l'érosion gpu sur les LOD 3-2-1-0 pour essayer de refaire les fjords et autres structures
 
-
+- Calotte glacière !!!!! 
+- Saisons
+- Render noises sont bien loins et très pres nul le reste
 ------------------------------------------------------------------------------------------------------
+
+
+
+
+Ce que j'ai mesuré
+
+J'ai reconstruit la LOD −3 en mettant à zéro toutes les contributions du décodeur, avec seulement l'upsampling bilinéaire, la correction de moyenne par blocs 2×2 et le clamp de terrain_refinement.py. Ce résultat reproduit presque tous les artefacts visibles : les tirets horizontaux et l'escalier qui suit la grille de 30 m.
+
+┌───────────────────────────┬──────────────────────────────────────────────────────────────┐
+│       À −3 (3,75 m)       │ Courbure selon la phase dans une cellule de 30 m (min → max) │
+├───────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ Sortie du serveur         │ 0,78 → 1,28                                                  │
+├───────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ Base seule, sans décodeur │ 0,67 → 1,44                                                  │
+├───────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ Résidu du décodeur seul   │ 0,88 → 1,13                                                  │
+└───────────────────────────┴──────────────────────────────────────────────────────────────┘
+
+- La base porte le treillis de 30 m. Le bilinéaire récursif donne une surface C0, donc des cassures de pente aux nœuds de la grille. base + _repeat(parent - avg_pool(base)) ajoute ensuite des marches à chaque niveau. L'ombrage à 3,75 m révèle tout ça.
+- Le résidu du décodeur fait des blocs 2×2. Le passage à moyenne nulle par bloc et le gain partagé par bloc (_repeat, max_pool(…, 2)) en sont la cause. Le décodeur lui-même produit environ 1 m RMS de détail, ce qui est raisonnable.
+- La correction tient. Une B-spline cubique interpolante, calculée en une seule passe depuis le DEM natif de 30 m, ne donne aucun treillis ni tiret, à −3 comme à −5. À −5 la surface est propre mais vide, il faut donc y ajouter du détail.
+
+Les images sont dans le scratchpad, sous lod/ : decomp.png (serveur / base seule / résidu / bicubique récursif) et bspline.png. Le bicubique récursif fait lui aussi un treillis. La correction doit donc être une interpolation en une seule passe, pas un meilleur filtre da
+
+Ce que je recommande
+
+1. Changer la base d'abord. C'est ce qui drérequis pour aller plus loin.
+- La LOD −k s'évalue directement depuis le natif avec une B-spline cubique, qui est lisse au 2e ordre. Il n'y a plus de récursion : −6 n'a plus besoin d
+- Le préfiltre B-spline s'applique sur la tuile plus une marge. Son erreur décroît en 0,268ⁿ, donc ~12 cellules
+  natives donnent une cohérence entre tuil
+- On abandonne la contrainte exacte de moyenne par bloc. L'écart est de l'ordre du terme de courbure, petit et
+  masqué par le fondu entre LOD, alors quebrique l'escalier.
+- La côte demande une logique séparée. La B-spline peut dépasser et inverser le signe près de 0 m, donc on garde
+  la logique actuelle de bande côtière natcifiquement.
+
+2. Garder le décodeur pour −1, peut-être −s. Il faut remplacer la moyenne nulle et legain par bloc par un passe-haut gaussien et un gain lissé. Une fois la base propre, on verra jusqu'où il tient vraiment.
+
+3. Du procédural guidé par le terrain pourdeur. Trois raisons :
+- Hors distribution : à −6, chaque cellule de latent étirée couvre 512 px plats, alors que le réseau a été
+  entraîné sur 8 px.
+- Coût : il faut une passe de décodeur 512² de plus par niveau, avec lectures récursives.
+- Mauvaise physique : le décodeur a appriscrêtes). À 1 m, le relief vient de la roche, des éboulis et du micro-relief, des processus différents.
+
+Le procédural, lui, devrait :
+- prendre l'amplitude de chaque octave en é localement sur le natif, pour qu'il n'yait pas de rupture statistique au passage sous 30 m ;
+- moduler le détail selon la pente, la couet le sol : roche striée sur les fortespentes, fonds de vallée lisses, dunes en zone aride ;
+- utiliser un bruit anisotrope orienté selente, pour faire des ravines ;
+- éventuellement ajouter une courte érosion thermique (angle d'éboulis) par tuile, avec une marge ;
+- hacher les coordonnées en entiers 64 bitr GPU.
+
+La piste « fausse normalisation » de ta ro comme un faux DEM à 30 m, demandel'autoencodeur. Il n'est pas dans les checkpoints publiés, donc il faudrait l'entraîner, et elle garde le problème
+de physique ci-dessus.
+
+La seule option apprise sérieuse serait d'ésolution ×2/×4 sur du lidar à 1 m (RGE ALTI de l'IGN, swissALTI3D, USGS 3DEP). C'est un gros projet, à garder pour plus tard.
+
+4. Pour atteindre −6 (0,47 m). MIN_LOD, le format des codes de partage (aujourd'hui de −3 à 11) et le front
+doivent suivre. Il faut aussi vérifier la ons côté shader loin de l'origine : à ~10000 km, un float32 n'a qu'environ 1 m de précision.
+
+Je te propose de commencer par l'étape 1, qui remplace la cascade par la B-spline directe, puis de comparer −1/−2/−3 avant et après. Ça devrait suffir ça pose la base pour le procédural. Jelance ?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

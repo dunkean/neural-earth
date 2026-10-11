@@ -474,6 +474,18 @@
       return sampled;
     }`;
 
+  // Shaded colours of a refined tile, box-averaged per mip: a finer cached
+  // tile shown below one sample per pixel would otherwise alias its metre
+  // relief into speckle.
+  const colorMipShader=`
+    @group(0) @binding(0) var source:texture_2d<f32>;
+    @group(0) @binding(1) var dest:texture_storage_2d<rgba8unorm,write>;
+    @compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3<u32>){
+      if(any(id.xy>=textureDimensions(dest))){return;}
+      let last=vec2<i32>(textureDimensions(source))-1;let p=vec2<i32>(id.xy)*2;
+      let sum=textureLoad(source,min(p,last),0)+textureLoad(source,min(p+vec2<i32>(1,0),last),0)+textureLoad(source,min(p+vec2<i32>(0,1),last),0)+textureLoad(source,min(p+vec2<i32>(1,1),last),0);
+      textureStore(dest,vec2<i32>(id.xy),sum*.25);
+    }`;
   // Coarse stays in its native signed-sqrt representation. Mips average
   // physical metres, then encode again; averaging signed roots is incorrect.
   const coarseMipShader=`
@@ -637,7 +649,7 @@
         if(errors.length)throw Error(errors.map(x=>`${label}:${x.lineNum} ${x.message}`).join('\n'));
         return result;
       };
-      const [blur,shade,render,coarse,mip,contour,bake]=await Promise.all([module(blurShader,'terrain Gaussian'),module(shadeShader,'terrain relief'),module(renderShader,'terrain quads'),module(coarseShader,'native coarse relief'),module(coarseMipShader,'native coarse mips'),module(contourShader,'terrain vector contours'),module(coarseBakeShader,'native coarse materials')]);
+      const [blur,shade,render,coarse,mip,contour,bake,colorMip]=await Promise.all([module(blurShader,'terrain Gaussian'),module(shadeShader,'terrain relief'),module(renderShader,'terrain quads'),module(coarseShader,'native coarse relief'),module(coarseMipShader,'native coarse mips'),module(contourShader,'terrain vector contours'),module(coarseBakeShader,'native coarse materials'),module(colorMipShader,'terrain colour mips')]);
       this.blurLayout=device.createBindGroupLayout({entries:[
         {binding:0,visibility:GPUShaderStage.COMPUTE,texture:{sampleType:'unfilterable-float'}},
         {binding:1,visibility:GPUShaderStage.COMPUTE,storageTexture:{access:'write-only',format:'rg32float'}},
@@ -673,6 +685,7 @@
       this.noAlbedo=this.makeTexture(1,1,'rgba8unorm');
       this.coarsePipeline=await device.createRenderPipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[this.coarseLayout]}),vertex:{module:coarse,entryPoint:'vertex'},fragment:{module:coarse,entryPoint:'fragment',targets:[{format:this.format}]},primitive:{topology:'triangle-list'}});
       this.coarseMipPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:mip,entryPoint:'main'}});
+      this.colorMipPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:colorMip,entryPoint:'main'}});
       [this.horizontal,this.vertical,this.shade,this.pipeline]=await Promise.all([
         device.createComputePipelineAsync({layout:blurLayout,compute:{module:blur,entryPoint:'horizontal'}}),
         device.createComputePipelineAsync({layout:blurLayout,compute:{module:blur,entryPoint:'vertical'}}),
@@ -682,7 +695,7 @@
       this.contourLayout=device.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:208}}]});
       this.contourPipeline=await device.createRenderPipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[this.contourLayout]}),vertex:{module:contour,entryPoint:'vertex',buffers:[{arrayStride:20,stepMode:'instance',attributes:[{shaderLocation:0,offset:0,format:'float32x4'},{shaderLocation:1,offset:16,format:'float32'}]}]},fragment:{module:contour,entryPoint:'fragment',targets:[{format:this.format,blend:{color:{srcFactor:'src-alpha',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}]},primitive:{topology:'triangle-list'}});
       const validation=await device.popErrorScope(); if(validation)throw Error(validation.message);
-      this.sampler=device.createSampler({magFilter:'linear',minFilter:'linear'});
+      this.sampler=device.createSampler({magFilter:'linear',minFilter:'linear',mipmapFilter:'linear'});
       this.available=true; this.notify('webgpu'); return this;
     }
     fail(message) {
@@ -707,7 +720,8 @@
       this.deleteTile(key); const started=performance.now(); this.scratch(width,height);
       const innerWidth=width-2*halo,innerHeight=height-2*halo;
       const elevation=this.makeTexture(width,height,'r32float',GPUTextureUsage.COPY_DST);
-      const color=this.makeTexture(innerWidth,innerHeight,'rgba8unorm',GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_SRC);
+      const colorMips=Math.min(5,Math.floor(Math.log2(Math.min(innerWidth,innerHeight)))+1);
+      const color=this.device.createTexture({size:[innerWidth,innerHeight],format:'rgba8unorm',mipLevelCount:colorMips,usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_SRC});
       if(climate!==null&&(!(climate instanceof Float32Array)||![5,21,36,46,50].includes(climate.length/(climateWidth*climateHeight))))throw Error('Invalid ticlimatee');
       const climateLayers=climate?climate.length/(climateWidth*climateHeight):5;
       const climateTexture=this.device.createTexture({size:[climateWidth,climateHeight,climateLayers],format:'r32float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
@@ -717,7 +731,7 @@
       const selectedMode=modeNumber(this.mode??mode);
       const tile={elevation,color,climate:climateTexture,halo,resolution:metresPerSample,params:[width,height,selectedMode,0],origin,lod,heights};
       this.shadeTile(tile);
-      const bytes=width*height*4+innerWidth*innerHeight*4+climateWidth*climateHeight*climateLayers*4;
+      const bytes=width*height*4+Math.ceil(innerWidth*innerHeight*16/3)+climateWidth*climateHeight*climateLayers*4;
       this.tiles.set(key,Object.assign(tile,{bytes,lastUsed:++this.serial}));this.bytes+=bytes;this.uploads++;this.lastUploadSubmitMs=performance.now()-started;
       window.TerrainTiming.record('render.upload_and_shade_submit',started,{key,bytes});
       window.TerrainTiming.queue(this.device.queue,'render.shade');
@@ -731,10 +745,14 @@
       const selectedMode=tile.params[2];
       this.device.queue.writeBuffer(params,0,new Float32Array([metresPerSample,halo,innerWidth,innerHeight,selectedMode,0,0,0,...(window.TerrainLighting?.vectors(lod)||[1,.35,1,1,-.5,-.5,.70710678,0]),...origin,0,0,...this.renderVectors()]));
       const horizontalGroup=this.device.createBindGroup({layout:this.blurLayout,entries:[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchA.createView()}]});
-      const shadeGroup=this.device.createBindGroup({layout:this.shadeLayout,entries:[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchB.createView()},{binding:2,resource:color.createView()},{binding:3,resource:{buffer:params}},{binding:4,resource:climateTexture.createView({dimension:'2d-array'})}]});
+      const shadeGroup=this.device.createBindGroup({layout:this.shadeLayout,entries:[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchB.createView()},{binding:2,resource:color.createView({baseMipLevel:0,mipLevelCount:1})},{binding:3,resource:{buffer:params}},{binding:4,resource:climateTexture.createView({dimension:'2d-array'})}]});
       const encoder=this.device.createCommandEncoder({label:'terrain shade once'});
       for(const [pipeline,group,w,h] of [[this.horizontal,horizontalGroup,width,height],[this.vertical,this.verticalGroup,width,height],[this.shade,shadeGroup,innerWidth,innerHeight]]) {
         const pass=encoder.beginComputePass(); pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(w/8),Math.ceil(h/8));pass.end();
+      }
+      for(let level=1;level<color.mipLevelCount;level++){
+        const group=this.device.createBindGroup({layout:this.colorMipPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:color.createView({baseMipLevel:level-1,mipLevelCount:1})},{binding:1,resource:color.createView({baseMipLevel:level,mipLevelCount:1})}]});
+        const pass=encoder.beginComputePass();pass.setPipeline(this.colorMipPipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil((innerWidth>>level)/8),Math.ceil((innerHeight>>level)/8));pass.end();
       }
       this.device.queue.submit([encoder.finish()]); params.destroy();tile.shadedMode=selectedMode;
     }

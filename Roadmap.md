@@ -1,15 +1,14 @@
 Now:
-- map/view compressed UID
+- Calotte glacière déguelasse avec un vieux noise !!!!! 
+- Noise dalmatien LOD 2 1
+- Render noises sont bien loins et très pres nul le reste
+- map/view compressed UID > to upgrade
 - Exports
-- UI cleaning
-- Repo cleaning
 
 Short term:
-- InifiniteGeneration Distillation (80% done)
-- Negative LOD finetuning: either Decoder retraining - fake heightmap normalization - homemade/third-party noise + erosion (magna urbis rust)
-- Orogen optimization pass: LOD ? tuning of best ratio cell / pixel / quality. Moar GPU porting
+- Saisons
+- Negative LOD finetuning: either Decoder retraining ((RGE ALTI, swissALTI3D, USGS 3DEP) - fake heightmap normalization + noise (done)
 - Basins then multiscale rivers: try Magna Urbis gpu erosions rivers (fix FP16 straight lines / test on IG reliefs)
-- Render layer optimization: either efficient gpu pipeline/shaders or surrogation in a UNET or UNET on GEarth (less probable)
 
 Mid/Long term:
 - Brush map layer
