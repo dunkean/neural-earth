@@ -4,7 +4,29 @@
 
 ## Point du 11 octobre : préservation des vallées encore insuffisante
 
-Le prochain essai est maintenant lancé :
+L'essai de supervision interne ci-dessous s'est lui aussi arrêté au contrôle
+morphologique au pas500. Son score de sélection agrégé baisse légèrement
+(0,87135 à0,86915), mais ce progrès masque des régressions dans les cas rares :
+avec coarse4, rappel des vallées fines des plaines tempérées18,6 % à16,2 %,
+et corrélation des vallées natives des plaines désertiques0,328 à0,226.
+Erreur latente globale0,11052 à0,11380 ; score physique7,640 à8,186.
+Ne pas prolonger ce checkpoint ni le présenter comme un candidat accepté.
+
+Le test architectural suivant repart des poids du teacher : native160×3,
+**tous les blocs et toutes les connexions de saut conservés**, réduction des
+canaux192 à160 avec sélection calibrée exclusivement sur TRAIN.178 138 245
+paramètres, contre253 688 037 pour le teacher. Le job `base-native160-operator`
+entraîne sur la5090 jusqu'à15000 étapes, batch4/lr2e-5/seed20261010, sur les
+42624 fenêtres TRAIN originales ; validation opérateur3552 fenêtres.
+Root : `~/data/distill/ckpt/native160x3-operator-pilot/`.
+Le job `base-native160-matched-validation` attend sa fin vérifiée puis évalue
+l'initialisation,5000 et15000 sur les204 scènes mixed natif/4/2 et les cas rares.
+Rapport prévu : `~/data/distill/eval/native160x3-operator-matched-validation.json`.
+Il s'agit d'un préentraînement opérateur, pas encore d'un entraînement mixed
+complet ni d'une preuve de qualité/performance. Dix tests de compression native
+passent ; correspondance calibration/manifest et transfert complet contrôlés.
+
+Commande de l'essai de supervision interne maintenant arrêté :
 `python -m distill.native_feature_train --output ~/data/distill/ckpt/native192x2-feature-mixed-pilot --smoke-root ~/data/distill/eval/native192-feature-smoke --steps 1500`.
 Il repart de l'EMA native192×2 opérateur15000, sans reprendre les poids
 physiques rejetés. L'objectif est MSE opérateur +0,05 MSE des gradients +0,5
