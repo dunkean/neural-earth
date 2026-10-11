@@ -144,6 +144,12 @@ lignes de morphologie sous `eval/native-operator5000-matched-validation.json`.
 La même évaluation du best du run prolongé est en attente de sa fin, dans
 le job `base-native-operator-long-validation`. Ces rapports numériques
 préparent la prochaine décision ; aucune planche finale n'est générée.
+Le palier opérateur15000 a terminé ; MSE de validation0,06708 contre0,08049
+au pas5000. La comparaison complète des14 vues avec coarse4/decoder200k
+suit l'évaluation intérieure, job `base-native-operator15000-app-comparison`.
+Le contrôle des jobs utilise maintenant un nom tmux EXACT (`=nom`) : un
+job `train-validation` ne peut plus faire apparaître `train` encore vivant
+après sa fin. Une régression avec deux noms de sessions le vérifie sans GPU.
 
 `check_physical_seams.py` accepte également les deux options de stages
 partagés pour comparer les requêtes froides sur les deux axes dans la chaîne

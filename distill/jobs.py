@@ -37,7 +37,9 @@ def state(directory):
     path = directory/'status.json'
     result = json.loads(path.read_text()) if path.exists() else dict(status='missing')
     session = f"distill-{directory.name}"
-    tmux = subprocess.run(['tmux', 'has-session', '-t', session], capture_output=True).returncode == 0
+    # tmux otherwise accepts a unique prefix: a finished "train" job would
+    # appear live while "train-validation" exists, deadlocking its queue.
+    tmux = subprocess.run(['tmux', 'has-session', '-t', '='+session], capture_output=True).returncode == 0
     worker = (bool(result.get('worker_identity')) and result.get('worker_pid') is not None and
               proc_identity(result['worker_pid']) == result.get('worker_identity'))
     child = (bool(result.get('child_identity')) and result.get('child_pid') is not None and
