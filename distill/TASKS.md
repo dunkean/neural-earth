@@ -162,7 +162,16 @@ n'est pas présumé meilleur. Poids sous `ckpt/native192x2-operator-long/`,
 évaluation aux trois coarse et deux LOD par
 `base-native192-operator-validation`. Le run128×2 continue sur5090 ; le192×2
 et les évaluations utilisent la4090. L'évaluation du128×2 à50000 attend aussi
-la fin de celle du192×2 pour éviter deux jobs simultanés sur4090.
+la fin de son propre entraînement et utilise maintenant la5090 libérée.
+Le192×2 termine15000 pas (198760669 paramètres) : pire groupe physique7,632
+contre11,567 pour128×2 à15000, MAE médianes LOD3/0 de51,16m/41,40m.
+La corrélation des vallées désertiques LOD3 monte à0,293 contre0,082 ; elle
+reste insuffisante. Le job `base-native192-multilod-smoke` teste les gradients
+sur4090, puis `base-native192-multilod-next` entre dans un nouveau pilote
+physique original/4/2 jusqu'à2000 pas. Il vérifie son propre checkpointsource
+immuable15000, sa propre preuve smoke et les mêmes producteurs figés avant
+de devenir le trainer. Sorties sous `eval/native192-multilod-smoke/` et
+`ckpt/native192x2-multilod-mixed-pilot/`. Aucun poids base accepté ou livré.
 Le contrôle des jobs utilise maintenant un nom tmux EXACT (`=nom`) : un
 job `train-validation` ne peut plus faire apparaître `train` encore vivant
 après sa fin. Une régression avec deux noms de sessions le vérifie sans GPU.

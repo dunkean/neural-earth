@@ -30,14 +30,18 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--steps',type=int,default=2000)
     parser.add_argument('--output',type=Path,default=DATA/'ckpt/native128x2-multilod-mixed-pilot')
+    parser.add_argument('--source',type=Path,default=DATA/'ckpt/native128x2-pilot/best.pt')
+    parser.add_argument('--smoke-job',default='base-native-multilod-smoke')
+    parser.add_argument('--smoke-root',type=Path,default=DATA/'eval/native-multilod-mixed-smoke')
+    parser.add_argument('--progress',type=Path,default=DATA/'native-multilod-next.json')
     args=parser.parse_args()
     if args.steps<1:
         parser.error('Positive optimizer-step target required.')
-    progress=DATA/'native-multilod-next.json'
+    progress=args.progress.expanduser().resolve()
     atomic_json(progress,dict(status='running',phase='waiting-for-capture-and-smoke'))
-    wait_job('base-native-multilod-smoke')
+    wait_job(args.smoke_job)
     wait_job('base-native-mixed-capture')
-    smoke_root=DATA/'eval/native-multilod-mixed-smoke'
+    smoke_root=args.smoke_root.expanduser().resolve()
     proof=json.loads((smoke_root/'gpu-smoke.json').read_text())
     verify_smoke(proof)
     replays=json.loads((smoke_root/'teacher-control.json').read_text())
@@ -51,7 +55,7 @@ def main():
     paths={name:REPO/name for name in contract['producer_sha256']}
     paths.update(dataset=DATA/'crops/native-mixed-scenes-v2/manifest.json',
         statistics=DATA/'eval/native-decoded-probe/channel-statistics.json',
-        source=DATA/'ckpt/native128x2-pilot/best.pt')
+        source=args.source.expanduser().resolve())
     for name,sha in sources.items():
         if hashlib.sha256(paths[name].read_bytes()).hexdigest()!=sha:
             raise ValueError('Training source or producer differs from the successful smoke.')
@@ -60,7 +64,8 @@ def main():
         note='Process becomes the trainer; terminal/quality status is recorded by trainer and durable job.'))
     # Keep the durable PID and signal handling: no orphan trainer subprocess.
     os.execv(sys.executable,[sys.executable,'-u','-m','distill.native_multilod_train',
-        '--steps',str(args.steps),'--output',str(args.output)])
+        '--steps',str(args.steps),'--output',str(args.output),
+        '--source',str(args.source.expanduser().resolve())])
 
 
 if __name__=='__main__':
