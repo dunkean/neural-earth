@@ -39,6 +39,16 @@ puissances par bande/canal/phase du teacher sur des strates TRAIN original/
 après inspection : dénominateurs figés sur ces puissances et équilibrage
 des termes H4/première passe. Même point de départ, mêmes garde-fous ;
 aucune reprise du500 rejeté ni normalisation par l'énergie de l'élève.
+La calibration a terminé sur273 scènes TRAIN,546 fenêtres par phase.
+Avant de choisir les canaux à renforcer, le job5090
+`base-native-first-channel-oracle` injecte séparément les canaux0/1/2/3/H4
+du teacher dans l'entrée de seconde passe, puis le groupe0–3 et tous les5,
+sur les20 scènes rares coarse4 indépendantes. Le bruit, labels et conditions
+restent identiques. Cela distingue un défaut des features de première passe
+d'un défaut H4 de première passe qui pourrait perturber les features ensuite.
+Le simple remplacement H4 en SORTIE finale ne suffisait pas à le distinguer.
+Rapport prévu : `eval/native160-first-channel-oracle.json` ; quatre rendus
+dans `_base/015000-first-channel-*.png`, alternative textuelle et JSON voisins.
 
 Le contrôle de durée native160×3 a été arrêté proprement au pas28579,
 après le contrôle indépendant25k : coarse4 rare, rappel fin0,44091,
