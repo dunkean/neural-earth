@@ -4,6 +4,22 @@
 
 ## Pilote du 11 octobre : objectifs latents distincts pour les deux passes
 
+Le premier pilote s'est arrêté au garde-fou morphologique au pas500,
+statut terminal vérifié : erreur0–3 pratiquement inchangée0,07080→0,07074,
+score physique amélioré8,396→7,765, mais score IoU dégradé0,78928→0,79617
+et rappel fin en baisse dans tous les grands profils. Par exemple coarse4
+tempéré0,3987→0,3771, plaine basse/mer0,2903→0,2497 (moyenneσ2/8).
+Les canaux opérateur protégés n'ont pas dépassé leurs plafonds. Ne pas
+reprendre ce500 ; garder les poids et images pour diagnostic, pas livraison.
+Les poids bruts restent en cours d'évaluation séparée sur4090.
+
+Contrôle complémentaire5090 `base-native-full-wrapper-control` : teacher
+non comprimé, mêmes poids et architecture192×3, dans l'enveloppe NativeBase
+fonctionnelle, sans entraînement. Il vérifie si le chemin d'entraînement et
+d'évaluation reproduit le teacher avant de modifier les normalisations de loss.
+Fichiers : `eval/native-full-wrapper-control{.pt,-validation.json}` et rendu
+`_base/teacher-control-000000.png`. Ce contrôle n'est pas un élève distillé.
+
 Le contrôle de durée native160×3 a été arrêté proprement au pas28579,
 après le contrôle indépendant25k : coarse4 rare, rappel fin0,44091,
 corrélation0,82339, amplitude0,68134 ; natif, corrélation0,15028 et
@@ -72,6 +88,12 @@ rares ×LOD3/0 ×teacher/élève, même coarse4/decoder200k, grand champ et
 quatre tuiles à caches neufs, deux axes, halos24 et ordre inversé. Le job
 CPU `base-native160-duration25k-seam-publication` attend sa fin vérifiée
 puis copie images/CSV/rapport à plat dans `_base/025000-seam-*`.
+Ce contrôle a terminé16 lignes. Pire MAE grand champ/quatre tuiles des
+quatre sites : LOD3 teacher0,955 m/élève0,954 m ; LOD0 teacher0,00492 m/
+élève0,04620 m. Pire saut supplémentaire LOD0 : teacher0,110 m/élève1,067 m.
+Ce sont les erreurs de partition du25k, pas ses erreurs par rapport au teacher
+ni une certification d'un futur checkpoint. Rapport/CSV et16 images copiés
+dans `_base`, `025000-seams.*` et `025000-seam-*.png`.
 `base-native160-phase500-raw-validation` attend ce test et le checkpoint500,
 exporte les poids bruts en fichier d'inférence identifié (hors Git), évalue
 EMA/bruts sur les204 scènes et60 formes rares, puis publie
