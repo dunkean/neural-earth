@@ -21,6 +21,13 @@ coarse4/8 et decoder et met à jour uniquement coarse1/2 et leur provenance.
 Ce script ne commit/push pas ; cette étape suit l'inspection des deux exports.
 Quatre tests CPU vérifient la sélection best d'un run complet et le refus
 des runs partiels, des poids modifiés ou d'une livraison manquante.
+Le job CPU `coarse-delivery-next` (`python -m distill.coarse_delivery_next --push`)
+attend les identités de processus des deux runs et automatise cette livraison.
+Il refuse une branche différente, des fichiers de livraison modifiés pendant
+l'attente, un staging déjà rempli, un arrêt incomplet ou des preuves altérées.
+Il met à jour poids/provenances et documentation, commit/push `distill`, vérifie
+le SHA distant et écrit `~/data/distill/coarse-delivery-next.json`. Il ne lance
+ni serveur ni base. En cas d'échec, inspecter avant toute reprise.
 
 L'utilisateur propose ensuite d'entraîner le base aussi avec les coarse
 distillés4/2. Le prochain entraînement base mélangera original/4/2, avec des
