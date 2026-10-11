@@ -2,6 +2,16 @@
 
 2026-10-10 · Grégory Beurier
 
+## Livraison coarse1/coarse2 complets
+
+Les deux entraînements ont terminé200 000 étapes. Poids best EMA sur384
+crops : coarse1 pas200000, coarse2 pas200000.
+Les trois contrôles export/CUDA Graph par modèle donnent une différence
+maximale0 ; provenance/SHA et statut complet dans `weights/manifest.json`.
+Best/latest et jalons conservés sous `~/data/distill/ckpt/coarse-full/`.
+Aucun poids base livré. Reprendre maintenant la stratégie base décrite
+ci-dessous : supervision LOD3/LOD0, cas rares, coarse original/4/2.
+
 ## Priorité utilisateur : terminer coarse1 et coarse2 avant le base
 
 Le 2026-10-11, l'utilisateur demande explicitement de finir les deux coarse

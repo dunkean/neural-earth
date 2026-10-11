@@ -5,12 +5,12 @@ du haut. Au premier lancement, les choix sont **coarse distillé 4 étapes,
 base original et decoder distillé**. Coarse et decoder peuvent être comparés
 à leurs modèles d'origine ; coarse8 reste disponible si son export existe.
 Coarse **2 étapes** et **1 étape** sont inclus sous `distill/weights/coarse2.pt`
-et `coarse1.pt`. Les EMA sélectionnées sur 384 crops de validation sont celles
-des pas 35 000 et 50 000 respectivement. Les runs visant 200 000 pas ont été
-interrompus à la demande de l'utilisateur aux pas 37 180 et 54 669 ; ces poids
-sont donc des entraînements partiels. Seuls chargement,
-sortie finie et équivalence export/CUDA Graph sont contrôlés ; l'utilisateur
-juge leur qualité dans l'app. Leur disponibilité ne change pas le défaut coarse4.
+et `coarse1.pt`. Les deux runs ont terminé leurs **200 000 étapes**.
+Les EMA retenues sur384 crops sont aux pas200000 et200000 respectivement.
+Les états latest/best et les jalons restent archivés hors Git ; seuls les
+poids d’inférence sont distribués. Sorties finies et équivalence export/
+CUDA Graph sont vérifiées ; la qualité visuelle reste à juger dans l’app.
+Le modèle par défaut reste coarse4.
 Les bases distillés rejetés ne figurent plus dans le menu ni dans l'API.
 Une ancienne configuration qui les sélectionnait est migrée vers le base original,
 sans modifier coarse, decoder ou le reset. Les autres choix sauvegardés sont
