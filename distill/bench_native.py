@@ -80,7 +80,7 @@ def main():
                 world.coarse[:, -8:args.size//32+8, -8:args.size//32+8]
                 torch.cuda.synchronize()
                 started = time.perf_counter()
-                field = world.latents[:, :args.size, :args.size]
+                field = world.latents[:, 0:args.size, 0:args.size]
                 torch.cuda.synchronize()
                 elapsed = time.perf_counter()-started
                 status = inference_status(world)

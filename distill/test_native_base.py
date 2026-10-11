@@ -12,6 +12,8 @@ from distill.export import export_stage
 from distill.student import Student, StudentConfig, load_student
 from distill.native_compression import compressed_config, project_state, select_channels
 from distill.native_bank import SceneCapture, scene_proposals
+from distill.native_inference import load_native
+from distill.common import REVISION
 
 
 class NativeTeacherTests(unittest.TestCase):
@@ -167,6 +169,23 @@ class NativeTeacherTests(unittest.TestCase):
             (output/'decoder.pt').write_bytes(b'changed')
             with self.assertRaisesRegex(ValueError, 'immutable'):
                 export_stage(path, output)
+
+    def test_native_loader_preserves_the_training_operator_and_revision(self):
+        teacher = self.compression_teacher()
+        teacher.net.out_gain.data.fill_(1.)
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory)/'native.pt'
+            state = dict(config=teacher.config, model=teacher.state_dict(),
+                         ema=teacher.state_dict(), step=5, teacher_revision=REVISION)
+            torch.save(state, path)
+            model, saved = load_native(path)
+            inputs, labels, conditions = torch.randn(1,5,64,64), torch.ones(1), [torch.randn(1,58)]
+            torch.testing.assert_close(model(inputs, noise_labels=labels, conditional_inputs=conditions),
+                                       teacher(inputs, labels, conditions), rtol=0, atol=0)
+            state['teacher_revision'] = 'different'
+            torch.save(state, path)
+            with self.assertRaisesRegex(ValueError, 'revision'):
+                load_native(path)
 
 
 if __name__ == '__main__':

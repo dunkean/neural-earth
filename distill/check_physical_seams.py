@@ -111,6 +111,7 @@ def preview(path, full, mosaic, lod, title):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base', type=Path)
+    parser.add_argument('--native-base', type=Path, help='Native base EMA, with original coarse and decoder.')
     parser.add_argument('--coarse', type=Path)
     parser.add_argument('--decoder', type=Path)
     parser.add_argument('--site-manifest', type=Path, default=DATA/'eval/rare-sites-complete.json')
@@ -121,8 +122,11 @@ def main():
                         help='Also capture explicitly named frozen rare cases alongside historical sites.')
     parser.add_argument('--lods', nargs='+', type=int, choices=(0, 3), default=[3, 0])
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--no-preview', action='store_true', help='Keep numerical/raw evidence only; final plates are produced separately.')
     args = parser.parse_args()
     paths = {k:v for k,v in dict(base=args.base, coarse=args.coarse, decoder=args.decoder).items() if v}
+    if args.native_base and paths:
+        parser.error('Native base comparison uses original coarse/decoder; omit other weights.')
     if paths and set(paths) != {'base', 'coarse', 'decoder'}:
         parser.error('Supply all three candidate stages together, or run teacher only.')
     if args.historical_sites and args.sites:
@@ -161,7 +165,18 @@ def main():
         fingerprint[stage] = hashlib.sha256(payload).hexdigest()
         with torch.inference_mode(False):
             models[stage], _ = load_student(io.BytesIO(payload), 'cuda')
-    for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py'):
+    if args.native_base:
+        from distill.native_inference import load_native
+        payload = args.native_base.read_bytes()
+        fingerprint['base'] = hashlib.sha256(payload).hexdigest()
+        with torch.inference_mode(False):
+            models['native_base'], saved = load_native(io.BytesIO(payload), 'cuda')
+        fingerprint['training_step'] = saved['step']
+        del payload, saved
+    code_files = (('distill/native_inference.py', 'backend/terrain_inference.py',
+                   'terrain-diffusion/terrain_diffusion/inference/world_pipeline.py') if args.native_base else
+                  ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py'))
+    for name in code_files:
         fingerprint['code:'+name] = hashlib.sha256((REPO/name).read_bytes()).hexdigest()
     output = external_path(args.output)
     output.mkdir(parents=True, exist_ok=True)
@@ -195,13 +210,17 @@ def main():
         configure_world(world, replace(loaded._terrain_profile, cuda_graphs=False), world_profile=site['profile'])
         if variant == 'student_all':
             install(world, models)
+        elif variant == 'native_student':
+            from terrain_inference import prepare_models
+            world.base_model = models['native_base']
+            prepare_models(world)
         world.bind()
         return world
     for site in sites:
         for lod in args.lods:
             span = 256 * 30 * 2**lod
             tx, ty = int(np.floor(site['x']/span)), int(np.floor(site['y']/span))
-            for variant in ['reference'] + (['student_all'] if paths else []):
+            for variant in ['reference'] + (['native_student'] if args.native_base else ['student_all'] if paths else []):
                 if any(r['site'] == site['name'] and r['lod'] == lod and r['variant'] == variant for r in report['rows']):
                     continue
                 name = f"{site['name']}-lod{lod}-{variant}"
@@ -212,6 +231,7 @@ def main():
                 if lod >= 3:
                     whole = gaussian_filter(whole, sigma=.65, mode='reflect').astype(np.float32)
                 whole = lod_relief(resolve_generation(site['profile']).settings, whole, lod)[280:792, 280:792]
+                whole_world.close()
                 del whole_world
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -224,6 +244,7 @@ def main():
                     if stage not in ('latent', 'decoder'):
                         raise ValueError(f'Unexpected cached/preview stage: {stage}')
                     tiles[(y, x)] = value
+                    tile_world.close()
                     del tile_world
                     gc.collect()
                     torch.cuda.empty_cache()
@@ -232,7 +253,8 @@ def main():
                 report['rows'].append(row)
                 atomic_write(output/(name+'.npz'), lambda f: np.savez_compressed(f, whole=whole, tiled=mosaic,
                              **{f'tile_{y}_{x}':v for (y,x),v in tiles.items()}))
-                preview(output/(name+'.png'), whole, mosaic, lod, name)
+                if not args.no_preview:
+                    preview(output/(name+'.png'), whole, mosaic, lod, name)
                 atomic_json(output/'report.json', report)
                 print(json.dumps(row), flush=True)
     with (output/'summary.csv').open('w', newline='') as handle:

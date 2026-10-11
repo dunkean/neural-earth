@@ -22,6 +22,55 @@ complet et planches finales demeure requise avant acceptation.
 
 ## Historique : objectif coarse complets, puis base
 
+### Base natif : mesures et reprise concrète après livraison des coarse
+
+Benchmark réel5090 au repos, champ latent1024²/T2/fenêtres64/pas32/batch16,
+coarse préchargé, préparation/transferts/fusion inclus, médiane3 mesures :
+référence254 M :3,462 s ;192×2 :2,797 s ;128×2 :1,726 s (2,006×) ;
+96×2 :1,540 s ;128×1 :1,541 s ;96×1 :1,481 s. Poids candidats aléatoires,
+coût uniquement. Le128×2 (90,84 M) est retenu pour commencer avec plus de
+capacité. Preuve `bench/native-architectures/gpu1.json`. Aucun gain de qualité
+ou modèle entraîné accepté n'est déduit de cette mesure.
+
+Capture624 scènes terminée :576 train/48 val, deux phases/coordonnées/batches/
+champs fusionnés conservés. Calibration sur64 scènes train uniquement et
+contrôle strict teacher BF16 cached/interface fonctionnelle non comprimée :
+maxabs0 pour les deux, `eval/native-channel-calibration-v1.json`.
+Le pilote natif128×2 de5000 pas tourne sur5090, après projection des canaux,
+têtes et skips calibrée sur train. Première validation au pas500 :MSE vitesse
+0,234, dont initialisation0,308 et raffinement0,093 ; proxy uniquement.
+
+`native_fusion.py` reconstruit le T2 différentiable :16 fenêtres initiales,
+4 fenêtres de raffinement, cœur32² ; bruit global exact et même arithmétique
+BF16 avant fusion. Le raffinement utilise l'état élève. Targets de vitesse
+teacher et différences de recouvrement sont calculés sur ce même état, détaché.
+Loss latent, gradients, courbure hauteur et opérateurs. Test CUDA réel128×2 :
+deux pas avec gradients finis,0,797 s après chauffe,3,76 Go pic. Reconstruction
+des entrées originales exactes ; maxabs final sous1e-6 dû à l'ordre des sommes.
+Ce plancher arithmétique n'est PAS la tolérance physique BF16/FP32 en mètres.
+
+Revue CLI Opus5.5 effort high terminée, session3fd58203-84e8-41cf-a473-eac1fee97eae,
+preuves `review/opus-native-fusion-20261011/`. GO pour pilote, avec corrections
+appliquées : recouvrements on-policy, replay teacher au démarrage, sélection
+composite du pire profil. Validation48 mondes×4 offsets intérieurs,192 cœurs ;
+sampling train indépendant sur les deux axes. Tous les jalons sont conservés.
+`--fresh-noise-fraction` permet de réévaluer les deux étapes teacher sur nouveaux
+bruits pour les futurs runs longs ; le pilote reste sur les bruits capturés.
+Le témoin opérateur à calcul égal proposé par Opus est différé : ce pilote vise
+la comparaison directe au teacher, sans prétendre attribuer causalement le gain
+à une composante de loss. La resélection physique précède toute acceptation.
+
+Job durable CPU `base-native-fusion-next` attend le pilote opérateur, audite la
+reconstruction, entraîne2000 pas régionaux sur5090, puis compare les élévations
+sur7 sites×LOD3/0 et la banque rare complète. `native_inference.py` charge les
+EMA dans le solver de production inchangé. `terrain_shape.py` ajoute position
+topographique multi-échelle, rétention des vallées et directions des gradients,
+calibrées contre FP32/BF16 : proxies morphologiques, pas preuve hydrologique.
+`check_physical_seams --native-base ... --no-preview` vérifie quatre tuiles
+froides et leurs halos contre une grande requête, teacher en contrôle, deux axes.
+Aucune planche intermédiaire, aucun poids base dans Git ou le menu. Entraînement
+complet et sélection finale encore à faire après ces preuves physiques.
+
 L'utilisateur demande les full runs coarse1 et coarse2, puis une distillation
 base réellement plus rapide et fidèle à l'érosion. `coarse_full.py` reprend les
 pilotes5k jusqu'à200k, sur19616 train /384 val. Jobs durables `coarse-full1`

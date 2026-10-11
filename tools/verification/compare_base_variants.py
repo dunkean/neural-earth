@@ -32,7 +32,7 @@ import torch
 from torch import nn
 
 VARIANTS = ['reference', 'fp32base', 'onestep', 'fp16base', 'fp16dec', 'fp32coarse', 'fp32dec',
-            'student', 'student_coarse', 'student_decoder', 'student_all']
+            'student', 'student_coarse', 'student_decoder', 'student_all', 'native_student']
 LODS = (3, 0)
 # Quantization holdout sites (LOD 3 tiles); their centre is used at every LOD.
 HOLDOUT = [dict(seed=101, profile='natural', tx=17, ty=-23),
@@ -100,9 +100,10 @@ def load_copy(folder, dtype):
 
 
 def errors(a, b):
+    from distill.terrain_shape import compare_shape
     d = np.abs(a.astype(np.float64) - b.astype(np.float64))
     return dict(mae=float(d.mean()), rmse=float(np.sqrt((d**2).mean())), p99=float(np.quantile(d, .99)),
-                max=float(d.max()), coast=float(np.mean((a > 0) != (b > 0))))
+                max=float(d.max()), coast=float(np.mean((a > 0) != (b > 0))), shape=compare_shape(a,b))
 
 
 def describe(e, lod):
@@ -121,7 +122,7 @@ def describe(e, lod):
 
 @torch.inference_mode()
 def run(output, variants, *, student=None, coarse_student=None, decoder_student=None,
-        site_names=None, lods=LODS, resume=True, site_manifest=None):
+        native_student=None, site_names=None, lods=LODS, resume=True, site_manifest=None):
     from dataclasses import replace
     from terrain_app import load_pipeline
     from terrain_diffusion.inference.world_pipeline import WorldPipeline
@@ -130,7 +131,7 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
     server.existing_final_mip = lambda *unused: None
     output.mkdir(parents=True, exist_ok=True)
     site_list = sites(site_manifest)
-    if site_manifest is not None and any(v.startswith('student') for v in variants):
+    if site_manifest is not None and any(v.startswith('student') or v == 'native_student' for v in variants):
         if not json.loads(Path(site_manifest).read_text())['frozen']:
             raise ValueError('Freeze teacher-qualified rare sites before evaluating a student.')
     loaded = load_pipeline(site_list[0]['seed'])
@@ -178,7 +179,23 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
         if any(path is None for path in checkpoints.values()):
             raise ValueError(f'{variant}: supply the corresponding --student/--coarse-student/--decoder-student.')
         frozen_models, fingerprint = {}, {}
-        if checkpoints:
+        if variant == 'native_student':
+            if native_student is None:
+                raise ValueError('native_student requires --native-student.')
+            from distill.native_inference import load_native
+            payload = Path(native_student).read_bytes()
+            fingerprint['base'] = hashlib.sha256(payload).hexdigest()
+            with torch.inference_mode(False):
+                base, saved_native = load_native(io.BytesIO(payload), 'cuda')
+            fingerprint['training_step'] = saved_native['step']
+            for name in ('distill/native_base.py', 'distill/native_inference.py',
+                         'backend/terrain_inference.py', 'terrain-diffusion/terrain_diffusion/inference/world_pipeline.py'):
+                fingerprint['code:'+name] = hashlib.sha256((REPO_ROOT/name).read_bytes()).hexdigest()
+            from types import SimpleNamespace
+            from terrain_inference import prepare_models
+            prepare_models(SimpleNamespace(coarse_model=base, base_model=base, decoder_model=base))
+            del payload, saved_native
+        elif checkpoints:
             from distill.student import load_student
             for stage, path in checkpoints.items():
                 # Hash and load the same bytes once. Training can atomically
@@ -341,6 +358,7 @@ def main():
     parser.add_argument('output', type=Path)
     parser.add_argument('--variants', nargs='+', default=['reference', 'fp32base'], choices=VARIANTS)
     parser.add_argument('--student', type=Path)
+    parser.add_argument('--native-student', type=Path, help='Native base operator/fusion EMA checkpoint.')
     parser.add_argument('--coarse-student', type=Path)
     parser.add_argument('--decoder-student', type=Path)
     parser.add_argument('--sites', nargs='+')
@@ -350,7 +368,7 @@ def main():
     args = parser.parse_args()
     if args.command == 'run':
         run(args.output, args.variants, student=args.student, coarse_student=args.coarse_student,
-            decoder_student=args.decoder_student, site_names=args.sites, lods=args.lods,
+            decoder_student=args.decoder_student, native_student=args.native_student, site_names=args.sites, lods=args.lods,
             resume=not args.fresh, site_manifest=args.site_manifest)
     else:
         sheet(args.output)
