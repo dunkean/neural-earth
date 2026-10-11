@@ -19,6 +19,26 @@ fonctionnelle, sans entraînement. Il vérifie si le chemin d'entraînement et
 d'évaluation reproduit le teacher avant de modifier les normalisations de loss.
 Fichiers : `eval/native-full-wrapper-control{.pt,-validation.json}` et rendu
 `_base/teacher-control-000000.png`. Ce contrôle n'est pas un élève distillé.
+Il a terminé : MSE relative0–3 0,00002766 ; coarse4 rareσ2, corrélation
+fine0,99936, amplitude1,00015 et rappel0,97879 ; natif, corrélation0,92132
+et amplitude1,00022. Le chemin NativeBase reproduit bien les détails fins
+avec les poids complets, au plancher numérique ; ne pas attribuer les
+vallées absentes du160 à une erreur majeure de cette enveloppe.
+
+L'évaluation brute/EMA500 a terminé sur4090 : coarse4 rareσ2, EMA fine
+rappel0,38010/amplitude0,63437, brut0,36525/0,57961 ; la source15k donnait
+0,41667/0,68331. La moyenne EMA ne cachait pas une bonne version brute.
+Les deux sont rejetés, conservés pour preuve. Rapport :
+`eval/native160-phase500-ema-raw-matched-validation.json` ; image brute
+`_base/phase-raw-000500.png`.
+
+Le job5090 `base-native-phase-band-calibration` calcule maintenant les
+puissances par bande/canal/phase du teacher sur des strates TRAIN original/
+4/2, cas/profils, sans données de validation. Sortie prévue :
+`eval/native-phase-train-band-statistics.json`. Prochain pilote à préparer
+après inspection : dénominateurs figés sur ces puissances et équilibrage
+des termes H4/première passe. Même point de départ, mêmes garde-fous ;
+aucune reprise du500 rejeté ni normalisation par l'énergie de l'élève.
 
 Le contrôle de durée native160×3 a été arrêté proprement au pas28579,
 après le contrôle indépendant25k : coarse4 rare, rappel fin0,44091,
