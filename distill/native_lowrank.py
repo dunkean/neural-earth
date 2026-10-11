@@ -31,7 +31,10 @@ class FactorMPConv(nn.Module):
     def from_conv(cls, conv, rank, mode='factorized'):
         if not isinstance(conv, MPConv) or conv.groups != 1 or tuple(conv.weight.shape[-2:]) != (3, 3):
             raise ValueError('Only ordinary internal MPConv 3x3 layers can be factorized.')
-        weight = conv.weight.float().flatten(1)
+        # Use FP64 only for the offline decomposition. FP32 eigenvectors of
+        # these wide kernels introduced visible full-network roundoff before
+        # any rank reduction; factors/forward/optimizer masters remain FP32.
+        weight = conv.weight.double().flatten(1)
         layer = cls(weight.shape[1]//9, weight.shape[0], (3, 3), rank, conv.no_padding, mode).to(weight.device)
         # Eigh of the small output Gram matrix avoids materializing the wide
         # right singular-vector matrix. Reconstruct A as U^T W, without inverse

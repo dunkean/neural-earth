@@ -28,7 +28,11 @@ def main():
     parser.add_argument('--fractions', type=float, nargs='+', default=[1.])
     parser.add_argument('--mode', choices=('composed', 'factorized'), default='factorized')
     parser.add_argument('--physical', action='store_true')
+    parser.add_argument('--wait-job', help='Wait for a verified successful basis/control job before loading CUDA.')
     args = parser.parse_args()
+    if args.wait_job:
+        from distill.run_training import wait_job
+        wait_job(args.wait_job)
     output, basis_path = external_path(args.output), external_path(args.basis)
     source = teacher_source()
     teacher_sha = digest(source/'diffusion_pytorch_model.safetensors')
@@ -38,11 +42,18 @@ def main():
     torch.backends.cudnn.allow_tf32 = False
     teacher = EDMUnet2D.from_pretrained(str(source)).cuda().eval().requires_grad_(False)
     producers = {f'distill/{name}': digest(REPO/'distill'/name) for name in
-                 ('native_lowrank.py', 'native_lowrank_control.py', 'native_progress_images.py')}
+                 ('native_lowrank.py', 'native_lowrank_control.py', 'native_progress_images.py',
+                  'native_base.py', 'native_multilod_train.py', 'native_feature_train.py', 'native_decoded.py')}
     if args.action == 'prepare':
         if basis_path.exists():
             raise ValueError('Keep an existing basis; do not overwrite the diagnostic.')
         model = NativeLowrankBase.from_teacher(teacher, 1.).eval().requires_grad_(False)
+        reconstruction = {}
+        for name in model.ranks:
+            target = teacher.get_submodule(name).weight
+            actual = model.net.get_submodule(name).composed_weight()
+            reconstruction[name] = dict(relative_mse=float((actual-target).square().mean()/target.square().mean()),
+                                        max_abs=float((actual-target).abs().max()))
         saved = dict(config=dict(teacher.config), ema={k: v.cpu() for k, v in model.state_dict().items()},
             architecture='native-lowrank', factor_ranks=model.ranks, factor_mode='factorized', rank_fraction=1.,
             step=0, teacher_revision=REVISION, teacher_weights_sha256=teacher_sha,
@@ -52,7 +63,8 @@ def main():
         atomic_json(output, dict(status='complete', basis=str(basis_path), basis_sha256=digest(basis_path),
             teacher_weights_sha256=teacher_sha, teacher_revision=REVISION, gpu=torch.cuda.get_device_name(),
             layers=len(model.ranks), parameters=sum(p.numel() for p in model.parameters()),
-            source_parameters=sum(p.numel() for p in teacher.parameters()), producer_sha256=producers, accepted=False))
+            source_parameters=sum(p.numel() for p in teacher.parameters()), decomposition_dtype='float64',
+            reconstruction=reconstruction, producer_sha256=producers, accepted=False))
         print(json.dumps(dict(basis=str(basis_path), layers=len(model.ranks))), flush=True)
         return
 
@@ -95,9 +107,11 @@ def main():
                 actual32 = model.net(batch['inputs'].float(), batch['labels'].float(), [batch['condition'].float()])
                 error = actual32-target32
                 fp32_rows.append(dict(file=record['file'], relative_mse=float(error.square().mean()/target32.square().mean().clamp_min(1e-12)),
-                                      max_abs=float(error.abs().max())))
-        fp32_pass = not fp32_rows or all(r['relative_mse'] < 1e-6 and r['max_abs'] < .002 for r in fp32_rows)
-        if not fp32_pass:
+                    max_abs=float(error.abs().max()),
+                    channel_mse=torch.stack([error[:2].square().mean((0, 2, 3)), error[2:].square().mean((0, 2, 3))]).cpu().tolist(),
+                    reference_channel_power=torch.stack([target32[:2].square().mean((0, 2, 3)), target32[2:].square().mean((0, 2, 3))]).cpu().tolist()))
+        fp32_pass = all(r['relative_mse'] < 1e-6 and r['max_abs'] < .002 for r in fp32_rows) if fp32_rows else None
+        if fp32_rows and not fp32_pass:
             atomic_json(output, dict(status='failed', reason='Full-rank FP32 control failed', fp32_rows=fp32_rows, accepted=False))
             raise ValueError('Full-rank algebra control failed; do not interpret compression quality.')
         details = validate(model, rare, dataset, weight, decoder, variance, True) if args.physical else None
