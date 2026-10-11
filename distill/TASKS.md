@@ -71,6 +71,23 @@ froides et leurs halos contre une grande requête, teacher en contrôle, deux ax
 Aucune planche intermédiaire, aucun poids base dans Git ou le menu. Entraînement
 complet et sélection finale encore à faire après ces preuves physiques.
 
+Contrôle avant fusion sur5090 : le teacher BF16 ne reproduit pas octet pour
+octet les appels capturés sur4090. Maxabs0,25 sur l'initialisation,0,03125 au
+raffinement. Mesure indépendante FP32 sur les MÊMES entrées/batches :MSE
+BF16 inter-GPU5,93e-5/8,12e-6, plancher FP32/BF168,15e-4/2,50e-5. Les
+écarts inter-GPU sont inférieurs au plancher mesuré. Le contrôle startup garde
+les poids pinned/batches/provenance et exige RMSE ≤110% de ce plancher par
+phase, au lieu d'une identité byte incompatible avec deux architectures GPU.
+Preuve `eval/native-fusion-startup-gpu1-floor.json`. Ce contrôle réseau à
+entrées figées ne remplace pas la mesure physique FP32/BF16 de la pipeline.
+
+Le pilote opérateur est maintenant terminé :5000 pas,579,93 s,exit0, meilleur
+checkpoint au pas5000,MSE vitesse val0,08049 (initialisation0,10382 /
+raffinement0,03595), EMA/checkpoints conservés. Le job régional est réellement
+lancé sur5090 pour2000 pas ; contrôle teacher startup passé dans le plancher,
+validation initiale192 cœurs MSE latente0,08737,score pire profil composite
+0,18582. Ces mesures ne certifient pas le rendu physique ni l'érosion.
+
 L'utilisateur demande les full runs coarse1 et coarse2, puis une distillation
 base réellement plus rapide et fidèle à l'érosion. `coarse_full.py` reprend les
 pilotes5k jusqu'à200k, sur19616 train /384 val. Jobs durables `coarse-full1`

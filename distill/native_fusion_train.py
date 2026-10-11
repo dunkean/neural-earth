@@ -52,8 +52,8 @@ def validate(model,files,weight,count):
 
 @torch.no_grad()
 def check_teacher(teacher,path):
-    """Replay original calls, with the capture's batch shapes and cuDNN settings."""
-    maxima=[]
+    """Replay original calls; cross-GPU rounding must fit the measured FP32 floor."""
+    rows=[]
     prior=torch.backends.cudnn.benchmark
     torch.backends.cudnn.benchmark=False
     try:
@@ -65,10 +65,34 @@ def check_teacher(teacher,path):
                     for key in ('inputs','labels','condition','target')]
                 output=teacher(inputs.to(torch.bfloat16),noise_labels=labels.to(torch.bfloat16),
                                conditional_inputs=[condition.to(torch.bfloat16)]).float()
-                maxima.append(float((output-target).abs().max()))
+                error=output-target
+                rows.append(dict(label=float(label),max_abs=float(error.abs().max()),
+                                 mse=float(error.square().mean()),batch=len(indices),call_id=int(call_id)))
+            if any(row['max_abs'] != 0. for row in rows):
+                from terrain_diffusion.models.edm_unet import EDMUnet2D
+                from terrain_inference import prepare_models
+                from types import SimpleNamespace
+                fp32=EDMUnet2D.from_pretrained(str(teacher_source())).to('cuda',torch.float32).eval().requires_grad_(False)
+                prepare_models(SimpleNamespace(coarse_model=fp32,base_model=fp32,decoder_model=fp32))
+                for row in rows:
+                    indices=np.flatnonzero(sample['call_ids']==row['call_id'])
+                    inputs,labels,condition,target=[torch.from_numpy(sample[key][indices]).cuda()
+                        for key in ('inputs','labels','condition','target')]
+                    output=fp32(inputs.float(),noise_labels=labels.float(),conditional_inputs=[condition.float()])
+                    error=output-target
+                    row['fp32_vs_stored_mse']=float(error.square().mean())
+                    row['fp32_vs_stored_max_abs']=float(error.abs().max())
+                    row['passed']=row['mse'] <= 1.21*row['fp32_vs_stored_mse']+1e-12
+                del fp32
+                torch.cuda.empty_cache()
+            else:
+                for row in rows:
+                    row['passed']=True
     finally:
         torch.backends.cudnn.benchmark=prior
-    return dict(max_abs=max(maxima),original_call_batches=True,passed=max(maxima)==0.)
+    return dict(max_abs=max(row['max_abs'] for row in rows),original_call_batches=True,
+                gpu=torch.cuda.get_device_name(),rows=rows,passed=all(row['passed'] for row in rows),
+                note='Same native inputs/batches and pinned weights. Cross-GPU BF16 RMSE must be within110% of the same-input FP32/stored-BF16 floor; this is not decoded physical acceptance.')
 
 
 def main():
