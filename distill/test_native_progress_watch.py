@@ -35,7 +35,7 @@ class PublicationTests(unittest.TestCase):
                     '--target-step', '25000', '--output', str(output)]
             states = [dict(live=True), dict(live=False, status='complete', returncode=0)]
             with patch('sys.argv', argv), patch.object(watch, 'state', side_effect=states), \
-                    patch.object(watch.subprocess, 'run', side_effect=render), patch.object(watch.time, 'sleep'):
+                    patch.object(watch.subprocess, 'run', side_effect=render), patch('threading.Event.wait'):
                 watch.main()
             self.assertEqual(watch.checksum(root/'progress-snapshots/step20000.pt'), expected)
             self.assertFalse(list((root/'progress-snapshots').glob('.publication-*')))

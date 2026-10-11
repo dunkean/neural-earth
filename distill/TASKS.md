@@ -45,11 +45,25 @@ Rapport : `eval/native160x3-step15000-phase-oracle.json`.
 Ils ont été soumis à un nouvel avis en lecture seule :
 `review/opus-native160-phase-20261011/`.
 
+Le second avis Opus5.5 est terminé, modèle vérifié : il retire sa priorité
+à l'hypothèse de mauvaises entrées de seconde passe, et propose un pilote
+opérateur avec objectifs dépendant de la phase : détails0–3 de première
+passe et hauteur H4 de seconde passe, avec ancrage MSE et pénalisation
+symétrique de l'énergie par bande. Ne pas reprendre les losses décodées
+rejetées. Un éventuel essai d'adaptateurs séparés vient après le contrôle des
+poids partagés. Son test « derniers k pas de seconde passe » ne s'applique
+pas ici : la base native T2 n'a qu'un appel réseau par phase.
+
 Le job4090 `base-native160-progress-long` attend cet oracle puis publie les
 checkpoints évalués sans perturber la5090 ; interrogation toutes les300 s,
 instantanés atomiques et empreintes exactes. Il conserve les jalons20k/30k,
 en plus du15k et du final50k. Les autres instantanés temporaires sont libérés
 après rendu ; les poids base restent hors Git.
+L'image `020000.png` est publiée. Le coordinateur4090 évalue désormais aussi
+chaque EMA publiée sur les204 scènes et60 contrôles morphologiques rares
+(`--matched-eval`). Cela utilise les intervalles entre rendus pour des mesures
+utiles. Un arrêt demandé termine d'abord le processus GPU enfant et libère
+l'instantané ; il ne signale jamais le trainer5090.
 
 Avis Opus5.5 obtenu, modèle réellement vérifié, lecture seule :
 `review/opus-native160-depth-20261011/OPUS_REVIEW.md`. Il propose cet oracle
