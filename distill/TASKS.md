@@ -2,6 +2,75 @@
 
 2026-10-10 · Grégory Beurier
 
+## Haute montagne humide ajoutée aux cas critiques (12 octobre)
+
+L'observation utilisateur est maintenant un contrôle distinct : conserver les
+vallées incisées et leurs ramifications, pas seulement produire des montagnes
+plausibles. Nouveau bank teacher-only séparé :
+`~/data/distill/crops/native-wet-mountains-v1/`. Trois mondes TRAIN déjà utilisés
+pour le teacher, trois nouveaux mondes VAL620001–620003, trois mondes finaux
+réservés101/303/404 ; deux scènes par monde et trois branches coarse
+original/coarse4/coarse2. Chaque cible vient du base original T2 sur SA branche
+coarse.54 captures,48 qualifiées ; les anciennes banques restent figées.
+Critères : pluie≥1200mm/an, terre≥95%, altitude p90≥2000m, relief p90-p10≥500m,
+pente p90≥15° aux deux échelles et amplitude TPI8 fine≥10m. Ces critères ne
+prouvent pas le drainage. Les trois previews VAL coarse4 ont été inspectées :
+incisions et ramifications visibles ; notes/SHA dans
+`_base/mountains-teacher-visual-review.json`. Pluie1441–2517mm/an, altitude
+p902041–3207m et relief783–1157m sur ces trois scènes.
+
+Comparaisons internes même bruit/decoder original, fichiers PNG/CSV/JSON/TXT :
+`_base/mountains-native160-015000.*` et
+`_base/mountains-lowrank0833-000000.*`. L'ancien160×3 EMA15k a, au LOD0,
+MAE125–159m, corrélation TPI8 0,837–0,865, rappel des vallées0,396–0,679 et
+amplitude0,631–0,808 : les incisions s'atténuent effectivement. Le contrôle
+factorisé5/6 NON ENTRAÎNÉ garde davantage les positions, mais MAE59–139m et
+amplitude1,054–1,221 : aucun nouveau base accepté. Ce ne sont pas les planches
+finales ni une validation des raccords. `native_progress_images` publie désormais
+également une planche montagne séparée lorsque cette banque est complète ;
+l'évaluateur refuse les mondes finaux et exige trois mondes VAL qualifiés.
+Code : `wet_mountains.py`, `wet_mountain_progress.py`, quatre tests CPU dédiés.
+Contrôle plein rang sur ces mêmes montagnes terminé :
+`_base/mountains-lowrank1000-000000.*`. MAE LOD0 1,86–2,24m, corrélation TPI8
+0,99984–0,99990, rappel0,991–0,994 et amplitude0,996–1,003. L'interface et
+la factorisation non comprimée conservent donc bien ces vallées. C'est un
+contrôle numérique, pas un modèle accéléré ou une validation finale.
+
+## Contrôles numériques corrigés et limite actuelle de performance
+
+La préparation SVD en FP64, hors entraînement, corrige le défaut numérique du
+premier contrôle décrit plus bas SANS changer la borne max FP32 de0,002.
+Maîtres, facteurs sauvegardés et optimisation restent FP32. Nouveau basis
+Linux : `eval/native-lowrank-fp64-basis.pt`. Plein rang factorisé : erreur max
+FP32~0,000202 ; opérateur BF16 MSE relative4,85e-5. Sur les60 lignes rares des
+trois coarses, fine coarse4 corrélation0,999366 et amplitude1,0053. Le contrôle
+recomposé dense passe également : max FP32~0,000054. Ce sont des contrôles
+274,7M paramètres, contre253,7M teacher, pas des élèves acceptés.
+
+Grille NON entraînée .5/.667/.75/.833 terminée sur les deux GPU, rapports
+`eval/native-lowrank-rankgrid-{main,secondary}-validation.json`. Les rangs
+tronqués ajoutent trop d'amplitude/bruit ; le rappel seul ne suffit pas.
+Premier timing5090 BF16 batch16 du même wrapper numérique eager : teacher
+3,974ms/fenêtre ; rangs5/6,3/4,2/3,1/2 :3,841/3,775/3,683/3,569ms.
+Ce chemin recalcule casts/normalisation et inclut les lancements Python :
+ce n'est PAS le chemin runtime caché ni une performance de déploiement.
+Il n'établit donc pas la performance potentielle après optimisation, et ne
+justifie pas de promettre un gros gain. Aucun nouvel entraînement lowrank
+n'est encore lancé. Avis Opus5.5 terminé dans
+`review/opus-native-lowrank-strategy-20261012/OPUS_REVIEW.md` : préférer une
+compression partant du teacher aux continuations160 qui perdent les vallées.
+Les résultats montagne et le timing réel lui sont transmis dans la même session,
+dossier `review/opus-wet-mountains-and-rank-speed-20261012/`. Réponse Opus5.5
+réellement terminée (modèle et session vérifiés) : privilégier la base du teacher,
+réduire sélectivement les convolutions coûteuses et protéger les représentations
+internes ; proposer25% de fenêtres montagne TRAIN et des contrôles montagne
+VAL obligatoires. Son extrapolation de la part du temps des convolutions à
+partir du wrapper n'est pas une mesure causale. Sa borne MAE≤2× l'erreur du
+contrôle factorisé BF16 serait ici~4m, plus stricte que la tolérance physique
+visée10–35m : ne pas la confondre avec l'écart teacher BF16/FP32. Il faut choisir
+la prochaine expérience sur un profil réel et une tolérance explicite, sans
+promouvoir les contrôles ni déclarer que la taille160 est seule responsable.
+
 ## Résultat des continuations1000 et contrôle d'une base teacher factorisée
 
 Les continuations `opt1e4diag` et `opt5e5diag` sont terminées au garde-fou

@@ -46,6 +46,8 @@ def main():
     parser.add_argument('--output', type=Path, default=DATA/'_base')
     parser.add_argument('--coarse', choices=('original', 'coarse4', 'coarse2'), default='coarse4')
     parser.add_argument('--label', default='', help='Distinct strategy prefix when pilot step numbers restart.')
+    parser.add_argument('--mountains', type=Path, default=DATA/'crops/native-wet-mountains-v1',
+                        help='Independent additional wet high-mountain bank; publish a separate comparison.')
     args = parser.parse_args()
     if args.label and any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for c in args.label):
         parser.error('Strategy label must contain only lowercase letters, digits, - or _.')
@@ -112,7 +114,8 @@ def main():
             context += f', source {source_step}'
         candidate_label = 'Teacher dans NativeBase' if saved.get('evaluation_only') else f'Eleve, 2 passes, etape {step}'
         if saved.get('architecture') == 'native-lowrank':
-            candidate_label = f'Teacher factorise, rang {saved["rank_fraction"]:.3f}, sans entrainement'
+            candidate_label = (f'Teacher factorise, rang {saved["rank_fraction"]:.3f}, sans entrainement'
+                if saved.get('evaluation_only') else f'Eleve factorise, rang {saved["rank_fraction"]:.3f}, etape {step}')
         draw.text((12, 10), f'Etape {step}{context} | Base {model.config["model_channels"]}x{model.config["layers_per_block"]} | {args.coarse}', fill='white', font=font)
         draw.text((12, 39), 'Validation interne, decoder original fige. Meme bruit et memes scenes. Checkpoint '+sha[:12], fill='white', font=small)
         draw.text((12, 66), 'Ombrage fixe, sans lissage. LOD3 : 64 pixels natifs ; LOD0 : interieur 384 pixels.', fill='white', font=small)
@@ -147,6 +150,12 @@ def main():
         print(json.dumps(dict(step=step, image=str(image_path))), flush=True)
         del model, saved, payload
         torch.cuda.empty_cache()
+        mountain_status = args.mountains/'status.json'
+        if mountain_status.exists() and json.loads(mountain_status.read_text())['status'] == 'complete':
+            from distill.wet_mountain_progress import publish
+            publish(path, args.label or 'base', args.mountains, output, args.coarse)
+        else:
+            print(json.dumps(dict(step=step, wet_mountain_comparison='pending teacher bank capture')), flush=True)
 
 
 if __name__ == '__main__':
