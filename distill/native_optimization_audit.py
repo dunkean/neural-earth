@@ -7,6 +7,10 @@ from distill.native_phase_loss import CHANNEL0_WEIGHTS, phase_loss
 
 
 def block(name):
+    if name == 'net.out_gain':
+        return 'output_gain'
+    if name.startswith('net.out_conv.'):
+        return 'output_conv'
     for prefix, label in (('net.enc.512x512', 'encoder512'), ('net.dec.64x64', 'decoder64'),
                           ('net.dec.512x512', 'decoder512'), ('net.out_', 'output')):
         if name.startswith(prefix):
@@ -29,12 +33,15 @@ def gradient_audit(model, records, root, variance, calibration, batches=16):
         first_grad = torch.autograd.grad(first, [p for _, p in parameters], retain_graph=True, allow_unused=True)
         second_grad = torch.autograd.grad(second, [p for _, p in parameters], allow_unused=True)
         sums = {name: torch.zeros(3, device='cuda', dtype=torch.float64)
-                for name in ('global', 'encoder512', 'decoder64', 'decoder512', 'output', 'other')}
+                for name in ('global', 'encoder512', 'decoder64', 'decoder512', 'output', 'output_gain', 'output_conv', 'other')}
         for (name, _), a, b in zip(parameters, first_grad, second_grad):
             values = torch.stack((a.square().sum() if a is not None else first.new_zeros(()),
                                   b.square().sum() if b is not None else first.new_zeros(()),
                                   (a*b).sum() if a is not None and b is not None else first.new_zeros(()))).double()
-            sums['global'] += values; sums[block(name)] += values
+            label = block(name)
+            sums['global'] += values; sums[label] += values
+            if label in ('output_gain', 'output_conv'):
+                sums['output'] += values
         details = {}
         for name, values in sums.items():
             aa, bb, ab = values.cpu().tolist()
@@ -93,3 +100,35 @@ def morphology_guard(candidate, baseline):
             reasons.append(dict(group=name, scale=scale, metric=metric, worlds=len(values),
                                 lower95_drop=lower, tolerance=tolerance))
     return reasons
+
+
+def diagnostic_reasons(original_reasons, candidate, baseline):
+    """Bounded pilot stops; original failures still prevent checkpoint selection.
+
+    Native recall against an already noisy source can decline when false valleys
+    disappear. Record that failure, but let the fixed optimization pilot finish.
+    Correlation, decoded valleys and catastrophic channel regressions still stop.
+    """
+    hard = [r for r in original_reasons
+            if not (r.get('scale') == 'native' and r.get('metric') == 'valley_retention')
+            and r.get('reason') != 'large untargeted channel regression']
+    for r in original_reasons:
+        if r.get('reason') != 'large untargeted channel regression':
+            continue
+        variant, phase, channel = (r[k] for k in ('variant', 'phase', 'channel'))
+        before = baseline['operator_control'][variant]['channel_mse'][phase][channel]
+        after = candidate['operator_control'][variant]['channel_mse'][phase][channel]
+        if after > 1.5*max(before, 1e-8):
+            hard.append(dict(r, reason='catastrophic untargeted channel regression', ratio=after/max(before, 1e-8)))
+    return hard
+
+
+def validate_parent_contract(parent, current):
+    """Resume optimizer state only when the numeric recipe and captured bank match."""
+    for key, value in parent.items():
+        if key not in ('producer_sha256', 'image_label') and current.get(key) != value:
+            raise ValueError(f'Parent numeric contract changed: {key}')
+    allowed = {'distill/native_optimization_train.py', 'distill/native_optimization_audit.py'}
+    for path, checksum in parent['producer_sha256'].items():
+        if path not in allowed and current['producer_sha256'].get(path) != checksum:
+            raise ValueError(f'Parent producer changed: {path}')

@@ -1,6 +1,6 @@
 import unittest
 
-from distill.native_optimization_audit import morphology_guard
+from distill.native_optimization_audit import block, diagnostic_reasons, morphology_guard, validate_parent_contract
 
 
 def report(drops):
@@ -27,6 +27,54 @@ class OptimizationGuardTests(unittest.TestCase):
         reasons = morphology_guard(candidate, report([0.]*4))
         self.assertTrue(reasons)
         self.assertIn('undefined', reasons[0]['reason'])
+
+    def test_diagnostic_only_native_recall_becomes_warning(self):
+        recall = dict(scale='native', metric='valley_retention')
+        fine = dict(scale='fine', metric='valley_retention')
+        position = dict(scale='native', metric='tpi_correlation')
+        undefined = dict(scale='native', reason='defined source morphology became undefined')
+        reasons = [recall, fine, position, undefined]
+        self.assertEqual(diagnostic_reasons(reasons, {}, {}), [fine, position, undefined])
+        self.assertEqual(reasons[0], recall)  # Original failure is preserved.
+
+    def test_untargeted_warning_does_not_hide_catastrophic_change(self):
+        reason = dict(reason='large untargeted channel regression', variant='coarse4', phase=0, channel=4)
+        def controls(value):
+            return dict(operator_control={'coarse4': dict(channel_mse=[[1., 1., 1., 1., value], [1.]*5])})
+        self.assertEqual(diagnostic_reasons([reason], controls(1.3), controls(1.)), [])
+        hard = diagnostic_reasons([reason], controls(1.6), controls(1.))
+        self.assertEqual(len(hard), 1)
+        self.assertEqual(hard[0]['ratio'], 1.6)
+
+    def test_output_gain_is_a_separate_audit_group(self):
+        self.assertEqual(block('net.out_gain'), 'output_gain')
+        self.assertEqual(block('net.out_conv.weight'), 'output_conv')
+
+
+class ResumeContractTests(unittest.TestCase):
+    def parent(self):
+        return dict(lr=.0001, weights={'channel0': 2.}, image_label='parent',
+                    producer_sha256={'distill/native_optimization_train.py': 'old',
+                                     'distill/native_optimization_audit.py': 'old',
+                                     'distill/native_phase_loss.py': 'frozen'})
+
+    def test_guard_and_audit_change_can_continue_exact_numeric_recipe(self):
+        parent = self.parent()
+        child = dict(parent, image_label='diagnostic', producer_sha256={
+            'distill/native_optimization_train.py': 'new',
+            'distill/native_optimization_audit.py': 'new', 'distill/native_phase_loss.py': 'frozen'})
+        validate_parent_contract(parent, child)
+
+    def test_learning_rate_change_rejects_optimizer_resume(self):
+        parent = self.parent()
+        with self.assertRaisesRegex(ValueError, 'lr'):
+            validate_parent_contract(parent, dict(parent, lr=.001))
+
+    def test_loss_producer_change_rejects_optimizer_resume(self):
+        parent = self.parent()
+        child = dict(parent, producer_sha256=dict(parent['producer_sha256'], **{'distill/native_phase_loss.py': 'changed'}))
+        with self.assertRaisesRegex(ValueError, 'native_phase_loss'):
+            validate_parent_contract(parent, child)
 
 
 if __name__ == '__main__':

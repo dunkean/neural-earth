@@ -2,6 +2,43 @@
 
 2026-10-10 · Grégory Beurier
 
+## Suite des pilotes d'optimisation : bornes diagnostiques explicites
+
+Les deux pilotes ci-dessous sont terminés au garde-fou500, exit0 ; pas une
+panne ni3000 pas accomplis. Poids bruts coarse4 canal0 VAL MSE source
+0,14213→0,14497 sur5090, source0,14216→0,14338 sur4090 : pas de progrès
+sur la cible causale. Mais rappel fin rare moyen apparié par11 mondes
+(morphologie moyenneσ2/8) : +0,04544 [0,02561;0,06615] et+0,05123
+[0,03811;0,06635]. Bruit natif réduit : médiane amplitude TPI2,845→1,889
+et2,195 ; corrélation0,133→0,226 et0,135→0,177. Encore trop de grain et
+vallées absentes sur les images ; aucun base accepté.
+
+Nouvel avis Opus5.5 réellement terminé :
+`review/opus-native-optimization500-20261011/OPUS_REVIEW.md` ; rapport,
+contrats, données complètes et bootstrap par monde dans le même dossier.
+Le rappel natif comparé à une source bruitée peut baisser lorsque des
+fausses vallées disparaissent ; cela ne doit pas seul arrêter ce diagnostic.
+Deux nouveaux dossiers reprennent EXACTEMENT les modèles brut/EMA,
+optimiseur et RNG500, sans déplacer ni modifier les dossiers précédents :
+`ckpt/native160x3-opt{1e4,5e5}-diagnostic/`. Source/calibration/loss/sampler,
+LR et seed conservés ; parent et ses SHA/contrat/verdict enregistrés.
+Jobs : `base-native160-opt1e4-diag-train` sur5090,
+`base-native160-opt5e5-diag-train` sur4090. Objectif3000, pas de changement
+d'architecture ou d'objectif pendant cette reprise.
+
+Double verdict à chaque500 : garde original toujours enregistré et
+interdisant la sélection du checkpoint s'il échoue. Pour cette continuation
+bornée uniquement : rappel natif en avertissement ; canal non ciblé >1,2×
+en avertissement et>1,5× en arrêt. Les pertes non finies, features>1,3×,
+morphologie devenue indéfinie, rappel/corrélation fine et corrélation native
+restent des arrêts. Aucun critère d'acceptation finale n'est assoupli.
+L'audit sépare désormais le scalaire `out_gain` de la convolution de sortie,
+car le cosinus agrégé était dominé par ce scalaire. Smokes de reprise réussis
+sur les deux GPU ;18 tests CPU réussis. Images :
+`_base/opt{1e4,5e5}diag-{raw,ema}-001000.png`, puis steps suivantes.
+Le500 précédent reste visible. Cas réservés/chaîne runtime/raccords et
+benchmark idle ne sont pas encore vérifiés pour ces nouveaux poids.
+
 ## Pilotes d'optimisation active du 11 octobre
 
 Avis Opus5.5 terminé, modèle réellement utilisé vérifié :

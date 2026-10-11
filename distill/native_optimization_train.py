@@ -19,7 +19,7 @@ import numpy as np
 import torch
 
 from distill.common import DATA, REPO, REVISION, atomic_json, atomic_write, append_json, external_path
-from distill.native_optimization_audit import gradient_audit, morphology_guard, movement
+from distill.native_optimization_audit import diagnostic_reasons, gradient_audit, morphology_guard, movement, validate_parent_contract
 from distill.native_base import NativeBase, teacher_source
 from distill.native_decoded import DecodedRegion, OriginalDecoder
 from distill.native_feature_train import balanced_windows
@@ -83,12 +83,19 @@ def main():
     parser.add_argument('--warmup', type=int, default=200)
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--smoke-root', type=Path)
+    parser.add_argument('--resume-from', type=Path, help='Terminal parent run; preserve exact model, EMA, optimizer and RNG.')
+    parser.add_argument('--diagnostic-complete', action='store_true', help='Log original guard failures; tolerate native-recall-only drops for a bounded pilot.')
     parser.add_argument('--frozen-statistics', type=Path, required=True, help='TRAIN-only band powers for channel0/H4 objective.')
     parser.add_argument('--label', default='phase', help='Image prefix for this distinct strategy.')
     args = parser.parse_args()
     if min(args.steps, args.eval_every) <= 0 or args.warmup < 0 or not np.isfinite(args.lr) or args.lr <= 0:
         parser.error('Positive finite learning rate and step counts required.')
     root, output, source = (external_path(p) for p in (args.dataset, args.output, args.source))
+    parent = external_path(args.resume_from) if args.resume_from else None
+    if parent == output:
+        raise ValueError('The parent run must remain untouched in a separate directory.')
+    if args.diagnostic_complete and parent is None:
+        raise ValueError('Diagnostic continuation requires an explicitly preserved terminal parent.')
     stats_path = DATA/'eval/native-decoded-probe/channel-statistics.json'
     manifest = json.loads((root/'manifest.json').read_text())
     stats = json.loads(stats_path.read_text())
@@ -128,6 +135,17 @@ def main():
         preserve_valleys=True, decoded_training_loss=False, x0_loss_dtype='fp32',
         eval_every=args.eval_every, clip_norm=1., selection='raw guarded worst-group valley IoU',
         audit_every=250, audit_batches=16, raw_and_ema_validation=True)
+    parent_contract, parent_status = None, None
+    if parent is not None:
+        parent_contract = json.loads((parent/'contract.json').read_text())
+        parent_status = json.loads((parent/'status.json').read_text())
+        if parent_status['status'] not in ('quality-guard', 'complete', 'interrupted'):
+            raise ValueError('A terminal parent checkpoint is required.')
+        validate_parent_contract(parent_contract, contract)
+        contract.update(parent_run=str(parent), parent_contract_sha256=digest(parent/'contract.json'),
+            parent_checkpoint_sha256=digest(parent/'latest.pt'), parent_step=parent_status['step'],
+            diagnostic_policy='native recall warning; untargeted 1.2 warning/1.5 stop; original guard forbids selection'
+                              if args.diagnostic_complete else 'original hard stops')
     if (output/'contract.json').exists() and json.loads((output/'contract.json').read_text()) != contract:
         raise ValueError('Phase trial contract changed; use a separate run.')
     if not args.smoke:
@@ -141,9 +159,12 @@ def main():
     atomic_json(output/'contract.json', contract)
     torch.set_num_threads(8); torch.manual_seed(args.seed); torch.backends.cudnn.benchmark = True
     model = NativeBase(config).cuda().eval()
-    saved = torch.load(output/'latest.pt', map_location='cpu', weights_only=True) if (output/'latest.pt').exists() else None
-    if saved and saved['contract'] != contract:
+    saved_path = output/'latest.pt' if (output/'latest.pt').exists() else parent/'latest.pt' if parent else None
+    saved = torch.load(saved_path, map_location='cpu', weights_only=True) if saved_path else None
+    if saved and saved['contract'] != (contract if saved_path.parent == output else parent_contract):
         raise ValueError('Saved training contract differs.')
+    if saved and saved_path.parent != output and saved['step'] != parent_status['step']:
+        raise ValueError('Parent terminal status and checkpoint steps differ.')
     model.load_state_dict(saved['model'] if saved else original['ema'])
     reference = {name: original['ema'][name].detach().cpu().clone() for name, _ in model.named_parameters()}
     ema = NativeBase(config).cuda().eval().requires_grad_(False)
@@ -181,7 +202,7 @@ def main():
             peak_bytes=torch.cuda.max_memory_allocated(), labels=batch['labels'].cpu().tolist())
 
     if args.smoke:
-        rows = [training_step(np.random.default_rng(np.random.SeedSequence([args.seed, index])), index)
+        rows = [training_step(np.random.default_rng(np.random.SeedSequence([args.seed, step+index])), step+index)
                 for index in range(3)]
         atomic_json(output/'gpu-smoke.json', dict(status='complete', contract=contract, rows=rows,
             gradient_control=gradient_audit(model, train, root, variance, calibration, batches=1),
@@ -212,6 +233,17 @@ def main():
             '--checkpoints', str(output/name), '--label', label]
         subprocess.run(subprocess_command, cwd=REPO, check=True)
 
+    if parent is not None and not (output/'baseline.json').exists():
+        baseline = json.loads((parent/'baseline.json').read_text())
+        atomic_json(output/'baseline.json', baseline)
+        os.link(parent/'initial.pt', output/'initial.pt')
+        alias('initial.pt', 'best-ema.pt'); alias('initial.pt', 'best-raw.pt')
+        atomic_json(output/'resume-lineage.json', dict(parent_contract=parent_contract,
+            parent_status=parent_status, preserved_source_baseline=True,
+            checkpoint_sha256=contract['parent_checkpoint_sha256'], exact_optimizer_and_rng=True,
+            original_guard_forbids_selection=True, accepted=False))
+        for name in ('validation.jsonl', 'train.jsonl'):
+            atomic_write(output/name, lambda f, name=name: f.write((parent/name).read_bytes()))
     if not (output/'baseline.json').exists():
         baseline = validate(ema, records, root, weight, decoder, variance, True)
         baseline['operator_control'] = operator_control(ema, records, root, variance, calibration)
@@ -264,12 +296,14 @@ def main():
                             if after > 1.2*max(before, 1e-8):
                                 reasons.append(dict(reason='large untargeted channel regression',
                                                     variant=variant, phase=phase, channel=channel))
-                guarded = bool(reasons)
-                improved = not guarded and details['selection_score'] < best
+                hard_reasons = diagnostic_reasons(reasons, details, baseline) if args.diagnostic_complete else reasons
+                guarded = bool(hard_reasons)
+                improved = not reasons and details['selection_score'] < best
                 if improved:
                     best = details['selection_score']
                 append_json(output/'validation.jsonl', dict(step=step, weights='raw', quality_guard=guarded,
-                    guard_reasons=reasons, movement=movement(model, reference), clip_fraction=clipped/observed, **details))
+                    guard_reasons=hard_reasons, original_guard_reasons=reasons, original_quality_guard=bool(reasons),
+                    selectable=not reasons, movement=movement(model, reference), clip_fraction=clipped/observed, **details))
                 append_json(output/'validation.jsonl', dict(step=step, weights='ema', **ema_details))
                 raw_name, ema_name = f'step-{step:06d}-raw.pt', f'step-{step:06d}-ema.pt'
                 snapshot(raw_name, model); snapshot(ema_name, ema); checkpoint('latest.pt')
@@ -279,8 +313,9 @@ def main():
                 # Keep the first comparison, best pair and latest pair. Only
                 # latest.pt carries the optimizer; inference snapshots are small.
                 protected = {(output/name).stat().st_ino for name in ('best-raw.pt', 'best-ema.pt')}
+                first_step = ((contract.get('parent_step', 0)//args.eval_every)+1)*args.eval_every
                 for old in output.glob('step-*.pt'):
-                    if old.name not in ('step-000500-raw.pt', 'step-000500-ema.pt', raw_name, ema_name) and old.stat().st_ino not in protected:
+                    if old.name not in (f'step-{first_step:06d}-raw.pt', f'step-{first_step:06d}-ema.pt', raw_name, ema_name) and old.stat().st_ino not in protected:
                         old.unlink()
         checkpoint('latest.pt')
         atomic_json(output/'status.json', dict(status='quality-guard' if guarded else 'interrupted' if STOP else 'complete',
