@@ -2,6 +2,36 @@
 
 2026-10-10 · Grégory Beurier
 
+## Diagnostic du 11 octobre : sorties linéaires conditionnées par passe
+
+Avis Opus5.5 terminé, modèle réellement utilisé vérifié :
+`review/opus-native-channel0-pilot-20261011/OPUS_REVIEW.md`. Choix : tester
+la récupération du canal0 depuis les features figées avant de changer le
+tronc. Son résumé utilise aussi des métriques de l'oracle sur un contexte
+différent ; comparer les modèles avec une référence recalculée identique.
+
+Le ridge de dernière couche a terminé :273 scènes TRAIN,34944 pixels par
+passe ; régularisation choisie sur3 folds séparés par monde, jamais VAL.
+Fit5090, validation opérateur4090 sur204 scènes. Reconstruction de la
+sortie du modèle lui-même : MSE relative0,000002996, contrôle réussi.
+Coarse4 première passe : MSE vélocité0,142159→0,142337, aucune récupération.
+Le readout H4 séparé dégrade aussi la validation0,001974→0,003815 ; ne pas
+l'ajouter au modèle. Deux petites corrections, tronc/poids source figés,
+sorties des autres phases/canaux exactement protégées.
+
+Contrôle autonome première passe sur20 cas rares coarse4,5090 : rappel fin
+σ2 médian source0,41808→readout0,41677, amplitude0,68360→0,67876,
+corrélation0,80734→0,80699. Bootstrap apparié par11 mondes, changement
+moyen de rappel−0,00180, intervalle95 % [−0,00300;−0,00033]. Diagnostic
+négatif, aucun base accepté. Rendu teacher/source/readout :
+`_base/readout-first-000000.png` et métriques CSV/JSON/TXT voisines.
+Poids minuscules de diagnostic : `eval/native160-readout-train.pt`,
+opérateur : `eval/native160-readout-operator-validation.json`, relief :
+`eval/native160-readout-first-rare-validation.json`.
+Prochain contrôle : concaténer features finales, skip haute résolution et
+bloc central, même TRAIN/VAL. Un échec ne prouverait pas l'absence de toute
+information non linéaire dans le tronc, seulement la limite de ces readouts.
+
 ## Pilote canal0 du 11 octobre : cible causale, statistiques TRAIN figées
 
 Après rejet du pilote `phase` au pas500, le pilote distinct
