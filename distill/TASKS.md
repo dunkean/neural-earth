@@ -49,6 +49,17 @@ d'un défaut H4 de première passe qui pourrait perturber les features ensuite.
 Le simple remplacement H4 en SORTIE finale ne suffisait pas à le distinguer.
 Rapport prévu : `eval/native160-first-channel-oracle.json` ; quatre rendus
 dans `_base/015000-first-channel-*.png`, alternative textuelle et JSON voisins.
+L'oracle a terminé : remplacer le seul canal0 de PREMIÈRE passe fait passer
+le rappel fin médianσ2 de0,3970 à0,7882 et l'amplitude0,6275 à0,9232.
+Le remplacement0–3 donne0,8299/0,9369 ; H4 seul donne0,4082/0,6382.
+Le défaut de vallées est principalement le canal0 de première passe sur ces
+20 cas, tandis que le bruit natif reste présent dans tous ces remplacements.
+Les images sont des diagnostics utilisant une entrée teacher, pas un modèle
+autonome livré. Prochain pilote à affiner : cible renforcée canal0 première
+passe, H4 seconde passe moins dominant, puissances TRAIN figées pour
+normaliser l'erreur de position. L'énergie doit cibler chaque teacher réel,
+pas la moyenne TRAIN (sinon bruit artificiel dans les plages plates).
+Avis actualisé demandé : `review/opus-native-first-channel-20261011/`.
 
 Le contrôle de durée native160×3 a été arrêté proprement au pas28579,
 après le contrôle indépendant25k : coarse4 rare, rappel fin0,44091,
