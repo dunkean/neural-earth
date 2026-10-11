@@ -2,7 +2,7 @@ import unittest
 
 import torch
 
-from distill.native_phase_loss import band_terms, phase_loss, CHANNEL0_WEIGHTS
+from distill.native_phase_loss import band_terms, phase_loss, CHANNEL0_WEIGHTS, x0_from_velocity
 
 
 class PhaseLossTests(unittest.TestCase):
@@ -18,6 +18,12 @@ class PhaseLossTests(unittest.TestCase):
         loss, terms = phase_loss(self.target, self.inputs, self.labels, self.target, self.variance)
         self.assertEqual(float(loss), 0.)
         self.assertTrue(all(float(value) == 0. for value in terms.values()))
+
+    def test_x0_target_matches_native_window_conversion_in_both_phases(self):
+        from distill.native_fusion import window_outputs
+        expected = window_outputs(self.inputs, self.target, self.labels, torch.float32)
+        actual = x0_from_velocity(self.inputs, self.target, self.labels)
+        torch.testing.assert_close(actual, expected, rtol=1e-6, atol=5e-7)
 
     def test_equal_energy_wrong_positions_are_penalized(self):
         reference = self.target[:2, :4]

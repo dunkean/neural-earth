@@ -25,6 +25,25 @@ Images progressives en vrac : `_base/channel0-000000.png`, puis
 `channel0-000500.png`, `channel0-raw-000500.png`, avec métriques texte/CSV.
 Ce pilote est expérimental ; aucun nouveau base n'est accepté ou livré.
 
+Résultat : arrêt au garde-fou morphologique500, statut terminal vérifié.
+MSE features0–3 0,070804→0,070705, score physique8,401→7,857 ; rappel
+fin coarse4 plaine basse/mer0,29148→0,26572 (moyenneσ2/8). Sur les20
+cas rares coarse4, médianeσ2 fine : EMA500 rappel0,39260/amplitude0,65021,
+brut500 0,42359/0,69737 ; source15k0,41667/0,68331. Le brut est légèrement
+meilleur que la source sur cette médiane, mais les vallées restent faibles.
+Ne pas attribuer cet arrêt à une panne ou déclarer le modèle accepté.
+
+Le contrôle par canal5090 a terminé sur204 scènes VAL : coarse4 première
+passe canal0 MSE x0 source0,142170→EMA0,142014→brut0,141989, presque
+inchangée. Sur273 scènes TRAIN figées, source0,165905→brut0,163964.
+Rapports `eval/native160-channel0-operator-{source15000,500-ema,500-raw}.json`
+et `eval/native160-channel0-operator-train-{source15000,500-raw}.json`.
+Un test vérifie aussi l'identité de la cible x0 avec la conversion native
+FP32 aux deux phases ; les différences BF16 restent évaluées séparément.
+L'avis Opus suivant attend les rapports complets puis analyse TRAIN/VAL,
+poids bruts/EMA et choix du prochain essai :
+`review/opus-native-channel0-pilot-20261011/`. Aucun pilote suivant lancé.
+
 ## Pilote du 11 octobre : objectifs latents distincts pour les deux passes
 
 Le premier pilote s'est arrêté au garde-fou morphologique au pas500,
