@@ -2,7 +2,7 @@ import unittest
 
 import torch
 
-from distill.native_phase_loss import band_terms, phase_loss
+from distill.native_phase_loss import band_terms, phase_loss, CHANNEL0_WEIGHTS
 
 
 class PhaseLossTests(unittest.TestCase):
@@ -60,6 +60,46 @@ class PhaseLossTests(unittest.TestCase):
         labels = self.labels.clone(); labels[0] = .9
         with self.assertRaises(ValueError):
             phase_loss(self.target, self.inputs, labels, self.target, self.variance)
+
+    def fixed_calibration(self):
+        return dict(first_power=torch.ones(3, 5), second_power=torch.ones(3, 5),
+                    second_variance=torch.ones(5))
+
+    def test_fixed_energy_still_targets_each_teacher_not_train_average(self):
+        actual = torch.zeros(2, 1, 64, 64)
+        position, energy = band_terms(actual, actual, torch.ones(1), torch.ones(3, 1))
+        self.assertEqual(float(position), 0.)
+        self.assertEqual(float(energy), 0.)
+        wrong = torch.randn_like(actual)
+        position, energy = band_terms(wrong, actual, torch.ones(1), torch.ones(3, 1))
+        self.assertGreater(float(position), 0.)
+        self.assertGreater(float(energy), 0.)
+
+    def test_fixed_channel0_objective_preserves_other_feature_targets(self):
+        prediction = self.target.clone(); prediction[0, 0] += .2
+        _, terms = phase_loss(prediction, self.inputs, self.labels, self.target, self.variance, self.fixed_calibration())
+        extra = CHANNEL0_WEIGHTS['first_x0']*terms['first_x0']+CHANNEL0_WEIGHTS['first_channel0']*terms['first_channel0']
+        self.assertAlmostEqual(float(extra/(.5*terms['first_x0'])), 16., places=4)
+        prediction = self.target.clone(); prediction[0, 2] += .2
+        _, terms = phase_loss(prediction, self.inputs, self.labels, self.target, self.variance, self.fixed_calibration())
+        self.assertEqual(float(terms['first_channel0']), 0.)
+        self.assertGreater(float(terms['first_x0']), 0.)
+
+    def test_fixed_loss_identity_and_detached_calibration(self):
+        calibration = {k: v.requires_grad_(True) for k, v in self.fixed_calibration().items()}
+        loss, _ = phase_loss(self.target, self.inputs, self.labels, self.target, self.variance, calibration)
+        self.assertEqual(float(loss), 0.)
+        prediction = (self.target+.01*torch.randn_like(self.target)).requires_grad_(True)
+        loss, _ = phase_loss(prediction, self.inputs, self.labels, self.target, self.variance, calibration)
+        loss.backward()
+        self.assertTrue(torch.isfinite(prediction.grad).all())
+        self.assertTrue(all(v.grad is None for v in calibration.values()))
+
+    def test_fixed_position_penalizes_misplaced_equal_power_noise(self):
+        reference = self.target[:2, :1]
+        position, energy = band_terms(-reference, reference, torch.ones(1), torch.ones(3, 1))
+        self.assertGreater(float(position), 1.)
+        self.assertEqual(float(energy), 0.)
 
 
 if __name__ == '__main__':

@@ -26,7 +26,7 @@ from distill.native_feature_train import balanced_windows
 from distill.native_mixed_bank import KINDS, VARIANTS
 from distill.native_multilod_eval import validation_records
 from distill.native_multilod_train import digest, validate
-from distill.native_phase_loss import WEIGHTS, phase_loss
+from distill.native_phase_loss import WEIGHTS, CHANNEL0_WEIGHTS, PHASE_LABELS, phase_loss
 
 STOP = False
 
@@ -74,6 +74,8 @@ def main():
     parser.add_argument('--seed', type=int, default=20261016)
     parser.add_argument('--smoke', action='store_true')
     parser.add_argument('--smoke-root', type=Path)
+    parser.add_argument('--frozen-statistics', type=Path, help='TRAIN-only band powers for channel0/H4 objective.')
+    parser.add_argument('--label', default='phase', help='Image prefix for this distinct strategy.')
     args = parser.parse_args()
     if min(args.steps, args.eval_every) <= 0 or not np.isfinite(args.lr) or args.lr <= 0:
         parser.error('Positive finite learning rate and step counts required.')
@@ -87,6 +89,17 @@ def main():
         raise ValueError('Complete independent mixed teacher bank required.')
     if digest(teacher_source()/'diffusion_pytorch_model.safetensors') != manifest['teacher_weights_sha256']:
         raise ValueError('Teacher and captured bank differ.')
+    frozen = None
+    if args.frozen_statistics:
+        args.frozen_statistics = args.frozen_statistics.expanduser().resolve()
+        frozen = json.loads(args.frozen_statistics.read_text())
+        if frozen.get('status') != 'complete' or frozen.get('split') != 'train' or \
+                frozen['dataset_manifest_sha256'] != digest(root/'manifest.json') or \
+                frozen['statistics_sha256'] != digest(stats_path) or \
+                frozen['teacher_weights_sha256'] != manifest['teacher_weights_sha256'] or \
+                frozen['sigmas'] != [1., 2., 4.] or frozen['phase_labels'] != list(PHASE_LABELS) or \
+                not set(frozen['scene_files']) <= {r['file'] for r in train}:
+            raise ValueError('Band calibration must use this teacher and TRAIN-only scene inventory.')
     original = torch.load(source, map_location='cpu', weights_only=True)
     if (original.get('teacher_revision') or original.get('dataset_manifest', {}).get('revision')) != REVISION:
         raise ValueError('Source checkpoint teacher revision differs.')
@@ -99,7 +112,9 @@ def main():
         dataset_manifest_sha256=digest(root/'manifest.json'), statistics_sha256=digest(stats_path),
         producer_sha256={f'distill/{p}': digest(REPO/'distill'/p) for p in producers},
         objective='phase-specific direct teacher x0 + position-sensitive band MSE + symmetric log-energy; velocity anchor',
-        weights=WEIGHTS, lr=args.lr, seed=args.seed, batch=4, phases_per_batch=[2, 2],
+        weights=CHANNEL0_WEIGHTS if frozen else WEIGHTS, lr=args.lr, seed=args.seed, batch=4, phases_per_batch=[2, 2],
+        band_calibration_sha256=digest(args.frozen_statistics) if frozen else None,
+        band_denominator='fixed TRAIN' if frozen else 'local teacher', image_label=args.label,
         rare_fraction=.25, sampler='uniform coarse/case/profile strata', fresh_noise_fraction=0.,
         preserve_valleys=True, decoded_training_loss=False, x0_loss_dtype='fp32',
         eval_every=args.eval_every, clip_norm=1., selection='fixed-baseline guarded worst-group valley IoU')
@@ -129,12 +144,16 @@ def main():
         torch.set_rng_state(saved['rng']); torch.cuda.set_rng_state_all(saved['cuda_rng'])
     del original, saved
     variance = torch.tensor(stats['variance'], device='cuda')
+    calibration = ({key: torch.tensor(value, device='cuda') for key, value in dict(
+        first_power=frozen['phases']['first']['band_power'],
+        second_power=frozen['phases']['second']['band_power'],
+        second_variance=frozen['phases']['second']['spatial_variance']).items()} if frozen else None)
 
     def training_step(record, generator):
         batch = balanced_windows(DecodedRegion(root/record['file'], 'cuda'), generator)
         optimizer.zero_grad(set_to_none=True)
         prediction = model(batch['inputs'], batch['labels'], [batch['condition']])
-        loss, terms = phase_loss(prediction, batch['inputs'], batch['labels'], batch['target'], variance)
+        loss, terms = phase_loss(prediction, batch['inputs'], batch['labels'], batch['target'], variance, calibration)
         if not torch.isfinite(loss):
             raise FloatingPointError('Nonfinite phase-specific objective.')
         loss.backward()
@@ -171,7 +190,7 @@ def main():
 
     def publish(name):
         subprocess_command = [sys.executable, '-m', 'distill.native_progress_images',
-            '--checkpoints', str(output/name), '--label', 'phase']
+            '--checkpoints', str(output/name), '--label', args.label]
         subprocess.run(subprocess_command, cwd=REPO, check=True)
 
     if not (output/'baseline.json').exists():

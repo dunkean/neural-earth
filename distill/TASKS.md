@@ -2,6 +2,29 @@
 
 2026-10-10 · Grégory Beurier
 
+## Pilote canal0 du 11 octobre : cible causale, statistiques TRAIN figées
+
+Après rejet du pilote `phase` au pas500, le pilote distinct
+`base-native160-channel0-train` repart de l'EMA160×3 au pas15000 sur5090.
+Les diagnostics teacher injecté ci-dessous motivent un poids16× sur le
+canal0 x0 de première passe ; les autres features gardent leur protection.
+Les termes H4 de seconde passe sont réduits10×. Les puissances par bande
+sont figées sur TRAIN ; l'énergie cible toujours chaque fenêtre teacher
+réelle, afin de ne pas ajouter du grain aux champs plats. Opus5.5 a revu
+ces choix : `review/opus-native-first-channel-20261011/OPUS_REVIEW.md`.
+
+Tests :13 régressions CPU réussies, smoke GPU5090 original/coarse4/coarse2
+réussi, gradients finis, pic mémoire5,08Go. Contrat exact et preuve :
+`eval/native160-channel0-smoke/gpu-smoke.json` ; cible5000 pas, validation
+tous les500, mêmes données indépendantes et garde-fous morphologiques.
+Poids hors Git : `ckpt/native160x3-channel0-mixed-pilot/`.
+La4090 compare indépendamment les poids bruts et EMA au pas500, job
+`base-native160-channel0-500-raw`, rapport
+`eval/native160-channel0-500-ema-raw-matched-validation.json`.
+Images progressives en vrac : `_base/channel0-000000.png`, puis
+`channel0-000500.png`, `channel0-raw-000500.png`, avec métriques texte/CSV.
+Ce pilote est expérimental ; aucun nouveau base n'est accepté ou livré.
+
 ## Pilote du 11 octobre : objectifs latents distincts pour les deux passes
 
 Le premier pilote s'est arrêté au garde-fou morphologique au pas500,
