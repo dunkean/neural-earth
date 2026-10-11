@@ -2,7 +2,65 @@
 
 2026-10-10 · Grégory Beurier
 
-## Point du 11 octobre : préservation des vallées encore insuffisante
+## Suivi du 11 octobre : deux GPU et images de progression
+
+Consignes utilisateur : utiliser les deux GPU pour du travail utile ; priorité
+à la5090 pour l'entraînement. Publier les rendus de chaque évaluation à plat
+dans `~/data/distill/_base/`, étape dans le nom, et consulter Opus5.5 lors des
+changements de stratégie. Cette demande remplace l'attente des seules planches
+finales. Les CSV/TXT voisins donnent les valeurs et le contexte des images.
+
+Le native160×3 a terminé15000 étapes sur5090 : MSE opérateur0,15948 à0,03499.
+Sur validation indépendante coarse4 rare, corrélation TPI fine0,808, rappel
+des vallées0,417, amplitude TPI0,683 ; en natif, corrélation0,080 et amplitude
+3,354. Les images montrent encore du bruit LOD3 et des vallées atténuées.
+Il n'est pas accepté. Rapports :
+`eval/native160x3-step15000-matched-validation.json` et les deux dossiers
+`eval/native160x3-step15000-app{,-rare}-comparison/` (7 sites historiques et
+12 sites rares figés, LOD3/0, même coarse4/decoder200k pour teacher/élève).
+
+Rendus réels disponibles : `000000.png`, `005000.png`, `015000.png` pour
+quatre scènes rares de validation avec decoder original ;
+`015000-app-*-lod{3,0}.png` pour la chaîne complète avec decoder distillé.
+Ces rendus à éclairage fixe sont issus des hauteurs calculées, sans lissage ;
+ce ne sont pas des captures du navigateur ni une preuve de continuité.
+
+Le job `base-native160-operator-long` poursuit le même apprentissage de15000
+à50000 sur5090, avec optimiseur/EMA/RNG conservés, sous
+`ckpt/native160x3-operator-long/`. C'est un contrôle de durée, pas une nouvelle
+stratégie promise comme suffisante. Le job4090 `base-native160-phase-oracle`
+compare élève→élève, élève→teacher, teacher→élève, teacher→teacher, sur les68
+scènes coarse4 indépendantes, dont20 rares. Il sépare l'erreur de première
+passe de l'ajustement de seconde passe et contrôle le plancher teacher.
+
+Cet oracle est terminé : teacher→élève conserve le bruit natif (amplitude
+TPI3,487 contre3,349 pour élève→élève), mais rétablit les vallées fines
+(rappel0,838 contre0,400, amplitude0,936 contre0,629). Élève→teacher retire
+le bruit natif (amplitude0,948), mais ne rétablit pas les vallées fines
+(rappel0,412). Le teacher→teacher de contrôle a un plancher non nul :
+MAE native rare médiane0,60 m, fine0,090 m ; plus grande MAE de ligne5,576 m.
+Ces résultats désignent deux défauts distincts, à confirmer sur les autres
+branches : ajustement H4 de seconde passe et détails0–3 de première passe.
+Rapport : `eval/native160x3-step15000-phase-oracle.json`.
+Ils ont été soumis à un nouvel avis en lecture seule :
+`review/opus-native160-phase-20261011/`.
+
+Le job4090 `base-native160-progress-long` attend cet oracle puis publie les
+checkpoints évalués sans perturber la5090 ; interrogation toutes les300 s,
+instantanés atomiques et empreintes exactes. Il conserve les jalons20k/30k,
+en plus du15k et du final50k. Les autres instantanés temporaires sont libérés
+après rendu ; les poids base restent hors Git.
+
+Avis Opus5.5 obtenu, modèle réellement vérifié, lecture seule :
+`review/opus-native160-depth-20261011/OPUS_REVIEW.md`. Il propose cet oracle
+de phases avant de choisir entre supervision sur les entrées produites par
+l'élève et ajustement du canal de hauteur. Il estime que prolonger seulement
+la MSE ne corrigera probablement pas les vallées ; les prochains choix doivent
+être confrontés aux résultats de l'oracle et aux images de la chaîne complète.
+Les contrôles à caches neufs, les deux axes de raccord et la performance au
+repos du candidat restent à faire ; aucun gain d'un base accepté n'est établi.
+
+## Essais précédents : préservation des vallées encore insuffisante
 
 L'essai de supervision interne ci-dessous s'est lui aussi arrêté au contrôle
 morphologique au pas500. Son score de sélection agrégé baisse légèrement
@@ -16,12 +74,12 @@ Le test architectural suivant repart des poids du teacher : native160×3,
 **tous les blocs et toutes les connexions de saut conservés**, réduction des
 canaux192 à160 avec sélection calibrée exclusivement sur TRAIN.178 138 245
 paramètres, contre253 688 037 pour le teacher. Le job `base-native160-operator`
-entraîne sur la5090 jusqu'à15000 étapes, batch4/lr2e-5/seed20261010, sur les
+a terminé15000 étapes sur la5090, batch4/lr2e-5/seed20261010, sur les
 42624 fenêtres TRAIN originales ; validation opérateur3552 fenêtres.
 Root : `~/data/distill/ckpt/native160x3-operator-pilot/`.
-Le job `base-native160-matched-validation` attend sa fin vérifiée puis évalue
-l'initialisation,5000 et15000 sur les204 scènes mixed natif/4/2 et les cas rares.
-Rapport prévu : `~/data/distill/eval/native160x3-operator-matched-validation.json`.
+La queue `base-native160-matched-validation` a été arrêtée pour éviter les
+doublons ; les trois validations ont terminé séparément. Rapports :
+`eval/native160x3-{initial,step5000,step15000}-matched-validation.json`.
 Il s'agit d'un préentraînement opérateur, pas encore d'un entraînement mixed
 complet ni d'une preuve de qualité/performance. Dix tests de compression native
 passent ; correspondance calibration/manifest et transfert complet contrôlés.
