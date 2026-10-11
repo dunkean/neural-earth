@@ -2,6 +2,33 @@
 
 2026-10-10 · Grégory Beurier
 
+## Point du 11 octobre : préservation des vallées encore insuffisante
+
+L'essai `native192x2-valley-mixed-pilot` s'est arrêté au contrôle qualité au
+pas500. La pénalisation supplémentaire de l'amplitude et de la profondeur
+des vallées ne suffit pas : le score physique passe de7,640 à6,551, mais le
+score de sélection morphologique se dégrade de0,87072 à0,87535 (plus bas est
+meilleur). Avec coarse4, le rappel des vallées fines passe de18,7 % à15,0 %
+sur les plaines tempérées, et de37,2 % à33,4 % sur les côtes humides.
+Le checkpoint est conservé, pas accepté ni installé dans l'application.
+Rapport : `~/data/distill/ckpt/native192x2-valley-mixed-pilot/validation.jsonl`.
+
+Les oracles sur sept sites et deux LODs isolent la perte de détails dans les
+canaux0–3 du base : sur le site côte LOD0, remplacer ces canaux par le teacher
+rétablit environ94–96 % des vallées, contre15–37 % pour les élèves testés.
+Changer seulement le canal de hauteur ne les rétablit pas. Le contrôle avec
+decoder original confirme que le decoder distillé n'est pas la cause.
+Rapports : `~/data/distill/eval/native192-operator15000-matched-oracles/`
+et `~/data/distill/eval/native192-physical500-matched-oracles/`.
+
+Prochaine piste à préparer : supervision des représentations intermédiaires
+du teacher et vérification de l'effet du retrait de blocs/connexions de saut.
+Ne pas prolonger cet essai arrêté ni assouplir ses critères pour le déclarer
+réussi. Aucun gain de performance d'un base de qualité acceptable n'est établi.
+Les planches finales et les contrôles de continuité du candidat final restent
+à produire. Les coarse1/2 complets et les choix approuvés de l'application
+restent livrés sur la branche `distill` ; aucun poids base dans Git.
+
 ## Livraison coarse1/coarse2 complets
 
 Les deux entraînements ont terminé 200 000 étapes. Poids best EMA sur 384
