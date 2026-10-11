@@ -102,12 +102,15 @@ def main():
         image = Image.new('RGB', (left+2*(size+pad), header+len(rows)*row_height), (24, 24, 24))
         draw = ImageDraw.Draw(image)
         source_step = saved.get('contract', {}).get('source_step')
-        context = f' | {args.label}, source {source_step}' if args.label else ''
+        context = f' | {args.label}' if args.label else ''
+        if args.label and source_step is not None:
+            context += f', source {source_step}'
+        candidate_label = 'Teacher dans NativeBase' if saved.get('evaluation_only') else f'Eleve, 2 passes, etape {step}'
         draw.text((12, 10), f'Etape {step}{context} | Base {model.config["model_channels"]}x{model.config["layers_per_block"]} | {args.coarse}', fill='white', font=font)
         draw.text((12, 39), 'Validation interne, decoder original fige. Meme bruit et memes scenes. Checkpoint '+sha[:12], fill='white', font=small)
         draw.text((12, 66), 'Ombrage fixe, sans lissage. LOD3 : 64 pixels natifs ; LOD0 : interieur 384 pixels.', fill='white', font=small)
         draw.text((left, 102), 'Teacher original, 2 passes', fill='white', font=font)
-        draw.text((left+size+pad, 102), f'Eleve, 2 passes, etape {step}', fill='white', font=font)
+        draw.text((left+size+pad, 102), candidate_label, fill='white', font=font)
         for index, (row, pair) in enumerate(zip(rows, fields)):
             y = header+index*row_height
             lod = row['lod']; exaggeration = 3. if lod == 3 else 1.5
