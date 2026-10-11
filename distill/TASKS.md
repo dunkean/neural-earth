@@ -146,7 +146,23 @@ le job `base-native-operator-long-validation`. Ces rapports numériques
 préparent la prochaine décision ; aucune planche finale n'est générée.
 Le palier opérateur15000 a terminé ; MSE de validation0,06708 contre0,08049
 au pas5000. La comparaison complète des14 vues avec coarse4/decoder200k
-suit l'évaluation intérieure, job `base-native-operator15000-app-comparison`.
+est terminée, job `base-native-operator15000-app-comparison` :28 champs finis.
+La validation intérieure original/4/2 passe de20,988 à11,567 (pire groupe),
+avec MAE médianes LOD3/0 de71,45m/57,44m contre99,01m/67,30m au pas5000.
+La corrélation fine des vallées rares reste faible au LOD3 (~0,09).
+Sur les14 vues complètes de l'application, MAE médianes141,62m/142,49m :
+le base n'est pas accepté. Le même run reprend maintenant de15000 à50000,
+sans changer les états optimiseur/EMA/RNG ni le dataset ; le checkpoint
+`step15000.pt` et les rapports de ce palier sont conservés.
+En parallèle, `base-native192-operator` entraîne une variante native192×2
+pendant15000 pas sur les mêmes paires teacher. Elle conserve tous les canaux
+du teacher et retire seulement des blocs : ce témoin de capacité vérifie si
+la compression des canaux limite la restitution des vallées. Son résultat
+n'est pas présumé meilleur. Poids sous `ckpt/native192x2-operator-long/`,
+évaluation aux trois coarse et deux LOD par
+`base-native192-operator-validation`. Le run128×2 continue sur5090 ; le192×2
+et les évaluations utilisent la4090. L'évaluation du128×2 à50000 attend aussi
+la fin de celle du192×2 pour éviter deux jobs simultanés sur4090.
 Le contrôle des jobs utilise maintenant un nom tmux EXACT (`=nom`) : un
 job `train-validation` ne peut plus faire apparaître `train` encore vivant
 après sa fin. Une régression avec deux noms de sessions le vérifie sans GPU.
