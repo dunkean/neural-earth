@@ -49,11 +49,33 @@ entrées déjà apprises. Pour le contrôle de fit, analyser le sous-ensemble
 GENERAL original, présent dans le préentraînement.
 
 Opus5.5 a reçu la stratégie concrète, les métriques25k et les termes du smoke :
-`review/opus-native160-phase-pilot-20261011/`. Lire son avis avant le prochain
-changement ; le teacher T2 a seulement un appel par phase, pas une série
+`review/opus-native160-phase-pilot-20261011/OPUS_REVIEW.md` (terminé, modèle
+effectif vérifié). Pas d'erreur mathématique fatale identifiée ; réserves :
+normalisation locale des fenêtres plates, gradient H4 dominant et EMA.999
+encore61 % source au pas500. Si le premier contrôle échoue, sa piste est
+de figer les puissances par bande/canal sur TRAIN et équilibrer les gradients
+des phases, au lieu d'assouplir les garde-fous. Lire les résultats raw avant
+le prochain choix. Le teacher T2 a seulement un appel par phase, pas une série
 de k solveur dans la seconde passe. Aucun base n'est encore accepté ;
 raccords à froid des deux axes, chaîne complète finale et performance au
 repos restent à vérifier. Aucun poids base dans Git ou l'application.
+
+Le diagnostic original TRAIN GENERAL a terminé23 scènes déjà présentes
+dans le préentraînement : amplitude native3,027 et corrélation0,198 pour
+teacher→élève, contre0,999/0,965 pour teacher→teacher. Le bruit est donc
+présent aussi sur ces entrées apprises, pas seulement avec coarse distillé.
+Rapport : `eval/native160x3-step15000-original-train-phase-diagnostic.json`.
+Les deux comparaisons app25k ont terminé ; leurs rendus sont dans `_base`.
+
+Jobs4090 suivants : `base-native160-duration25k-seams` vérifie quatre cas
+rares ×LOD3/0 ×teacher/élève, même coarse4/decoder200k, grand champ et
+quatre tuiles à caches neufs, deux axes, halos24 et ordre inversé. Le job
+CPU `base-native160-duration25k-seam-publication` attend sa fin vérifiée
+puis copie images/CSV/rapport à plat dans `_base/025000-seam-*`.
+`base-native160-phase500-raw-validation` attend ce test et le checkpoint500,
+exporte les poids bruts en fichier d'inférence identifié (hors Git), évalue
+EMA/bruts sur les204 scènes et60 formes rares, puis publie
+`_base/phase-raw-000500.png`. Cette comparaison ne modifie pas le trainer.
 
 ## Étapes précédentes : deux GPU et images de progression
 
