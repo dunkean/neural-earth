@@ -4,6 +4,30 @@
 
 ## Point du 11 octobre : préservation des vallées encore insuffisante
 
+Le prochain essai est maintenant lancé :
+`python -m distill.native_feature_train --output ~/data/distill/ckpt/native192x2-feature-mixed-pilot --smoke-root ~/data/distill/eval/native192-feature-smoke --steps 1500`.
+Il repart de l'EMA native192×2 opérateur15000, sans reprendre les poids
+physiques rejetés. L'objectif est MSE opérateur +0,05 MSE des gradients +0,5
+erreur des huit représentations de fin de niveau encodeur/décodeur, normalisée
+uniquement par l'énergie des canaux teacher. Les coordonnées des canaux sont
+identiques (192 canaux conservés) ; le teacher et ses poids restent figés.
+Les pertes physiques en sortie sont retirées de l'entraînement pour éviter
+leur biais d'atténuation ; elles restent mesurées lors de la validation.
+
+Chaque batch contient deux fenêtres par étape de diffusion, sur la banque
+coarse natif/4/2 avec25 % de cas rares. Cette expérience n'est pas une simple
+variation du poids de la loss précédente : batch4, supervision interne et
+absence des pertes physiques ; elle utilise le bruit capturé (pas de
+renouvellement du bruit dans ce premier palier). Les mêmes204 scènes de
+validation indépendante et les mêmes garde-fous morphologiques/latents sont
+conservés. Le palier1500 n'est pas une durée finale ni une preuve d'acceptation.
+Le smoke GPU a réussi sur les trois branches, avec huit niveaux, gradients
+élève finis et non nuls, teacher figé, phases2+2 et pic mémoire6,64 Go.
+Treize tests CPU passent, dont un forward fonctionnel du vrai réseau natif
+avec gradients encodeur/décodeur et un test qui pénalise l'atténuation.
+Job durable : `base-native192-feature-train`, GPU4090 ; checkpoints/données
+hors Git. Aucun changement de la stack runtime approuvée.
+
 L'essai `native192x2-valley-mixed-pilot` s'est arrêté au contrôle qualité au
 pas500. La pénalisation supplémentaire de l'amplitude et de la profondeur
 des vallées ne suffit pas : le score physique passe de7,640 à6,551, mais le
