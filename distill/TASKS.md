@@ -2,7 +2,60 @@
 
 2026-10-10 · Grégory Beurier
 
-## Suivi du 11 octobre : deux GPU et images de progression
+## Pilote du 11 octobre : objectifs latents distincts pour les deux passes
+
+Le contrôle de durée native160×3 a été arrêté proprement au pas28579,
+après le contrôle indépendant25k : coarse4 rare, rappel fin0,44091,
+corrélation0,82339, amplitude0,68134 ; natif, corrélation0,15028 et
+amplitude2,75411. MSE opérateur0,03163, score physique6,331. Les images
+`_base/025000.png` confirment du grain natif et des vallées fines atténuées.
+Les jalons15k/20k/25k et le latest28579 restent conservés hors Git.
+La queue50k a été annulée ; ne pas la relancer. Décision/provenance :
+`preparation/native160-duration-guard25000.json`.
+
+Le job `base-native160-phase-train`, sur5090, repart de l'EMA15k pour un
+pilote de5000 étapes supplémentaires, batch4, lr1e-5, seed20261016,
+coarse original/4/2 et25 % de cas rares, choix uniforme coarse/cas/profil.
+Root : `ckpt/native160x3-phase-mixed-pilot/`. Aucun teacher ni decoder
+n'est entraîné. MSE opérateur +0,05 gradients comme ancrage ; première
+passe : sortie x0 des canaux0–3 ; seconde passe : hauteur H4.
+Chaque objectif ajoute erreur de position par bande et erreur symétrique
+de log-énergie, normalisées uniquement par teacher/statistiques TRAIN.
+Pas de gradients de pertes physiques ou du decoder ; le calcul FP32 de
+la loss ne modifie pas l'expression BF16 du runtime.
+
+Validation indépendante204 scènes/60 cas morphologiques chaque500 pas,
+teacher+decoder figés, garde-fous de rappel/corrélation et d'erreur latente.
+En plus, protéger les sorties non ciblées : MSE opérateur0–3 de seconde
+passe ≤105 % du point de départ, H4 de première passe ≤110 %, par coarse.
+Sélection du best par pire groupe de valley IoU. Garder le point initial,
+premier contrôle et best/latest ; ne pas assimiler un pilote à une livraison.
+Les images `~/data/distill/_base/phase-XXXXXX.png` comptent les étapes du
+pilote, avec la source15k explicitement affichée ; les images numériques
+sans préfixe restent celles du contrôle de durée.
+
+Six tests CPU de loss passent (identité, bruit à même énergie mais mauvais
+emplacement, atténuation/excès, teacher constant et gradients finis, phases
+distinctes, rejet des labels inconnus). Trois vrais pas de smoke GPU sur
+original/4/2 passent, pic5,09 Go, gradients non nuls ; preuve du code final :
+`eval/native160-phase-loss-smoke-v2/gpu-smoke.json`.
+
+La4090 exécute `base-native160-duration25k-diagnostics` : diagnostic de
+phases sur60 scènes TRAIN avec coarse original, puis chaîne complète25k
+sur7 sites historiques et12 rares figés, deux LODs et rendus dans `_base`.
+Le précédent diagnostic TRAIN20 était avec coarse4 et inclut des cas rares
+absents du préentraînement : ne pas le présenter comme mesure sur des
+entrées déjà apprises. Pour le contrôle de fit, analyser le sous-ensemble
+GENERAL original, présent dans le préentraînement.
+
+Opus5.5 a reçu la stratégie concrète, les métriques25k et les termes du smoke :
+`review/opus-native160-phase-pilot-20261011/`. Lire son avis avant le prochain
+changement ; le teacher T2 a seulement un appel par phase, pas une série
+de k solveur dans la seconde passe. Aucun base n'est encore accepté ;
+raccords à froid des deux axes, chaîne complète finale et performance au
+repos restent à vérifier. Aucun poids base dans Git ou l'application.
+
+## Étapes précédentes : deux GPU et images de progression
 
 Consignes utilisateur : utiliser les deux GPU pour du travail utile ; priorité
 à la5090 pour l'entraînement. Publier les rendus de chaque évaluation à plat
@@ -25,9 +78,9 @@ quatre scènes rares de validation avec decoder original ;
 Ces rendus à éclairage fixe sont issus des hauteurs calculées, sans lissage ;
 ce ne sont pas des captures du navigateur ni une preuve de continuité.
 
-Le job `base-native160-operator-long` poursuit le même apprentissage de15000
-à50000 sur5090, avec optimiseur/EMA/RNG conservés, sous
-`ckpt/native160x3-operator-long/`. C'est un contrôle de durée, pas une nouvelle
+Le job `base-native160-operator-long` a poursuivi le même apprentissage de15000
+vers50000 sur5090, avec optimiseur/EMA/RNG conservés, sous
+`ckpt/native160x3-operator-long/`, avant son arrêt au contrôle25k. C'est un contrôle de durée, pas une nouvelle
 stratégie promise comme suffisante. Le job4090 `base-native160-phase-oracle`
 compare élève→élève, élève→teacher, teacher→élève, teacher→teacher, sur les68
 scènes coarse4 indépendantes, dont20 rares. Il sépare l'erreur de première

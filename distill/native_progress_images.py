@@ -45,7 +45,10 @@ def main():
     parser.add_argument('--dataset', type=Path, default=DATA/'crops/native-mixed-scenes-v2')
     parser.add_argument('--output', type=Path, default=DATA/'_base')
     parser.add_argument('--coarse', choices=('original', 'coarse4', 'coarse2'), default='coarse4')
+    parser.add_argument('--label', default='', help='Distinct strategy prefix when pilot step numbers restart.')
     args = parser.parse_args()
+    if args.label and any(c not in 'abcdefghijklmnopqrstuvwxyz0123456789-_' for c in args.label):
+        parser.error('Strategy label must contain only lowercase letters, digits, - or _.')
     root, output = external_path(args.dataset), external_path(args.output)
     manifest = json.loads((root/'manifest.json').read_text())
     statistics = json.loads((DATA/'eval/native-decoded-probe/channel-statistics.json').read_text())
@@ -74,6 +77,7 @@ def main():
         model = NativeBase(saved['config']).cuda().eval().requires_grad_(False)
         model.load_state_dict(saved['ema'])
         step = saved['step']; rows, fields = [], []
+        stem = f'{args.label}-{step:06d}' if args.label else f'{step:06d}'
         for record in selected:
             region = DecodedRegion(root/record['file'], 'cuda')
             result = decoded_region_forward(model, region, weight)
@@ -97,7 +101,9 @@ def main():
         size, left, pad, row_height, header = 512, 250, 12, 556, 140
         image = Image.new('RGB', (left+2*(size+pad), header+len(rows)*row_height), (24, 24, 24))
         draw = ImageDraw.Draw(image)
-        draw.text((12, 10), f'Etape {step} | Base {model.config["model_channels"]}x{model.config["layers_per_block"]} | {args.coarse}', fill='white', font=font)
+        source_step = saved.get('contract', {}).get('source_step')
+        context = f' | {args.label}, source {source_step}' if args.label else ''
+        draw.text((12, 10), f'Etape {step}{context} | Base {model.config["model_channels"]}x{model.config["layers_per_block"]} | {args.coarse}', fill='white', font=font)
         draw.text((12, 39), 'Validation interne, decoder original fige. Meme bruit et memes scenes. Checkpoint '+sha[:12], fill='white', font=small)
         draw.text((12, 66), 'Ombrage fixe, sans lissage. LOD3 : 64 pixels natifs ; LOD0 : interieur 384 pixels.', fill='white', font=small)
         draw.text((left, 102), 'Teacher original, 2 passes', fill='white', font=font)
@@ -111,20 +117,21 @@ def main():
                 panel = shade(elevation, 30*2**lod, exaggeration).resize((size, size), Image.Resampling.NEAREST)
                 image.paste(panel, (left+column*(size+pad), y))
         description = (f'Etape {step}. Teacher et eleve sur les memes quatre scenes rares de validation, '
-                       f'coarse {args.coarse}, decoder original. Les valeurs exactes figurent dans {step:06d}.csv. '
+                       f'coarse {args.coarse}, decoder original. Les valeurs exactes figurent dans {stem}.csv. '
                        'Ce rendu ne certifie pas encore la chaine complete de l application ou les raccords de tuiles.')
         meta = PngImagePlugin.PngInfo(); meta.add_text('Description', description); meta.add_text('CheckpointSHA256', sha)
-        image_path = output/f'{step:06d}.png'
+        image_path = output/f'{stem}.png'
         if image_path.exists():
             with Image.open(image_path) as existing:
                 if existing.info.get('CheckpointSHA256') != sha:
                     raise ValueError('Refuse to overwrite another model at the same step.')
         atomic_write(image_path, lambda handle: image.save(handle, format='PNG', pnginfo=meta))
-        csv_path = output/f'{step:06d}.csv'
+        csv_path = output/f'{stem}.csv'
         with csv_path.open('w', newline='') as handle:
             writer = csv.DictWriter(handle, fieldnames=list(rows[0])); writer.writeheader(); writer.writerows(rows)
-        (output/f'{step:06d}.txt').write_text(description+'\n', encoding='utf-8')
-        atomic_json(output/f'{step:06d}.json', dict(checkpoint=str(path), checkpoint_sha256=sha,
+        (output/f'{stem}.txt').write_text(description+'\n', encoding='utf-8')
+        atomic_json(output/f'{stem}.json', dict(checkpoint=str(path), checkpoint_sha256=sha,
+            strategy=args.label, source_step=source_step,
             step=step, gpu=torch.cuda.get_device_name(), dataset_manifest_sha256=hashlib.sha256((root/'manifest.json').read_bytes()).hexdigest(),
             producer_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(), rows=rows, accepted=False))
         print(json.dumps(dict(step=step, image=str(image_path))), flush=True)

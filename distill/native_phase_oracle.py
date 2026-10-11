@@ -8,6 +8,7 @@ This is an interior diagnostic, not an application or seam certification.
 import argparse
 import hashlib
 import json
+from itertools import zip_longest
 from pathlib import Path
 
 import numpy as np
@@ -44,18 +45,25 @@ def main():
     parser.add_argument('--dataset', type=Path, default=DATA/'crops/native-mixed-scenes-v2')
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--coarse', choices=('original', 'coarse4', 'coarse2'), default='coarse4')
+    parser.add_argument('--split', choices=('train', 'val'), default='val', help='Train is diagnostic only; never acceptance evidence.')
     parser.add_argument('--limit', type=int, help='Small smoke only; omitted evaluates all selected independent worlds.')
     args = parser.parse_args()
     root, output, checkpoint = (external_path(p) for p in (args.dataset, args.output, args.checkpoint))
     manifest = json.loads((root/'manifest.json').read_text())
     stats_path = DATA/'eval/native-decoded-probe/channel-statistics.json'
-    records = [r for r in validation_records(manifest, json.loads(stats_path.read_text()))
-               if r['coarse_variant'] == args.coarse]
+    independent_validation = validation_records(manifest, json.loads(stats_path.read_text()))
+    pool = independent_validation if args.split == 'val' else [r for r in manifest['scenes'] if r['metadata']['split'] == 'train']
+    records = [r for r in pool if r['coarse_variant'] == args.coarse]
     if json.loads((root/'status.json').read_text())['status'] != 'complete':
         raise ValueError('Complete independent matched bank required.')
     if args.limit is not None:
         if args.limit <= 0:
             raise ValueError('Positive smoke limit required.')
+        if args.split == 'train':
+            buckets = {}
+            for record in sorted(records, key=lambda r: r['file']):
+                buckets.setdefault((record['metadata']['profile'], record['case_kind']), []).append(record)
+            records = [r for stripe in zip_longest(*buckets.values()) for r in stripe if r is not None]
         records = records[:args.limit]
     source = teacher_source()
     with (source/'diffusion_pytorch_model.safetensors').open('rb') as handle:
@@ -116,6 +124,7 @@ def main():
     atomic_json(output, dict(status='complete', step=saved['step'], checkpoint=str(checkpoint),
         checkpoint_sha256=checkpoint_sha, teacher_sha256=teacher_sha, coarse=args.coarse,
         decoder='original', records=len(records), smoke=args.limit is not None,
+        split=args.split, validation_evidence=args.split == 'val' and args.limit is None,
         dataset_manifest_sha256=hashlib.sha256((root/'manifest.json').read_bytes()).hexdigest(),
         producer_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
         summary=summary, rows=rows, accepted=False,
