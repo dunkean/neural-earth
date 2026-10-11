@@ -2,7 +2,25 @@
 
 2026-10-10 · Grégory Beurier
 
-## Objectif actif du 2026-10-11 : coarse complets, puis base
+## Reprise du 2026-10-11 : livraison coarse partiels, puis base seul
+
+À la demande de l'utilisateur, les full runs coarse ont été arrêtés proprement
+après 41 min 26 s : coarse1 au pas 54 669, coarse2 au pas 37 180. Les checkpoints
+latest, best et jalons restent conservés hors Git. Les EMA best sélectionnées
+sur 384 crops, pas 50 000 et 35 000, sont maintenant livrées dans
+`distill/weights/coarse1.pt` et `coarse2.pt`, avec SHA/provenance et statut
+partiel explicite. Trois fenêtres de validation ont vérifié sorties finies et
+écart nul entre EMA source et export CUDA Graph. Défauts coarse4/base original/
+decoder inchangés. Aucun poids base dans Git.
+
+L'utilisateur demande maintenant de continuer le base, sans attendre la fin des
+coarse. `base-native-next --defer-coarse` exige leurs jobs arrêtés puis lance
+directement benchmark des architectures sur5090, capture teacher sur4090,
+calibration train et pilote natif sur5090. Le serveur reste arrêté. La suite
+fusion/états élève, relief décodé/érosion/côtes, raccords froids, entraînement
+complet et planches finales demeure requise avant acceptation.
+
+## Historique : objectif coarse complets, puis base
 
 L'utilisateur demande les full runs coarse1 et coarse2, puis une distillation
 base réellement plus rapide et fidèle à l'érosion. `coarse_full.py` reprend les

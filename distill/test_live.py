@@ -121,12 +121,14 @@ class LiveModelTests(unittest.TestCase):
         root = Path(self.directory.name)
         bundled = root/'bundled'
         bundled.mkdir()
-        for name in ('coarse8', 'coarse4', 'decoder'):
+        for name in ('coarse8', 'coarse4', 'coarse2', 'coarse1', 'decoder'):
             (bundled/(name+'.pt')).write_bytes(name.encode())
         options = catalog(root/'empty-data', bundled_root=bundled)
         models = LiveModels(root/'new-config.json', options)
         self.assertEqual(models.selection, DEFAULT_SELECTION)
         self.assertEqual(options['coarse']['solver4']['path'], str(bundled/'coarse4.pt'))
+        self.assertEqual(options['coarse']['solver2']['path'], str(bundled/'coarse2.pt'))
+        self.assertEqual(options['coarse']['solver1']['path'], str(bundled/'coarse1.pt'))
         self.assertEqual(options['decoder']['distilled200k']['path'], str(bundled/'decoder.pt'))
         self.assertEqual(set(options['base']), {'teacher'})
 

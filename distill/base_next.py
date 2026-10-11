@@ -1,4 +1,4 @@
-"""Queue measured native-base work strictly after both full coarse deliveries.
+"""Queue measured native-base work after coarse deliveries or explicit deferral.
 
 Process identities are checked while waiting; terminal failures stop the queue.
 The queue benchmarks, captures fresh teacher scenes, calibrates, then trains a
@@ -7,6 +7,7 @@ remain explicit work, never inferred from this pilot's success.
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 from pathlib import Path
@@ -20,6 +21,10 @@ from distill.jobs import state
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--defer-coarse', action='store_true',
+                        help='Continue base work after the user defers incomplete coarse runs; require their jobs stopped.')
+    args = parser.parse_args()
     progress_path = DATA/'native-base-next.json'
     stopped = False
     process = None
@@ -37,8 +42,14 @@ def main():
         atomic_json(progress_path, dict(status='running', phase=phase, updated_at=time.time(), **values))
         print(json.dumps(dict(phase=phase, **values)), flush=True)
 
-    progress('waiting-for-full-coarse')
-    while not stopped:
+    if args.defer_coarse:
+        jobs = {name: state(DATA/'jobs'/name) for name in ('coarse-full1', 'coarse-full2')}
+        if any(job['live'] for job in jobs.values()):
+            raise RuntimeError('Deferred coarse jobs must be stopped before base work.')
+        progress('coarse-deferred-by-user')
+    else:
+        progress('waiting-for-full-coarse')
+    while not stopped and not args.defer_coarse:
         jobs = {name: state(DATA/'jobs'/name) for name in ('coarse-full1', 'coarse-full2')}
         if all(not job['live'] for job in jobs.values()):
             for name, job in jobs.items():

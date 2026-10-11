@@ -4,10 +4,11 @@ Le serveur de revue utilise le viewer existant, avec un menu **NN** dans la barr
 du haut. Au premier lancement, les choix sont **coarse distillé 4 étapes,
 base original et decoder distillé**. Coarse et decoder peuvent être comparés
 à leurs modèles d'origine ; coarse8 reste disponible si son export existe.
-Coarse **2 étapes · essai** et **1 étape · essai** sont proposés lorsque leurs
-exports existent sous `live/weights/coarse2/coarse.pt` et
-`live/weights/coarse1/coarse.pt`. Ils partent des poids du coarse4, avec
-5 000 étapes d'entraînement supplémentaires chacun. Seuls chargement,
+Coarse **2 étapes** et **1 étape** sont inclus sous `distill/weights/coarse2.pt`
+et `coarse1.pt`. Les EMA sélectionnées sur 384 crops de validation sont celles
+des pas 35 000 et 50 000 respectivement. Les runs visant 200 000 pas ont été
+interrompus à la demande de l'utilisateur aux pas 37 180 et 54 669 ; ces poids
+sont donc des entraînements partiels. Seuls chargement,
 sortie finie et équivalence export/CUDA Graph sont contrôlés ; l'utilisateur
 juge leur qualité dans l'app. Leur disponibilité ne change pas le défaut coarse4.
 Les bases distillés rejetés ne figurent plus dans le menu ni dans l'API.
@@ -15,7 +16,7 @@ Une ancienne configuration qui les sélectionnait est migrée vers le base origi
 sans modifier coarse, decoder ou le reset. Les autres choix sauvegardés sont
 conservés au redémarrage. Les choix sont communs aux onglets de ce serveur.
 
-Les poids coarse8, coarse4 et decoder sont inclus dans Git, à la demande de
+Les poids coarse8, coarse4, coarse2, coarse1 et decoder sont inclus dans Git, à la demande de
 l'utilisateur, sous `distill/weights/`. Le catalogue les utilise en priorité.
 Le manifest enregistre leur provenance, leurs SHA256 et la révision du teacher.
 Aucun poids de base distillé n'est inclus. Les checkpoints d'entraînement et

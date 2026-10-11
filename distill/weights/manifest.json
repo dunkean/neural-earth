@@ -66,7 +66,71 @@
         "norm_eps": 1e-06
       },
       "selected_weights": "ema"
+    },
+    "coarse1": {
+      "file": "coarse1.pt",
+      "bytes": 11216897,
+      "sha256": "0aad641de5626304a6f91ee63da4f3ec85f994c917c50250295e3f87ec34cbc5",
+      "stage": "coarse",
+      "source_checkpoint_sha256": "e5294d63349cc2d36fb880566e19aa068d1361ea0a3a77b6971214233ae6b263",
+      "training_step": 50000,
+      "config": {
+        "stage": "coarse",
+        "width": 128,
+        "depth": 3,
+        "dilations": [
+          1,
+          2,
+          4
+        ],
+        "solver_steps": 1,
+        "norm_eps": 1e-06
+      },
+      "selected_weights": "ema",
+      "training_status": "interrupted",
+      "last_training_step": 54669,
+      "target_training_steps": 200000,
+      "validation_count": 384,
+      "export_max_abs": 0.0,
+      "smoke_indices": [
+        0,
+        192,
+        383
+      ],
+      "physical_acceptance": false
+    },
+    "coarse2": {
+      "file": "coarse2.pt",
+      "bytes": 11216897,
+      "sha256": "962ddbb3dcf9eda72b81e6490cfd27b6c42661232299702354e441ba5c9aae26",
+      "stage": "coarse",
+      "source_checkpoint_sha256": "0677b84e2b97bb4c4b14a9724bb5c2e8d06f2176cfa42f0d90d082190d6de39f",
+      "training_step": 35000,
+      "config": {
+        "stage": "coarse",
+        "width": 128,
+        "depth": 3,
+        "dilations": [
+          1,
+          2,
+          4
+        ],
+        "solver_steps": 2,
+        "norm_eps": 1e-06
+      },
+      "selected_weights": "ema",
+      "training_status": "interrupted",
+      "last_training_step": 37180,
+      "target_training_steps": 200000,
+      "validation_count": 384,
+      "export_max_abs": 0.0,
+      "smoke_indices": [
+        0,
+        192,
+        383
+      ],
+      "physical_acceptance": false
     }
   },
-  "note": "User-authorized Git distribution of coarse8, coarse4 and decoder. No distilled base weights."
+  "note": "User-authorized Git distribution of coarse8/coarse4/coarse2/coarse1 and decoder. Coarse1/2 are preserved partial-run EMA checkpoints, not completed200k runs. No distilled base weights."
 }
