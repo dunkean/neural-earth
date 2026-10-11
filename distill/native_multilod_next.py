@@ -34,6 +34,7 @@ def main():
     parser.add_argument('--smoke-job',default='base-native-multilod-smoke')
     parser.add_argument('--smoke-root',type=Path,default=DATA/'eval/native-multilod-mixed-smoke')
     parser.add_argument('--progress',type=Path,default=DATA/'native-multilod-next.json')
+    parser.add_argument('--preserve-valleys',action='store_true')
     args=parser.parse_args()
     if args.steps<1:
         parser.error('Positive optimizer-step target required.')
@@ -48,6 +49,8 @@ def main():
     if set(replays)!={'original','coarse4','coarse2'} or any(not r['passed'] for r in replays.values()):
         raise ValueError('Original teacher replay failed a matched branch.')
     contract=proof['contract']
+    if bool(contract.get('preserve_valleys',False)) != args.preserve_valleys:
+        raise ValueError('Smoke and trainer must use the same valley-preservation policy.')
     sources=contract['producer_sha256'] | {
         'dataset':contract['dataset_manifest_sha256'],
         'statistics':contract['statistics_sha256'],
@@ -65,7 +68,7 @@ def main():
     # Keep the durable PID and signal handling: no orphan trainer subprocess.
     os.execv(sys.executable,[sys.executable,'-u','-m','distill.native_multilod_train',
         '--steps',str(args.steps),'--output',str(args.output),
-        '--source',str(args.source.expanduser().resolve())])
+        '--source',str(args.source.expanduser().resolve())]+(['--preserve-valleys'] if args.preserve_valleys else []))
 
 
 if __name__=='__main__':

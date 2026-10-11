@@ -39,11 +39,14 @@ def compare_shape(candidate,reference):
             rows.append(dict(sigma_pixels=sigma,land_pixels=int(valid.sum()),available=False))
             continue
         scale=float(np.sqrt(np.mean(tpi[valid]**2)))
+        actual_scale=float(np.sqrt(np.mean(actual[valid]**2)))
         valleys=valid & (tpi < -.75*scale)
         predicted=valid & (actual < -.75*scale)
         union=int((valleys|predicted).sum())
         rows.append(dict(sigma_pixels=sigma,land_pixels=int(valid.sum()),available=scale>1e-6,
-            tpi_rms_m=scale,tpi_mae_m=float(np.mean(np.abs(actual[valid]-tpi[valid]))),
+            tpi_rms_m=scale,candidate_tpi_rms_m=actual_scale,
+            tpi_rms_ratio=actual_scale/scale if scale>1e-6 else None,
+            tpi_mae_m=float(np.mean(np.abs(actual[valid]-tpi[valid]))),
             tpi_correlation=correlation(actual[valid],tpi[valid]),
             valley_pixels=int(valleys.sum()),valley_iou=float((valleys&predicted).sum()/union) if union else None,
             valley_retention=float((valleys&predicted).sum()/valleys.sum()) if valleys.any() else None))

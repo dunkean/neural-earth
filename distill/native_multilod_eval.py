@@ -74,7 +74,8 @@ def main():
             raise ValueError('Native checkpoint uses a different or missing teacher revision.')
         model = NativeBase(saved['config']).cuda().eval().requires_grad_(False)
         model.load_state_dict(saved['ema'])
-        details = validate(model, records, root, weight, decoder, variance)
+        details = validate(model, records, root, weight, decoder, variance,
+            preserve_valleys=bool(saved.get('contract',{}).get('preserve_valleys',False)))
         rare = [row for row in records if row['case_kind'] is not None]
         shapes = shape_validation(model, [root/row['file'] for row in rare], weight, decoder) if args.rare_shape else None
         if shapes is not None:

@@ -26,6 +26,18 @@ class TerrainShapeTests(unittest.TestCase):
         self.assertAlmostEqual(result['gradient_direction_cosine'],1.)
         self.assertLess(max(row['tpi_mae_m'] for row in result['topographic_position']),1e-10)
 
+    def test_shallow_valleys_cannot_pass_on_correlation_alone(self):
+        reference=self.terrain()
+        result=compare_shape(500.+.5*(reference-500.),reference)
+        for row in result['topographic_position']:
+            self.assertAlmostEqual(row['tpi_correlation'],1.)
+            self.assertAlmostEqual(row['tpi_rms_ratio'],.5)
+        self.assertLess(result['topographic_position'][0]['valley_retention'],1.)
+
+    def test_flat_land_has_no_defined_amplitude_ratio(self):
+        result=compare_shape(np.full((128,128),500.),np.full((128,128),500.))
+        self.assertTrue(all(row['tpi_rms_ratio'] is None for row in result['topographic_position']))
+
     def test_sea_and_flat_cases_do_not_claim_valley_evidence(self):
         result=compare_shape(np.zeros((128,128)),np.zeros((128,128)))
         self.assertIsNone(result['gradient_direction_cosine'])

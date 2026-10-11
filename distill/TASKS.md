@@ -172,6 +172,51 @@ physique original/4/2 jusqu'à2000 pas. Il vérifie son propre checkpointsource
 immuable15000, sa propre preuve smoke et les mêmes producteurs figés avant
 de devenir le trainer. Sorties sous `eval/native192-multilod-smoke/` et
 `ckpt/native192x2-multilod-mixed-pilot/`. Aucun poids base accepté ou livré.
+Le compact termine50000 pas ; validation original/4/2 : pire groupe6,576,
+MAE médianes LOD3/0 de47,83m/30,66m, corrélation fine des vallées rares0,136
+au LOD3 et0,617 au LOD0 (branche originale). Il reste insuffisant. Les jobs
+`base-native128-50k-multilod-smoke` et `base-native128-50k-multilod-next`
+reprennent la supervision physique depuis le jalon50000 immuable sur5090,
+sous `ckpt/native128x2-multilod50k-mixed-pilot/` ; smoke trois branches vérifié.
+Le192×2 physique atteint500 pas : score6,118 contre7,636 au départ ; MSE
+canaux0–3 +9,48%, encore dans le garde-fou. Contrôle coast en pipeline
+complet (fondation15000 et physique500, mêmes coarse4/decoder200k) en cours.
+Les checkpoints terminaux identiques ont été liés sans changer aucun nom
+ni octet :20,9Go libérés pour les nouveaux jalons. Preuve hors Git sous
+`preparation/native-checkpoint-dedup.json` ; aucun checkpoint unique supprimé.
+
+Les deux pilotes physiques atteignent finalement le garde-fou au pas1000.
+La nouvelle revue Opus5.5 (session5fb5dc79-0013-409e-b7cc-db10366ce984,
+modèle réel contrôlé) est sous
+`review/opus-base-generalization-20261011/REPORT.md` et `OPUS_REVIEW.md`.
+Ses hypothèses ont été testées avant de changer l'entraînement :
+`eval/native192-physical-val-amplitude.json` montre, branche originale,
+une rétention fine des vallées σ2 de0,127 →0,025 →0,005 (op15000/phys500/1000),
+avec RMS élève/teacher de0,356 →0,207 →0,164. Le même défaut existe en
+validation, pas seulement sur la côte finale. Le decoder original donne
+la même régression. Les14 vues de deux contrôles de mélange de canaux
+(`native192-operator15000-matched-oracles/`, `native192-physical500-matched-oracles/`)
+utilisent maintenant exactement les mêmes coarse4/decoder200k dans les deux
+mondes. Réintroduire les canaux0–3 teacher restaure la rétention coast à0,944
+au lieu de0,146 ; remettre seulement le canal4 donne0,148. Le mélange tout
+teacher a une MAE maximale entre vues de0,275m. Les arrays d'élévation seules
+ne permettaient pas ce mélange : les champs latents complets ont été recalculés.
+
+Nouvel essai contrôlé : `native_amplitude.py` ajoute un poids total0,3 sur
+le RMS TPI et la profondeur aux positions des10% de vallées teacher les plus
+profondes, aux deux LOD. Les pertes de position existantes restent actives ;
+du bruit déplacé ne peut pas réussir par son seul spectre. Sept tests CPU
+couvrent vallées peu profondes/déplacées, gradients correctifs, bruit sur plaine,
+mers et candidats plats. `--preserve-valleys` sélectionne le pire groupe par
+IoU des vallées et ajoute des gardes fixes sur rétention/corrélation native/fine,
+en plus des gardes latents. L'ancien score physique reste enregistré séparément
+sous `physical_selection_score` ; ne pas comparer les unités des deux sélections.
+La source192×2 opérateur15000, les tirages, les trois coarse et le seed restent
+les mêmes que dans le contrôle arrêté. Le premier palier est1500 pas, pas une
+acceptation ni la fin de l'entraînement. Jobs `base-native192-valley-smoke`
+puis `base-native192-valley-next`, sorties `eval/native192-valley-smoke/` et
+`ckpt/native192x2-valley-mixed-pilot/`. La preuve smoke et le trainer doivent
+activer la même politique, avec les nouveaux producteurs identifiés par SHA.
 Le contrôle des jobs utilise maintenant un nom tmux EXACT (`=nom`) : un
 job `train-validation` ne peut plus faire apparaître `train` encore vivant
 après sa fin. Une régression avec deux noms de sessions le vérifie sans GPU.

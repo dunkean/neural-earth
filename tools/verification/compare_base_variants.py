@@ -125,9 +125,10 @@ def shared_stage_paths(variants, conditioning_coarse=None, conditioning_decoder=
                        coarse_student=None, decoder_student=None):
     paths = {stage:path for stage,path in dict(coarse=conditioning_coarse,decoder=conditioning_decoder).items()
              if path is not None}
-    if paths and (any(v not in ('reference','native_student','fp32base') for v in variants) or
+    if paths and (any(v not in ('reference','native_student','fp32base','native_teacher_height',
+                                'native_teacher_features','native_teacher_all') for v in variants) or
                   coarse_student is not None or decoder_student is not None):
-        raise ValueError('Shared-stage comparison supports reference/native_student/fp32base; omit per-variant coarse/decoder weights.')
+        raise ValueError('Shared-stage comparison supports reference/native variants/fp32base; omit per-variant coarse/decoder weights.')
     return paths
 
 
@@ -224,6 +225,7 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
             raise ValueError(f'{variant}: supply the corresponding --student/--coarse-student/--decoder-student.')
         frozen_models, fingerprint = {}, {}
         fingerprint['code:tools/verification/compare_base_variants.py'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        fingerprint['code:distill/terrain_shape.py'] = hashlib.sha256((REPO_ROOT/'distill/terrain_shape.py').read_bytes()).hexdigest()
         if shared_paths:
             fingerprint['shared_stages'] = shared_fingerprint
             for name in ('distill/student.py','distill/features.py','distill/inference.py','distill/coarse_solver.py'):
@@ -306,6 +308,8 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
                             latents_batch_size=16, cache_limit=1024*1024**2, torch_compile=False,log_mode='silent')))
                         oracle_world.coarse_model, oracle_world.base_model, oracle_world.decoder_model = raw_coarse,raw_base,raw_decoder
                         configure_world(oracle_world,replace(loaded._terrain_profile,cuda_graphs=False),world_profile=site['profile'])
+                        if shared_models:
+                            install(oracle_world,shared_models)
                         oracle_world.bind()
                         original_builder = world._build_latent_stage
                         mode = variant.removeprefix('native_')

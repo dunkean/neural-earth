@@ -24,9 +24,10 @@ class MatchedReferenceTests(unittest.TestCase):
             shared_stage_paths(['reference','native_student'],conditioning_coarse=Path('coarse2.pt'),
                                coarse_student=Path('coarse4.pt'))
 
-    def test_oracle_mix_cannot_silently_use_another_teacher_chain(self):
-        with self.assertRaisesRegex(ValueError,'Shared-stage comparison'):
-            shared_stage_paths(['reference','native_teacher_height'],conditioning_coarse=Path('coarse2.pt'))
+    def test_native_oracles_use_the_same_shared_coarse_and_decoder(self):
+        paths=shared_stage_paths(['reference','native_teacher_height','native_teacher_features','native_teacher_all'],
+            conditioning_coarse=Path('coarse2.pt'),conditioning_decoder=Path('decoder.pt'))
+        self.assertEqual(set(paths),{'coarse','decoder'})
 
     def test_relative_weights_survive_backend_geography_chdir(self):
         previous = Path.cwd()
