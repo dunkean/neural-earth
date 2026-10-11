@@ -32,7 +32,8 @@ import torch
 from torch import nn
 
 VARIANTS = ['reference', 'fp32base', 'onestep', 'fp16base', 'fp16dec', 'fp32coarse', 'fp32dec',
-            'student', 'student_coarse', 'student_decoder', 'student_all', 'native_student']
+            'student', 'student_coarse', 'student_decoder', 'student_all', 'native_student',
+            'native_teacher_height', 'native_teacher_features', 'native_teacher_all']
 LODS = (3, 0)
 # Quantization holdout sites (LOD 3 tiles); their centre is used at every LOD.
 HOLDOUT = [dict(seed=101, profile='natural', tx=17, ty=-23),
@@ -131,7 +132,7 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
     server.existing_final_mip = lambda *unused: None
     output.mkdir(parents=True, exist_ok=True)
     site_list = sites(site_manifest)
-    if site_manifest is not None and any(v.startswith('student') or v == 'native_student' for v in variants):
+    if site_manifest is not None and any(v.startswith('student') or v.startswith('native_') for v in variants):
         if not json.loads(Path(site_manifest).read_text())['frozen']:
             raise ValueError('Freeze teacher-qualified rare sites before evaluating a student.')
     loaded = load_pipeline(site_list[0]['seed'])
@@ -179,7 +180,7 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
         if any(path is None for path in checkpoints.values()):
             raise ValueError(f'{variant}: supply the corresponding --student/--coarse-student/--decoder-student.')
         frozen_models, fingerprint = {}, {}
-        if variant == 'native_student':
+        if variant.startswith('native_'):
             if native_student is None:
                 raise ValueError('native_student requires --native-student.')
             from distill.native_inference import load_native
@@ -191,6 +192,9 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
             for name in ('distill/native_base.py', 'distill/native_inference.py',
                          'backend/terrain_inference.py', 'terrain-diffusion/terrain_diffusion/inference/world_pipeline.py'):
                 fingerprint['code:'+name] = hashlib.sha256((REPO_ROOT/name).read_bytes()).hexdigest()
+            if variant != 'native_student':
+                fingerprint['oracle'] = variant.removeprefix('native_')
+                fingerprint['code:distill/native_oracle.py'] = hashlib.sha256((REPO_ROOT/'distill/native_oracle.py').read_bytes()).hexdigest()
             from types import SimpleNamespace
             from terrain_inference import prepare_models
             prepare_models(SimpleNamespace(coarse_model=base, base_model=base, decoder_model=base))
@@ -232,7 +236,7 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
                     print(json.dumps(dict(variant=variant, site=site['name'], lod=lod, resumed=True)), flush=True)
                     continue
                 tx, ty = tile(site['x'], lod), tile(site['y'], lod)
-                item, world = dict(site=site['name'], lod=lod, tx=tx, ty=ty), None
+                item, world, oracle_world = dict(site=site['name'], lod=lod, tx=tx, ty=ty), None, None
                 try:
                     world = WorldPipeline(**(config | dict(seed=site['seed'], dtype='bf16', latents_batch_size=16,
                         cache_limit=1024 * 1024**2, torch_compile=False, log_mode='silent',
@@ -248,6 +252,16 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
                     if checkpoints:
                         from distill.inference import install
                         install(world, frozen_models)
+                    if variant in ('native_teacher_height','native_teacher_features','native_teacher_all'):
+                        from distill.native_oracle import mixed_tensor
+                        oracle_world = WorldPipeline(**(config | dict(seed=site['seed'], dtype='bf16',
+                            latents_batch_size=16, cache_limit=1024*1024**2, torch_compile=False,log_mode='silent')))
+                        oracle_world.coarse_model, oracle_world.base_model, oracle_world.decoder_model = raw_coarse,raw_base,raw_decoder
+                        configure_world(oracle_world,replace(loaded._terrain_profile,cuda_graphs=False),world_profile=site['profile'])
+                        oracle_world.bind()
+                        original_builder = world._build_latent_stage
+                        mode = variant.removeprefix('native_')
+                        world._build_latent_stage = lambda: mixed_tensor(original_builder(),oracle_world.latents,mode,world.tile_store)
                     world.bind()
                     torch.cuda.synchronize()
                     started = time.perf_counter()
@@ -267,6 +281,8 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
                 finally:
                     if world is not None:
                         world.close()
+                    if oracle_world is not None:
+                        oracle_world.close()
                     gc.collect()
                 if previous_item is not None:
                     results.remove(previous_item)

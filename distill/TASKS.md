@@ -2,6 +2,55 @@
 
 2026-10-10 · Grégory Beurier
 
+## Base natif — supervision physique du 2026-10-11
+
+Les pilotes ne sont pas acceptés. Le128×2 opérateur5000 pas donne une MAE
+médiane196,69 m au LOD3 et185,93 m au LOD0, sur7 sites. Après2000 pas
+régionaux fusionnés :195,94 m /167,24 m. Ce gain reste très loin du teacher,
+et les vallées sont mal placées ou disparaissent. EMA, initial, best, latest et
+jalons sont conservés. Preuves hors Git : `~/data/distill/eval/` dossiers
+`native128x2-operator-pilot` et `native128x2-fusion-pilot`, `report.json` et
+`arrays.npz`; le second inclut `rare/` et `cold-seams/`. Aucun poids base livré.
+
+Diagnostic oracle sur14 vues : substituer la hauteur teacher (canal4) donne
+une MAE médiane0,069 m au LOD3 et13,08 m au LOD0 ; substituer seulement les
+canaux0–3 laisse196,70 m /146,71 m. Les deux sont donc à superviser, avec une
+priorité physique sur la hauteur. Au LOD3, le runtime utilise directement le
+canal4 : le decoder n'intervient pas. Le contrôle « tous canaux teacher » donne
+0,069 m /0,028 m. Ce sont des diagnostics, pas des options de modèle.
+
+Revue Opus5.5 high, sessionec6c4cb6-db4b-459f-954b-4b8a7e9481d9, archivée sous
+`review/opus-native-physics-20261011/` : préférer la supervision physique à
+prolonger aveuglément la MSE de vitesse. Deux inférences du rapport ne sont pas
+retenues : les canaux0–3 n'expliquent pas le LOD3 ; aucune comparaison physique
+2500/5000 pas n'avait été faite. Les swaps oracle ci-dessus tranchent l'attribution.
+
+`native_decoded.py` reconstruit un cœur64 latents aligné96 (base32/decoder48),
+25 fenêtres init +9 raffinement, fusion et état élève T2. Le decoder ORIGINAL
+BF16 est gelé mais différentiable sur ses entrées. Loss hauteur en mètres,
+pentes relatives, position topographique σ2/8/32, latent normalisé par variance
+globale TRAIN, opérateurs et recouvrements on-policy ; clip1. Les576 scènes train
+ont toutes une géométrie complète. Deux pas GPU4090 : gradients finis et non
+nuls vers les34 fenêtres,2,33 s après chauffe,7,41 Go pic. Preuves :
+`eval/native-decoded-probe/{channel-statistics,decoder-control,gpu-smoke}.json`.
+
+Le contrôle du proxy distingue les mêmes latents du runtime et les latents
+capturés sur l'autre GPU. Exemple earthlike :17,41 m capturé4090→runtime5090,
+mais0,059 m proxy→pipeline sur les MÊMES latents ; contrôle4090 :0,041 m.
+Ce drift ne doit pas être attribué au decoder. Les six profils sont contrôlés
+avant entraînement (`eval/native-decoded-controls/`). Le replay base sur les
+entrées/batches capturés garde aussi son plancher de précision mesuré.
+
+Job durable `base-native-decoded-next` : contrôles, pilote physique2000 pas sur
+5090 depuis l'EMA opérateur5000 (optimiseur neuf),25% nouveaux bruits teacher,
+validation48 mondes et sélection du pire profil physique. Une dégradation des
+canaux0–3 >10% arrête le pilote à partir de500 pas. Ensuite pipeline complète,
+cas rares et raccords de quatre tuiles froides, deux axes/halos, sans planches.
+Une baisse médiane de30% et le maintien des vallées guideront la poursuite,
+sans constituer une acceptation finale. Entraînement complet, benchmark du
+modèle entraîné sur cartes au repos et planches finales restent à faire.
+**85 tests passent**, log `logs/native-decoded-tests.log`.
+
 ## Reprise du 2026-10-11 : livraison coarse partiels, puis base seul
 
 À la demande de l'utilisateur, les full runs coarse ont été arrêtés proprement
