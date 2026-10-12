@@ -82,3 +82,19 @@ le ratio RMS haute fréquence passe de2,12 à2,21. Les poids bruts améliorent
 donc certains reliefs sans dominer l'EMA sur les cas côtiers/plats. Les deux
 sont conservés ; la sélection finale attend les prochains checkpoints et le
 retour visuel. Aucun changement de recette, aucun nouveau base par défaut.
+
+## Audit intégral de l'export30k
+
+`native_weight_artifact_audit.py` compare chaque paramètre reconstruit à la
+valeur BF16 effectivement utilisée par le QAT, y compris la normalisation MP,
+le fan-in et la quantification des kernels. Il vérifie aussi configuration,
+compteur, provenance teacher, inventaire et SHA du fichier packé. L'audit
+s'effectue sur le type de device utilisé par l'export : les réductions de
+normalisation CPU/CUDA peuvent produire des codes différents.
+
+Checkpoint30k sur4090 : **174tenseurs, dont93kernels quantifiés, tous exactement
+égaux**. Le test CPU détecte un mauvais checkpoint à métadonnées identiques
+(poison du gain de sortie), ainsi qu'un compteur source/manifest incompatible.
+Preuve : `~/data/distill/eval/native-nf4-artifact30k-audit.json`.
+Cette égalité des poids complète les contrôles de forwards ; elle ne remplace
+pas l'évaluation du relief, des côtes ou des raccords physiques.
