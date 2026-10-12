@@ -4,6 +4,11 @@
 
 ## État actuel : poids seuls NF4, adaptation6000pas lancée
 
+Pilote désormais **terminé à6000**,34,8min, sans garde-fou déclenché. Le meilleur
+score pratique est au6000 ; contrôle des poids bruts6000 lancé sur4090. Images
+`_base/native-weight-nf4qat-<coarse>-006000.png` disponibles. Qualité améliorée,
+bruit haute fréquence des plaines encore amplifié ; pas de déclaration finale.
+
 Top utilisateur reçu : lancer les trainings et signaler les nouveaux screenshots.
 Pilote5090 `base-weight-nf4-train`, observateur4090 `base-weight-nf4-evaluate`.
 Le stockage natifNF4 réel fait149,605Mo d'échelles/poids, hors petit manifest ;

@@ -3,6 +3,10 @@
 12 octobre 2026, après le top utilisateur. ValléesFP8QAT500 jugées bonnes ;
 priorité50–100Mo, plafond150Mo, grain des plaines et côte à suivre.
 
+**État :** les6000pas ont terminé normalement en34,8min, observateur terminé
+aussi. Les images006000 sont disponibles ; un contrôle complémentaire des
+poids bruts6000 est lancé. Aucun modèle n'est encore déclaré final.
+
 ## Format et contrôles
 
 Le réseau natif254M, fenêtres64/pas32, deux phases,58conditions et attention
@@ -98,8 +102,26 @@ le grain reste excessif et la qualitéFP8QAT500 n'est pas encore récupérée.
 Les PNG500/1000 et les fichiers numériques associés sont publiés dans `_base`.
 Au1000, paquet poids+manifest :149 654 662octets, sans accélération acquise.
 
+Au6000, meilleur score pratique de ce pilote0,797 : montagnes/coarse4,
+MAE41,0/14,1/29,0m, amplitudes1,002/0,929/0,920 ; coarse2,
+34,9/13,9/29,5m et0,994/0,937/0,929. PlainesLOD3, HF-RMS :
+1,84/2,09(coarse4),1,76/2,14(coarse2). Le bruit s'est réduit mais reste amplifié.
+Les poids bruts3000 ont aussi été conservés/évalués : montagnes/coarse4
+30,1/14,4/30,0m et amplitudes1,070/0,980/0,946, meilleurs que leurEMA.
+Ne pas conclure sur la seule courbeEMA. Les raw6000 et l'état complet de reprise
+restent conservés ; le contrôle brut6000 doit guider la candidate suivante.
+
+Compression transport sans perte testée au1000 : gzip132 277 702octets,
+reconstructionSHA identique au fichier149 604 746octets. Cette économie concerne
+le téléchargement ; les poids décompressés et la mémoire d'exécution ne sont
+pas réduits de la même manière.
+
 Revue complémentaire Opus5.5 xhigh lancée en lecture seule sur ce changement
 de stratégie et les preuves, sous `review/opus-weight-nf4-start-20261012/`.
+Cette revue est terminée : pas de défaut bloquant identifié dans les sources
+lues, contrôle brut/EMA conseillé, risque de biais d'altitude et d'échelles
+fixées signalé. Les gains des convolutions quantifiées sont bienunitaires dans
+les appels du teacher ; aucune correction de recette en cours de run effectuée.
 Ne pas modifier silencieusement la recette d'un run actif sur un avis : vérifier
 ses premiers résultats et conserver sa provenance.
 
