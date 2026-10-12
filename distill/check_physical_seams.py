@@ -19,6 +19,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from scipy.ndimage import gaussian_filter
 import torch
+from types import SimpleNamespace
 
 from distill.common import DATA, REPO, REVISION, atomic_json, atomic_write, external_path, source_digest
 from distill.inference import install
@@ -120,7 +121,7 @@ def preview(path, full, mosaic, lod, title):
     image.save(path)
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base', type=Path)
@@ -203,12 +204,16 @@ def main():
         with torch.inference_mode(False):
             models['native_base'], saved = load_native(io.BytesIO(payload), 'cuda')
         fingerprint['training_step'] = saved['step']
+        fingerprint['architecture'] = saved.get('architecture','native')
         del payload, saved
     code_files = (('distill/native_inference.py', 'backend/terrain_inference.py',
                    'terrain-diffusion/terrain_diffusion/inference/world_pipeline.py') if args.native_base else
                   ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py'))
     for name in code_files:
         fingerprint['code:'+name] = hashlib.sha256((REPO/name).read_bytes()).hexdigest()
+    if args.native_base and fingerprint['architecture']=='native-weight-quant':
+        for name in ('distill/native_weight_runtime.py','distill/native_weight_quant.py'):
+            fingerprint['code:'+name] = hashlib.sha256((REPO/name).read_bytes()).hexdigest()
     fingerprint['code:distill/check_physical_seams.py'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     if shared_paths:
         for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py'):
@@ -252,7 +257,13 @@ def main():
         elif variant == 'native_student':
             from terrain_inference import prepare_models
             world.base_model = models['native_base']
-            prepare_models(world)
+            if getattr(world.base_model,'_terrain_custom_base',False):
+                # Quantized kernels already include MP normalization. Preserve
+                # their exact forward; prepare only the shared native stages.
+                prepare_models(SimpleNamespace(coarse_model=world.coarse_model,
+                    base_model=world.coarse_model,decoder_model=world.decoder_model))
+            else:
+                prepare_models(world)
         world.bind()
         return world
     for site in sites:

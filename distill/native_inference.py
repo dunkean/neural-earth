@@ -11,16 +11,19 @@ def load_native(source,device='cpu'):
     saved=torch.load(source,map_location='cpu',weights_only=True)
     config=saved['config']
     if (config.get('in_channels') != 5 or config.get('out_channels') != 5 or
-            config.get('conditional_inputs') != [['tensor',58,1.0]]):
+            [list(row) for row in (config.get('conditional_inputs') or [])] != [['tensor',58,1.0]]):
         raise ValueError('Native base requires the teacher five-channel /58-value interface.')
     revision=saved.get('teacher_revision') or saved.get('dataset_manifest',{}).get('revision')
     if revision != REVISION:
         raise ValueError('Native base teacher revision is missing or mismatched.')
-    state=saved.get('ema',saved['model'])
+    state=saved['ema'] if 'ema' in saved else saved.get('model')
     if not state or any(not name.startswith('net.') for name in state):
         raise ValueError('Native checkpoint weights must belong to the native net.')
     if any(not torch.isfinite(value).all() for value in state.values()):
         raise ValueError('Non-finite native base weights.')
+    if saved.get('architecture')=='native-weight-quant':
+        from distill.native_weight_runtime import runtime_model
+        return runtime_model(saved,device),saved
     model=EDMUnet2D.from_config(config)
     model.load_state_dict({name[4:]:value for name,value in state.items()},strict=True)
     dtype=torch.bfloat16 if torch.device(device).type=='cuda' else torch.float32

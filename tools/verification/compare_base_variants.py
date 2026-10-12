@@ -138,7 +138,7 @@ def resolve_evaluation_paths(**paths):
     return {name:None if path is None else Path(path).expanduser().resolve() for name,path in paths.items()}
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def run(output, variants, *, student=None, coarse_student=None, decoder_student=None,
         native_student=None, site_names=None, lods=LODS, resume=True, site_manifest=None,
         conditioning_coarse=None, conditioning_decoder=None):
@@ -239,6 +239,7 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
             with torch.inference_mode(False):
                 base, saved_native = load_native(io.BytesIO(payload), 'cuda')
             fingerprint['training_step'] = saved_native['step']
+            fingerprint['architecture'] = saved_native.get('architecture','native')
             for name in ('distill/native_base.py', 'distill/native_inference.py',
                          'backend/terrain_inference.py', 'terrain-diffusion/terrain_diffusion/inference/world_pipeline.py'):
                 fingerprint['code:'+name] = hashlib.sha256((REPO_ROOT/name).read_bytes()).hexdigest()
@@ -247,7 +248,13 @@ def run(output, variants, *, student=None, coarse_student=None, decoder_student=
                 fingerprint['code:distill/native_oracle.py'] = hashlib.sha256((REPO_ROOT/'distill/native_oracle.py').read_bytes()).hexdigest()
             from types import SimpleNamespace
             from terrain_inference import prepare_models
-            prepare_models(SimpleNamespace(coarse_model=base, base_model=base, decoder_model=base))
+            if getattr(base,'_terrain_custom_base',False):
+                # NF4 kernels already include native normalization; preserve
+                # their forwards rather than normalizing a second time.
+                for name in ('distill/native_weight_runtime.py','distill/native_weight_quant.py'):
+                    fingerprint['code:'+name] = hashlib.sha256((REPO_ROOT/name).read_bytes()).hexdigest()
+            else:
+                prepare_models(SimpleNamespace(coarse_model=base, base_model=base, decoder_model=base))
             del payload, saved_native
         elif checkpoints:
             from distill.student import load_student
