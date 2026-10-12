@@ -1,0 +1,57 @@
+# Original / NF4 : première mesure d'inférence
+
+Mesure du 12 octobre 2026, RTX 4090, PyTorch BF16, fenêtres 64×64,
+format contigu, embeddings précalculés et CUDA Graphs pour les deux modèles.
+Les deux étapes natives sont chronométrées séparément puis moyennées.
+Le candidat utilise l'EMA à 15 000 étapes, chargé par l'adaptateur
+`native_weight_runtime` avec ses convolutions NF4 déjà déquantifiées en BF16.
+La quantification simulée d'entraînement n'est pas chronométrée.
+
+| Batch | Original, ms / fenêtre | Distillé, ms / fenêtre | Rapport distillé / original |
+|---|---:|---:|---:|
+| 1 | 4,976 | 6,041 | 1,214 |
+| 16 | 2,016 | 2,037 | 1,011 |
+
+Chaque temps est la médiane de cinq séries de dix forwards, après chauffe.
+Les échantillons individuels, les mesures eager et les pics mémoire sont dans
+`/home/delete/data/distill/eval/native-nf4-inference-4090-preliminary.json`.
+Le job `base-nf4-inference-benchmark-4090` est terminé avec code 0.
+
+## Interprétation et limites
+
+À batch 16, ce candidat a pratiquement le même temps de calcul que l'original.
+À batch 1, l'adaptateur actuel est environ 21 % plus lent. Les deux réseaux
+conservent 253 688 037 paramètres, les convolutions et les deux étapes natives.
+Le stockage NF4 n'implique donc pas un calcul quatre bits : les convolutions
+de cette implémentation utilisent BF16. Aucune accélération WASM / WebGPU
+n'est mesurée ici.
+
+Le fichier teacher actuel fait 1 014 772 076 octets (FP32). Une représentation
+BF16 des paramètres seuls ferait 507 376 074 octets. Le paquet NF4 vérifié
+fait environ 149,65 Mo, manifeste compris. La compression du téléchargement
+est distincte de l'occupation GPU après déquantification.
+
+Il s'agit d'une première mesure : l'affichage Windows est actif sur la 4090
+et l'entraînement principal continue sur la 5090. Aucun entraînement ne
+tournait sur la 4090 pendant ce micro-benchmark. L'attention reste la référence,
+les opérations ponctuelles utilisent PyTorch sous Linux, sans kernels exacts
+Windows. Ces résultats ne sont pas des temps de génération d'une vue complète.
+
+À la fin, répéter la comparaison sur la 5090 sans calcul concurrent sur cette
+carte, avec les poids retenus, puis mesurer une vue complète à coarse et decoder
+identiques. Conserver les temps du base isolé et ceux de la chaîne complète
+afin de rendre visible le coût du decoder, des caches et de l'orchestration.
+
+## Reproduction
+
+```bash
+source distill/env.sh
+CUDA_VISIBLE_DEVICES=0 python -m distill.benchmark_native_runtime \
+  --checkpoint /home/delete/data/distill/ckpt/native-weight-nf4-100k/step015000.pt \
+  --output /home/delete/data/distill/eval/native-nf4-inference-4090-new.json \
+  --iterations 10 \
+  --note 'Décrire les charges concurrentes et le GPU physique'
+```
+
+Le script refuse d'écraser une mesure existante. Le rapport ne marque
+`completed: true` qu'après les huit mesures et les contrôles de sorties finies.
