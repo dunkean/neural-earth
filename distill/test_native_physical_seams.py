@@ -1,12 +1,27 @@
 from pathlib import Path
 import unittest
+import json
+import tempfile
 
 import numpy as np
 
-from distill.check_physical_seams import partition_stats, stage_paths
+from distill.check_physical_seams import partition_stats, stage_paths, native_validation_sites
+from distill.common import REVISION
 
 
 class NativePhysicalSeamsTests(unittest.TestCase):
+    def test_native_validation_coordinates_and_training_rejection(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'scene.npz'
+            metadata=dict(split='val',teacher_revision=REVISION,native_size=128,
+                          x=64,y=-32,seed=620001,profile='orogen')
+            np.savez(path,metadata=json.dumps(metadata))
+            sites,digests=native_validation_sites([path])
+            self.assertEqual((sites[0]['x'],sites[0]['y']),(30720,7680))
+            self.assertEqual(sites[0]['seed'],620001)
+            self.assertEqual(len(digests[str(path)]),64)
+            metadata['split']='train';np.savez(path,metadata=json.dumps(metadata))
+            with self.assertRaises(ValueError):native_validation_sites([path])
     def test_native_base_can_share_application_coarse_and_decoder(self):
         paths, shared = stage_paths(native_base=Path('native.pt'),
             conditioning_coarse=Path('coarse4.pt'), conditioning_decoder=Path('decoder.pt'))

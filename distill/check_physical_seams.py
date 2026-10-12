@@ -45,6 +45,29 @@ def historical_sites(names):
     return result, path
 
 
+def native_validation_sites(paths):
+    """Use existing validation captures without selecting reserved final worlds."""
+    result, digests = [], {}
+    for path in paths:
+        path = Path(path).expanduser().resolve()
+        with np.load(path,allow_pickle=False) as sample:
+            metadata=json.loads(str(sample['metadata']))
+        if (metadata.get('split')!='val' or metadata.get('teacher_revision')!=REVISION or
+                metadata.get('native_size')!=128):
+            raise ValueError('Pinned native128 validation captures required.')
+        if metadata['x']%32 or metadata['y']%32:
+            raise ValueError('Validation captures must use the native32 grid.')
+        name='native-val-'+path.stem
+        if any(site['name']==name for site in result):raise ValueError('Duplicate validation scene names.')
+        # One base latent spans eight native30m pixels. Center the app request
+        # on the stored128-latent capture rather than its upper-left corner.
+        result.append(dict(name=name,seed=metadata['seed'],profile=metadata['profile'],
+            x=(metadata['x']+64)*240,y=(metadata['y']+64)*240,
+            kind='native-validation',source_scene=str(path)))
+        digests[str(path)]=hashlib.sha256(path.read_bytes()).hexdigest()
+    return result,digests
+
+
 def stage_paths(base=None, native_base=None, coarse=None, decoder=None,
                 conditioning_coarse=None, conditioning_decoder=None):
     candidates = {k:v for k,v in dict(base=base, coarse=coarse, decoder=decoder).items() if v}
@@ -132,6 +155,8 @@ def main():
     parser.add_argument('--conditioning-decoder', type=Path, help='Use these decoder weights in BOTH reference and native chains.')
     parser.add_argument('--site-manifest', type=Path, default=DATA/'eval/rare-sites-complete.json')
     parser.add_argument('--sites', nargs='+', help='Otherwise one site per category; prefer warmer plains.')
+    parser.add_argument('--validation-scenes',type=Path,nargs='+',
+                        help='Existing native128 VAL captures; center physical seam checks on these worlds.')
     parser.add_argument('--historical-sites', nargs='+', choices=('snow', 'desert', 'coast'),
                         help='Capture the original held-out screenshot locations instead of the rare bank.')
     parser.add_argument('--include-rare-sites', nargs='+',
@@ -140,6 +165,10 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--no-preview', action='store_true', help='Keep numerical/raw evidence only; final plates are produced separately.')
     args = parser.parse_args()
+    if args.validation_scenes:
+        args.validation_scenes=[p.expanduser().resolve() for p in args.validation_scenes]
+        if args.sites or args.historical_sites or args.include_rare_sites:
+            parser.error('--validation-scenes is a separate site source.')
     # The backend changes cwd when importing upstream geography assets.
     for name in ('base', 'native_base', 'coarse', 'decoder', 'conditioning_coarse',
                  'conditioning_decoder', 'site_manifest', 'output'):
@@ -155,7 +184,9 @@ def main():
         parser.error('Choose historical sites or names from the rare bank.')
     if args.include_rare_sites and not args.historical_sites:
         parser.error('--include-rare-sites requires --historical-sites; otherwise use --sites.')
-    if args.historical_sites:
+    if args.validation_scenes:
+        sites,manifest_digest=native_validation_sites(args.validation_scenes)
+    elif args.historical_sites:
         if len(set(args.historical_sites)) != len(args.historical_sites):
             parser.error('Historical site names must be distinct.')
         sites, manifest_path = historical_sites(args.historical_sites)
@@ -175,7 +206,7 @@ def main():
         if set(args.sites) - {s['name'] for s in sites}:
             parser.error('Unknown site in the frozen bank.')
         sites = [s for s in sites if s['name'] in args.sites]
-    elif not args.historical_sites:
+    elif not args.historical_sites and not args.validation_scenes:
         selected = []
         for kind in KINDS:
             choices = [s for s in sites if s['kind'] == kind]

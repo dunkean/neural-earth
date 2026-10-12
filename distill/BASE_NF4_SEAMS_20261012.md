@@ -45,3 +45,27 @@ Job `base-nf4-cold-seams-20k`, terminé normalement, quatre lignes référence /
 NF4 × LOD3 /0. Aucune planche finale n'est publiée à ce stade. La côte humide,
 les montagnes, d'autres ordres de requête et les candidats finaux restent à
 vérifier avant de déclarer le base livré.
+
+## Côte humide sur un monde VAL existant
+
+Le checker accepte désormais `--validation-scenes <capture-native128.npz>`.
+Il vérifie splitVAL, révision du teacher et grille32, puis convertit le centre
+latent du capture en coordonnées physiques (240m par latent). Cela permet de
+réutiliser les cas VAL sans sélectionner les mondes finaux réservés.
+Un test CPU couvre les deux axes et rejette les captures TRAIN.
+
+Contrôle terminé sur `val-0696-coarse4.npz`, monde10594, même stack et EMA20k :
+
+| LOD | Base | MAE toutes zones (m) | MAE raccords (m) | Erreur maximale de saut (m) |
+|---|---|---:|---:|---:|
+|3|Original|1,8353|2,6260|29,7749|
+|3|NF4 EMA20k|1,8260|2,6216|16,1162|
+|0|Original|0,01447|0,01191|0,62555|
+|0|NF4 EMA20k|0,01428|0,01131|0,60449|
+
+Le LOD3 présente des écarts de partition également chez le teacher. Ce n'est
+pas une identité numérique ni une preuve de tous les raccords. NF4 n'amplifie
+pas les métriques de raccord principales sur ce deuxième cas ; la vérification
+visuelle finale et d'autres scènes restent nécessaires.
+Rapport et tableaux physiques bruts :
+`~/data/distill/eval/native-nf4-wet-coast-seams-20k-coarse4/`.
