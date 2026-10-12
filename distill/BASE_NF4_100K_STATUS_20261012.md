@@ -61,3 +61,29 @@ Les paquets restent horsGit.
 - Comparaison finale des candidats retenus sur des scènes contrastées,
   contrôle de généralisation, planches finales de bonne qualité et temps sur
   une vue complète restent à produire. Aucun poids base n'est promu par défaut.
+
+## Raccords70k /5090 : premier passage terminé
+
+Le job `base-nf4-70k-cold-seams-5090` a terminé avec code0 : 28lignes,
+sept scènes × deuxLOD × original/candidat. Profil latentbatch16 noncanonique,
+coarse4/decoder livré communs, monde neuf pour chaque tuile et grande requête.
+
+| Scène | LOD3 MAE raccord original /70k (m) | LOD0 MAE raccord original /70k (m) |
+|---|---:|---:|
+| Désert | 2,278 /2,146 | 0,069 /0,049 |
+| Plaine tempérée | 1,197 /1,167 | 0,047 /0,089 |
+| Côte humide | 2,646 /2,652 | 0,161 /0,145 |
+| Plaine-mer | 0,936 /0,907 | 0,037 /0,027 |
+| Montagne620001 | 3,821 /3,758 | 0,429 /0,541 |
+| Montagne620002 | 4,049 /3,800 | 0,572 /0,543 |
+| Montagne620003 | 2,254 /1,972 | 0,302 /0,347 |
+
+Les moyennes sont proches de la référence, mais des maxima sont aggravés :
+montagne620002 LOD3, saut maximal31,690m original /37,602m70k ;
+montagne620003 LOD0, 2,730m /3,577m. Les mesures sont des écarts entre
+découpages de chaque modèle, pas leur erreur par rapport au relief teacher.
+La revue visuelle finale reste requise ; aucune continuité parfaite n'est déclarée.
+
+Le contrôle des sept mêmes scènes avec `TERRAIN_CANONICAL_LATENTS=1` et
+`TERRAIN_LATENT_BATCH=1` est lancé sur5090 pour isoler l'effet numérique
+du batch. Sortie : `eval/native-nf4-70k-canonical-seams-5090`.
