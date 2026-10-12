@@ -2,6 +2,67 @@
 
 2026-10-10 · Grégory Beurier
 
+## Élève de champ pleine largeur : entraînement6k en cours
+
+Le pilote quart-rang est archivé à froid, avec toutes ses empreintes et chemins
+Linux conservés par symlinks ; aucun poids n'est perdu. Preuve :
+`preparation/quarter-pilot-cold-archive.json`. Les données actives, le teacher et
+le checkpoint initial du nouvel élève restent sur le système Linux.
+
+Nouvelle famille `FieldBase`,253688037 paramètres,192×3 et T2 : tous les poids,
+skips, têtes et resampling du teacher conservés, sans réduction de rang. Champ
+256 en entrée,128 central en sortie, deux passes et bruits natifs seed+5819/5820.
+Les49 conditions58 de première passe forment une grille7×7 aux centres des
+fenêtres, espacés32 ; elles sont identiques pour les fenêtres de seconde passe
+communes. Interpolation FP32 puis MLP/FiLM du teacher aux positions du champ.
+Attention locale alignée sur les multiples64 du monde, plutôt qu'une attention
+globale sur256. Le même modèle sur64 et condition constante reproduit EXACTEMENT
+le teacher : maxabs0/MSE0 sur les deux phases du contrôle GPU réel.
+Six tests CPU vérifient centres, offsets, attention locale, gradients de toutes
+les cibles, chevauchements selon x/y et ratios de sampling.
+
+Ce transfert n'est pas une identité sur les grands champs. Au départ, trois
+montagnes VAL coarse4 ont MAE133/218/382m,corr TPI8 .822/.779/.661,amplitude
+1,398/1,245/1,077. Recadrages indépendants déplacés32 : MAE native montagne
+18–50m,max193–715m. Ces chiffres ne sont PAS les seams app ; halo64 n'est PAS
+une borne mathématique du champ récepteur des convolutions. Les ruptures de
+recadrage doivent être apprises et vérifiées avant toute acceptation.
+
+Supervision : champ initial192 blended réellement capturé, positif/complet,
+comparé à32:224 ; final128 comparé à64:192. Pas de cible initiale256 inventée.
+Loss latente normalisée sur les cinq canaux aux deux phases, gradient, bandes
+positionnelles et énergie×2 en montagne ; aucune loss de decoder physique.
+KD sur les32 pixels centraux d'une fenêtre teacher64 correspondante, aux DEUX
+phases et aux37 sorties encoder/decoder,74 comparaisons. Poids0,12093 calibré
+sur16 scènes TRAIN. Tous les6000 pas utilisent25% montagnes/15% anciennes
+rares/60% générales et les trois coarse. Adam3e-5, warmup200,clip1,EMA demi-vie500.
+Une loss de recadrage commun intervient tous4 pas, axes alternés ; le champ
+auxiliaire est détaché pour contenir la mémoire. Checkpointing du FORWARD complet
+rejoue correctement les casts fonctionnels BF16, sans recomputation en FP32.
+GPU smoke complet sur5090, les trois branches, targets/KD/seam : gradients
+finis, teacher figé, pic15,65GiB. Le run avec EMA monte~16,58GiB.
+
+Jobs durables : `base-field-full-width-train` sur5090,
+`base-field-full-width-evaluate` sur4090. Run
+`ckpt/field-full-width-pilot/`, sources/teacher/data/calibration figés par SHA.
+Observer chaque500 pas : trois coarses, les quatre anciennes rares et les trois
+mondes VAL de montagne, photos `_base/field-fullwidth-<coarse>-<step>.*` et
+recadrages x/y. Le500 progresse sans passer : montagnes coarse4 MAE106/177/310m,
+corr .853/.811/.707,amplitude1,087/1,025/.898. Aucun nouveau base accepté.
+Le garde-fou2000 compare chaque monde à SON propre départ, pas à une moyenne.
+Les stats de continuité, chaîne app, mondes finaux et vitesse réelle restent requis.
+
+Avis Opus5.5 réellement terminé, même session :
+`review/opus-field-full-launched-20261012/OPUS_REVIEW.md`. Aucun bug numérique
+bloquant identifié ; risques : lignes d'attention internes64 que les pertes de
+recadrage ne détectent pas, tokens padding et KD profond des fenêtres64 qui
+peut être incompatible avec les targets blended. Diagnostic supplémentaire
+indépendant, sans modifier les producteurs live :
+`field_attention_diagnostic.py`. Au500, montagnes : ratios d'erreur TPI8 sur les
+lignes64 vs hors lignes0,880/1,376/0,711 ; une scène mérite surveillance au2000.
+Les niveaux et phases KD, erreur bord16 vs intérieur64 et lignes superposées
+sont publiés dans `_base/field-attention-lines-000500.*`.
+
 ## Pilote teacher-basis sélectif : 4 000 pas réellement terminés
 
 Profil BF16 à poids en cache et CUDA Graphs,5090,batch16 : teacher1,400ms
