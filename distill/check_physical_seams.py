@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-from dataclasses import replace
+from dataclasses import asdict, replace
 import gc
 import hashlib
 import io
@@ -274,6 +274,10 @@ def main():
     from terrain_snr import lod_relief
     from terrain_generation import resolve_generation
     loaded = load_pipeline(sites[0]['seed'])
+    inference_profile=asdict(replace(loaded._terrain_profile,cuda_graphs=False))
+    if 'inference_profile' in report and report['inference_profile']!=inference_profile:
+        raise ValueError('Inference profile changed; use a new output directory.')
+    report['inference_profile']=inference_profile
     config = {k:v for k,v in dict(loaded.config).items() if not k.startswith('_')}
     def world_for(site, variant):
         world = WorldPipeline(**(config | dict(seed=site['seed'], dtype='bf16', latents_batch_size=16,

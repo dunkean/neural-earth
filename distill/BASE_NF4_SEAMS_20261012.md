@@ -69,3 +69,28 @@ pas les métriques de raccord principales sur ce deuxième cas ; la vérificatio
 visuelle finale et d'autres scènes restent nécessaires.
 Rapport et tableaux physiques bruts :
 `~/data/distill/eval/native-nf4-wet-coast-seams-20k-coarse4/`.
+
+## Trois hautes montagnes humides VAL
+
+Run4090 terminé normalement sur les trois captures VAL de mondes620001/2/3,
+coarse4 + decoder livré, EMA20k, deux LOD :12lignes référence/candidat.
+
+| Monde | LOD | MAE raccords original / NF4 (m) | Saut maximal original / NF4 (m) |
+|---|---|---:|---:|
+|620001|3|3,9169 /3,6096|34,6821 /60,0610|
+|620001|0|0,0229 /0,0218|1,1289 /0,7275|
+|620002|3|3,8712 /3,7241|32,4170 /28,3193|
+|620002|0|0,0175 /0,0161|0,5525 /0,3901|
+|620003|3|2,1808 /2,1408|20,5801 /21,6023|
+|620003|0|0,0157 /0,0170|0,7151 /0,6373|
+
+Le premier monde a un maximum NF4 aggravé au LOD3. Les erreurs de saut médianes
+restent2,21m pour les deux ; au percentile99 elles sont23,96m original et
+24,64m NF4. Le maximum60,06m reste un problème à diagnostiquer, pas un raccord
+parfait déclaré. Le contrôle suivant reprend ce monde avec fenêtres base en
+batch1 canonique pour distinguer une variation de calcul liée au batch d'une
+instabilité de découpage persistante. L'entraînement ne change pas.
+
+Données brutes : `~/data/distill/eval/native-nf4-wet-mountain-seams-20k-coarse4/`.
+Le checker consigne désormais le profil d'inférence réel et refuse sa
+modification lors d'une reprise d'un même rapport.
