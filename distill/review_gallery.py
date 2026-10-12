@@ -98,10 +98,11 @@ def build(directories, output, labels=None):
         manifests.append(manifest)
         with np.load(directory/'arrays.npz', allow_pickle=False) as arrays:
             for variant, rows in report['variants'].items():
-                if not variant.startswith('student'):
+                if not (variant.startswith('student') or variant=='native_student'):
                     continue
                 stage_label = {'student': 'Base', 'student_coarse': 'Coarse',
-                               'student_decoder': 'Decoder', 'student_all': 'Trois élèves ensemble'}[variant]
+                               'student_decoder': 'Decoder', 'student_all': 'Trois élèves ensemble',
+                               'native_student': 'Base natif'}[variant]
                 display_label = (labels or {}).get(str(directory), directory.name)
                 group = dict(label=display_label+' · '+stage_label, views=[])
                 for row in rows:

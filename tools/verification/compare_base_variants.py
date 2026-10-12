@@ -44,6 +44,9 @@ HOLDOUT = [dict(seed=101, profile='natural', tx=17, ty=-23),
 
 def sites(manifest=None):
     if manifest is not None:
+        if json.loads(Path(manifest).read_text()).get('schema')=='native-captures-v1':
+            from distill.native_site_manifest import load_sites
+            return load_sites(manifest)
         from distill.rare_cases import load_sites
         return load_sites(manifest)
     shots = json.loads((REPO_ROOT / 'docs/images/screenshots.json').read_text(encoding='utf-8'))
