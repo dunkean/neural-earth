@@ -70,3 +70,37 @@ les SHA protègent le trainer principal ne sont pas modifiés. Les anciens
 checkpoints inactifs sont archivés avec SHA identiques, sans supprimer leurs
 poids. Aucune nouvelle base par défaut, aucun poids base ajouté dans Git.
 Les planches finales pour décider seront produites après la comparaison.
+
+## Exécution lancée le 12 octobre à 17:26 (heure système du job)
+
+La calibration finale porte sur 32 régions TRAIN, sans mise à jour des poids :
+`eval/native-nf4-aux-calibration40k.json`. Coefficients fixes : côte
+0,015562819153703665 ; passe-haut 0,00002478780872295629. Références initiales
+des normes régulières : brute 0,1065546423, préconditionnée 13031,83447.
+Le renfort est plafonné à la moitié de chacune des références mobiles
+(demi-vie 50 mises à jour), avant le clip habituel à 1.
+
+Le smoke GPU réel `eval/native-nf4-aux-smoke40k.json` a exécuté trois mises
+à jour par variante. A et B avec coefficient zéro sont **exactement identiques**
+pour raw, EMA, Adam, RNG CPU/CUDA, pertes et normes. Les trois mises à jour
+B actives sont finies et le teacher reste sans gradient. Le pic réservé de
+B est 12,465 Go, contre 9,798 Go pour A. Ces mesures ne prouvent pas encore
+une amélioration des terrains ; elles autorisent la comparaison entraînée.
+
+Job : `base-nf4-objective-ablation`, GPU physique 4090. Résultats et états :
+`ckpt/native-nf4-objective-ablation/{a,b}`. Les bras progressent tour à tour
+aux étapes globales 42500, 45000, 47500 et 50000, soit 10000 mises à jour
+supplémentaires chacun. L'auxiliaire de B intervient une fois sur deux.
+Les snapshots raw et EMA sont conservés à chaque fin de bloc.
+
+Le controller et le moniteur principal partagent un verrou système
+`jobs/nf4-4090-gpu.lock`. Les évaluations du principal attendent la fin d'un
+segment pour utiliser la carte, sans interrompre son training sur 5090.
+Le moniteur a été relancé après sa publication complète à 50k ; il réutilise
+les rapports terminés et vérifie que les SHA des planches correspondent aux
+checkpoints. Il ne recalcule pas tous les checkpoints historiques.
+
+Après chaque paire de blocs, publication raw/EMA avec coarse4 et coarse2 dans
+`_base`, labels `nf4abla`, `nf4ablb`, `nf4ablaraw`, `nf4ablbraw`. Les métriques
+conservent LOD3/LOD0, biais, côtes, passe-haut, C0 et vallées sur les sept
+scènes de progression. Le banc étendu et les planches finales restent à faire.
