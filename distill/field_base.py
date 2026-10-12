@@ -98,10 +98,18 @@ def field_forward(net,x,noise_labels,conditions,origins,centres,return_features=
         key=(height,width,spacing)
         if key not in embeddings:
             embeddings[key]=embedding_at(net,conditions,noise_labels,height,width,spacing,centres)
+            if hasattr(net,'field_phase_embedding'):
+                from distill.field_phase import add_phase_embedding
+                embeddings[key]=add_phase_embedding(net,embeddings[key],origins,height,width,spacing)
         return embeddings[key]
     x=torch.cat((x,torch.ones_like(x[:,:1])),dim=1);skips=[]
     for name,block in net.enc.items():
-        if 'conv' in name:x=block(x)
+        if 'conv' in name:
+            x=block(x)
+            if hasattr(net,'field_phase_stem'):
+                from distill.field_phase import phase_features
+                phase=phase_features(origins,*initial_size,1,x.device,x.dtype).permute(0,3,1,2)
+                x=x+F.conv2d(phase,net.field_phase_stem.to(x.dtype))
         else:
             height=x.shape[-2]//2 if block.resample_mode=='down' else x.shape[-2]
             width=x.shape[-1]//2 if block.resample_mode=='down' else x.shape[-1]

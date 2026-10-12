@@ -11,6 +11,7 @@ import torch
 
 from distill.common import DATA,REPO,atomic_json,atomic_write,external_path
 from distill.field_base import FieldBase
+from distill.field_phase import FieldPhaseBase
 from distill.field_scene import FieldScene,field_scene_forward
 from distill.native_basis_training import inventory
 from distill.native_decoded import OriginalDecoder
@@ -24,8 +25,9 @@ from distill.wet_mountain_progress import selected_validation
 @torch.no_grad()
 def evaluate(checkpoint,output,label,coarse='coarse4',seams=False):
     saved=torch.load(checkpoint,map_location='cpu',weights_only=True)
-    if saved['architecture']!='native-field':raise ValueError('Field checkpoint required.')
-    model=FieldBase(saved['config']).cuda().eval().requires_grad_(False);model.load_state_dict(saved['ema'])
+    classes={'native-field':FieldBase,'native-field-phase':FieldPhaseBase}
+    if saved['architecture'] not in classes:raise ValueError('Field checkpoint required.')
+    model=classes[saved['architecture']](saved['config']).cuda().eval().requires_grad_(False);model.load_state_dict(saved['ema'])
     main=DATA/'crops/native-mixed-scenes-v2'
     manifest=json.loads((main/'manifest.json').read_text());selected=[]
     for kind in LABELS:
@@ -39,6 +41,11 @@ def evaluate(checkpoint,output,label,coarse='coarse4',seams=False):
     for root,record in selected:
         scene=FieldScene(root/record['file'],'cuda')
         result=field_scene_forward(model,scene)
+        initial_heights=[]
+        for latent in (scene.initial,result['initial192'][0]):
+            q=latent[4].float()*38.6-31.4
+            initial_heights.append((q.sign()*q.square()).cpu().numpy()[32:-32,32:-32])
+        initial_shape=next(r for r in compare_shape(initial_heights[1],initial_heights[0])['topographic_position'] if r['sigma_pixels']==8.)
         yy,xx=tuple(((scene.metadata[k]+95)//96)*96 for k in ('y','x'))
         oy,ox=yy-scene.metadata['y'],xx-scene.metadata['x']
         decoder_noise=torch.from_numpy(gaussian_noise_patch(scene.metadata['seed']+5819,
@@ -55,7 +62,9 @@ def evaluate(checkpoint,output,label,coarse='coarse4',seams=False):
             rows.append(dict(step=saved['step'],kind=record['case_kind'],seed=scene.metadata['seed'],
                 coarse=coarse,lod=lod,mae_m=float(np.abs(reference-candidate).mean()),
                 correlation=tpi.get('tpi_correlation'),recall=tpi.get('valley_retention'),
-                rms=tpi.get('tpi_rms_ratio'),shape=metrics))
+                rms=tpi.get('tpi_rms_ratio'),shape=metrics,
+                initial_correlation=initial_shape.get('tpi_correlation'),initial_rms=initial_shape.get('tpi_rms_ratio'),
+                initial_mae_m=float(np.abs(initial_heights[1]-initial_heights[0]).mean())))
             fields.append((reference,candidate))
         if seams:
             for shift in ((0,32),(32,0)):

@@ -53,7 +53,7 @@ class FieldScene:
         self.inputs0=refinement_inputs(zeros,self.noise[0][None],self.labels[:1],self.dtype)
 
 
-def field_scene_forward(model,scene,checkpointed=False,features=False):
+def field_scene_forward(model,scene,checkpointed=False,features=False,initial_override=None):
     from torch.utils.checkpoint import checkpoint
     condition=scene.condition[None];origins=[scene.origin];centres=[scene.centres]
     def evaluate(inputs,labels):
@@ -62,7 +62,8 @@ def field_scene_forward(model,scene,checkpointed=False,features=False):
                if checkpointed else evaluate(scene.inputs0,scene.labels[:1]))
     velocity0,features0=first if features else (first,None)
     initial=window_outputs(scene.inputs0,velocity0,scene.labels[:1],scene.dtype)
-    weighted=torch.cat((initial,torch.ones_like(initial[:,:1])),dim=1)
+    refinement=initial if initial_override is None else initial_override.detach()[None]
+    weighted=torch.cat((refinement,torch.ones_like(refinement[:,:1])),dim=1)
     inputs1=refinement_inputs(weighted,scene.noise[1][None],scene.labels[1:],scene.dtype)
     second=(checkpoint(evaluate,inputs1,scene.labels[1:],use_reentrant=False)
                if checkpointed else evaluate(inputs1,scene.labels[1:]))

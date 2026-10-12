@@ -9,6 +9,7 @@ import torch
 
 from distill.common import DATA,atomic_json,atomic_write,external_path
 from distill.field_base import FieldBase
+from distill.field_phase import FieldPhaseBase
 from distill.field_scene import FieldScene,field_scene_forward
 from distill.field_loss import teacher_features,central_kd
 from distill.native_base import teacher_source
@@ -40,10 +41,12 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--checkpoint',required=True)
     parser.add_argument('--output',default=str(DATA/'_base'))
+    parser.add_argument('--label',default='')
     args=parser.parse_args();output=external_path(args.output)
     torch.set_num_threads(8);torch.backends.cudnn.benchmark=True
     source=torch.load(args.checkpoint,map_location='cpu',weights_only=True)
-    model=FieldBase(source['config']).cuda().eval().requires_grad_(False);model.load_state_dict(source['ema'])
+    cls=FieldPhaseBase if source['architecture']=='native-field-phase' else FieldBase
+    model=cls(source['config']).cuda().eval().requires_grad_(False);model.load_state_dict(source['ema'])
     records,_=selected_validation(ROOT,'coarse4');rows=[];images=[]
     teacher=EDMUnet2D.from_pretrained(str(teacher_source())).cuda().bfloat16().eval().requires_grad_(False)
     for record in records:
@@ -69,7 +72,7 @@ def main():
             if (origin[0]+i)%64==0:draw.line((0,i*6,767,i*6),fill=(255,60,60),width=1)
             if (origin[1]+i)%64==0:draw.line((i*6,0,i*6,767),fill=(255,60,60),width=1)
         images.append(panel)
-    stem=f'field-attention-lines-{source["step"]:06d}'
+    stem=f'field-attention-lines-{args.label+"-" if args.label else ""}{source["step"]:06d}'
     canvas=Image.new('RGB',(768*len(images),768))
     for i,panel in enumerate(images):canvas.paste(panel,(i*768,0))
     atomic_write(output/f'{stem}.png',lambda f:canvas.save(f,format='PNG'))
