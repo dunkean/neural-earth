@@ -1,0 +1,55 @@
+# Reprise du base NF4 jusqu'à 100 000 mises à jour
+
+Autorisation utilisateur : « vise 100k passes go », puis « continue sans t'arrêter ».
+Objectif : **100 000 pas au total**, soit 94 000 supplémentaires après le pilote.
+Ce compteur désigne des mises à jour Adam, pas 100 000 parcours complets du dataset.
+
+## Recette conservée
+
+Le parent est `~/data/distill/ckpt/native-weight-nf4-pilot/latest.pt`, terminé à
+6 000 pas. La reprise conserve exactement poids bruts FP32, EMA FP32, moments
+et compteurs Adam, RNG CPU/CUDA et compteur global du sampler. Le teacher natif,
+la quantification des seuls poids NF4 par groupes de 512, les trois branches
+coarse, les pertes et le sampling restent identiques. LR constante héritée du
+parent : environ **3e-6**, sans réinitialisation ni saut de taux d'apprentissage.
+Ce choix poursuit l'adaptation stable ; il ne garantit pas que la qualité
+s'améliorera pendant tous les 94 000 nouveaux pas.
+
+Le smoke vérifie l'égalité des états restaurés, les RNG et deux vrais pas de
+backpropagation sur la 5090. Un test CPU compare aussi la prochaine mise à jour
+Adam à celle d'un modèle qui n'a pas été interrompu. Aucune reprise depuis les
+seuls poids EMA : les snapshots d'évaluation ne sont pas des états de reprise.
+
+## Exécution et sauvegardes
+
+Code : `native_weight_quant_resume.py`. Nouveau dossier indépendant :
+`~/data/distill/ckpt/native-weight-nf4-100k/`. Le parent reste inchangé.
+Jobs durables : `base-weight-nf4-100k-train` sur 5090 et
+`base-weight-nf4-100k-evaluate` sur 4090. Évaluation parallèle uniquement :
+aucun arrêt automatique pour un seuil visuel de qualité. Une erreur numérique
+ou technique reste signalée et le dernier état est sauvegardé si possible.
+
+Planche initiale au 6 000, puis 7 000, puis tous les 5 000 pas :
+`~/data/distill/_base/native-weight-nf4long-<coarse>-<step>.png`, avec JSON/CSV.
+Même batterie : plaines désertiques/tempérées, côte humide torturée,
+transition plaine basse/mer et trois hautes montagnes humides ; LOD 3 et 0,
+coarse 2, coarse 4 et original. Le début de la série reproduit les poids EMA
+6 000 du pilote. Les comparaisons finales et les raccords froids complets
+restent à effectuer sur les candidats sélectionnés.
+
+Snapshots EMA BF16 et état complet `latest.pt` à 7 000 puis tous les 5 000 pas.
+Poids bruts supplémentaires à 20 000, 50 000 et 100 000. Le meilleur score
+pratique pointe vers un checkpoint conservé ; il ne vaut pas acceptation
+visuelle. Export NF4 tous les 10 000 pas, sans exporter chaque petite amélioration.
+Des anciens checkpoints terminés sont archivés sur D: avec vérification SHA256
+et liens symboliques ; les données d'entraînement restent dans Linux.
+
+## Point de départ, sans promesse de vitesse
+
+Le fichier NF4 du pilote pèse **149,60 Mo**, environ **149,65 Mo** avec manifeste.
+C'est la limite de repli autorisée, pas encore la cible préférée 50–100 Mo.
+Sur les trois montagnes humides/coarse4/LOD0, EMA6 000 : MAE 41,0/14,1/29,0 m,
+amplitudes TPI8 1,002/0,929/0,920. Le grain des plaines au LOD3 reste amplifié :
+ratios RMS haute fréquence désert/tempéré 1,84/2,09. L'amélioration visuelle et
+les cas rares motivent la suite. Calcul BF16 simulant les poids NF4 : aucun
+gain d'inférence, export WASM ou modèle final accepté n'est revendiqué.

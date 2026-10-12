@@ -2,10 +2,22 @@
 
 2026-10-10 · Grégory Beurier
 
-## État actuel : poids seuls NF4, adaptation6000pas lancée
+## État actuel : reprise des poids NF4 vers100000pas
+
+L'utilisateur autorise100000mises à jour au total, depuis le parent6000.
+La reprise explicite conserve poids bruts, EMA, Adam et RNG, avec LR héritée
+constante≈3e-6. Smoke5090 : états restaurés identiques, deux vrais pas finis,
+teacher gelé ; huit tests CPU passent. Jobs prévus :5090entraînement,
+4090évaluation parallèle, sans arrêt automatique pour un seuil de qualité.
+Photos `~/data/distill/_base/native-weight-nf4long-<coarse>-<step>.png` :6000,
+7000, puis tous5000. Parent conservé, nouveaux snapshots et meilleurs candidats
+gardés dans `ckpt/native-weight-nf4-100k/`. Détails et limites :
+[BASE_WEIGHT_NF4_100K_20261012.md](BASE_WEIGHT_NF4_100K_20261012.md).
+
+## Pilote poids seuls NF4 :6000pas terminés
 
 Pilote désormais **terminé à6000**,34,8min, sans garde-fou déclenché. Le meilleur
-score pratique est au6000 ; contrôle des poids bruts6000 lancé sur4090. Images
+score pratique est au6000 ; contrôle des poids bruts6000 terminé sur4090. Images
 `_base/native-weight-nf4qat-<coarse>-006000.png` disponibles. Qualité améliorée,
 bruit haute fréquence des plaines encore amplifié ; pas de déclaration finale.
 

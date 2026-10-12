@@ -19,6 +19,10 @@ def main():
     parser.add_argument('--run',type=Path,required=True)
     parser.add_argument('--trainer-job',required=True)
     parser.add_argument('--label',default='nf4qat')
+    parser.add_argument('--initial-step',type=int,default=0)
+    parser.add_argument('--pack-every',type=int,default=0,
+                        help='Positive interval avoids exporting every improving long-run checkpoint.')
+    parser.add_argument('--monitor-only',action='store_true',help='Report quality regressions without a training stop.')
     args=parser.parse_args();root=external_path(args.run)
     torch.set_num_threads(8);torch.backends.cudnn.benchmark=True
     torch.backends.cuda.matmul.allow_tf32=False;torch.backends.cudnn.allow_tf32=False
@@ -31,7 +35,7 @@ def main():
                 step=reports[0]['step'];rows=[r for p in reports for r in p['rows'] if r['coarse']!='original']
                 mountains=[r for r in rows if r['kind']==KIND and r['lod']==0]
                 if baseline is None:
-                    if step!=0:raise ValueError('Initial terrain baseline required.')
+                    if step!=args.initial_step:raise ValueError('Initial terrain baseline required.')
                     baseline={str(r['seed'])+r['coarse']:r for r in mountains}
                 # A practical comparison score, not acceptance. No channel0/2
                 # gate; gradual recovery gets time before a persistent regression.
@@ -45,12 +49,15 @@ def main():
                 deteriorated=step>=3000 and all(r['mae_m']>2*baseline[str(r['seed'])+r['coarse']]['mae_m']
                     and r['correlation']<baseline[str(r['seed'])+r['coarse']]['correlation']-.15 for r in mountains)
                 bad_count=bad_count+1 if deteriorated else 0
-                entry=dict(step=step,score=score,best=best,rows=rows,hard_stop=bad_count>=3,
+                entry=dict(step=step,score=score,best=best,rows=rows,hard_stop=bad_count>=3 and not args.monitor_only,
+                    quality_regression=bad_count>=3,
                     reason='Persistent catastrophic regression on all six wet/coarse2/4 branches' if bad_count>=3 else None,
                     accepted=False,note='User accepts current valleys; evaluate size/grain/coast/look&feel, final cold seams still required.')
                 atomic_json(root/f'eval-{step:06d}.json',entry)
                 append_json(root/'evaluation.jsonl',entry);atomic_json(root/'evaluation-status.json',entry|dict(status='complete'))
-                if step in (0,1000,3000,6000) or step==best['step']:
+                pack_now=(step%args.pack_every==0 if args.pack_every else
+                          step in (0,1000,3000,6000) or step==best['step'])
+                if pack_now:
                     destination=root/'packed'/f'step{step:06d}'
                     if not (destination/'manifest.json').exists():
                         saved=torch.load(checkpoint,map_location='cpu',weights_only=True,mmap=True)
