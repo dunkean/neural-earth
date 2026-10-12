@@ -2,21 +2,35 @@
 
 2026-10-10 · Grégory Beurier
 
-## État actuel : revue terminée, choix utilisateur en attente
+## État actuel : priorité taille, programme prêt, top utilisateur en attente
 
-Calculs GPU suspendus pendant la décision utilisateur. Aucun nouveau training
-ni benchmark à lancer automatiquement avant son choix. Le bilan complet est
+Retour utilisateur après les planches : les QAT avec coarse2/coarse4 font le
+travail visuellement et **les vallées sont OK**. Défauts résiduels : grain haute
+fréquence en plaine et pixels côtiers dispersés. Priorité : poids embarqués dans
+la page, cible50–100Mo, plafond de secours150Mo ; vitesse secondaire. Le runtime
+WASM/WebGPU est déjà pris en charge par l'utilisateur et sera amélioré plus tard.
+
+[Programme proposé](BASE_SIZE_FIRST_PLAN_20261012.md) : tester d'abord le
+stockage compact des poids seuls, préserver la topologie native ; une version
+4bits mixte du réseau entier aurait147,7Mo de charge utile, qualité non prouvée.
+Le QAT8bits mixte entier aurait267,6Mo et dépasse le plafond. La réduction
+progressive de largeur vient ensuite si nécessaire. Tailles inventoriées surCPU,
+pas des exports déjà validés. Aucun nouveau training, évaluationGPU ou benchmark
+à lancer automatiquement avant le top demandé par l'utilisateur.
+
+Le bilan historique complet est
 dans [BASE_EXPERIMENTS_REVIEW_20261012.md](BASE_EXPERIMENTS_REVIEW_20261012.md).
 Deux avis indépendants terminés :
 [Astra high](REVIEW_ASTRA_BASE_20261012.md) et
 [Opus5.5 xhigh, texte complet](REVIEW_OPUS_BASE_20261012.md).
 [Synthèse pour décision](BASE_REVIEW_SYNTHESIS_20261012.md).
 
-Les deux avis proposent une compression progressive depuis le teacher natif.
+Les deux avis précédents proposent une compression progressive depuis le teacher natif.
 Astra privilégie le demi-rang sélectif et une supervision de la compositionT2 ;
 Opus vise128×2 avec plus de récupération et un LR à calibrer. Aucune de ces
-recettes n'est encore lancée. Le QAT500 conservé mérite un examen visuel,
-mais reste imparfait sur les plaines/côtes/LOD3 et n'est pas accéléré.
+recettes n'est encore lancée. Ce choix initial est remplacé par la priorité taille
+ci-dessus. Le QAT500 conservé est le repère visuel actuel ; les défauts de
+plaines/côtes/LOD3 restent à traiter et aucune accélérationFP8 n'est acquise.
 Images et métriques :
 [BASE_QAT500_VISUAL_20261012.md](BASE_QAT500_VISUAL_20261012.md).
 
@@ -32,7 +46,8 @@ Calibration exacte99,99% sur64batches TRAIN indépendants, échelles figées.
 
 Contrôle sans quantification :<2m sur montagnes/coarse4. Avant entraînement,
 FP8 simulé :27/20/52m,corr0,991/0,988/0,997 ; les neuf branches montagneuses
-ont15,5–81,8m. Rappel des vallées/côtes pas encore suffisant, aucun base accepté.
+ont15,5–81,8m. Ces chiffres décrivent l'évaluation initiale avant training ;
+ils ne remplacent pas le retour visuel utilisateur ultérieur sur le QAT500.
 Photos `_base/native-fp8-ptq-<coarse>-000000.*`, chiffres et détails dans
 [BASE_NATIVE_FP8_20261012.md](BASE_NATIVE_FP8_20261012.md).
 

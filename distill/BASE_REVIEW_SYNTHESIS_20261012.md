@@ -2,6 +2,12 @@
 
 12 octobre 2026. [Rapport complet](BASE_EXPERIMENTS_REVIEW_20261012.md), [Astra high](REVIEW_ASTRA_BASE_20261012.md), [Opus5.5 xhigh, avis complet](REVIEW_OPUS_BASE_20261012.md). Les propositions ci-dessous ne sont pas lancées.
 
+**Retour ultérieur qui change la décision :** les vallées QAT sont jugées bonnes
+par l'utilisateur ; la taille embarquée devient prioritaire, cible50–100Mo,
+plafond150Mo. Le [nouveau programme](BASE_SIZE_FIRST_PLAN_20261012.md) remplace
+la recommandation de lancement ci-dessous. Cette page conserve la synthèse
+historique des deux avis ; les nouveaux essais attendent le top utilisateur.
+
 ## Ce que les deux avis changent
 
 Les deux reviewers recommandent de **partir du teacher original et de le comprimer progressivement**, en conservant ses conditions, attention, fenêtres et deux passes. Changer simultanément cette géométrie et la taille du réseau a trop éloigné les élèves de la fonction originale. Ils déconseillent de repartir sur un grand champ une passe à ce stade.

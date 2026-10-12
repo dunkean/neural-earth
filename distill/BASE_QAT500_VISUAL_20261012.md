@@ -2,7 +2,7 @@
 
 12 octobre 2026. Images et mesures déjà calculées ; aucun nouveau calcul GPU.
 
-**Statut :** candidate à examiner visuellement, pas un base accepté. Le réseau garde254M paramètres et utilise des convolutions BF16 avec arrondi FP8 simulé : aucun gain de vitesse acquis. Le checkpoint contient les poids EMA du pas500 ; ses empreintes correspondent aux trois évaluations.
+**Statut après retour utilisateur :** les images QAT avec coarse2/coarse4 conviennent visuellement et les vallées sont jugées bonnes. Le travail restant porte surtout sur la taille embarquée et l'excès de haute fréquence en plaine, avec quelques pixels côtiers dispersés. Le réseau garde254M paramètres et utilise des convolutions BF16 avec arrondi FP8 simulé : aucun gain de vitesse acquis. Le checkpoint contient les poids EMA du pas500 ; ses empreintes correspondent aux trois évaluations. Ce retour ne certifie pas encore un export compact ni les raccords finaux.
 
 ## Planches existantes
 
@@ -41,7 +41,7 @@ Chaque planche compare les hauteurs réellement calculées du teacher et de la c
 
 Une amplitude de1 correspond au teacher. Corrélation et rappel élevés sont favorables, mais le TPI ne certifie pas un réseau de drainage. Un rappel non disponible est indiqué par un tiret. Les valeurs sont celles de ces scènes, pas une moyenne de tous les mondes.
 
-**Points à regarder :** vallées/affluents des montagnes, grain dans les plaines au LOD3, découpe des côtes et transition basse plaine/mer. Les défauts sur ces cas interdisent une conclusion fondée seulement sur les montagnes.
+**Points à préserver et améliorer :** conserver les vallées/affluents jugés bons ; réduire le grain dans les plaines au LOD3 ; examiner la découpe des côtes et la transition basse plaine/mer. Le rendu est jugé utilisable par l'utilisateur sur les images coarse2/coarse4 ; les mesures restent disponibles pour comparer les prochaines compressions.
 
 [Toutes les42 lignes CSV](/home/delete/data/distill/_base/native-fp8-qat500-decision.csv) · [Provenance et JSON](/home/delete/data/distill/_base/native-fp8-qat500-decision.json).
 
@@ -51,4 +51,4 @@ Une amplitude de1 correspond au teacher. Corrélation et rappel élevés sont fa
 - SHA256 : `57f505c10b26e2cbef4dc1ca7b56e64a6e4c59455eaaf9181b0d63945e42f893`.
 - Taille du checkpoint EMA FP32 : 1014.859Mo. Ce n’est pas un export FP8 packé.
 - Aucun changement du modèle base actif dans le runtime ; aucune mise en Git de ces poids.
-- Les nouveaux entraînements restent en attente du choix utilisateur après les revues Astra/Opus.
+- Les nouveaux entraînements restent en attente du top utilisateur sur le [programme centré sur la taille](BASE_SIZE_FIRST_PLAN_20261012.md).
