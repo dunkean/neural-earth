@@ -55,3 +55,22 @@ CUDA_VISIBLE_DEVICES=0 python -m distill.benchmark_native_runtime \
 
 Le script refuse d'écraser une mesure existante. Le rapport ne marque
 `completed: true` qu'après les huit mesures et les contrôles de sorties finies.
+
+## Mesure 5090 après les 100 000 étapes
+
+Le trainer principal est terminé avec code 0. Avant le benchmark, la 5090
+était à 0 % d'utilisation et 54 Mio occupés. B continue sur la 4090 ; aucun
+training ne partage la 5090 pendant cette mesure. Même protocole que ci-dessus,
+avec 30 forwards par série et le checkpoint EMA100k.
+
+| Batch | Original, ms / fenêtre | Distillé EMA100k, ms / fenêtre | Rapport distillé / original |
+|---|---:|---:|---:|
+| 1 | 4,459 | 5,068 | 1,137 |
+| 16 | 1,425 | 1,461 | 1,025 |
+
+Rapport complet : `eval/native-nf4-inference-5090-100k.json`.
+Job `base-nf4-inference-benchmark-5090-100k`, terminé avec code 0 et toutes
+les sorties finies. À batch16, le candidat est environ 2,5 % plus lent dans
+ce runtime. La compression des poids reste son gain actuel ; aucune réduction
+du nombre de fenêtres ou des deux étapes n'est réalisée. La vue complète,
+les métriques finales et l'audit du paquet100k restent à faire.

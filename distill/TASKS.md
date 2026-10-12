@@ -2,7 +2,22 @@
 
 2026-10-10 · Grégory Beurier
 
-## État actuel : reprise des poids NF4 vers100000pas
+## État actuel : poids NF4 à100000pas terminés, validation en cours
+
+Le trainer principal `base-weight-nf4-100k-train` a terminé normalement à
+100000mises à jour (code0). Raw, EMA et état complet de reprise sont conservés.
+Le modèle n'est pas encore déclaré accepté : évaluations raw/EMA sur5090,
+comparaison auxiliaire A/B sur4090 et validation finale restent en cours.
+Le brasA a terminé ses10000pas supplémentaires ; B exécute son dernier bloc.
+À42500 et45000, B réduit le grainLOD3 mais aggrave le biais d'altitudeLOD0.
+[Protocole A/B](BASE_NF4_AUXILIARY_PLAN_20261012.md),
+[résultats intermédiaires](BASE_NF4_ABLATION_42500_20261012.md).
+
+Benchmark5090 EMA100k, BF16/CUDA Graphs/batch16 : original1,425ms par fenêtre,
+NF4distillé1,461ms. Le gain actuel est le stockage≈149,65Mo, pas la vitesse.
+[Mesures et limites](BASE_NF4_INFERENCE_PERF_20261012.md).
+
+### Recette de reprise exécutée
 
 L'utilisateur autorise100000mises à jour au total, depuis le parent6000.
 La reprise explicite conserve poids bruts, EMA, Adam et RNG, avec LR héritée
