@@ -43,6 +43,13 @@ def catalog(root=DATA, bundled_root=REPO/'distill/weights'):
         'base': [],
         'decoder': [('distilled200k', 'Distillé · 13 Mo', weight_path('decoder.pt', weights/'candidate-1/decoder.pt'))],
     }
+    native=Path(root)/'ckpt/native-weight-nf4-100k/step070000.pt'
+    proof=Path(root)/'eval/native-nf4-artifact70000-5090-audit.json'
+    if native.is_file() and proof.is_file():
+        audit=json.loads(proof.read_text())
+        if (audit.get('status')=='complete' and audit.get('tensor_count')==174 and
+                audit.get('checkpoint_sha256')==hashlib.sha256(native.read_bytes()).hexdigest()):
+            specifications['base'].append(('nf4_70k','Essai NF4 · 70k · 150 Mo',native))
     result = {}
     for stage, entries in specifications.items():
         result[stage] = {'teacher': dict(label='Original · référence', path=None)}
@@ -50,6 +57,7 @@ def catalog(root=DATA, bundled_root=REPO/'distill/weights'):
             if path.is_file():
                 result[stage][key] = dict(label=label, path=str(path),
                     sha256=hashlib.sha256(path.read_bytes()).hexdigest())
+                if stage=='base':result[stage][key]['format']='native'
     return result
 
 
@@ -97,7 +105,8 @@ class LiveModels:
     def identity(self):
         # A reset changes only neural namespaces. Orogen's request/identity is
         # unchanged and its persisted bootstrap remains reusable.
-        files = ('student.py', 'features.py', 'inference.py', 'coarse_solver.py', 'live_runtime.py')
+        files = ('student.py', 'features.py', 'inference.py', 'coarse_solver.py', 'live_runtime.py',
+                 'native_live_runtime.py','native_inference.py','native_weight_runtime.py','native_weight_quant.py','native_base.py')
         return dict(teacher_revision=REVISION, reset=self.config['reset'],
             selection=self.selection,
             checkpoints={stage: self.options[stage][key].get('sha256')
@@ -109,6 +118,7 @@ class LiveModels:
         from distill.inference import install
         from distill.student import load_student
         models = {}
+        native_base=None
         with self.lock:
             for stage, choice in self.selection.items():
                 if choice == 'teacher':
@@ -120,13 +130,25 @@ class LiveModels:
                     if hashlib.sha256(payload).hexdigest() != option['sha256']:
                         raise ValueError('Model export changed since server startup; restart the review server.')
                     with torch.inference_mode(False):
-                        model, _ = load_student(io.BytesIO(payload), world.device)
-                    if model.config.stage != stage:
+                        if option.get('format')=='native':
+                            if stage!='base':raise ValueError('Native export must be a base.')
+                            from distill.native_inference import load_native
+                            model, _ = load_native(io.BytesIO(payload),world.device)
+                        else:model, _ = load_student(io.BytesIO(payload), world.device)
+                    if option.get('format')!='native' and model.config.stage != stage:
                         raise ValueError('Model export stage differs from selected stage.')
                     self.models[key] = model.requires_grad_(False)
-                models[stage] = self.models[key]
+                if option.get('format')=='native':native_base=self.models[key]
+                else:models[stage] = self.models[key]
         if models:
             install(world, models, tile_size=512)
+        if native_base is not None:
+            from distill.native_live_runtime import NativeLiveBase
+            # configure_world prepared the original stack before this hook.
+            # Never normalize the already baked native NF4 kernels again.
+            if not hasattr(world,'_distill_counts'):
+                world._distill_counts={stage:dict(calls=0,output_pixels=0) for stage in STAGES}
+            world.base_model=NativeLiveBase(native_base,world._distill_counts['base'])
 
     def public(self):
         return dict(selection=self.selection, revision=self.config['revision'],

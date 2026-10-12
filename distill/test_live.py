@@ -143,6 +143,34 @@ class LiveModelTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_selection(dict(DEFAULT_SELECTION, base='initial128'), options)
 
+    def test_native_candidate_requires_matching_full_tensor_audit(self):
+        root=self.install_review_exports()
+        native=root/'ckpt/native-weight-nf4-100k/step070000.pt'
+        native.parent.mkdir(parents=True);native.write_bytes(b'new-native-export')
+        proof=root/'eval/native-nf4-artifact70000-5090-audit.json'
+        proof.parent.mkdir()
+        options=lambda:catalog(root,bundled_root=root/'bundled')
+        self.assertNotIn('nf4_70k',options()['base'])
+        atomic_json(proof,dict(status='complete',tensor_count=174,
+            checkpoint_sha256=hashlib.sha256(native.read_bytes()).hexdigest()))
+        self.assertEqual(options()['base']['nf4_70k']['format'],'native')
+        self.assertEqual(LiveModels(root/'new-config.json',options()).selection,DEFAULT_SELECTION)
+        native.write_bytes(b'changed-native-export')
+        self.assertNotIn('nf4_70k',options()['base'])
+
+    def test_native_counter_preserves_forward_and_separates_world_counts(self):
+        import torch
+        from distill.native_live_runtime import NativeLiveBase
+        net=torch.nn.Linear(2,2).eval().requires_grad_(False)
+        net._terrain_custom_base=True
+        x=torch.ones(1,2)
+        first=dict(calls=0,output_pixels=0);second=dict(calls=0,output_pixels=0)
+        a,b=NativeLiveBase(net,first),NativeLiveBase(net,second)
+        self.assertTrue(torch.equal(a(x),net(x)))
+        self.assertEqual(first['calls'],1);self.assertEqual(second['calls'],0)
+        self.assertTrue(a._terrain_custom_base)
+        b(x);self.assertEqual(first['calls'],1);self.assertEqual(second['calls'],1)
+
     def test_legacy_base_is_retired_without_resetting_or_changing_other_choices(self):
         root = self.install_review_exports()
         for choice in ('initial128', 'coupled128', 'refined128', 'refined192'):
