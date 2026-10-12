@@ -94,3 +94,22 @@ instabilité de découpage persistante. L'entraînement ne change pas.
 Données brutes : `~/data/distill/eval/native-nf4-wet-mountain-seams-20k-coarse4/`.
 Le checker consigne désormais le profil d'inférence réel et refuse sa
 modification lors d'une reprise d'un même rapport.
+
+## Contrôle canonique du maximum60m : terminé
+
+Même monde620001, EMA20k, coarse4/decoder et coordonnées ; seuls les paramètres
+`TERRAIN_CANONICAL_LATENTS=1` et `TERRAIN_LATENT_BATCH=1` sont ajoutés.
+Profil enregistré : `canonical_latents=true`, `latent_batch=1`, graphs base
+ désactivés comme au test précédent. Les deux variantes et les deux LOD sont
+terminés : **toutes les métriques de partition exactement0**, incluant MAE,
+maximum, sauts aux deux axes, zones communes des halos et classes terre/mer.
+
+Ce contrôle montre que le calcul par fenêtres en batch1 élimine l'écart sur
+le cas testé. Les écarts du profilbatch16 ne sont donc pas une discontinuité
+inévitable de cette géométrie NF4. Ce n'est pas une preuve sur tous les sites,
+ni une mesure d'accélération : aucune vitesse du modecanonique n'est revendiquée.
+Le profil courant de l'application et la recette du trainer100k restent
+inchangés ; les réglages d'exécution pourront être décidés séparément.
+
+Preuve complète : `~/data/distill/eval/native-nf4-canonical-seams-20k-coarse4/`.
+Job `base-nf4-canonical-seams-20k`, terminé avec code0.
