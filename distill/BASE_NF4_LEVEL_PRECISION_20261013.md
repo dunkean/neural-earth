@@ -97,3 +97,28 @@ active restent dans le système de fichiers Linux. Reçu :
 
 Les instantanés 70k/100k, les paquets vérifiés et les captures précédentes sont
 conservés. Aucun poids base expérimental n'est ajouté à Git.
+
+## Premier témoin visuel, avant les résultats B
+
+A à72k a été figé depuis un état complet atomique, sans toucher au trainer.
+Une copie70k avec gain FP32 à sa référence reproduit mathématiquement le
+point initial et permet les mêmes métriques sur la même emprise. Les deux
+évaluations4090 sont terminées : sept capturesVAL, coarse4, decoder original.
+La MAE moyenneLOD0 passe de11,11 à9,63m ; cela masque des différences :
+les plaines désertique/tempérée régressent de2,60→3,12m et1,40→2,38m, alors
+que les trois montagnes passent de26,30→20,87 /13,04→12,89 /32,51→26,32m.
+Ce témoin montre qu'un redémarrage KD seul peut améliorer certaines montagnes
+et aggraver des plaines : **aucun bénéfice de B n'est encore démontré**.
+Le grainLOD3 reste visible sur la planche ; la qualité n'est pas acceptée.
+
+Planches et alternativesCSV/JSON/TXT dans `_base` :
+
+- `native-weight-nf4levelstart-coarse4-070000.*`
+- `native-weight-nf4levelaearly-coarse4-072000.*`
+
+Comparaison appariée : `eval/native-nf4-level-a-early-matched-comparison.json`.
+A a depuis terminé son premier bloc à72,5k ; B construit ses propres moments
+à taux nul avant ce même bloc. Le [paquet avec scalaireFP32](NF4_SCALAR_PACKING.md)
+a aussi été audité sur4090 :149,654742Mo tout compris, champs et decoder exacts
+par rapport au prototype avant export. Le paquet du candidat retenu devra être
+exporté et réaudité sur5090.
