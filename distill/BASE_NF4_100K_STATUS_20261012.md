@@ -87,3 +87,11 @@ La revue visuelle finale reste requise ; aucune continuité parfaite n'est décl
 Le contrôle des sept mêmes scènes avec `TERRAIN_CANONICAL_LATENTS=1` et
 `TERRAIN_LATENT_BATCH=1` est lancé sur5090 pour isoler l'effet numérique
 du batch. Sortie : `eval/native-nf4-70k-canonical-seams-5090`.
+
+Le contrôle canonique est désormais **terminé avec code0** : les28lignes
+présentent exactement0 pour toutes les métriques de partition (MAE/max,
+raccords, sauts, halos communs et désaccord de signe). Cela vaut pour les
+deux modèles, sept scènes et deuxLOD, avec batch latent1 et mode canonique.
+Les écarts du précédent passage sont donc dépendants du mode de calcul par
+batch sur ce banc. Cela ne garantit ni tous les mondes ni la qualité visuelle
+du relief ; le profil usuel batch16 garde les écarts consignés ci-dessus.
