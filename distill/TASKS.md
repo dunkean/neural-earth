@@ -2,7 +2,60 @@
 
 2026-10-10 · Grégory Beurier
 
-## Reprise actuelle : quatre sorties de fenêtres pour le premier champ
+## État actuel : revue terminée, choix utilisateur en attente
+
+Calculs GPU suspendus pendant la décision utilisateur. Aucun nouveau training
+ni benchmark à lancer automatiquement avant son choix. Le bilan complet est
+dans [BASE_EXPERIMENTS_REVIEW_20261012.md](BASE_EXPERIMENTS_REVIEW_20261012.md).
+Deux avis indépendants terminés :
+[Astra high](REVIEW_ASTRA_BASE_20261012.md) et
+[Opus5.5 xhigh, texte complet](REVIEW_OPUS_BASE_20261012.md).
+[Synthèse pour décision](BASE_REVIEW_SYNTHESIS_20261012.md).
+
+Les deux avis proposent une compression progressive depuis le teacher natif.
+Astra privilégie le demi-rang sélectif et une supervision de la compositionT2 ;
+Opus vise128×2 avec plus de récupération et un LR à calibrer. Aucune de ces
+recettes n'est encore lancée. Le QAT500 conservé mérite un examen visuel,
+mais reste imparfait sur les plaines/côtes/LOD3 et n'est pas accéléré.
+Images et métriques :
+[BASE_QAT500_VISUAL_20261012.md](BASE_QAT500_VISUAL_20261012.md).
+
+## Précision FP8 native : pilote arrêté au1057
+
+Les quatre sorties de fenêtres ont manqué le critère1000 (canal0 amélioré
+seulement4–5%) et le run s'est arrêté au1051. Après revue Opus5.5, cette famille
+de champ est conservée/archivée ; la reprise part du teacher original,192×3,
+64/32,T2,58scalaires et attention inchangés. E4M3 simulé sur les93 convolutions
+internes, échelles par canal pour poids effectifs et statiques par couche pour
+activations ; normalisations, couches sensibles et decoder externe conservés.
+Calibration exacte99,99% sur64batches TRAIN indépendants, échelles figées.
+
+Contrôle sans quantification :<2m sur montagnes/coarse4. Avant entraînement,
+FP8 simulé :27/20/52m,corr0,991/0,988/0,997 ; les neuf branches montagneuses
+ont15,5–81,8m. Rappel des vallées/côtes pas encore suffisant, aucun base accepté.
+Photos `_base/native-fp8-ptq-<coarse>-000000.*`, chiffres et détails dans
+[BASE_NATIVE_FP8_20261012.md](BASE_NATIVE_FP8_20261012.md).
+
+Jobs terminés : `base-native-fp8-train`5090 et `base-native-fp8-evaluate`4090.
+Arrêt au garde1000, pas réel1057 sur3000 prévus, statut `guarded` : le canal0
+n'a pas été divisé par deux sur les neuf branches montagneuses. Au1000,
+montagnes/coarse4 LOD0 :47/28/75m ; le500 était meilleur :15/15/37m.
+Ces checkpoints restent conservés ; aucun n'est accepté comme base final.
+Recette exécutée :Adam1e-5,warmup100,EMA500. Batch8/4par phase, même sampling et trois
+coarse ; premier canal0 pondéré×2, KD37blocs calibré à0,5opérateur. La moitié
+des batches de seconde phase utilise les neuf premières fenêtres natives de
+l'élève actuel, fusionnées/détachées ; teacher sur ces MÊMES entrées.
+GPU smoke exact5090 : gradients/teacher/échelles validés,37taps,batches
+on-policy et teacher-state,pic7,93GiB. Trois tests CPU dédiés passent.
+Évaluations/photos tous500 : `_base/native-fp8-qat-<coarse>-<step>.*`.
+
+FP8 ici simulé par calcul BF16 : PAS de gain de vitesse annoncé. Les primitives
+locales acceptent les GEMM FP8 mais refusent les convolutions FP8 directes.
+L'export packé, la vitesse réelle, la qualité autonome complète, les autres
+cas rares, les mondes finaux et les vrais raccords froids restent à prouver.
+Base original toujours au défaut runtime ; aucun nouveau poids base dans Git.
+
+## Quatre sorties de fenêtres : pilote arrêté au1051
 
 Le pilote de coordonnées périodiques s'est arrêté à2037 nouveaux pas après son
 contrôle2000, avant les4000 prévus. Montagnes/coarse4 :154/128/89m, amplitudes
@@ -25,8 +78,8 @@ recadrages x/y,17 tests CPU pertinents. Au départ, résultat FINAL exactement
 identique au parent sur six contrôles brut/EMA ; premier champ ne change que
 par l'arrondi de fusion FP32, MSE~5,7e-15/max≤9,54e-7. Pic GPU19,50GiB.
 
-Jobs actuels : `base-field-heads-train`5090 et `base-field-heads-evaluate`4090,
-budget3000, évaluations et photos tous500 dans
+Jobs désormais terminés : `base-field-heads-train`5090 et `base-field-heads-evaluate`4090,
+budget prévu3000, évaluations et photos tous500 dans
 `_base/field-heads-<coarse>-<step>.*`. Critères intermédiaires1000/2000,
 limites de l'explication d'Opus et preuves dans
 [BASE_WINDOW_HEADS_20261012.md](BASE_WINDOW_HEADS_20261012.md).
