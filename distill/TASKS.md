@@ -2,7 +2,16 @@
 
 2026-10-10 · Grégory Beurier
 
-## État actuel : priorité taille, programme prêt, top utilisateur en attente
+## État actuel : poids seuls NF4, adaptation6000pas lancée
+
+Top utilisateur reçu : lancer les trainings et signaler les nouveaux screenshots.
+Pilote5090 `base-weight-nf4-train`, observateur4090 `base-weight-nf4-evaluate`.
+Le stockage natifNF4 réel fait149,605Mo d'échelles/poids, hors petit manifest ;
+contrôle packGPU exact sur3batches et5testsCPU. Les départs4bits ont davantage
+de grain et des amplitudes montagne trop faibles : ils doivent être adaptés.
+Recette, preuves et limites : [BASE_WEIGHT_NF4_20261012.md](BASE_WEIGHT_NF4_20261012.md).
+Images : `_base/native-weight-nf4qat-<coarse>-<step>.png`, tous500pas.
+L'assistant doit prévenir l'utilisateur pour chaque nouvelle série disponible.
 
 Retour utilisateur après les planches : les QAT avec coarse2/coarse4 font le
 travail visuellement et **les vallées sont OK**. Défauts résiduels : grain haute
@@ -16,7 +25,8 @@ stockage compact des poids seuls, préserver la topologie native ; une version
 Le QAT8bits mixte entier aurait267,6Mo et dépasse le plafond. La réduction
 progressive de largeur vient ensuite si nécessaire. Tailles inventoriées surCPU,
 pas des exports déjà validés. Aucun nouveau training, évaluationGPU ou benchmark
-à lancer automatiquement avant le top demandé par l'utilisateur.
+avant le top : cette attente est maintenant terminée et le pilote ci-dessus
+est réellement lancé. Aucune nouvelle architecture comprimée n'est encore entraînée.
 
 Le bilan historique complet est
 dans [BASE_EXPERIMENTS_REVIEW_20261012.md](BASE_EXPERIMENTS_REVIEW_20261012.md).
