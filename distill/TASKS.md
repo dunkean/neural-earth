@@ -82,6 +82,22 @@ Les résultats/photos et la limite on-policy sont renvoyés à la même session
 Opus5.5, `review/opus-basis-quarter-negative4000-20261012/`. Prochaine expérience
 à choisir sur cet échec réel, sans prolonger silencieusement le budget4000.
 
+Avis Opus5.5 terminé dans ce dernier dossier : différer la compression de rang
+et essayer un élève de champ gardant toute la largeur192×3 et les DEUX phases,
+avec conditionnement spatial et attention locale, pour gagner surtout sur les
+fenêtres qui se recouvrent. Ce n'est pas encore implémenté ni mesuré. Ses
+affirmations d'un plafond de vitesse et d'un lissage inévitable par régression
+one-pass ne sont pas des preuves générales. L'écart TRAIN/VAL montre que le
+quart-rang n'a pas pleinement ajusté même les terrains vus, sans conclure à un
+plafond. La priorité suivante est un résultat qui préserve réellement les
+incisions, pas une continuation silencieuse de ce pilote négatif.
+Points concrets à résoudre pour ce changement : les58 conditions par fenêtre
+doivent garder leur alignement spatial ; l'attention d'un champ256 ne peut pas
+devenir globale ; les halos des DEUX phases doivent être comptés dans le coût
+et dans les raccords ; le bank actuel conserve un champ initial192 et un final128,
+pas un initial256. Toute extension sera un nouveau bank teacher, avec les mêmes
+splits indépendants et les trois coarses. Le gain n'est donc pas présumé acquis.
+
 ## Haute montagne humide ajoutée aux cas critiques (12 octobre)
 
 L'observation utilisateur est maintenant un contrôle distinct : conserver les
