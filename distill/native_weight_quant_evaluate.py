@@ -25,8 +25,14 @@ from distill.wet_mountain_progress import selected_validation
 @torch.no_grad()
 def evaluate(checkpoint,output,label='qat',coarse='coarse4',quantized=True):
     saved=torch.load(checkpoint,map_location='cpu',weights_only=True)
-    if saved['architecture']!='native-weight-quant':raise ValueError('Weight-only checkpoint required.')
-    model=load_weight_quant(saved,'cuda');model.quantized=quantized
+    scalar = saved['architecture']=='native-weight-quant-scalar'
+    if scalar:
+        from distill.native_scalar_precision import load_scalar_precision
+        model=load_scalar_precision(saved,'cuda')
+    else:
+        if saved['architecture']!='native-weight-quant':raise ValueError('Weight-only checkpoint required.')
+        model=load_weight_quant(saved,'cuda')
+    model.quantized=quantized
     cache=model.cached_weights();cache.__enter__()
     root=DATA/'crops/native-mixed-scenes-v2';manifest=json.loads((root/'manifest.json').read_text())
     selected=[]
@@ -49,13 +55,17 @@ def evaluate(checkpoint,output,label='qat',coarse='coarse4',quantized=True):
         for latent in (region.target,result['core']):
             q=latent[4].float()*38.6-31.4
             fine=reconstructed_height(decoder(latent[None],region.decoder_noise),latent[None])[0,0].cpu().numpy()[64:-64,64:-64]
-            heights.append({3:(q.sign()*q.square()).cpu().numpy(),0:fine})
+            low=(q.sign()*q.square()).cpu().numpy()
+            if scalar:low=low[16:48,16:48]  # Same footprint as the256px LOD0 core.
+            heights.append({3:low,0:fine})
         for lod in (3,0):
             reference,candidate=heights[0][lod],heights[1][lod];shape=compare_shape(candidate,reference)
-            tpi=next(r for r in shape['topographic_position'] if r['sigma_pixels']==8.)
+            tpi_sigma=(2. if lod==3 else 16.) if scalar else 8.
+            tpi=next(r for r in shape['topographic_position'] if r['sigma_pixels']==tpi_sigma)
             rows.append(dict(step=saved['step'],kind=record['case_kind'],seed=record['metadata']['seed'],coarse=coarse,lod=lod,
                 mae_m=float(np.abs(candidate-reference).mean()),correlation=tpi.get('tpi_correlation'),
                 recall=tpi.get('valley_retention'),rms=tpi.get('tpi_rms_ratio'),channel0_mse=channel0_mse,shape=shape))
+            if scalar:rows[-1].update(tpi_sigma_pixels=tpi_sigma,tpi_scale_m=480.)
             land=reference>0
             a=reference-gaussian_filter(reference,1.,mode='reflect');b=candidate-gaussian_filter(candidate,1.,mode='reflect')
             mask=land.copy();mask[:3]=mask[-3:]=False;mask[:,:3]=mask[:,-3:]=False
@@ -91,6 +101,9 @@ def evaluate(checkpoint,output,label='qat',coarse='coarse4',quantized=True):
     (output/f'{stem}.txt').write_text('Autonomous native64/32,T2 chain, original decoder. Real paired relief without smoothing. Metrics in CSV/JSON. Weight-only packing, native BF16 activations.\n')
     report=dict(checkpoint=str(checkpoint),checkpoint_sha256=digest(checkpoint),step=saved['step'],rows=rows,
                 quantized=quantized,source_sha256=digest(__file__),gpu=torch.cuda.get_device_name(),accepted=False)
+    if scalar:
+        report.update(architecture=saved['architecture'],scalar_precision=saved['scalar_precision'],
+                      footprint='Matched central32x32 latent /256x256 decoded; progress image enlarges these native fields.')
     atomic_json(output/f'{stem}.json',report)
     cache.__exit__(None,None,None)
     del model,decoder;gc.collect();torch.cuda.empty_cache()

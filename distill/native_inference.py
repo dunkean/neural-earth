@@ -21,6 +21,9 @@ def load_native(source,device='cpu'):
         raise ValueError('Native checkpoint weights must belong to the native net.')
     if any(not torch.isfinite(value).all() for value in state.values()):
         raise ValueError('Non-finite native base weights.')
+    if saved.get('architecture')=='native-weight-quant-scalar':
+        from distill.native_scalar_precision import runtime_scalar_model
+        return runtime_scalar_model(saved,device),saved
     if saved.get('architecture')=='native-weight-quant':
         from distill.native_weight_runtime import runtime_model
         return runtime_model(saved,device),saved

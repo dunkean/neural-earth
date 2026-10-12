@@ -64,9 +64,29 @@ class ScalarPrecisionBase(NativeWeightQuantBase):
 
 
 def load_scalar_precision(saved, device='cpu'):
-    if saved['architecture'] != 'native-weight-quant':
-        raise ValueError('A legacy NF4 source checkpoint is required for this probe.')
+    if saved['architecture'] not in ('native-weight-quant', 'native-weight-quant-scalar'):
+        raise ValueError('Explicit NF4 scalar or legacy NF4 checkpoint required.')
     model = ScalarPrecisionBase(saved['config'], saved['scheme'], saved['block'],
                                 saved['quantized_layers']).to(device).eval()
     model.load_state_dict(saved['ema'])
+    if saved['architecture'] == 'native-weight-quant-scalar':
+        if saved.get('scalar_precision') != 'anchored-fp32-v1':
+            raise ValueError('Unsupported scalar precision contract.')
+        model.set_precision('anchored', saved['gain_anchor'])
     return model.requires_grad_(False)
+
+
+@torch.no_grad()
+def runtime_scalar_model(saved, device='cpu'):
+    if saved.get('architecture') != 'native-weight-quant-scalar' or saved.get('scalar_precision') != 'anchored-fp32-v1':
+        raise ValueError('Explicit anchored scalar runtime contract required.')
+    from distill.native_weight_runtime import runtime_model
+    net = runtime_model(saved | dict(architecture='native-weight-quant'), device)
+    net.out_gain = torch.nn.Parameter(saved['ema']['net.out_gain'].to(device=device, dtype=torch.float32),
+                                      requires_grad=False)
+    anchor = float(saved['gain_anchor'])
+    if float(torch.tensor(anchor).bfloat16().float()) != anchor:
+        raise ValueError('Runtime anchor must be an exact BF16 value.')
+    net.out_conv._gain_anchor = anchor
+    net.out_conv.forward = MethodType(anchored_output_conv, net.out_conv)
+    return net
