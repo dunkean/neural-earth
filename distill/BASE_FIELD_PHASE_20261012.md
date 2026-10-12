@@ -50,3 +50,26 @@ raccords froids dans l'application. La cohérence entre champs décalés est un
 diagnostic préalable, pas cette validation finale. Aucune accélération acquise
 n'est annoncée et le base original reste le défaut de l'application. Aucun poids
 base expérimental n'est ajouté à Git.
+
+## Contrôle causal des canaux au1000
+
+La comparaison des cinq canaux du premier champ (`field_first_features.py`)
+montre qu'au500 le canal0 concentre environ80% de l'erreur normalisée des
+quatre features. Cette erreur diminue4–5% par rapport à l'EMA2037, mais la
+géométrie finale autonome reste insuffisante : au1000, montagne/coarse4 donne
+150/130/109m, corrélation TPI8 de0,848/0,854/0,896.
+
+`field_channel_oracles.py` remplace séparément des canaux initiaux par leurs
+cibles teacher enregistrées, sans changer les poids ni les bruits. Sur les
+trois mondes VAL coarse4, remplacer le seul canal0 ramène l'erreur décodée à
+56/28/66m et la corrélation à0,993–0,994. Remplacer les trois autres features
+ou la hauteur seule corrige beaucoup moins le terrain. C'est un contrôle causal
+du défaut, pas une performance du modèle autonome ni une acceptation.
+L'anneau teacher externe32 reste partiellement fusionné dans ce contrôle.
+
+Résultats externes : `eval/field-first-features500.json` et
+`eval/field-channel-oracles1000.json`, accompagnés de textes. Les photos
+autonomes au1000 sont dans `_base/field-phase-<coarse>-001000.png`.
+Ces données sont transmises à Opus dans `review/opus-field-channel0-20261012`.
+La recette du producteur actif reste figée ; toute nouvelle stratégie doit
+attendre son garde-fou ou son budget et conserver son état de reprise.
