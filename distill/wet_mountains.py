@@ -138,6 +138,8 @@ def preview(root, record, low, fine, qualification):
         panel = shade(e, 30*2**lod, 1.5).resize((768, 768), Image.Resampling.NEAREST)
         image.paste(panel, (col*780, 144))
     name = f'mountains-teacher-{Path(record["file"]).stem}'
+    if root != ROOT:
+        name = f'mountains-teacher-{root.name}-{Path(record["file"]).stem}'
     output = external_path(DATA/'_base'); output.mkdir(parents=True, exist_ok=True)
     atomic_write(output/f'{name}.png', lambda f: image.save(f, format='PNG'))
     atomic_json(output/f'{name}.json', qualification | dict(record=record))

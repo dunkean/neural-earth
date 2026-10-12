@@ -2,6 +2,86 @@
 
 2026-10-10 · Grégory Beurier
 
+## Pilote teacher-basis sélectif : 4 000 pas réellement terminés
+
+Profil BF16 à poids en cache et CUDA Graphs,5090,batch16 : teacher1,400ms
+par fenêtre ; seules42 convolutions internes3×3 du décodeur du base sont
+factorisées. Les quatre niveaux du décodeur représentent~71% du temps des
+convolutions éligibles mesurées par événements. Encoder, skips, attention,
+embeddings, têtes et resampling restent à leur largeur originale. Demi-rang :
+180,9M paramètres/1,182ms. Quart-rang :137,834M/1,001ms, potentiel×1,40.
+Huitième-rang :117,119M/0,904ms. Ces temps contrôlent l'architecture non entraînée,
+pas encore la performance idle des poids finaux. Le cache reproduit EXACTEMENT
+le wrapper BF16, erreur max0, y compris l'ordre multiplication/arrondi.
+Rapports : `eval/native-lowrank-{cached,quarter-cached}-profile.json`.
+
+Douze nouveaux mondes TRAIN montagne humide sélectionnés sur les sorties
+du teacher d'origine, recapturés/requalifiés au decoder original sur les trois
+coarses :36/36 branches qualifiées, indépendantes des trois mondes VAL et des
+mondes finaux. `crops/native-wet-mountain-train-extension-v1/` complète les
+trois mondes TRAIN du premier bank, sans changer les anciennes banques.
+
+Entraînement5090 terminé exit0 au vrai pas4000,17,6min, aucun base accepté :
+`ckpt/native-basis-decoder-quarter-pilot/`. Départ teacher plein rang, extinction
+progressive des directions de queue sur1000 pas, re-SVD FP64/compaction et
+reset Adam/EMA au1000, puis3000 pas. FP32 masters, BF16 forwards, deux passes,
+fenêtres64/32 et condition58. Adam facteurs5e-5/autres1e-5, warmup100, clip1,
+EMA demi-vie500. Batch8 mondes distincts,4 par phase, trois coarses dans chaque
+phase ;25% montagne,15% anciennes scènes rares,60% générales.1947 scènes TRAIN.
+Régression directe teacher sur chaque entrée/branche, sans loss décodée ;
+supervision des37 sorties encoder/decoder, donc des skips. Loss équilibrée
+des QUATRE features de première passe et hauteur seconde, statistiques TRAIN
+figées et terme d'énergie×2 sur les fenêtres montagne. Poids KD0,37169 calibré
+sur50 batches TRAIN au rang final, pas sur le plancher numérique plein rang.
+GPU smoke exact avec gradients plein rang ET compact, teacher sans gradients,
+13 tests CPU pertinents ; pic GPU du training~8,54GiB.
+
+Opus5.5, même session réellement reprise :
+`review/opus-basis-quarter-launched-20261012/OPUS_REVIEW.md`. Pas de défaut
+bloquant identifié ; contrôle FP32 de la compaction demandé et exécuté sur
+les RAW avant/après (l'EMA est réinitialisée). Sur trois branches : MSE relative
+2,94–3,93e-12,max~3,4e-5 ; BF16 change4,05–5,19e-5, comparable au plancher de
+réorganisation. `eval/native-basis-quarter-cut-check.json`. Ne pas confondre
+le chiffre1,9e-11 FP32 du contrôle antérieur avec son erreur BF16 ; MPConv
+normalise le poids globalement, pas canal de sortie par canal de sortie.
+
+La4090 évalue les checkpoints et fournit les états autonomes TRAIN de seconde
+passe. L'évaluation complète204 scènes est plus lente que le training : les
+buffers on-policy sont arrivés tard, via un producteur TRAIN prioritaire.
+Les32 fenêtres on-policy observées dans les logs tous25 pas ne prouvent PAS
+25% sur toute la seconde moitié du run. C'est une limite de ce pilote, à corriger
+dans la coordination du suivant. Le500 ne passe pas : montagne coarse4 fine
+MAE156–248m,corr TPI8~0,797–0,854,rappel0,698–0,796,amplitude1,008–1,148.
+Les poids finaux4000 restent à qualifier ; aucune conclusion favorable tirée
+de la seule loss TRAIN finale0,186/opérateur0,0395/représentation0,150.
+
+Observateur supplémentaire5090, après la fin du training, sur checkpoints
+0/1000/4000 : `eval/native-basis-quarter-final-cached/`. Copies d'inférence
+cachées vérifiées avec erreur MAX0 sur les deux phases et trois coarses avant
+toute mesure, OpenBLAS limité à1 thread ; aucune modification des producteurs
+live. Images `_base/basisquarter*` et `_base/mountains-basisquarter*`, CSV/JSON/TXT
+associés. Les PNG sont des comparaisons internes de progression, pas les
+planches finales app/cold-seams demandées. Poids/optimiseurs/RNG, checkpoint
+pré-compaction et premiers paliers conservés hors Git. Résultat final, vraie
+vitesse idle entraînée, chaîne complète, mondes finaux et raccords restent requis.
+
+Résultat4000 maintenant vérifié, toujours négatif : feature VAL0,06012 contre
+0,10062 au1000. Les trois montagnes coarse4 : MAE98,4/75,0/68,1m ; corrélation
+TPI8 0,881/0,869/0,923 ; rappel0,600/0,758/0,569 ; amplitude0,780/0,917/0,720.
+Inspection de `_base/mountains-basisquartercached-004000.png` : les grands
+reliefs tiennent, mais des incisions/affluents s'atténuent encore. Aucun base
+accepté. Les anciennes rares coarse4 ont de meilleurs écarts absolus : MAE fine
+médiane désert4,12m/tempérée2,98m/côte8,17m/plaine-mer1,73m, mais position TPI
+native encore insuffisante, corrélations0,606/0,533/0,804/0,668.
+Audit autonome TRAIN4000,17 scènes/15 mondes montagne coarse4 : MAE médiane
+71,70m,corr0,9426,rappel0,762,amplitude0,886. Les cas TRAIN restent eux aussi
+imparfaits ; ce n'est pas seulement une erreur sur les trois mondes VAL et
+4000 pas ne prouvent toujours pas un plafond de capacité. Rapport
+`eval/native-basis-quarter-mountain-train4000.json`, CSV dans `_base`.
+Les résultats/photos et la limite on-policy sont renvoyés à la même session
+Opus5.5, `review/opus-basis-quarter-negative4000-20261012/`. Prochaine expérience
+à choisir sur cet échec réel, sans prolonger silencieusement le budget4000.
+
 ## Haute montagne humide ajoutée aux cas critiques (12 octobre)
 
 L'observation utilisateur est maintenant un contrôle distinct : conserver les
