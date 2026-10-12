@@ -74,3 +74,35 @@ les sorties finies. À batch16, le candidat est environ 2,5 % plus lent dans
 ce runtime. La compression des poids reste son gain actuel ; aucune réduction
 du nombre de fenêtres ou des deux étapes n'est réalisée. La vue complète,
 les métriques finales et l'audit du paquet100k restent à faire.
+
+## Vue complète : terrain d'un viewport1920×1080, candidat70k
+
+Benchmark terminé avec code0, après la fin des trainings et évaluations A/B.
+Les deuxGPU étaient libres de calcul avant lancement. Mesure5090, trois
+répétitions par variante/LOD après un passage de chauffe ; ordre intercalé,
+monde neuf par mesure, poids résidents. Coarse4 et decoder livré identiques.
+
+| LOD | Original (s) | NF4 EMA70k (s) | Fenêtres base calculées |
+|---|---:|---:|---:|
+| 3 | 12,408 | 13,971 | 5986 |
+| 0 | 2,276 | 2,487 | 310 |
+
+Ce sont les médianes des requêtes **terrain backend** des40tuiles256px
+nécessaires à ce viewport, avec un cache de monde neuf, pas un temps HTTP
+ou de rendu navigateur. AuLOD3, la zone visible représente environ119439km² ;
+les40tuiles couvrent un rectangle un peu plus grand. Les fenêtres calculées
+sont strictement identiques pour original et candidat sur toutes les répétitions.
+Les sorties sont finies et les tableaux physiques d'une répétition sont conservés.
+
+Les graphesCUDA **du base** sont désactivés pour les deux variantes dans ce
+chemin Linux, comme dans le banc physique. Le profil exact est enregistré :
+decoder/coarse gardent leurs options communes. La différence avec le micro-bench
+CUDA Graphs ci-dessus n'est donc pas une contradiction : cette mesure inclut
+les requêtes, transferts, construction des champs et l'adaptateur d'inférence
+actuel. Le candidat est environ12,6% plus lent auLOD3 et9,3% auLOD0.
+Ces résultats n'anticipent aucune optimisation future ni performanceWASM.
+
+Code : `python -m distill.benchmark_native_view`. Données :
+`eval/native-nf4-70k-full-view-5090/report.json` et ses tableaux `.npz`.
+Job : `base-nf4-70k-full-view-benchmark-5090`. Un GPU occupé fait refuser
+le lancement, et le script conserve les mesures existantes sans les écraser.
