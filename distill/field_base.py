@@ -92,7 +92,7 @@ def block_forward(block,inputs,embedding,origins,spacing):
     return torch.clip(x,-block.clip_act,block.clip_act) if block.clip_act is not None else x
 
 
-def field_forward(net,x,noise_labels,conditions,origins,centres,return_features=False):
+def field_forward(net,x,noise_labels,conditions,origins,centres,return_features=False,return_head_velocities=False):
     initial_size=x.shape[-2:];embeddings={};features={}
     def emb_for(height,width,spacing):
         key=(height,width,spacing)
@@ -125,6 +125,10 @@ def field_forward(net,x,noise_labels,conditions,origins,centres,return_features=
         x=block_forward(block,x,emb_for(height,width,spacing),origins,spacing)
         if return_features:features['dec.'+name]=x
     result=net.out_conv(x,gain=net.out_gain)
+    if return_head_velocities:
+        heads=torch.stack([head(x,gain=net.field_window_gains[i])
+                           for i,head in enumerate(net.field_window_heads)],dim=1)
+        return result,features,heads
     return (result,features) if return_features else result
 
 

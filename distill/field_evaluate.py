@@ -12,6 +12,7 @@ import torch
 from distill.common import DATA,REPO,atomic_json,atomic_write,external_path
 from distill.field_base import FieldBase
 from distill.field_phase import FieldPhaseBase
+from distill.field_heads import FieldHeadsBase,recorded_heads,head_loss
 from distill.field_scene import FieldScene,field_scene_forward
 from distill.native_basis_training import inventory
 from distill.native_decoded import OriginalDecoder
@@ -25,7 +26,7 @@ from distill.wet_mountain_progress import selected_validation
 @torch.no_grad()
 def evaluate(checkpoint,output,label,coarse='coarse4',seams=False):
     saved=torch.load(checkpoint,map_location='cpu',weights_only=True)
-    classes={'native-field':FieldBase,'native-field-phase':FieldPhaseBase}
+    classes={'native-field':FieldBase,'native-field-phase':FieldPhaseBase,'native-field-heads':FieldHeadsBase}
     if saved['architecture'] not in classes:raise ValueError('Field checkpoint required.')
     model=classes[saved['architecture']](saved['config']).cuda().eval().requires_grad_(False);model.load_state_dict(saved['ema'])
     main=DATA/'crops/native-mixed-scenes-v2'
@@ -37,10 +38,16 @@ def evaluate(checkpoint,output,label,coarse='coarse4',seams=False):
     mountains,_=selected_validation(ROOT,coarse)
     selected += [(ROOT,r) for r in mountains]
     decoder=OriginalDecoder('cuda');rows=[];fields=[];seam_rows=[]
+    variance=torch.tensor(json.loads((DATA/'eval/native-decoded-probe/channel-statistics.json').read_text())['variance'],device='cuda')
     from terrain_diffusion.inference.world_pipeline import gaussian_noise_patch
     for root,record in selected:
         scene=FieldScene(root/record['file'],'cuda')
         result=field_scene_forward(model,scene)
+        initial_channel0_mse=float((result['initial192'][0,0]-scene.initial[0]).square().mean()/variance[0])
+        initial_head_mse=None
+        if result['initial_heads'] is not None:
+            targets,mask=recorded_heads(root/record['file'],scene)
+            initial_head_mse=float(head_loss(result['initial_heads'],targets,mask,variance)[0])
         initial_heights=[]
         for latent in (scene.initial,result['initial192'][0]):
             q=latent[4].float()*38.6-31.4
@@ -64,7 +71,8 @@ def evaluate(checkpoint,output,label,coarse='coarse4',seams=False):
                 correlation=tpi.get('tpi_correlation'),recall=tpi.get('valley_retention'),
                 rms=tpi.get('tpi_rms_ratio'),shape=metrics,
                 initial_correlation=initial_shape.get('tpi_correlation'),initial_rms=initial_shape.get('tpi_rms_ratio'),
-                initial_mae_m=float(np.abs(initial_heights[1]-initial_heights[0]).mean())))
+                initial_mae_m=float(np.abs(initial_heights[1]-initial_heights[0]).mean()),
+                initial_channel0_mse=initial_channel0_mse,initial_head_mse=initial_head_mse))
             fields.append((reference,candidate))
         if seams:
             for shift in ((0,32),(32,0)):

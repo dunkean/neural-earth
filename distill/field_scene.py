@@ -58,10 +58,23 @@ def field_scene_forward(model,scene,checkpointed=False,features=False,initial_ov
     condition=scene.condition[None];origins=[scene.origin];centres=[scene.centres]
     def evaluate(inputs,labels):
         return model(inputs,labels,condition,origins,centres,return_features=features)
-    first=(checkpoint(evaluate,scene.inputs0,scene.labels[:1],use_reentrant=False)
-               if checkpointed else evaluate(scene.inputs0,scene.labels[:1]))
-    velocity0,features0=first if features else (first,None)
-    initial=window_outputs(scene.inputs0,velocity0,scene.labels[:1],scene.dtype)
+    initial_heads=None
+    if hasattr(model.net,'field_window_heads'):
+        from distill.field_heads import combine_heads
+        def evaluate_heads(inputs,labels):
+            return model(inputs,labels,condition,origins,centres,return_features=features,return_head_velocities=True)
+        first=(checkpoint(evaluate_heads,scene.inputs0,scene.labels[:1],use_reentrant=False)
+               if checkpointed else evaluate_heads(scene.inputs0,scene.labels[:1]))
+        velocity0,features0,head_velocities=first
+        b,_,c,h,w=head_velocities.shape
+        initial_heads=window_outputs(scene.inputs0.repeat_interleave(4,dim=0),head_velocities.reshape(b*4,c,h,w),
+            scene.labels[:1].expand(b*4),scene.dtype).reshape(b,4,c,h,w)
+        initial=combine_heads(initial_heads,origins)
+    else:
+        first=(checkpoint(evaluate,scene.inputs0,scene.labels[:1],use_reentrant=False)
+                   if checkpointed else evaluate(scene.inputs0,scene.labels[:1]))
+        velocity0,features0=first if features else (first,None)
+        initial=window_outputs(scene.inputs0,velocity0,scene.labels[:1],scene.dtype)
     refinement=initial if initial_override is None else initial_override.detach()[None]
     weighted=torch.cat((refinement,torch.ones_like(refinement[:,:1])),dim=1)
     inputs1=refinement_inputs(weighted,scene.noise[1][None],scene.labels[1:],scene.dtype)
@@ -71,4 +84,4 @@ def field_scene_forward(model,scene,checkpointed=False,features=False,initial_ov
     final=window_outputs(inputs1,velocity1,scene.labels[1:],scene.dtype)
     return dict(initial=initial,final=final,initial192=initial[:,:,32:224,32:224],
                 core=final[:,:,64:192,64:192],inputs1=inputs1,velocity0=velocity0,velocity1=velocity1,
-                features0=features0,features1=features1)
+                features0=features0,features1=features1,initial_heads=initial_heads)

@@ -10,6 +10,7 @@ import torch
 from distill.common import DATA,atomic_json,atomic_write,external_path
 from distill.field_base import FieldBase
 from distill.field_phase import FieldPhaseBase
+from distill.field_heads import FieldHeadsBase
 from distill.field_scene import FieldScene,field_scene_forward
 from distill.field_loss import teacher_features,central_kd
 from distill.native_base import teacher_source
@@ -45,7 +46,7 @@ def main():
     args=parser.parse_args();output=external_path(args.output)
     torch.set_num_threads(8);torch.backends.cudnn.benchmark=True
     source=torch.load(args.checkpoint,map_location='cpu',weights_only=True)
-    cls=FieldPhaseBase if source['architecture']=='native-field-phase' else FieldBase
+    cls={'native-field':FieldBase,'native-field-phase':FieldPhaseBase,'native-field-heads':FieldHeadsBase}[source['architecture']]
     model=cls(source['config']).cuda().eval().requires_grad_(False);model.load_state_dict(source['ema'])
     records,_=selected_validation(ROOT,'coarse4');rows=[];images=[]
     teacher=EDMUnet2D.from_pretrained(str(teacher_source())).cuda().bfloat16().eval().requires_grad_(False)

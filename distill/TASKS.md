@@ -2,7 +2,39 @@
 
 2026-10-10 · Grégory Beurier
 
-## Reprise actuelle : coordonnées des fenêtres et vallées humides
+## Reprise actuelle : quatre sorties de fenêtres pour le premier champ
+
+Le pilote de coordonnées périodiques s'est arrêté à2037 nouveaux pas après son
+contrôle2000, avant les4000 prévus. Montagnes/coarse4 :154/128/89m, amplitudes
+0,848/0,876/0,753 ; il n'est pas accepté. Le défaut principal est mieux isolé :
+remplacer le seul canal0 de première phase par le teacher restaure une
+corrélation0,993–0,994 au contrôle1000. Au dernier état, sa MSE n'a baissé que
+10–13%, sous la condition30% donnée par Opus pour conserver cette recette.
+
+Nouvelle reprise `field_heads_train.py` : quatre petites sorties de première
+phase sur un tronc192×3 partagé, cibles non fusionnées des49 fenêtres natives,
+fusion par poids triangulaires mondiaux fixes. La seconde phase garde la sortie
+originale. Poids bruts et EMA parent, moments Adam et RNG conservés. LR héritée
+3e-5/têtes1e-4, warmup100, forcing25%, même sampling et continuation du compteur
+global4074. Supervision normalisée par tête1.0 en plus des losses précédentes.
+La cible teacher initiale192 reconstruite par les classes de fenêtres est
+vérifiée ; les régions sans capture sont masquées.
+
+GPU smoke sur5090 complet : trois coarse, batch montagne, forcing/nonforcing,
+recadrages x/y,17 tests CPU pertinents. Au départ, résultat FINAL exactement
+identique au parent sur six contrôles brut/EMA ; premier champ ne change que
+par l'arrondi de fusion FP32, MSE~5,7e-15/max≤9,54e-7. Pic GPU19,50GiB.
+
+Jobs actuels : `base-field-heads-train`5090 et `base-field-heads-evaluate`4090,
+budget3000, évaluations et photos tous500 dans
+`_base/field-heads-<coarse>-<step>.*`. Critères intermédiaires1000/2000,
+limites de l'explication d'Opus et preuves dans
+[BASE_WINDOW_HEADS_20261012.md](BASE_WINDOW_HEADS_20261012.md).
+La qualité autonome, les autres cas rares, la chaîne app, les vrais raccords
+froids et les performances restent à prouver. Base original toujours au défaut
+runtime ; aucun poids base expérimental dans Git.
+
+## Pilote de coordonnées des fenêtres : arrêté au2037
 
 Le pilote pleine largeur s'est arrêté au garde-fou au vrai pas2037, avant
 les6000 prévus. Au2000, montagne humide/coarse4 : erreur décodée125–147m,
@@ -18,8 +50,8 @@ sur5090. Treize tests CPU pertinents passent. Première phase davantage
 supervisée et seconde parfois teacher-forcée au TRAIN, jamais en évaluation.
 Recadrages communs comparés avec deux chaînes autonomes, même sur batch forcé.
 
-Jobs actuels : `base-field-phase-train`5090 et `base-field-phase-evaluate`4090,
-budget4000 nouveaux pas, observer chaque500. Photos comparatives et métriques
+Jobs désormais terminés : `base-field-phase-train`5090 et `base-field-phase-evaluate`4090,
+budget prévu4000 nouveaux pas, observer chaque500. Photos comparatives et métriques
 dans `_base/field-phase-<coarse>-<step>.*`, diagnostics de lignes
 `field-attention-lines-phase-<step>.*`. Données : quinze mondes TRAIN de montagne
 humide,25% du sampling ; mondes VAL et finaux séparés. Revue Opus5.5 et
