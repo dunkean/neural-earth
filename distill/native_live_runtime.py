@@ -24,3 +24,10 @@ class NativeLiveBase(torch.nn.Module):
     def forward_with_embeddings(self,inputs,*args,**kwargs):
         self.note(inputs)
         return self.model.forward_with_embeddings(inputs,*args,**kwargs)
+
+
+def install(world,model):
+    counts=getattr(world,'_distill_counts',{})
+    counts.setdefault('base',dict(calls=0,output_pixels=0))
+    world._distill_counts=counts
+    world.base_model=NativeLiveBase(model,counts['base'])

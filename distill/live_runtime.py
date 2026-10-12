@@ -143,12 +143,10 @@ class LiveModels:
         if models:
             install(world, models, tile_size=512)
         if native_base is not None:
-            from distill.native_live_runtime import NativeLiveBase
+            from distill.native_live_runtime import install as install_native
             # configure_world prepared the original stack before this hook.
             # Never normalize the already baked native NF4 kernels again.
-            if not hasattr(world,'_distill_counts'):
-                world._distill_counts={stage:dict(calls=0,output_pixels=0) for stage in STAGES}
-            world.base_model=NativeLiveBase(native_base,world._distill_counts['base'])
+            install_native(world,native_base)
 
     def public(self):
         return dict(selection=self.selection, revision=self.config['revision'],

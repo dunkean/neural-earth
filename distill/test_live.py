@@ -171,6 +171,20 @@ class LiveModelTests(unittest.TestCase):
         self.assertTrue(a._terrain_custom_base)
         b(x);self.assertEqual(first['calls'],1);self.assertEqual(second['calls'],1)
 
+    def test_native_install_preserves_other_student_counters(self):
+        import torch
+        from types import SimpleNamespace
+        from distill.native_live_runtime import install
+        counts=dict(coarse=dict(calls=7,output_pixels=16384),decoder=dict(calls=3,output_pixels=256))
+        world=SimpleNamespace(_distill_counts=counts)
+        model=torch.nn.Conv2d(5,5,1).eval().requires_grad_(False)
+        install(world,model)
+        inputs=torch.zeros(2,5,8,8)
+        self.assertTrue(torch.equal(world.base_model(inputs),model(inputs)))
+        self.assertEqual(world._distill_counts['base'],dict(calls=1,output_pixels=128))
+        self.assertEqual(counts['coarse']['calls'],7)
+        self.assertEqual(counts['decoder']['calls'],3)
+
     def test_legacy_base_is_retired_without_resetting_or_changing_other_choices(self):
         root = self.install_review_exports()
         for choice in ('initial128', 'coupled128', 'refined128', 'refined192'):
