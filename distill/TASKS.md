@@ -2,7 +2,34 @@
 
 2026-10-10 · Grégory Beurier
 
-## Élève de champ pleine largeur : entraînement6k en cours
+## Reprise actuelle : coordonnées des fenêtres et vallées humides
+
+Le pilote pleine largeur s'est arrêté au garde-fou au vrai pas2037, avant
+les6000 prévus. Au2000, montagne humide/coarse4 : erreur décodée125–147m,
+amplitude TPI8 de0,66–0,82 ; il n'est pas accepté. Le contrôle causal1500
+atteint29–41m/corrélation0,997 avec un premier champ teacher fourni à sa seconde
+passe, ce qui motive une correction du premier champ.
+
+Reprise `field_phase_train.py` à partir des poids bruts, EMA, Adam et RNG2037,
+avec deux projections de coordonnées périodiques initialisées à zéro. Six
+contrôles GPU vérifient l'identité bit à bit initiale sur les trois coarse,
+poids bruts et EMA ; gradients réels, y compris forcing et raccords, validés
+sur5090. Treize tests CPU pertinents passent. Première phase davantage
+supervisée et seconde parfois teacher-forcée au TRAIN, jamais en évaluation.
+Recadrages communs comparés avec deux chaînes autonomes, même sur batch forcé.
+
+Jobs actuels : `base-field-phase-train`5090 et `base-field-phase-evaluate`4090,
+budget4000 nouveaux pas, observer chaque500. Photos comparatives et métriques
+dans `_base/field-phase-<coarse>-<step>.*`, diagnostics de lignes
+`field-attention-lines-phase-<step>.*`. Données : quinze mondes TRAIN de montagne
+humide,25% du sampling ; mondes VAL et finaux séparés. Revue Opus5.5 et
+contrat, garde-fous, limites et commandes dans
+[BASE_FIELD_PHASE_20261012.md](BASE_FIELD_PHASE_20261012.md).
+Le base original reste le défaut runtime ; aucun nouveau poids base accepté
+ou poussé dans Git. Qualité sur tous les cas, chaîne app, vrais raccords froids
+et performances au repos restent à valider.
+
+## Élève de champ pleine largeur : pilote arrêté au2037
 
 Le pilote quart-rang est archivé à froid, avec toutes ses empreintes et chemins
 Linux conservés par symlinks ; aucun poids n'est perdu. Preuve :
@@ -34,7 +61,7 @@ Loss latente normalisée sur les cinq canaux aux deux phases, gradient, bandes
 positionnelles et énergie×2 en montagne ; aucune loss de decoder physique.
 KD sur les32 pixels centraux d'une fenêtre teacher64 correspondante, aux DEUX
 phases et aux37 sorties encoder/decoder,74 comparaisons. Poids0,12093 calibré
-sur16 scènes TRAIN. Tous les6000 pas utilisent25% montagnes/15% anciennes
+sur16 scènes TRAIN. La recette prévue6000 pas utilise25% montagnes/15% anciennes
 rares/60% générales et les trois coarse. Adam3e-5, warmup200,clip1,EMA demi-vie500.
 Une loss de recadrage commun intervient tous4 pas, axes alternés ; le champ
 auxiliaire est détaché pour contenir la mémoire. Checkpointing du FORWARD complet
@@ -42,7 +69,7 @@ rejoue correctement les casts fonctionnels BF16, sans recomputation en FP32.
 GPU smoke complet sur5090, les trois branches, targets/KD/seam : gradients
 finis, teacher figé, pic15,65GiB. Le run avec EMA monte~16,58GiB.
 
-Jobs durables : `base-field-full-width-train` sur5090,
+Jobs durables désormais terminés : `base-field-full-width-train` sur5090,
 `base-field-full-width-evaluate` sur4090. Run
 `ckpt/field-full-width-pilot/`, sources/teacher/data/calibration figés par SHA.
 Observer chaque500 pas : trois coarses, les quatre anciennes rares et les trois
