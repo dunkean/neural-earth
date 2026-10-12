@@ -53,3 +53,32 @@ amplitudes TPI8 1,002/0,929/0,920. Le grain des plaines au LOD3 reste amplifié 
 ratios RMS haute fréquence désert/tempéré 1,84/2,09. L'amélioration visuelle et
 les cas rares motivent la suite. Calcul BF16 simulant les poids NF4 : aucun
 gain d'inférence, export WASM ou modèle final accepté n'est revendiqué.
+
+## Candidats conservés à29k du run
+
+Le meilleur score pratique parmi les évaluations disponibles reste l'EMA15k
+(score0,73035 ; pas une acceptation visuelle). Son export compact est conservé
+à `ckpt/native-weight-nf4-100k/packed/step015000/` :149604746octets de poids,
+**149654663octets** avec le manifeste. Contrôle4090 sur trois vrais batches
+mixtes : écart QAT/reconstruction exactement0. Preuve et SHA :
+`~/data/distill/eval/native-nf4-best15k-packed-proof.json`.
+Les checkpoints EMA ultérieurs et les poids bruts20k restent disponibles.
+
+Les poids bruts20k ont aussi été évalués sur les trois coarse, deux LOD et
+sept scènes, avec le même decoder original que l'évaluation EMA :
+`_base/native-weight-nf4longraw-<coarse>-020000.*`.
+Comparaison coarse4 au LOD0 :
+
+| Cas | MAE EMA20k / brut20k (m) |
+|---|---:|
+|Montagne humide620001|36,55 /33,66|
+|Montagne humide620002|15,38 /13,56|
+|Montagne humide620003|44,41 /34,82|
+|Plaine basse/mer|0,477 /0,556|
+
+Sur le patch plaine basse/mer, la fraction brute de classes terre/mer erronées
+passe de14,45% à17,71% avec les poids bruts. Sur la plaine tempérée au LOD3,
+le ratio RMS haute fréquence passe de2,12 à2,21. Les poids bruts améliorent
+donc certains reliefs sans dominer l'EMA sur les cas côtiers/plats. Les deux
+sont conservés ; la sélection finale attend les prochains checkpoints et le
+retour visuel. Aucun changement de recette, aucun nouveau base par défaut.
