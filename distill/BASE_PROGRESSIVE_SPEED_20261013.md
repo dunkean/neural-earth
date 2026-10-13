@@ -67,6 +67,27 @@ de fixer la récupération suivante.
 La suppression de blocs puis la distillation vers une passe restent des
 étapes ultérieures, après un modèle plus étroit jugé correct.
 
+## Après validation du base : accélérer les autres réseaux
+
+Instruction supplémentaire du 13 octobre : poursuivre l'accélération des
+autres réseaux une fois le base terminé. Le base garde la priorité jusqu'à
+la validation de sa qualité, de ses raccords et de sa vitesse, puis la
+publication des poids retenus.
+
+1. **Decoder** : mesurer les poids livrés, puis réduire le coût du réseau en
+   protégeant les détails du relief, les côtes et la continuité entre tuiles.
+   Il devient le prochain goulot lorsque le base accélère.
+2. **Coarse** : partir des versions actuelles acceptées visuellement, mesurer
+   leur coût réel et améliorer leur vitesse en surveillant surtout le bruit
+   haute fréquence en plaine et la dispersion des pixels côtiers. Conserver
+   les versions deux et quatre passes comme références.
+
+Pour chacun, garder les meilleurs checkpoints, fournir les planches et
+métriques de comparaison, et demander une revue complète à Opus 5.5 après
+chaque grande étape. Les versions actuelles restent disponibles pour les
+comparaisons et l'intégration. Les recettes précises seront choisies à partir
+des mesures ; aucun entraînement de ces réseaux ne précède la fin du base.
+
 ## Contrôles de lancement
 
 32batchs TRAIN pour choisir les canaux/têtes ; trois contrôles source exacts ;
