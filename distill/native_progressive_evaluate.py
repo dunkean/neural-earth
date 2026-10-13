@@ -39,7 +39,15 @@ def evaluate(checkpoint, output, coarse='coarse4', label='progressive160'):
     stem = output/f'base-{label}-{saved["step"]:06d}-{coarse}'
     if stem.with_suffix('.json').exists():
         raise ValueError('Existing progress report must be preserved.')
-    model = load_progressive(saved, 'cuda')
+    architecture = saved['architecture']
+    if architecture == 'native-progressive-width':
+        model = load_progressive(saved, 'cuda')
+    elif architecture == 'native-weight-quant-scalar':
+        from distill.native_scalar_precision import load_scalar_precision
+        model = load_scalar_precision(saved, 'cuda')
+    else:
+        raise ValueError('Unsupported paired progress/reference architecture.')
+    amount = saved.get('amount')
     teacher = TeacherForward(EDMUnet2D.from_pretrained(str(teacher_source())).cuda().bfloat16().eval().requires_grad_(False))
     decoder = OriginalDecoder('cuda')
     main = DATA/'crops/native-mixed-scenes-v2'
@@ -71,7 +79,7 @@ def evaluate(checkpoint, output, coarse='coarse4', label='progressive160'):
                 land[:3] = land[-3:] = False;land[:, :3] = land[:, -3:] = False
                 energy = float(np.mean(hp[0][land]**2)) if land.any() else 0.
                 shape = compare_shape(actual, reference)
-                row = dict(step=saved['step'], amount=saved['amount'], kind=record['case_kind'],
+                row = dict(step=saved['step'], amount=amount, kind=record['case_kind'],
                     seed=record['metadata']['seed'], coarse=coarse, lod=lod,
                     mae_m=float(np.abs(delta).mean()), height_bias_m=float(delta.mean()),
                     coast_disagreement=float(np.mean((actual > 0) != (reference > 0))),
@@ -80,12 +88,17 @@ def evaluate(checkpoint, output, coarse='coarse4', label='progressive160'):
     size, left, gap, header, row_height = 512, 245, 12, 125, 556
     image = Image.new('RGB', (left+2*(size+gap), header+len(rows)*row_height), (24, 24, 24))
     draw = ImageDraw.Draw(image);font = ImageFont.truetype('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf', 17)
-    draw.text((12, 10), f'Reduction192 vers160 | etape {saved["step"]} | retrait {saved["amount"]:.3f} | {coarse}', fill='white', font=font)
+    title = (f'Reduction192 vers160 | etape {saved["step"]} | retrait {amount:.3f} | {coarse}'
+             if architecture == 'native-progressive-width' else
+             f'Base NF4 produit | etape {saved["step"]} | {coarse}')
+    draw.text((12, 10), title, fill='white', font=font)
     draw.text((12, 40), 'Teacher recalcule meme GPU/bruit, decoder original. Champs32/256px agrandis; pas de lissage ajoute.', fill='white', font=font)
     draw.text((left, 83), 'Teacher BF16', fill='white', font=font)
     selected_weights = saved.get('selected_weights', 'ema')
     caption = {'ema':'Eleve progressif EMA', 'raw':'Eleve, poids bruts',
                'untrained':'Teacher projete, sans entrainement'}.get(selected_weights, selected_weights)
+    if architecture == 'native-weight-quant-scalar':
+        caption = 'Base NF4 produit, '+selected_weights
     draw.text((left+size+gap, 83), caption, fill='white', font=font)
     names = LABELS|{KIND:'Haute montagne humide'}
     for i, (row, pair) in enumerate(zip(rows, fields, strict=True)):
@@ -100,11 +113,12 @@ def evaluate(checkpoint, output, coarse='coarse4', label='progressive160'):
         writer = csv.DictWriter(handle, fieldnames=list(flat[0]));writer.writeheader();writer.writerows(flat)
     stem.with_suffix('.txt').write_text('Comparaison appariee meme GPU/bruit, teacher BF16 recalcule, decoder original. Champs natifs32/256px agrandis. CSV/JSON donnent les metriques et la morphologie.\n')
     report = dict(status='complete', checkpoint=str(checkpoint), checkpoint_sha256=file_sha(checkpoint),
-        gpu=torch.cuda.get_device_name(), step=saved['step'], amount=saved['amount'], rows=rows,
+        gpu=torch.cuda.get_device_name(), step=saved['step'], amount=amount, rows=rows,
+        architecture=architecture,
         selected_weights=selected_weights,
         reference_scope='Teacher original BF16 recomputed on same GPU, source noise and conditioning.', accepted=False)
     atomic_json(stem.with_suffix('.json'), report)
-    append_json(DATA/'_base/image-publications.jsonl', dict(image=str(stem.with_suffix('.png')), step=saved['step'], coarse=coarse, label='progressive160'))
+    append_json(DATA/'_base/image-publications.jsonl', dict(image=str(stem.with_suffix('.png')), step=saved['step'], coarse=coarse, label=label))
     print(json.dumps(dict(image=str(stem.with_suffix('.png')), step=saved['step'], coarse=coarse)), flush=True)
     return report
 

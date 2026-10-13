@@ -78,29 +78,46 @@ les observations à2k ; le lanceur Opus lit et trace aussi ce complément.
 
 ## Paliers suivants
 
+La revue intermédiaire Opus5.5 a été obtenue à14k :
+`REVIEW_OPUS_PROGRESSIVE_INTERIM_20261013.md`. Les décisions et les contrôles
+sont dans `PROGRESSIVE_INTERIM_REVIEW_RESPONSE_20261013.md`. Elle confirme
+de terminer20k et recommande une récupération en mètres/côtes, puis de
+prioriser moins de blocs/une passe pour la vitesse. Ce n'est pas encore la
+revue finale du palier.
+
 1. Récupération du réseau160, ordre de grandeur30kpas, ajustée avec la revue.
    Nouvelle revue Opus sur qualité, vitesse et raccords.
+   Comparer raw etEMA ; garder les maîtres FP32 du départ choisi. Préparer
+   le canal4 de x0 en mètres aux deux passes, l'auxiliaire TT pleine résolution
+   avec côte près de0m, et la décroissance du featureKD. Calibrer les gradients
+   surTRAIN ; corriger la journalisation par phase/état/catégorie. Les fonctions
+   physiques et les contrôles identitaires sont prêts, le trainer de reprise
+   n'est pas encore lancé.
    Le helper `native_progressive_features.py` prépare l'alignement des features :
    après compaction, seuls les canaux du teacher sont sélectionnés suivant
    `original_teacher_channel_mapping`, ceux de l'élève sont déjà consécutifs.
    Trois testsCPU vérifient des coordonnées non contiguës, le gradient réservé
    à l'élève et le rejet des mappings incohérents. Cela prépare la reprise ;
    son entraînement attend toujours la revue du premier palier.
-2. Réduction graduelle160→128 en conservant les trois blocs/deux passes, puis
-   récupération. Ordre de grandeur20k+30kpas, avec revue entre grands paliers.
-   Environ100kpasses au total pour cette proposition ; les recettes suivantes
-   ne sont pas encore figées, les avis et images peuvent les modifier.
-3. QAT/stockage du réseau retenu, réel benchmark CPU/GPU selon intégration,
+2. Priorité vitesse : moins de blocs et/ou une passe réellement distillée
+   vers la sortie du teacher à deux passes, avec contexte et fusion supervisés.
+   Choisir l'ordre à partir des gains mesurés aux batchs1/4/16 et sur une vue
+   complète. Conserver le160 à deux passes comme référence et solution de repli.
+3. Réduction vers128 si les mesures la justifient. Séparer la sélection des
+   canaux résiduels de celle des têtes d'attention ; la sélection par blocs64
+   de l'ancien code ne sera pas reconduite pour cette réduction. Comparer les
+   projections sans entraînement surTRAIN. La proposition reste environ100k
+   mises à jour comme point de départ ; les paliers et recettes évoluent avec
+   les revues et les résultats, sans arrêt automatique à ce nombre.
+4. QAT/stockage du réseau retenu, réel benchmark CPU/GPU selon intégration,
    lieux rares/réservés, raccords canoniques et ordinaires, bonnes planches512px
    et nouvelle release. Premier objectif intermédiaire : environ2× mesuré, sans promettre
    que la baisse de FLOPs se convertira exactement en baisse de latence.
 
-4. Pousser ensuite le gain : moins de blocs, puis une passe réellement
-   distillée vers la sortie du teacher à deux passes. Tester ces réductions
-   séparément en gardant les meilleurs compromis précédents. Supprimer
-   directement la seconde passe du teacher n'est pas cette distillation.
-   La priorité de vitesse justifie ces paliers au-delà du premier gain2×,
-   si les résultats visuels restent corrects. Mesurer chaque gain effectif.
+Tester ces réductions séparément en gardant les meilleurs compromis précédents.
+Supprimer directement la seconde passe du teacher n'est pas cette distillation.
+La priorité de vitesse justifie les paliers au-delà du premier gain2× si le
+rendu reste correct ; aucun gain futur n'est présenté comme déjà mesuré.
 
 Les métriques servent à expliquer et comparer les défauts, et à surveiller
 les cas rares ; un peu de bruit résiduel ne bloque pas à lui seul un candidat
