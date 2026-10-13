@@ -66,7 +66,71 @@
         "norm_eps": 1e-06
       },
       "selected_weights": "ema"
+    },
+    "coarse1": {
+      "file": "coarse1.pt",
+      "bytes": 11216897,
+      "sha256": "d0914416c8877421061445a979d63cf04331fdc3970972cc70d7cc8a0b109af8",
+      "stage": "coarse",
+      "source_checkpoint_sha256": "09e9f1b3a17f57382be143ec359688674b3c8a85252296404dc964d2885a4873",
+      "training_step": 200000,
+      "config": {
+        "stage": "coarse",
+        "width": 128,
+        "depth": 3,
+        "dilations": [
+          1,
+          2,
+          4
+        ],
+        "solver_steps": 1,
+        "norm_eps": 1e-06
+      },
+      "selected_weights": "ema",
+      "training_status": "complete",
+      "last_training_step": 200000,
+      "target_training_steps": 200000,
+      "validation_count": 384,
+      "export_max_abs": 0.0,
+      "smoke_indices": [
+        0,
+        192,
+        383
+      ],
+      "physical_acceptance": false
+    },
+    "coarse2": {
+      "file": "coarse2.pt",
+      "bytes": 11216897,
+      "sha256": "143f8f9d7808a242492e6e6a966e968a7b618d2950ac35cf5ac3a2e4fcaef157",
+      "stage": "coarse",
+      "source_checkpoint_sha256": "75e742bfdadce1360d189a9a356b82f1a6f07d41028ca695eaa6cf23e63852ed",
+      "training_step": 200000,
+      "config": {
+        "stage": "coarse",
+        "width": 128,
+        "depth": 3,
+        "dilations": [
+          1,
+          2,
+          4
+        ],
+        "solver_steps": 2,
+        "norm_eps": 1e-06
+      },
+      "selected_weights": "ema",
+      "training_status": "complete",
+      "last_training_step": 200000,
+      "target_training_steps": 200000,
+      "validation_count": 384,
+      "export_max_abs": 0.0,
+      "smoke_indices": [
+        0,
+        192,
+        383
+      ],
+      "physical_acceptance": false
     }
   },
-  "note": "User-authorized Git distribution of coarse8, coarse4 and decoder. No distilled base weights."
+  "note": "User-authorized Git distribution of coarse8/coarse4/coarse2/coarse1 and decoder. Coarse1/2 completed200k training runs; inference uses each full-validation best EMA. Visual quality remains subject to user review. No distilled base weights."
 }

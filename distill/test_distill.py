@@ -16,7 +16,7 @@ from distill.inference import base_inputs, coarse_inputs, decoder_inputs
 from distill.jobs import proc_identity
 from distill.resume_teacher import validate_resume_plan
 from distill.student import Student, StudentConfig, load_student
-from distill.train import coarse_delta_loss, coarse_height_mae, losses, lowfreq_height_mae, spectral_band_loss
+from distill.train import coarse_delta_loss, coarse_height_mae, losses, lowfreq_height_mae, spectral_band_loss, validation_footprint_changed
 from distill.evaluate import artifact_audit, audit, pipeline_speed_audit
 from distill.rare_cases import additional_evidence, augment, load_sites, local_errors, qualifies, sampling_policy, KINDS
 from distill.common import source_digest
@@ -35,6 +35,11 @@ class DistillationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         torch.set_num_threads(2)
+
+    def test_full_validation_does_not_reuse_a_two_crop_pilot_best_score(self):
+        self.assertTrue(validation_footprint_changed({'val_count': 2}, {'val_count': 384}))
+        self.assertFalse(validation_footprint_changed({'val_count': 384}, {'val_count': 384}))
+        self.assertTrue(validation_footprint_changed({'val_count': 12, 'overfit': True}, {'val_count': 12}))
 
     def test_seam_rejection_can_be_benchmarked_but_crash_or_stale_report_cannot(self):
         from distill.common import REPO

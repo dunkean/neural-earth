@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import argparse
 import csv
-from dataclasses import replace
+from dataclasses import asdict, replace
 import gc
 import hashlib
 import io
@@ -19,6 +19,7 @@ import numpy as np
 from PIL import Image, ImageDraw
 from scipy.ndimage import gaussian_filter
 import torch
+from types import SimpleNamespace
 
 from distill.common import DATA, REPO, REVISION, atomic_json, atomic_write, external_path, source_digest
 from distill.inference import install
@@ -42,6 +43,42 @@ def historical_sites(names):
             kind=kinds[name], conditioning=dict(temp=item['source_summer_temperature_c'],
                                                rain=item['source_annual_rain_mm'])))
     return result, path
+
+
+def native_validation_sites(paths):
+    """Use existing validation captures without selecting reserved final worlds."""
+    result, digests = [], {}
+    for path in paths:
+        path = Path(path).expanduser().resolve()
+        with np.load(path,allow_pickle=False) as sample:
+            metadata=json.loads(str(sample['metadata']))
+        if (metadata.get('split')!='val' or metadata.get('teacher_revision')!=REVISION or
+                metadata.get('native_size')!=128):
+            raise ValueError('Pinned native128 validation captures required.')
+        if metadata['x']%32 or metadata['y']%32:
+            raise ValueError('Validation captures must use the native32 grid.')
+        name='native-val-'+path.stem
+        if any(site['name']==name for site in result):raise ValueError('Duplicate validation scene names.')
+        # One base latent spans eight native30m pixels. Center the app request
+        # on the stored128-latent capture rather than its upper-left corner.
+        result.append(dict(name=name,seed=metadata['seed'],profile=metadata['profile'],
+            x=(metadata['x']+64)*240,y=(metadata['y']+64)*240,
+            kind='native-validation',source_scene=str(path)))
+        digests[str(path)]=hashlib.sha256(path.read_bytes()).hexdigest()
+    return result,digests
+
+
+def stage_paths(base=None, native_base=None, coarse=None, decoder=None,
+                conditioning_coarse=None, conditioning_decoder=None):
+    candidates = {k:v for k,v in dict(base=base, coarse=coarse, decoder=decoder).items() if v}
+    shared = {k:v for k,v in dict(coarse=conditioning_coarse, decoder=conditioning_decoder).items() if v}
+    if native_base and candidates:
+        raise ValueError('Use --conditioning-coarse/--conditioning-decoder with a native base.')
+    if candidates and set(candidates) != {'base', 'coarse', 'decoder'}:
+        raise ValueError('Supply all three candidate stages together, or use a native base.')
+    if shared and candidates:
+        raise ValueError('Shared stages support teacher/native base comparisons only.')
+    return candidates, shared
 
 
 def partition_stats(full, tiles, halo=24):
@@ -107,29 +144,49 @@ def preview(path, full, mosaic, lod, title):
     image.save(path)
 
 
-@torch.inference_mode()
+@torch.no_grad()
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base', type=Path)
+    parser.add_argument('--native-base', type=Path, help='Native base EMA; optionally share frozen coarse/decoder stages.')
     parser.add_argument('--coarse', type=Path)
     parser.add_argument('--decoder', type=Path)
+    parser.add_argument('--conditioning-coarse', type=Path, help='Use these coarse weights in BOTH reference and native chains.')
+    parser.add_argument('--conditioning-decoder', type=Path, help='Use these decoder weights in BOTH reference and native chains.')
     parser.add_argument('--site-manifest', type=Path, default=DATA/'eval/rare-sites-complete.json')
     parser.add_argument('--sites', nargs='+', help='Otherwise one site per category; prefer warmer plains.')
+    parser.add_argument('--validation-scenes',type=Path,nargs='+',
+                        help='Existing native128 VAL captures; center physical seam checks on these worlds.')
     parser.add_argument('--historical-sites', nargs='+', choices=('snow', 'desert', 'coast'),
                         help='Capture the original held-out screenshot locations instead of the rare bank.')
     parser.add_argument('--include-rare-sites', nargs='+',
                         help='Also capture explicitly named frozen rare cases alongside historical sites.')
     parser.add_argument('--lods', nargs='+', type=int, choices=(0, 3), default=[3, 0])
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--no-preview', action='store_true', help='Keep numerical/raw evidence only; final plates are produced separately.')
     args = parser.parse_args()
-    paths = {k:v for k,v in dict(base=args.base, coarse=args.coarse, decoder=args.decoder).items() if v}
-    if paths and set(paths) != {'base', 'coarse', 'decoder'}:
-        parser.error('Supply all three candidate stages together, or run teacher only.')
+    if args.validation_scenes:
+        args.validation_scenes=[p.expanduser().resolve() for p in args.validation_scenes]
+        if args.sites or args.historical_sites or args.include_rare_sites:
+            parser.error('--validation-scenes is a separate site source.')
+    # The backend changes cwd when importing upstream geography assets.
+    for name in ('base', 'native_base', 'coarse', 'decoder', 'conditioning_coarse',
+                 'conditioning_decoder', 'site_manifest', 'output'):
+        value = getattr(args, name)
+        if value is not None:
+            setattr(args, name, value.expanduser().resolve())
+    try:
+        paths, shared_paths = stage_paths(args.base,args.native_base,args.coarse,args.decoder,
+            args.conditioning_coarse,args.conditioning_decoder)
+    except ValueError as error:
+        parser.error(str(error))
     if args.historical_sites and args.sites:
         parser.error('Choose historical sites or names from the rare bank.')
     if args.include_rare_sites and not args.historical_sites:
         parser.error('--include-rare-sites requires --historical-sites; otherwise use --sites.')
-    if args.historical_sites:
+    if args.validation_scenes:
+        sites,manifest_digest=native_validation_sites(args.validation_scenes)
+    elif args.historical_sites:
         if len(set(args.historical_sites)) != len(args.historical_sites):
             parser.error('Historical site names must be distinct.')
         sites, manifest_path = historical_sites(args.historical_sites)
@@ -149,24 +206,55 @@ def main():
         if set(args.sites) - {s['name'] for s in sites}:
             parser.error('Unknown site in the frozen bank.')
         sites = [s for s in sites if s['name'] in args.sites]
-    elif not args.historical_sites:
+    elif not args.historical_sites and not args.validation_scenes:
         selected = []
         for kind in KINDS:
             choices = [s for s in sites if s['kind'] == kind]
             selected.append(next((s for s in choices if s.get('climate_archetype')), choices[0]))
         sites = selected
-    models, fingerprint = {}, {}
+    models, shared_models, fingerprint, shared_fingerprint = {}, {}, {}, {}
     for stage, path in paths.items():
         payload = path.read_bytes()
         fingerprint[stage] = hashlib.sha256(payload).hexdigest()
         with torch.inference_mode(False):
             models[stage], _ = load_student(io.BytesIO(payload), 'cuda')
-    for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py'):
+    for stage, path in shared_paths.items():
+        payload = path.read_bytes()
+        with torch.inference_mode(False):
+            shared_models[stage], saved = load_student(io.BytesIO(payload), 'cuda')
+        if shared_models[stage].config.stage != stage:
+            raise ValueError('Shared-stage checkpoint has the wrong stage.')
+        shared_fingerprint[stage] = dict(sha256=hashlib.sha256(payload).hexdigest(),
+            step=saved['step'], path=str(path))
+        del payload, saved
+    fingerprint['shared_stages'] = shared_fingerprint
+    if args.native_base:
+        from distill.native_inference import load_native
+        payload = args.native_base.read_bytes()
+        fingerprint['base'] = hashlib.sha256(payload).hexdigest()
+        with torch.inference_mode(False):
+            models['native_base'], saved = load_native(io.BytesIO(payload), 'cuda')
+        fingerprint['training_step'] = saved['step']
+        fingerprint['architecture'] = saved.get('architecture','native')
+        del payload, saved
+    code_files = (('distill/native_inference.py', 'backend/terrain_inference.py',
+                   'terrain-diffusion/terrain_diffusion/inference/world_pipeline.py') if args.native_base else
+                  ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py'))
+    for name in code_files:
         fingerprint['code:'+name] = hashlib.sha256((REPO/name).read_bytes()).hexdigest()
+    if args.native_base and fingerprint['architecture']=='native-weight-quant':
+        for name in ('distill/native_weight_runtime.py','distill/native_weight_quant.py'):
+            fingerprint['code:'+name] = hashlib.sha256((REPO/name).read_bytes()).hexdigest()
+    fingerprint['code:distill/check_physical_seams.py'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    if shared_paths:
+        for name in ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py'):
+            fingerprint['code:'+name] = hashlib.sha256((REPO/name).read_bytes()).hexdigest()
     output = external_path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     report = dict(gpu=torch.cuda.get_device_name(), sites=sites, lods=args.lods, rows=[],
                   checkpoint_digests=fingerprint, teacher_sources=source_digest(),
+                  shared_stages=shared_fingerprint,
+                  reference_scope='Original base; supplied coarse/decoder shared by both chains.' if shared_paths else 'Original teacher chain.',
                   site_manifest_digest=manifest_digest,
                   fresh_world_per_partition=True, fresh_world_per_viewer_tile=True,
                   tile_size=256, halo=24, accepted=False,
@@ -186,6 +274,10 @@ def main():
     from terrain_snr import lod_relief
     from terrain_generation import resolve_generation
     loaded = load_pipeline(sites[0]['seed'])
+    inference_profile=asdict(replace(loaded._terrain_profile,cuda_graphs=False))
+    if 'inference_profile' in report and report['inference_profile']!=inference_profile:
+        raise ValueError('Inference profile changed; use a new output directory.')
+    report['inference_profile']=inference_profile
     config = {k:v for k,v in dict(loaded.config).items() if not k.startswith('_')}
     def world_for(site, variant):
         world = WorldPipeline(**(config | dict(seed=site['seed'], dtype='bf16', latents_batch_size=16,
@@ -193,15 +285,27 @@ def main():
         world.coarse_model, world.base_model, world.decoder_model = (
             loaded.coarse_model, loaded.base_model, loaded.decoder_model)
         configure_world(world, replace(loaded._terrain_profile, cuda_graphs=False), world_profile=site['profile'])
+        if shared_models:
+            install(world, shared_models)
         if variant == 'student_all':
             install(world, models)
+        elif variant == 'native_student':
+            from terrain_inference import prepare_models
+            world.base_model = models['native_base']
+            if getattr(world.base_model,'_terrain_custom_base',False):
+                # Quantized kernels already include MP normalization. Preserve
+                # their exact forward; prepare only the shared native stages.
+                prepare_models(SimpleNamespace(coarse_model=world.coarse_model,
+                    base_model=world.coarse_model,decoder_model=world.decoder_model))
+            else:
+                prepare_models(world)
         world.bind()
         return world
     for site in sites:
         for lod in args.lods:
             span = 256 * 30 * 2**lod
             tx, ty = int(np.floor(site['x']/span)), int(np.floor(site['y']/span))
-            for variant in ['reference'] + (['student_all'] if paths else []):
+            for variant in ['reference'] + (['native_student'] if args.native_base else ['student_all'] if paths else []):
                 if any(r['site'] == site['name'] and r['lod'] == lod and r['variant'] == variant for r in report['rows']):
                     continue
                 name = f"{site['name']}-lod{lod}-{variant}"
@@ -212,6 +316,7 @@ def main():
                 if lod >= 3:
                     whole = gaussian_filter(whole, sigma=.65, mode='reflect').astype(np.float32)
                 whole = lod_relief(resolve_generation(site['profile']).settings, whole, lod)[280:792, 280:792]
+                whole_world.close()
                 del whole_world
                 gc.collect()
                 torch.cuda.empty_cache()
@@ -224,6 +329,7 @@ def main():
                     if stage not in ('latent', 'decoder'):
                         raise ValueError(f'Unexpected cached/preview stage: {stage}')
                     tiles[(y, x)] = value
+                    tile_world.close()
                     del tile_world
                     gc.collect()
                     torch.cuda.empty_cache()
@@ -232,7 +338,8 @@ def main():
                 report['rows'].append(row)
                 atomic_write(output/(name+'.npz'), lambda f: np.savez_compressed(f, whole=whole, tiled=mosaic,
                              **{f'tile_{y}_{x}':v for (y,x),v in tiles.items()}))
-                preview(output/(name+'.png'), whole, mosaic, lod, name)
+                if not args.no_preview:
+                    preview(output/(name+'.png'), whole, mosaic, lod, name)
                 atomic_json(output/'report.json', report)
                 print(json.dumps(row), flush=True)
     with (output/'summary.csv').open('w', newline='') as handle:

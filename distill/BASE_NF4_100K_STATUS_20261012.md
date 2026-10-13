@@ -1,0 +1,97 @@
+# NF4 : entraînement 100k terminé, sélection et validation en cours
+
+Le job principal `base-weight-nf4-100k-train` est terminé à 100 000 mises à
+jour, code 0. L'entraînement de reprise a duré 32 439 secondes, soit environ
+9 heures. L'état complet raw/EMA/Adam/RNG, tous les snapshots EMA et les raw
+20k/50k/100k sont conservés. Aucune acceptation du dernier checkpoint n'est
+déduite de la fin du training.
+
+## Qualité sur les scènes de progression
+
+Le meilleur score du moniteur parmi les points évalués jusqu'à95k est
+**70k : 0,64844**, contre 0,72970 à40k. Ce score est un outil de classement,
+pas un seuil d'acceptation. Les six évaluations 100k (raw/EMA × coarse4/2/original)
+ont terminé normalement sur5090 ; le dernier EMA est moins bon que70k.
+
+| Scène, LOD0, coarse4 | EMA70k MAE (m) | EMA100k MAE (m) | Raw100k MAE (m) |
+|---|---:|---:|---:|
+| Plaine désertique10294 | 2,554 | 6,632 | 4,817 |
+| Plaine tempérée10296 | 1,392 | 9,732 | 5,563 |
+| Côte humide10594 | 1,714 | 6,736 | 4,408 |
+| Plaine-mer10296 | 0,145 | 0,375 | 0,144 |
+| Montagne humide620001 | 26,128 | 56,929 | 36,530 |
+| Montagne humide620002 | 13,113 | 32,296 | 16,141 |
+| Montagne humide620003 | 33,278 | 50,374 | 32,557 |
+
+Le biais négatif explique une grande partie de la régression EMA100k ; dans
+la première montagne, il vaut −56,921m. Le raw100k est meilleur que son EMA
+sur ces cas, sans surpasser systématiquement70k. Les vallées, le grainLOD3,
+les côtes, les biais et les raccords doivent rester des critères séparés.
+Les chiffres ci-dessus couvrent sept scènes de progression et ne constituent
+pas encore le banc étendu de validation finale.
+
+Rapports complets et planches :
+`~/data/distill/_base/native-weight-nf4long-<coarse>-100000.*`,
+`native-weight-nf4longraw-<coarse>-100000.*`,
+`native-weight-nf4long-<coarse>-070000.*`.
+
+## Poids compacts et performances
+
+Audits5090 des paquets70k et100k terminés : **174tenseurs, dont93kernels
+quantifiés, tous exactement identiques en valeurs BF16 effectives** à leur
+sourceQAT. Les fichiers poids font149604746octets ; le manifeste ajoute
+environ50Ko. Preuves :
+`eval/native-nf4-artifact70000-5090-audit.json` et
+`eval/native-nf4-artifact100000-5090-audit.json`.
+
+Benchmark EMA100k5090 : à batch16 / CUDA Graphs, original1,425ms/fenêtre,
+distillé1,461ms. Le gain actuel est la compression de stockage, pas le
+calcul. [Rapport et protocole](BASE_NF4_INFERENCE_PERF_20261012.md).
+Les paquets restent horsGit.
+
+## Travail restant en cours
+
+- B termine ses10000mises à jour auxiliaires sur4090 ; A est terminé.
+  Les trois points intermédiaires montrent moins de grainLOD3 mais davantage
+  de biaisLOD0 pour B. Tous les raw/EMA sont conservés.
+- Le contrôle des raccords physiques70k tourne sur5090 : sept scènesVAL,
+  deuxLOD, coarse4 et decoder livré communs aux deux bases, grande requête
+  contre quatre tuiles froides en ordre inverse, raccords et halos sur les
+  deuxaxes. Sortie : `eval/native-nf4-70k-cold-seams-5090`.
+- Comparaison finale des candidats retenus sur des scènes contrastées,
+  contrôle de généralisation, planches finales de bonne qualité et temps sur
+  une vue complète restent à produire. Aucun poids base n'est promu par défaut.
+
+## Raccords70k /5090 : premier passage terminé
+
+Le job `base-nf4-70k-cold-seams-5090` a terminé avec code0 : 28lignes,
+sept scènes × deuxLOD × original/candidat. Profil latentbatch16 noncanonique,
+coarse4/decoder livré communs, monde neuf pour chaque tuile et grande requête.
+
+| Scène | LOD3 MAE raccord original /70k (m) | LOD0 MAE raccord original /70k (m) |
+|---|---:|---:|
+| Désert | 2,278 /2,146 | 0,069 /0,049 |
+| Plaine tempérée | 1,197 /1,167 | 0,047 /0,089 |
+| Côte humide | 2,646 /2,652 | 0,161 /0,145 |
+| Plaine-mer | 0,936 /0,907 | 0,037 /0,027 |
+| Montagne620001 | 3,821 /3,758 | 0,429 /0,541 |
+| Montagne620002 | 4,049 /3,800 | 0,572 /0,543 |
+| Montagne620003 | 2,254 /1,972 | 0,302 /0,347 |
+
+Les moyennes sont proches de la référence, mais des maxima sont aggravés :
+montagne620002 LOD3, saut maximal31,690m original /37,602m70k ;
+montagne620003 LOD0, 2,730m /3,577m. Les mesures sont des écarts entre
+découpages de chaque modèle, pas leur erreur par rapport au relief teacher.
+La revue visuelle finale reste requise ; aucune continuité parfaite n'est déclarée.
+
+Le contrôle des sept mêmes scènes avec `TERRAIN_CANONICAL_LATENTS=1` et
+`TERRAIN_LATENT_BATCH=1` est lancé sur5090 pour isoler l'effet numérique
+du batch. Sortie : `eval/native-nf4-70k-canonical-seams-5090`.
+
+Le contrôle canonique est désormais **terminé avec code0** : les28lignes
+présentent exactement0 pour toutes les métriques de partition (MAE/max,
+raccords, sauts, halos communs et désaccord de signe). Cela vaut pour les
+deux modèles, sept scènes et deuxLOD, avec batch latent1 et mode canonique.
+Les écarts du précédent passage sont donc dépendants du mode de calcul par
+batch sur ce banc. Cela ne garantit ni tous les mondes ni la qualité visuelle
+du relief ; le profil usuel batch16 garde les écarts consignés ci-dessus.

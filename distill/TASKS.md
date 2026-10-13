@@ -2,7 +2,1345 @@
 
 2026-10-10 · Grégory Beurier
 
-## État actuel après les tests live utilisateur
+## État actuel : poids NF4 à100000pas terminés, validation en cours
+
+Le trainer principal `base-weight-nf4-100k-train` a terminé normalement à
+100000mises à jour (code0). Raw, EMA et état complet de reprise sont conservés.
+Le modèle n'est pas encore déclaré accepté : évaluations raw/EMA sur5090,
+comparaison auxiliaire A/B sur4090 et validation finale restent en cours.
+Le brasA a terminé ses10000pas supplémentaires ; B exécute son dernier bloc.
+À42500 et45000, B réduit le grainLOD3 mais aggrave le biais d'altitudeLOD0.
+[Protocole A/B](BASE_NF4_AUXILIARY_PLAN_20261012.md),
+[résultats intermédiaires](BASE_NF4_ABLATION_42500_20261012.md).
+
+Benchmark5090 EMA100k, BF16/CUDA Graphs/batch16 : original1,425ms par fenêtre,
+NF4distillé1,461ms. Le gain actuel est le stockage≈149,65Mo, pas la vitesse.
+[Mesures et limites](BASE_NF4_INFERENCE_PERF_20261012.md).
+
+### Recette de reprise exécutée
+
+L'utilisateur autorise100000mises à jour au total, depuis le parent6000.
+La reprise explicite conserve poids bruts, EMA, Adam et RNG, avec LR héritée
+constante≈3e-6. Smoke5090 : états restaurés identiques, deux vrais pas finis,
+teacher gelé ; huit tests CPU passent. Jobs prévus :5090entraînement,
+4090évaluation parallèle, sans arrêt automatique pour un seuil de qualité.
+Photos `~/data/distill/_base/native-weight-nf4long-<coarse>-<step>.png` :6000,
+7000, puis tous5000. Parent conservé, nouveaux snapshots et meilleurs candidats
+gardés dans `ckpt/native-weight-nf4-100k/`. Détails et limites :
+[BASE_WEIGHT_NF4_100K_20261012.md](BASE_WEIGHT_NF4_100K_20261012.md).
+
+## Pilote poids seuls NF4 :6000pas terminés
+
+Pilote désormais **terminé à6000**,34,8min, sans garde-fou déclenché. Le meilleur
+score pratique est au6000 ; contrôle des poids bruts6000 terminé sur4090. Images
+`_base/native-weight-nf4qat-<coarse>-006000.png` disponibles. Qualité améliorée,
+bruit haute fréquence des plaines encore amplifié ; pas de déclaration finale.
+
+Top utilisateur reçu : lancer les trainings et signaler les nouveaux screenshots.
+Pilote5090 `base-weight-nf4-train`, observateur4090 `base-weight-nf4-evaluate`.
+Le stockage natifNF4 réel fait149,605Mo d'échelles/poids, hors petit manifest ;
+contrôle packGPU exact sur3batches et5testsCPU. Les départs4bits ont davantage
+de grain et des amplitudes montagne trop faibles : ils doivent être adaptés.
+Recette, preuves et limites : [BASE_WEIGHT_NF4_20261012.md](BASE_WEIGHT_NF4_20261012.md).
+Images : `_base/native-weight-nf4qat-<coarse>-<step>.png`, tous500pas.
+L'assistant doit prévenir l'utilisateur pour chaque nouvelle série disponible.
+
+Retour utilisateur après les planches : les QAT avec coarse2/coarse4 font le
+travail visuellement et **les vallées sont OK**. Défauts résiduels : grain haute
+fréquence en plaine et pixels côtiers dispersés. Priorité : poids embarqués dans
+la page, cible50–100Mo, plafond de secours150Mo ; vitesse secondaire. Le runtime
+WASM/WebGPU est déjà pris en charge par l'utilisateur et sera amélioré plus tard.
+
+[Programme proposé](BASE_SIZE_FIRST_PLAN_20261012.md) : tester d'abord le
+stockage compact des poids seuls, préserver la topologie native ; une version
+4bits mixte du réseau entier aurait147,7Mo de charge utile, qualité non prouvée.
+Le QAT8bits mixte entier aurait267,6Mo et dépasse le plafond. La réduction
+progressive de largeur vient ensuite si nécessaire. Tailles inventoriées surCPU,
+pas des exports déjà validés. Aucun nouveau training, évaluationGPU ou benchmark
+avant le top : cette attente est maintenant terminée et le pilote ci-dessus
+est réellement lancé. Aucune nouvelle architecture comprimée n'est encore entraînée.
+
+Le bilan historique complet est
+dans [BASE_EXPERIMENTS_REVIEW_20261012.md](BASE_EXPERIMENTS_REVIEW_20261012.md).
+Deux avis indépendants terminés :
+[Astra high](REVIEW_ASTRA_BASE_20261012.md) et
+[Opus5.5 xhigh, texte complet](REVIEW_OPUS_BASE_20261012.md).
+[Synthèse pour décision](BASE_REVIEW_SYNTHESIS_20261012.md).
+
+Les deux avis précédents proposent une compression progressive depuis le teacher natif.
+Astra privilégie le demi-rang sélectif et une supervision de la compositionT2 ;
+Opus vise128×2 avec plus de récupération et un LR à calibrer. Aucune de ces
+recettes n'est encore lancée. Ce choix initial est remplacé par la priorité taille
+ci-dessus. Le QAT500 conservé est le repère visuel actuel ; les défauts de
+plaines/côtes/LOD3 restent à traiter et aucune accélérationFP8 n'est acquise.
+Images et métriques :
+[BASE_QAT500_VISUAL_20261012.md](BASE_QAT500_VISUAL_20261012.md).
+
+## Précision FP8 native : pilote arrêté au1057
+
+Les quatre sorties de fenêtres ont manqué le critère1000 (canal0 amélioré
+seulement4–5%) et le run s'est arrêté au1051. Après revue Opus5.5, cette famille
+de champ est conservée/archivée ; la reprise part du teacher original,192×3,
+64/32,T2,58scalaires et attention inchangés. E4M3 simulé sur les93 convolutions
+internes, échelles par canal pour poids effectifs et statiques par couche pour
+activations ; normalisations, couches sensibles et decoder externe conservés.
+Calibration exacte99,99% sur64batches TRAIN indépendants, échelles figées.
+
+Contrôle sans quantification :<2m sur montagnes/coarse4. Avant entraînement,
+FP8 simulé :27/20/52m,corr0,991/0,988/0,997 ; les neuf branches montagneuses
+ont15,5–81,8m. Ces chiffres décrivent l'évaluation initiale avant training ;
+ils ne remplacent pas le retour visuel utilisateur ultérieur sur le QAT500.
+Photos `_base/native-fp8-ptq-<coarse>-000000.*`, chiffres et détails dans
+[BASE_NATIVE_FP8_20261012.md](BASE_NATIVE_FP8_20261012.md).
+
+Jobs terminés : `base-native-fp8-train`5090 et `base-native-fp8-evaluate`4090.
+Arrêt au garde1000, pas réel1057 sur3000 prévus, statut `guarded` : le canal0
+n'a pas été divisé par deux sur les neuf branches montagneuses. Au1000,
+montagnes/coarse4 LOD0 :47/28/75m ; le500 était meilleur :15/15/37m.
+Ces checkpoints restent conservés ; aucun n'est accepté comme base final.
+Recette exécutée :Adam1e-5,warmup100,EMA500. Batch8/4par phase, même sampling et trois
+coarse ; premier canal0 pondéré×2, KD37blocs calibré à0,5opérateur. La moitié
+des batches de seconde phase utilise les neuf premières fenêtres natives de
+l'élève actuel, fusionnées/détachées ; teacher sur ces MÊMES entrées.
+GPU smoke exact5090 : gradients/teacher/échelles validés,37taps,batches
+on-policy et teacher-state,pic7,93GiB. Trois tests CPU dédiés passent.
+Évaluations/photos tous500 : `_base/native-fp8-qat-<coarse>-<step>.*`.
+
+FP8 ici simulé par calcul BF16 : PAS de gain de vitesse annoncé. Les primitives
+locales acceptent les GEMM FP8 mais refusent les convolutions FP8 directes.
+L'export packé, la vitesse réelle, la qualité autonome complète, les autres
+cas rares, les mondes finaux et les vrais raccords froids restent à prouver.
+Base original toujours au défaut runtime ; aucun nouveau poids base dans Git.
+
+## Quatre sorties de fenêtres : pilote arrêté au1051
+
+Le pilote de coordonnées périodiques s'est arrêté à2037 nouveaux pas après son
+contrôle2000, avant les4000 prévus. Montagnes/coarse4 :154/128/89m, amplitudes
+0,848/0,876/0,753 ; il n'est pas accepté. Le défaut principal est mieux isolé :
+remplacer le seul canal0 de première phase par le teacher restaure une
+corrélation0,993–0,994 au contrôle1000. Au dernier état, sa MSE n'a baissé que
+10–13%, sous la condition30% donnée par Opus pour conserver cette recette.
+
+Nouvelle reprise `field_heads_train.py` : quatre petites sorties de première
+phase sur un tronc192×3 partagé, cibles non fusionnées des49 fenêtres natives,
+fusion par poids triangulaires mondiaux fixes. La seconde phase garde la sortie
+originale. Poids bruts et EMA parent, moments Adam et RNG conservés. LR héritée
+3e-5/têtes1e-4, warmup100, forcing25%, même sampling et continuation du compteur
+global4074. Supervision normalisée par tête1.0 en plus des losses précédentes.
+La cible teacher initiale192 reconstruite par les classes de fenêtres est
+vérifiée ; les régions sans capture sont masquées.
+
+GPU smoke sur5090 complet : trois coarse, batch montagne, forcing/nonforcing,
+recadrages x/y,17 tests CPU pertinents. Au départ, résultat FINAL exactement
+identique au parent sur six contrôles brut/EMA ; premier champ ne change que
+par l'arrondi de fusion FP32, MSE~5,7e-15/max≤9,54e-7. Pic GPU19,50GiB.
+
+Jobs désormais terminés : `base-field-heads-train`5090 et `base-field-heads-evaluate`4090,
+budget prévu3000, évaluations et photos tous500 dans
+`_base/field-heads-<coarse>-<step>.*`. Critères intermédiaires1000/2000,
+limites de l'explication d'Opus et preuves dans
+[BASE_WINDOW_HEADS_20261012.md](BASE_WINDOW_HEADS_20261012.md).
+La qualité autonome, les autres cas rares, la chaîne app, les vrais raccords
+froids et les performances restent à prouver. Base original toujours au défaut
+runtime ; aucun poids base expérimental dans Git.
+
+## Pilote de coordonnées des fenêtres : arrêté au2037
+
+Le pilote pleine largeur s'est arrêté au garde-fou au vrai pas2037, avant
+les6000 prévus. Au2000, montagne humide/coarse4 : erreur décodée125–147m,
+amplitude TPI8 de0,66–0,82 ; il n'est pas accepté. Le contrôle causal1500
+atteint29–41m/corrélation0,997 avec un premier champ teacher fourni à sa seconde
+passe, ce qui motive une correction du premier champ.
+
+Reprise `field_phase_train.py` à partir des poids bruts, EMA, Adam et RNG2037,
+avec deux projections de coordonnées périodiques initialisées à zéro. Six
+contrôles GPU vérifient l'identité bit à bit initiale sur les trois coarse,
+poids bruts et EMA ; gradients réels, y compris forcing et raccords, validés
+sur5090. Treize tests CPU pertinents passent. Première phase davantage
+supervisée et seconde parfois teacher-forcée au TRAIN, jamais en évaluation.
+Recadrages communs comparés avec deux chaînes autonomes, même sur batch forcé.
+
+Jobs désormais terminés : `base-field-phase-train`5090 et `base-field-phase-evaluate`4090,
+budget prévu4000 nouveaux pas, observer chaque500. Photos comparatives et métriques
+dans `_base/field-phase-<coarse>-<step>.*`, diagnostics de lignes
+`field-attention-lines-phase-<step>.*`. Données : quinze mondes TRAIN de montagne
+humide,25% du sampling ; mondes VAL et finaux séparés. Revue Opus5.5 et
+contrat, garde-fous, limites et commandes dans
+[BASE_FIELD_PHASE_20261012.md](BASE_FIELD_PHASE_20261012.md).
+Le base original reste le défaut runtime ; aucun nouveau poids base accepté
+ou poussé dans Git. Qualité sur tous les cas, chaîne app, vrais raccords froids
+et performances au repos restent à valider.
+
+## Élève de champ pleine largeur : pilote arrêté au2037
+
+Le pilote quart-rang est archivé à froid, avec toutes ses empreintes et chemins
+Linux conservés par symlinks ; aucun poids n'est perdu. Preuve :
+`preparation/quarter-pilot-cold-archive.json`. Les données actives, le teacher et
+le checkpoint initial du nouvel élève restent sur le système Linux.
+
+Nouvelle famille `FieldBase`,253688037 paramètres,192×3 et T2 : tous les poids,
+skips, têtes et resampling du teacher conservés, sans réduction de rang. Champ
+256 en entrée,128 central en sortie, deux passes et bruits natifs seed+5819/5820.
+Les49 conditions58 de première passe forment une grille7×7 aux centres des
+fenêtres, espacés32 ; elles sont identiques pour les fenêtres de seconde passe
+communes. Interpolation FP32 puis MLP/FiLM du teacher aux positions du champ.
+Attention locale alignée sur les multiples64 du monde, plutôt qu'une attention
+globale sur256. Le même modèle sur64 et condition constante reproduit EXACTEMENT
+le teacher : maxabs0/MSE0 sur les deux phases du contrôle GPU réel.
+Six tests CPU vérifient centres, offsets, attention locale, gradients de toutes
+les cibles, chevauchements selon x/y et ratios de sampling.
+
+Ce transfert n'est pas une identité sur les grands champs. Au départ, trois
+montagnes VAL coarse4 ont MAE133/218/382m,corr TPI8 .822/.779/.661,amplitude
+1,398/1,245/1,077. Recadrages indépendants déplacés32 : MAE native montagne
+18–50m,max193–715m. Ces chiffres ne sont PAS les seams app ; halo64 n'est PAS
+une borne mathématique du champ récepteur des convolutions. Les ruptures de
+recadrage doivent être apprises et vérifiées avant toute acceptation.
+
+Supervision : champ initial192 blended réellement capturé, positif/complet,
+comparé à32:224 ; final128 comparé à64:192. Pas de cible initiale256 inventée.
+Loss latente normalisée sur les cinq canaux aux deux phases, gradient, bandes
+positionnelles et énergie×2 en montagne ; aucune loss de decoder physique.
+KD sur les32 pixels centraux d'une fenêtre teacher64 correspondante, aux DEUX
+phases et aux37 sorties encoder/decoder,74 comparaisons. Poids0,12093 calibré
+sur16 scènes TRAIN. La recette prévue6000 pas utilise25% montagnes/15% anciennes
+rares/60% générales et les trois coarse. Adam3e-5, warmup200,clip1,EMA demi-vie500.
+Une loss de recadrage commun intervient tous4 pas, axes alternés ; le champ
+auxiliaire est détaché pour contenir la mémoire. Checkpointing du FORWARD complet
+rejoue correctement les casts fonctionnels BF16, sans recomputation en FP32.
+GPU smoke complet sur5090, les trois branches, targets/KD/seam : gradients
+finis, teacher figé, pic15,65GiB. Le run avec EMA monte~16,58GiB.
+
+Jobs durables désormais terminés : `base-field-full-width-train` sur5090,
+`base-field-full-width-evaluate` sur4090. Run
+`ckpt/field-full-width-pilot/`, sources/teacher/data/calibration figés par SHA.
+Observer chaque500 pas : trois coarses, les quatre anciennes rares et les trois
+mondes VAL de montagne, photos `_base/field-fullwidth-<coarse>-<step>.*` et
+recadrages x/y. Le500 progresse sans passer : montagnes coarse4 MAE106/177/310m,
+corr .853/.811/.707,amplitude1,087/1,025/.898. Aucun nouveau base accepté.
+Le garde-fou2000 compare chaque monde à SON propre départ, pas à une moyenne.
+Les stats de continuité, chaîne app, mondes finaux et vitesse réelle restent requis.
+
+Avis Opus5.5 réellement terminé, même session :
+`review/opus-field-full-launched-20261012/OPUS_REVIEW.md`. Aucun bug numérique
+bloquant identifié ; risques : lignes d'attention internes64 que les pertes de
+recadrage ne détectent pas, tokens padding et KD profond des fenêtres64 qui
+peut être incompatible avec les targets blended. Diagnostic supplémentaire
+indépendant, sans modifier les producteurs live :
+`field_attention_diagnostic.py`. Au500, montagnes : ratios d'erreur TPI8 sur les
+lignes64 vs hors lignes0,880/1,376/0,711 ; une scène mérite surveillance au2000.
+Les niveaux et phases KD, erreur bord16 vs intérieur64 et lignes superposées
+sont publiés dans `_base/field-attention-lines-000500.*`.
+
+## Pilote teacher-basis sélectif : 4 000 pas réellement terminés
+
+Profil BF16 à poids en cache et CUDA Graphs,5090,batch16 : teacher1,400ms
+par fenêtre ; seules42 convolutions internes3×3 du décodeur du base sont
+factorisées. Les quatre niveaux du décodeur représentent~71% du temps des
+convolutions éligibles mesurées par événements. Encoder, skips, attention,
+embeddings, têtes et resampling restent à leur largeur originale. Demi-rang :
+180,9M paramètres/1,182ms. Quart-rang :137,834M/1,001ms, potentiel×1,40.
+Huitième-rang :117,119M/0,904ms. Ces temps contrôlent l'architecture non entraînée,
+pas encore la performance idle des poids finaux. Le cache reproduit EXACTEMENT
+le wrapper BF16, erreur max0, y compris l'ordre multiplication/arrondi.
+Rapports : `eval/native-lowrank-{cached,quarter-cached}-profile.json`.
+
+Douze nouveaux mondes TRAIN montagne humide sélectionnés sur les sorties
+du teacher d'origine, recapturés/requalifiés au decoder original sur les trois
+coarses :36/36 branches qualifiées, indépendantes des trois mondes VAL et des
+mondes finaux. `crops/native-wet-mountain-train-extension-v1/` complète les
+trois mondes TRAIN du premier bank, sans changer les anciennes banques.
+
+Entraînement5090 terminé exit0 au vrai pas4000,17,6min, aucun base accepté :
+`ckpt/native-basis-decoder-quarter-pilot/`. Départ teacher plein rang, extinction
+progressive des directions de queue sur1000 pas, re-SVD FP64/compaction et
+reset Adam/EMA au1000, puis3000 pas. FP32 masters, BF16 forwards, deux passes,
+fenêtres64/32 et condition58. Adam facteurs5e-5/autres1e-5, warmup100, clip1,
+EMA demi-vie500. Batch8 mondes distincts,4 par phase, trois coarses dans chaque
+phase ;25% montagne,15% anciennes scènes rares,60% générales.1947 scènes TRAIN.
+Régression directe teacher sur chaque entrée/branche, sans loss décodée ;
+supervision des37 sorties encoder/decoder, donc des skips. Loss équilibrée
+des QUATRE features de première passe et hauteur seconde, statistiques TRAIN
+figées et terme d'énergie×2 sur les fenêtres montagne. Poids KD0,37169 calibré
+sur50 batches TRAIN au rang final, pas sur le plancher numérique plein rang.
+GPU smoke exact avec gradients plein rang ET compact, teacher sans gradients,
+13 tests CPU pertinents ; pic GPU du training~8,54GiB.
+
+Opus5.5, même session réellement reprise :
+`review/opus-basis-quarter-launched-20261012/OPUS_REVIEW.md`. Pas de défaut
+bloquant identifié ; contrôle FP32 de la compaction demandé et exécuté sur
+les RAW avant/après (l'EMA est réinitialisée). Sur trois branches : MSE relative
+2,94–3,93e-12,max~3,4e-5 ; BF16 change4,05–5,19e-5, comparable au plancher de
+réorganisation. `eval/native-basis-quarter-cut-check.json`. Ne pas confondre
+le chiffre1,9e-11 FP32 du contrôle antérieur avec son erreur BF16 ; MPConv
+normalise le poids globalement, pas canal de sortie par canal de sortie.
+
+La4090 évalue les checkpoints et fournit les états autonomes TRAIN de seconde
+passe. L'évaluation complète204 scènes est plus lente que le training : les
+buffers on-policy sont arrivés tard, via un producteur TRAIN prioritaire.
+Les32 fenêtres on-policy observées dans les logs tous25 pas ne prouvent PAS
+25% sur toute la seconde moitié du run. C'est une limite de ce pilote, à corriger
+dans la coordination du suivant. Le500 ne passe pas : montagne coarse4 fine
+MAE156–248m,corr TPI8~0,797–0,854,rappel0,698–0,796,amplitude1,008–1,148.
+Les poids finaux4000 restent à qualifier ; aucune conclusion favorable tirée
+de la seule loss TRAIN finale0,186/opérateur0,0395/représentation0,150.
+
+Observateur supplémentaire5090, après la fin du training, sur checkpoints
+0/1000/4000 : `eval/native-basis-quarter-final-cached/`. Copies d'inférence
+cachées vérifiées avec erreur MAX0 sur les deux phases et trois coarses avant
+toute mesure, OpenBLAS limité à1 thread ; aucune modification des producteurs
+live. Images `_base/basisquarter*` et `_base/mountains-basisquarter*`, CSV/JSON/TXT
+associés. Les PNG sont des comparaisons internes de progression, pas les
+planches finales app/cold-seams demandées. Poids/optimiseurs/RNG, checkpoint
+pré-compaction et premiers paliers conservés hors Git. Résultat final, vraie
+vitesse idle entraînée, chaîne complète, mondes finaux et raccords restent requis.
+
+Résultat4000 maintenant vérifié, toujours négatif : feature VAL0,06012 contre
+0,10062 au1000. Les trois montagnes coarse4 : MAE98,4/75,0/68,1m ; corrélation
+TPI8 0,881/0,869/0,923 ; rappel0,600/0,758/0,569 ; amplitude0,780/0,917/0,720.
+Inspection de `_base/mountains-basisquartercached-004000.png` : les grands
+reliefs tiennent, mais des incisions/affluents s'atténuent encore. Aucun base
+accepté. Les anciennes rares coarse4 ont de meilleurs écarts absolus : MAE fine
+médiane désert4,12m/tempérée2,98m/côte8,17m/plaine-mer1,73m, mais position TPI
+native encore insuffisante, corrélations0,606/0,533/0,804/0,668.
+Audit autonome TRAIN4000,17 scènes/15 mondes montagne coarse4 : MAE médiane
+71,70m,corr0,9426,rappel0,762,amplitude0,886. Les cas TRAIN restent eux aussi
+imparfaits ; ce n'est pas seulement une erreur sur les trois mondes VAL et
+4000 pas ne prouvent toujours pas un plafond de capacité. Rapport
+`eval/native-basis-quarter-mountain-train4000.json`, CSV dans `_base`.
+Les résultats/photos et la limite on-policy sont renvoyés à la même session
+Opus5.5, `review/opus-basis-quarter-negative4000-20261012/`. Prochaine expérience
+à choisir sur cet échec réel, sans prolonger silencieusement le budget4000.
+
+Avis Opus5.5 terminé dans ce dernier dossier : différer la compression de rang
+et essayer un élève de champ gardant toute la largeur192×3 et les DEUX phases,
+avec conditionnement spatial et attention locale, pour gagner surtout sur les
+fenêtres qui se recouvrent. Ce n'est pas encore implémenté ni mesuré. Ses
+affirmations d'un plafond de vitesse et d'un lissage inévitable par régression
+one-pass ne sont pas des preuves générales. L'écart TRAIN/VAL montre que le
+quart-rang n'a pas pleinement ajusté même les terrains vus, sans conclure à un
+plafond. La priorité suivante est un résultat qui préserve réellement les
+incisions, pas une continuation silencieuse de ce pilote négatif.
+Points concrets à résoudre pour ce changement : les58 conditions par fenêtre
+doivent garder leur alignement spatial ; l'attention d'un champ256 ne peut pas
+devenir globale ; les halos des DEUX phases doivent être comptés dans le coût
+et dans les raccords ; le bank actuel conserve un champ initial192 et un final128,
+pas un initial256. Toute extension sera un nouveau bank teacher, avec les mêmes
+splits indépendants et les trois coarses. Le gain n'est donc pas présumé acquis.
+
+## Haute montagne humide ajoutée aux cas critiques (12 octobre)
+
+L'observation utilisateur est maintenant un contrôle distinct : conserver les
+vallées incisées et leurs ramifications, pas seulement produire des montagnes
+plausibles. Nouveau bank teacher-only séparé :
+`~/data/distill/crops/native-wet-mountains-v1/`. Trois mondes TRAIN déjà utilisés
+pour le teacher, trois nouveaux mondes VAL620001–620003, trois mondes finaux
+réservés101/303/404 ; deux scènes par monde et trois branches coarse
+original/coarse4/coarse2. Chaque cible vient du base original T2 sur SA branche
+coarse.54 captures,48 qualifiées ; les anciennes banques restent figées.
+Critères : pluie≥1200mm/an, terre≥95%, altitude p90≥2000m, relief p90-p10≥500m,
+pente p90≥15° aux deux échelles et amplitude TPI8 fine≥10m. Ces critères ne
+prouvent pas le drainage. Les trois previews VAL coarse4 ont été inspectées :
+incisions et ramifications visibles ; notes/SHA dans
+`_base/mountains-teacher-visual-review.json`. Pluie1441–2517mm/an, altitude
+p902041–3207m et relief783–1157m sur ces trois scènes.
+
+Comparaisons internes même bruit/decoder original, fichiers PNG/CSV/JSON/TXT :
+`_base/mountains-native160-015000.*` et
+`_base/mountains-lowrank0833-000000.*`. L'ancien160×3 EMA15k a, au LOD0,
+MAE125–159m, corrélation TPI8 0,837–0,865, rappel des vallées0,396–0,679 et
+amplitude0,631–0,808 : les incisions s'atténuent effectivement. Le contrôle
+factorisé5/6 NON ENTRAÎNÉ garde davantage les positions, mais MAE59–139m et
+amplitude1,054–1,221 : aucun nouveau base accepté. Ce ne sont pas les planches
+finales ni une validation des raccords. `native_progress_images` publie désormais
+également une planche montagne séparée lorsque cette banque est complète ;
+l'évaluateur refuse les mondes finaux et exige trois mondes VAL qualifiés.
+Code : `wet_mountains.py`, `wet_mountain_progress.py`, quatre tests CPU dédiés.
+Contrôle plein rang sur ces mêmes montagnes terminé :
+`_base/mountains-lowrank1000-000000.*`. MAE LOD0 1,86–2,24m, corrélation TPI8
+0,99984–0,99990, rappel0,991–0,994 et amplitude0,996–1,003. L'interface et
+la factorisation non comprimée conservent donc bien ces vallées. C'est un
+contrôle numérique, pas un modèle accéléré ou une validation finale.
+
+## Contrôles numériques corrigés et limite actuelle de performance
+
+La préparation SVD en FP64, hors entraînement, corrige le défaut numérique du
+premier contrôle décrit plus bas SANS changer la borne max FP32 de0,002.
+Maîtres, facteurs sauvegardés et optimisation restent FP32. Nouveau basis
+Linux : `eval/native-lowrank-fp64-basis.pt`. Plein rang factorisé : erreur max
+FP32~0,000202 ; opérateur BF16 MSE relative4,85e-5. Sur les60 lignes rares des
+trois coarses, fine coarse4 corrélation0,999366 et amplitude1,0053. Le contrôle
+recomposé dense passe également : max FP32~0,000054. Ce sont des contrôles
+274,7M paramètres, contre253,7M teacher, pas des élèves acceptés.
+
+Grille NON entraînée .5/.667/.75/.833 terminée sur les deux GPU, rapports
+`eval/native-lowrank-rankgrid-{main,secondary}-validation.json`. Les rangs
+tronqués ajoutent trop d'amplitude/bruit ; le rappel seul ne suffit pas.
+Premier timing5090 BF16 batch16 du même wrapper numérique eager : teacher
+3,974ms/fenêtre ; rangs5/6,3/4,2/3,1/2 :3,841/3,775/3,683/3,569ms.
+Ce chemin recalcule casts/normalisation et inclut les lancements Python :
+ce n'est PAS le chemin runtime caché ni une performance de déploiement.
+Il n'établit donc pas la performance potentielle après optimisation, et ne
+justifie pas de promettre un gros gain. Aucun nouvel entraînement lowrank
+n'est encore lancé. Avis Opus5.5 terminé dans
+`review/opus-native-lowrank-strategy-20261012/OPUS_REVIEW.md` : préférer une
+compression partant du teacher aux continuations160 qui perdent les vallées.
+Les résultats montagne et le timing réel lui sont transmis dans la même session,
+dossier `review/opus-wet-mountains-and-rank-speed-20261012/`. Réponse Opus5.5
+réellement terminée (modèle et session vérifiés) : privilégier la base du teacher,
+réduire sélectivement les convolutions coûteuses et protéger les représentations
+internes ; proposer25% de fenêtres montagne TRAIN et des contrôles montagne
+VAL obligatoires. Son extrapolation de la part du temps des convolutions à
+partir du wrapper n'est pas une mesure causale. Sa borne MAE≤2× l'erreur du
+contrôle factorisé BF16 serait ici~4m, plus stricte que la tolérance physique
+visée10–35m : ne pas la confondre avec l'écart teacher BF16/FP32. Il faut choisir
+la prochaine expérience sur un profil réel et une tolérance explicite, sans
+promouvoir les contrôles ni déclarer que la taille160 est seule responsable.
+
+## Résultat des continuations1000 et contrôle d'une base teacher factorisée
+
+Les continuations `opt1e4diag` et `opt5e5diag` sont terminées au garde-fou
+fin1000 (exit0), pas3000. Les3 variantes coarse perdent du rappel fin sur
+les cas Orogen,3 mondes, borne basse de baisse1,8–3,1 points. Coarse4
+canal0 VAL MSE progresse enfin :0,14213→0,13778 et0,14216→0,13988.
+Amplitude TPI native rare médiane descend à1,509 et1,770, mais rappel fin
+rare médian est0,386 et0,411, source~0,425. Aucun nouveau base accepté.
+Le500 n'a pas été remplacé ; images1000 dans `_base/opt*diag-*-001000.png`.
+Audit1000 : déplacement relatif global0,00326 et0,00189. Le gain de sortie
+scalaire explique les cosinus±1 du bloc agrégé ; convolution de sortie et
+blocs partagés ne montrent pas de conflit fortement négatif persistant.
+Ces1000 pas ne démontrent donc pas un plafond de capacité du160×3.
+
+Préparation d'un diagnostic différent, sans entraînement : toutes les
+features/skip/attention/embeddings du teacher192×3 conservées ;72
+convolutions internes3×3 remplacées par3×3→1×1. Normalisation MP calculée
+sur le poids COMPOSÉ, pas facteur par facteur. Têtes, convolutions groupées,
+resampling et conditionnement restent ceux du teacher.5 tests CPU vérifient
+normalisation/gain, équivalence plein rang, gradients tronqués et cas zéro.
+Base SVD plein rang produite sur5090 :
+`eval/native-lowrank-full-basis.pt`, SHA750462e2acffd3b249071d7998dbf61ea0a18554830026492da0b7bb4f238e57,
+274,7M paramètres contre253,7M : le plein rang est un contrôle, pas un gain.
+Fichier producteur initial exact conservé pour provenance :
+`preparation/native-lowrank-control-basis-source.py`.
+Les premiers contrôles physiques ont exposé un sous-ensemble insuffisant
+pour le vérificateur3-coarse ; corrigé pour couvrir les60 lignes rares des
+3 branches, sans enlever une strate du vérificateur. Les deux contrôles
+plein rang ont ensuite buté sur la borne max FP32 fixée à0,002 : maximum
+0,002354 factorisé et0,002476 recomposé, MSE relative~3,6e-9. BF16/relief
+non interprétés tant que le contrôle numérique n'est pas passé. Les facteurs
+non entraînés ne sont pas des modèles distillés et ne sont pas ajoutés au
+runtime. Cette première version reste dans Git pour sa provenance.
+
+## Suite des pilotes d'optimisation : bornes diagnostiques explicites
+
+Les deux pilotes ci-dessous sont terminés au garde-fou500, exit0 ; pas une
+panne ni3000 pas accomplis. Poids bruts coarse4 canal0 VAL MSE source
+0,14213→0,14497 sur5090, source0,14216→0,14338 sur4090 : pas de progrès
+sur la cible causale. Mais rappel fin rare moyen apparié par11 mondes
+(morphologie moyenneσ2/8) : +0,04544 [0,02561;0,06615] et+0,05123
+[0,03811;0,06635]. Bruit natif réduit : médiane amplitude TPI2,845→1,889
+et2,195 ; corrélation0,133→0,226 et0,135→0,177. Encore trop de grain et
+vallées absentes sur les images ; aucun base accepté.
+
+Nouvel avis Opus5.5 réellement terminé :
+`review/opus-native-optimization500-20261011/OPUS_REVIEW.md` ; rapport,
+contrats, données complètes et bootstrap par monde dans le même dossier.
+Le rappel natif comparé à une source bruitée peut baisser lorsque des
+fausses vallées disparaissent ; cela ne doit pas seul arrêter ce diagnostic.
+Deux nouveaux dossiers reprennent EXACTEMENT les modèles brut/EMA,
+optimiseur et RNG500, sans déplacer ni modifier les dossiers précédents :
+`ckpt/native160x3-opt{1e4,5e5}-diagnostic/`. Source/calibration/loss/sampler,
+LR et seed conservés ; parent et ses SHA/contrat/verdict enregistrés.
+Jobs : `base-native160-opt1e4-diag-train` sur5090,
+`base-native160-opt5e5-diag-train` sur4090. Objectif3000, pas de changement
+d'architecture ou d'objectif pendant cette reprise.
+
+Double verdict à chaque500 : garde original toujours enregistré et
+interdisant la sélection du checkpoint s'il échoue. Pour cette continuation
+bornée uniquement : rappel natif en avertissement ; canal non ciblé >1,2×
+en avertissement et>1,5× en arrêt. Les pertes non finies, features>1,3×,
+morphologie devenue indéfinie, rappel/corrélation fine et corrélation native
+restent des arrêts. Aucun critère d'acceptation finale n'est assoupli.
+L'audit sépare désormais le scalaire `out_gain` de la convolution de sortie,
+car le cosinus agrégé était dominé par ce scalaire. Smokes de reprise réussis
+sur les deux GPU ;18 tests CPU réussis. Images :
+`_base/opt{1e4,5e5}diag-{raw,ema}-001000.png`, puis steps suivantes.
+Le500 précédent reste visible. Cas réservés/chaîne runtime/raccords et
+benchmark idle ne sont pas encore vérifiés pour ces nouveaux poids.
+
+## Pilotes d'optimisation active du 11 octobre
+
+Avis Opus5.5 terminé, modèle réellement utilisé vérifié :
+`review/opus-native-readout-negative-20261011/OPUS_REVIEW.md`.
+Tester l'apprentissage avant une nouvelle architecture : deux pilotes3000 pas
+repartent de la même EMA160×3 au pas15000. Principal5090 lr0,0001,
+comparaison4090 lr0,00005 ; warmup200, AdamW, clip1, EMA0,999.
+Chaque batch contient8 fenêtres de8 mondes TRAIN distincts,4 par passe,
+les3 variantes coarse original/4/2 par passe et2 cas rares. Les cibles
+proviennent toujours du base teacher original de chaque branche coarse.
+Le chargement direct d'une fenêtre évite des transferts et constructions
+inutiles pendant l'entraînement ; l'inférence runtime reste inchangée.
+
+Tests :12 régressions CPU réussies ; smokes GPU5090 et4090,3 batches chacun,
+gradients finis et audit des deux objectifs, pic5,36Go. Contrats exacts :
+`eval/native160-opt{1e4,5e5}-smoke-v2/gpu-smoke.json`.
+Jobs : `base-native160-opt1e4-train`, `base-native160-opt5e5-train`.
+Poids hors Git : `ckpt/native160x3-opt{1e4,5e5}-pilot/`.
+Audit tous les250 pas :16 batches TRAIN fixes, normes/cosinus des gradients
+par bloc, déplacements des poids et fraction changée après arrondi BF16.
+La tête présente déjà des gradients opposés dans le contrôle court ; un
+batch ne suffit pas à conclure, les audits répétés doivent le confirmer.
+
+Évaluation indépendante tous les500 pas sur204 scènes VAL, poids bruts
+et EMA séparés, contrôle opérateur par canal et bandes, relief autonome.
+Images progressives : `_base/opt{1e4,5e5}-{raw,ema}-000500.png`, puis les
+steps suivantes, avec fichiers CSV/JSON/TXT ; référence au pas0 également.
+Conserver le premier couple500, le meilleur couple et le dernier couple,
+plus un état complet de reprise. Les garde-fous servent à arrêter une
+régression manifeste ; ils ne constituent pas l'acceptation finale.
+Un candidat prometteur devra encore passer les cas rares réservés, la
+chaîne réelle et de nouveaux tests de continuité entre tuiles. Les timings
+pendant ces jobs concurrents ne sont pas des benchmarks d'inférence.
+
+Si les poids bougent réellement sans récupérer les features manquantes,
+prochain choix à discuter avec Opus : conserver la largeur native192×3 et
+comprimer progressivement les convolutions, sans changer leurs bases de
+features. Aucun nouveau base accepté ou ajouté à la pile runtime.
+
+## Diagnostic du 11 octobre : sorties linéaires conditionnées par passe
+
+Avis Opus5.5 terminé, modèle réellement utilisé vérifié :
+`review/opus-native-channel0-pilot-20261011/OPUS_REVIEW.md`. Choix : tester
+la récupération du canal0 depuis les features figées avant de changer le
+tronc. Son résumé utilise aussi des métriques de l'oracle sur un contexte
+différent ; comparer les modèles avec une référence recalculée identique.
+
+Le ridge de dernière couche a terminé :273 scènes TRAIN,34944 pixels par
+passe ; régularisation choisie sur3 folds séparés par monde, jamais VAL.
+Fit5090, validation opérateur4090 sur204 scènes. Reconstruction de la
+sortie du modèle lui-même : MSE relative0,000002996, contrôle réussi.
+Coarse4 première passe : MSE vélocité0,142159→0,142337, aucune récupération.
+Le readout H4 séparé dégrade aussi la validation0,001974→0,003815 ; ne pas
+l'ajouter au modèle. Deux petites corrections, tronc/poids source figés,
+correction limitée aux canaux/passes ciblés pour une même entrée opérateur.
+L'inférence autonome consomme normalement l'état élève modifié ensuite.
+
+Contrôle autonome première passe sur20 cas rares coarse4,5090 : rappel fin
+σ2 médian source0,41808→readout0,41677, amplitude0,68360→0,67876,
+corrélation0,80734→0,80699. Bootstrap apparié par11 mondes, changement
+moyen de rappel−0,00180, intervalle95 % [−0,00300;−0,00033]. Diagnostic
+négatif, aucun base accepté. Rendu teacher/source/readout :
+`_base/readout-first-000000.png` et métriques CSV/JSON/TXT voisines.
+Poids minuscules de diagnostic : `eval/native160-readout-train.pt`,
+opérateur : `eval/native160-readout-operator-validation.json`, relief :
+`eval/native160-readout-first-rare-validation.json`.
+Le contrôle multiscale a aussi terminé : features finales3×3, skip haute
+résolution1×1 et bloc central1×1 suréchantillonné. Même TRAIN/VAL ; contrôle
+de reconstruction MSE relative0,000003221. Coarse4 première passe MSE
+vélocité0,142151→0,142322 ; aucune récupération. Relief autonome : rappel
+finσ2 source0,41843→0,41577, amplitude0,68412→0,67815. Bootstrap par11mondes,
+changement moyen−0,00111, intervalle95 % [−0,00276;+0,00050]. Cet échec ne
+prouve pas l'absence de toute information non linéaire dans le tronc.
+Rapports : `eval/native160-multiscale-readout-{operator-validation,first-rare-validation}.json` ;
+image : `_base/multiscale-readout-first-000000.png`, valeurs CSV/JSON/TXT.
+La première version du readout, avant ajout multiscale, est conservée au
+commit `09006aa` pour reproduire son contrat et ses résultats.
+
+Inspection des convolutions originales254M sur4090 :
+`eval/native-teacher-conv-rank-statistics.json`. Conserver toutes les dimensions
+de features avec des facteurs3×3→1×1 à demi-rang donnerait environ150,2M
+éléments dans l'état, énergie des poids retenue moyenne77,1 %, minimum61,7 %.
+Ce calcul n'est ni une mesure de qualité ni un benchmark. Les têtes, attention,
+embeddings et resampling sont exclus ; MPConv normalise GLOBALement ses poids,
+pas séparément chaque ligne ou facteur.
+
+Diagnostic des mises à jour du pilote500 : poids de RMS~1, déplacements RMS
+0,0002–0,0009 dans les couches échantillonnées, mais11–35 % de leurs valeurs
+BF16 ont changé. Le réseau n'était pas totalement figé par l'arrondi.
+Configurations upstream, sans preuve des hyperparamètres réels du checkpoint :
+diffusion base lr0,001, consistency base0,00005, pilote actuel0,00001.
+Avis terminé sur optimisation plus active versus
+tronc conservant toutes les features avec convolutions factorisées :
+`review/opus-native-readout-negative-20261011/`. Tous ces readouts sont rejetés
+pour livraison ; aucun modèle n'est ajouté à la pile runtime.
+
+## Pilote canal0 du 11 octobre : cible causale, statistiques TRAIN figées
+
+Après rejet du pilote `phase` au pas500, le pilote distinct
+`base-native160-channel0-train` repart de l'EMA160×3 au pas15000 sur5090.
+Les diagnostics teacher injecté ci-dessous motivent un poids16× sur le
+canal0 x0 de première passe ; les autres features gardent leur protection.
+Les termes H4 de seconde passe sont réduits10×. Les puissances par bande
+sont figées sur TRAIN ; l'énergie cible toujours chaque fenêtre teacher
+réelle, afin de ne pas ajouter du grain aux champs plats. Opus5.5 a revu
+ces choix : `review/opus-native-first-channel-20261011/OPUS_REVIEW.md`.
+
+Tests :13 régressions CPU réussies, smoke GPU5090 original/coarse4/coarse2
+réussi, gradients finis, pic mémoire5,08Go. Contrat exact et preuve :
+`eval/native160-channel0-smoke/gpu-smoke.json` ; cible5000 pas, validation
+tous les500, mêmes données indépendantes et garde-fous morphologiques.
+Poids hors Git : `ckpt/native160x3-channel0-mixed-pilot/`.
+La4090 compare indépendamment les poids bruts et EMA au pas500, job
+`base-native160-channel0-500-raw`, rapport
+`eval/native160-channel0-500-ema-raw-matched-validation.json`.
+Images progressives en vrac : `_base/channel0-000000.png`, puis
+`channel0-000500.png`, `channel0-raw-000500.png`, avec métriques texte/CSV.
+Ce pilote est expérimental ; aucun nouveau base n'est accepté ou livré.
+
+Résultat : arrêt au garde-fou morphologique500, statut terminal vérifié.
+MSE features0–3 0,070804→0,070705, score physique8,401→7,857 ; rappel
+fin coarse4 plaine basse/mer0,29148→0,26572 (moyenneσ2/8). Sur les20
+cas rares coarse4, médianeσ2 fine : EMA500 rappel0,39260/amplitude0,65021,
+brut500 0,42359/0,69737 ; source15k0,41667/0,68331. Le brut est légèrement
+meilleur que la source sur cette médiane, mais les vallées restent faibles.
+Ne pas attribuer cet arrêt à une panne ou déclarer le modèle accepté.
+
+Le contrôle par canal5090 a terminé sur204 scènes VAL : coarse4 première
+passe canal0 MSE x0 source0,142170→EMA0,142014→brut0,141989, presque
+inchangée. Sur273 scènes TRAIN figées, source0,165905→brut0,163964.
+Rapports `eval/native160-channel0-operator-{source15000,500-ema,500-raw}.json`
+et `eval/native160-channel0-operator-train-{source15000,500-raw}.json`.
+Un test vérifie aussi l'identité de la cible x0 avec la conversion native
+FP32 aux deux phases ; les différences BF16 restent évaluées séparément.
+L'avis Opus suivant attend les rapports complets puis analyse TRAIN/VAL,
+poids bruts/EMA et choix du prochain essai :
+`review/opus-native-channel0-pilot-20261011/`. Aucun pilote suivant lancé.
+
+## Pilote du 11 octobre : objectifs latents distincts pour les deux passes
+
+Le premier pilote s'est arrêté au garde-fou morphologique au pas500,
+statut terminal vérifié : erreur0–3 pratiquement inchangée0,07080→0,07074,
+score physique amélioré8,396→7,765, mais score IoU dégradé0,78928→0,79617
+et rappel fin en baisse dans tous les grands profils. Par exemple coarse4
+tempéré0,3987→0,3771, plaine basse/mer0,2903→0,2497 (moyenneσ2/8).
+Les canaux opérateur protégés n'ont pas dépassé leurs plafonds. Ne pas
+reprendre ce500 ; garder les poids et images pour diagnostic, pas livraison.
+Les poids bruts restent en cours d'évaluation séparée sur4090.
+
+Contrôle complémentaire5090 `base-native-full-wrapper-control` : teacher
+non comprimé, mêmes poids et architecture192×3, dans l'enveloppe NativeBase
+fonctionnelle, sans entraînement. Il vérifie si le chemin d'entraînement et
+d'évaluation reproduit le teacher avant de modifier les normalisations de loss.
+Fichiers : `eval/native-full-wrapper-control{.pt,-validation.json}` et rendu
+`_base/teacher-control-000000.png`. Ce contrôle n'est pas un élève distillé.
+Il a terminé : MSE relative0–3 0,00002766 ; coarse4 rareσ2, corrélation
+fine0,99936, amplitude1,00015 et rappel0,97879 ; natif, corrélation0,92132
+et amplitude1,00022. Le chemin NativeBase reproduit bien les détails fins
+avec les poids complets, au plancher numérique ; ne pas attribuer les
+vallées absentes du160 à une erreur majeure de cette enveloppe.
+
+L'évaluation brute/EMA500 a terminé sur4090 : coarse4 rareσ2, EMA fine
+rappel0,38010/amplitude0,63437, brut0,36525/0,57961 ; la source15k donnait
+0,41667/0,68331. La moyenne EMA ne cachait pas une bonne version brute.
+Les deux sont rejetés, conservés pour preuve. Rapport :
+`eval/native160-phase500-ema-raw-matched-validation.json` ; image brute
+`_base/phase-raw-000500.png`.
+
+Le job5090 `base-native-phase-band-calibration` calcule maintenant les
+puissances par bande/canal/phase du teacher sur des strates TRAIN original/
+4/2, cas/profils, sans données de validation. Sortie prévue :
+`eval/native-phase-train-band-statistics.json`. Prochain pilote à préparer
+après inspection : dénominateurs figés sur ces puissances et équilibrage
+des termes H4/première passe. Même point de départ, mêmes garde-fous ;
+aucune reprise du500 rejeté ni normalisation par l'énergie de l'élève.
+La calibration a terminé sur273 scènes TRAIN,546 fenêtres par phase.
+Avant de choisir les canaux à renforcer, le job5090
+`base-native-first-channel-oracle` injecte séparément les canaux0/1/2/3/H4
+du teacher dans l'entrée de seconde passe, puis le groupe0–3 et tous les5,
+sur les20 scènes rares coarse4 indépendantes. Le bruit, labels et conditions
+restent identiques. Cela distingue un défaut des features de première passe
+d'un défaut H4 de première passe qui pourrait perturber les features ensuite.
+Le simple remplacement H4 en SORTIE finale ne suffisait pas à le distinguer.
+Rapport prévu : `eval/native160-first-channel-oracle.json` ; quatre rendus
+dans `_base/015000-first-channel-*.png`, alternative textuelle et JSON voisins.
+L'oracle a terminé : remplacer le seul canal0 de PREMIÈRE passe fait passer
+le rappel fin médianσ2 de0,3970 à0,7882 et l'amplitude0,6275 à0,9232.
+Le remplacement0–3 donne0,8299/0,9369 ; H4 seul donne0,4082/0,6382.
+Le défaut de vallées est principalement le canal0 de première passe sur ces
+20 cas, tandis que le bruit natif reste présent dans tous ces remplacements.
+Les images sont des diagnostics utilisant une entrée teacher, pas un modèle
+autonome livré. Prochain pilote à affiner : cible renforcée canal0 première
+passe, H4 seconde passe moins dominant, puissances TRAIN figées pour
+normaliser l'erreur de position. L'énergie doit cibler chaque teacher réel,
+pas la moyenne TRAIN (sinon bruit artificiel dans les plages plates).
+Avis actualisé demandé : `review/opus-native-first-channel-20261011/`.
+
+Le contrôle de durée native160×3 a été arrêté proprement au pas28579,
+après le contrôle indépendant25k : coarse4 rare, rappel fin0,44091,
+corrélation0,82339, amplitude0,68134 ; natif, corrélation0,15028 et
+amplitude2,75411. MSE opérateur0,03163, score physique6,331. Les images
+`_base/025000.png` confirment du grain natif et des vallées fines atténuées.
+Les jalons15k/20k/25k et le latest28579 restent conservés hors Git.
+La queue50k a été annulée ; ne pas la relancer. Décision/provenance :
+`preparation/native160-duration-guard25000.json`.
+
+Le job `base-native160-phase-train`, sur5090, repart de l'EMA15k pour un
+pilote de5000 étapes supplémentaires, batch4, lr1e-5, seed20261016,
+coarse original/4/2 et25 % de cas rares, choix uniforme coarse/cas/profil.
+Root : `ckpt/native160x3-phase-mixed-pilot/`. Aucun teacher ni decoder
+n'est entraîné. MSE opérateur +0,05 gradients comme ancrage ; première
+passe : sortie x0 des canaux0–3 ; seconde passe : hauteur H4.
+Chaque objectif ajoute erreur de position par bande et erreur symétrique
+de log-énergie, normalisées uniquement par teacher/statistiques TRAIN.
+Pas de gradients de pertes physiques ou du decoder ; le calcul FP32 de
+la loss ne modifie pas l'expression BF16 du runtime.
+
+Validation indépendante204 scènes/60 cas morphologiques chaque500 pas,
+teacher+decoder figés, garde-fous de rappel/corrélation et d'erreur latente.
+En plus, protéger les sorties non ciblées : MSE opérateur0–3 de seconde
+passe ≤105 % du point de départ, H4 de première passe ≤110 %, par coarse.
+Sélection du best par pire groupe de valley IoU. Garder le point initial,
+premier contrôle et best/latest ; ne pas assimiler un pilote à une livraison.
+Les images `~/data/distill/_base/phase-XXXXXX.png` comptent les étapes du
+pilote, avec la source15k explicitement affichée ; les images numériques
+sans préfixe restent celles du contrôle de durée.
+
+Six tests CPU de loss passent (identité, bruit à même énergie mais mauvais
+emplacement, atténuation/excès, teacher constant et gradients finis, phases
+distinctes, rejet des labels inconnus). Trois vrais pas de smoke GPU sur
+original/4/2 passent, pic5,09 Go, gradients non nuls ; preuve du code final :
+`eval/native160-phase-loss-smoke-v2/gpu-smoke.json`.
+
+La4090 exécute `base-native160-duration25k-diagnostics` : diagnostic de
+phases sur60 scènes TRAIN avec coarse original, puis chaîne complète25k
+sur7 sites historiques et12 rares figés, deux LODs et rendus dans `_base`.
+Le précédent diagnostic TRAIN20 était avec coarse4 et inclut des cas rares
+absents du préentraînement : ne pas le présenter comme mesure sur des
+entrées déjà apprises. Pour le contrôle de fit, analyser le sous-ensemble
+GENERAL original, présent dans le préentraînement.
+
+Opus5.5 a reçu la stratégie concrète, les métriques25k et les termes du smoke :
+`review/opus-native160-phase-pilot-20261011/OPUS_REVIEW.md` (terminé, modèle
+effectif vérifié). Pas d'erreur mathématique fatale identifiée ; réserves :
+normalisation locale des fenêtres plates, gradient H4 dominant et EMA.999
+encore61 % source au pas500. Si le premier contrôle échoue, sa piste est
+de figer les puissances par bande/canal sur TRAIN et équilibrer les gradients
+des phases, au lieu d'assouplir les garde-fous. Lire les résultats raw avant
+le prochain choix. Le teacher T2 a seulement un appel par phase, pas une série
+de k solveur dans la seconde passe. Aucun base n'est encore accepté ;
+raccords à froid des deux axes, chaîne complète finale et performance au
+repos restent à vérifier. Aucun poids base dans Git ou l'application.
+
+Le diagnostic original TRAIN GENERAL a terminé23 scènes déjà présentes
+dans le préentraînement : amplitude native3,027 et corrélation0,198 pour
+teacher→élève, contre0,999/0,965 pour teacher→teacher. Le bruit est donc
+présent aussi sur ces entrées apprises, pas seulement avec coarse distillé.
+Rapport : `eval/native160x3-step15000-original-train-phase-diagnostic.json`.
+Les deux comparaisons app25k ont terminé ; leurs rendus sont dans `_base`.
+
+Jobs4090 suivants : `base-native160-duration25k-seams` vérifie quatre cas
+rares ×LOD3/0 ×teacher/élève, même coarse4/decoder200k, grand champ et
+quatre tuiles à caches neufs, deux axes, halos24 et ordre inversé. Le job
+CPU `base-native160-duration25k-seam-publication` attend sa fin vérifiée
+puis copie images/CSV/rapport à plat dans `_base/025000-seam-*`.
+Ce contrôle a terminé16 lignes. Pire MAE grand champ/quatre tuiles des
+quatre sites : LOD3 teacher0,955 m/élève0,954 m ; LOD0 teacher0,00492 m/
+élève0,04620 m. Pire saut supplémentaire LOD0 : teacher0,110 m/élève1,067 m.
+Ce sont les erreurs de partition du25k, pas ses erreurs par rapport au teacher
+ni une certification d'un futur checkpoint. Rapport/CSV et16 images copiés
+dans `_base`, `025000-seams.*` et `025000-seam-*.png`.
+`base-native160-phase500-raw-validation` attend ce test et le checkpoint500,
+exporte les poids bruts en fichier d'inférence identifié (hors Git), évalue
+EMA/bruts sur les204 scènes et60 formes rares, puis publie
+`_base/phase-raw-000500.png`. Cette comparaison ne modifie pas le trainer.
+
+## Étapes précédentes : deux GPU et images de progression
+
+Consignes utilisateur : utiliser les deux GPU pour du travail utile ; priorité
+à la5090 pour l'entraînement. Publier les rendus de chaque évaluation à plat
+dans `~/data/distill/_base/`, étape dans le nom, et consulter Opus5.5 lors des
+changements de stratégie. Cette demande remplace l'attente des seules planches
+finales. Les CSV/TXT voisins donnent les valeurs et le contexte des images.
+
+Le native160×3 a terminé15000 étapes sur5090 : MSE opérateur0,15948 à0,03499.
+Sur validation indépendante coarse4 rare, corrélation TPI fine0,808, rappel
+des vallées0,417, amplitude TPI0,683 ; en natif, corrélation0,080 et amplitude
+3,354. Les images montrent encore du bruit LOD3 et des vallées atténuées.
+Il n'est pas accepté. Rapports :
+`eval/native160x3-step15000-matched-validation.json` et les deux dossiers
+`eval/native160x3-step15000-app{,-rare}-comparison/` (7 sites historiques et
+12 sites rares figés, LOD3/0, même coarse4/decoder200k pour teacher/élève).
+
+Rendus réels disponibles : `000000.png`, `005000.png`, `015000.png` pour
+quatre scènes rares de validation avec decoder original ;
+`015000-app-*-lod{3,0}.png` pour la chaîne complète avec decoder distillé.
+Ces rendus à éclairage fixe sont issus des hauteurs calculées, sans lissage ;
+ce ne sont pas des captures du navigateur ni une preuve de continuité.
+
+Le job `base-native160-operator-long` a poursuivi le même apprentissage de15000
+vers50000 sur5090, avec optimiseur/EMA/RNG conservés, sous
+`ckpt/native160x3-operator-long/`, avant son arrêt au contrôle25k. C'est un contrôle de durée, pas une nouvelle
+stratégie promise comme suffisante. Le job4090 `base-native160-phase-oracle`
+compare élève→élève, élève→teacher, teacher→élève, teacher→teacher, sur les68
+scènes coarse4 indépendantes, dont20 rares. Il sépare l'erreur de première
+passe de l'ajustement de seconde passe et contrôle le plancher teacher.
+
+Cet oracle est terminé : teacher→élève conserve le bruit natif (amplitude
+TPI3,487 contre3,349 pour élève→élève), mais rétablit les vallées fines
+(rappel0,838 contre0,400, amplitude0,936 contre0,629). Élève→teacher retire
+le bruit natif (amplitude0,948), mais ne rétablit pas les vallées fines
+(rappel0,412). Le teacher→teacher de contrôle a un plancher non nul :
+MAE native rare médiane0,60 m, fine0,090 m ; plus grande MAE de ligne5,576 m.
+Ces résultats désignent deux défauts distincts, à confirmer sur les autres
+branches : ajustement H4 de seconde passe et détails0–3 de première passe.
+Rapport : `eval/native160x3-step15000-phase-oracle.json`.
+Ils ont été soumis à un nouvel avis en lecture seule :
+`review/opus-native160-phase-20261011/`.
+
+Le second avis Opus5.5 est terminé, modèle vérifié : il retire sa priorité
+à l'hypothèse de mauvaises entrées de seconde passe, et propose un pilote
+opérateur avec objectifs dépendant de la phase : détails0–3 de première
+passe et hauteur H4 de seconde passe, avec ancrage MSE et pénalisation
+symétrique de l'énergie par bande. Ne pas reprendre les losses décodées
+rejetées. Un éventuel essai d'adaptateurs séparés vient après le contrôle des
+poids partagés. Son test « derniers k pas de seconde passe » ne s'applique
+pas ici : la base native T2 n'a qu'un appel réseau par phase.
+
+Le job4090 `base-native160-progress-long` attend cet oracle puis publie les
+checkpoints évalués sans perturber la5090 ; interrogation toutes les300 s,
+instantanés atomiques et empreintes exactes. Il conserve les jalons20k/30k,
+en plus du15k et du final50k. Les autres instantanés temporaires sont libérés
+après rendu ; les poids base restent hors Git.
+L'image `020000.png` est publiée. Le coordinateur4090 évalue désormais aussi
+chaque EMA publiée sur les204 scènes et60 contrôles morphologiques rares
+(`--matched-eval`). Cela utilise les intervalles entre rendus pour des mesures
+utiles. Un arrêt demandé termine d'abord le processus GPU enfant et libère
+l'instantané ; il ne signale jamais le trainer5090.
+
+Avis Opus5.5 obtenu, modèle réellement vérifié, lecture seule :
+`review/opus-native160-depth-20261011/OPUS_REVIEW.md`. Il propose cet oracle
+de phases avant de choisir entre supervision sur les entrées produites par
+l'élève et ajustement du canal de hauteur. Il estime que prolonger seulement
+la MSE ne corrigera probablement pas les vallées ; les prochains choix doivent
+être confrontés aux résultats de l'oracle et aux images de la chaîne complète.
+Les contrôles à caches neufs, les deux axes de raccord et la performance au
+repos du candidat restent à faire ; aucun gain d'un base accepté n'est établi.
+
+## Essais précédents : préservation des vallées encore insuffisante
+
+L'essai de supervision interne ci-dessous s'est lui aussi arrêté au contrôle
+morphologique au pas500. Son score de sélection agrégé baisse légèrement
+(0,87135 à0,86915), mais ce progrès masque des régressions dans les cas rares :
+avec coarse4, rappel des vallées fines des plaines tempérées18,6 % à16,2 %,
+et corrélation des vallées natives des plaines désertiques0,328 à0,226.
+Erreur latente globale0,11052 à0,11380 ; score physique7,640 à8,186.
+Ne pas prolonger ce checkpoint ni le présenter comme un candidat accepté.
+
+Le test architectural suivant repart des poids du teacher : native160×3,
+**tous les blocs et toutes les connexions de saut conservés**, réduction des
+canaux192 à160 avec sélection calibrée exclusivement sur TRAIN.178 138 245
+paramètres, contre253 688 037 pour le teacher. Le job `base-native160-operator`
+a terminé15000 étapes sur la5090, batch4/lr2e-5/seed20261010, sur les
+42624 fenêtres TRAIN originales ; validation opérateur3552 fenêtres.
+Root : `~/data/distill/ckpt/native160x3-operator-pilot/`.
+La queue `base-native160-matched-validation` a été arrêtée pour éviter les
+doublons ; les trois validations ont terminé séparément. Rapports :
+`eval/native160x3-{initial,step5000,step15000}-matched-validation.json`.
+Il s'agit d'un préentraînement opérateur, pas encore d'un entraînement mixed
+complet ni d'une preuve de qualité/performance. Dix tests de compression native
+passent ; correspondance calibration/manifest et transfert complet contrôlés.
+
+Commande de l'essai de supervision interne maintenant arrêté :
+`python -m distill.native_feature_train --output ~/data/distill/ckpt/native192x2-feature-mixed-pilot --smoke-root ~/data/distill/eval/native192-feature-smoke --steps 1500`.
+Il repart de l'EMA native192×2 opérateur15000, sans reprendre les poids
+physiques rejetés. L'objectif est MSE opérateur +0,05 MSE des gradients +0,5
+erreur des huit représentations de fin de niveau encodeur/décodeur, normalisée
+uniquement par l'énergie des canaux teacher. Les coordonnées des canaux sont
+identiques (192 canaux conservés) ; le teacher et ses poids restent figés.
+Les pertes physiques en sortie sont retirées de l'entraînement pour éviter
+leur biais d'atténuation ; elles restent mesurées lors de la validation.
+
+Chaque batch contient deux fenêtres par étape de diffusion, sur la banque
+coarse natif/4/2 avec25 % de cas rares. Cette expérience n'est pas une simple
+variation du poids de la loss précédente : batch4, supervision interne et
+absence des pertes physiques ; elle utilise le bruit capturé (pas de
+renouvellement du bruit dans ce premier palier). Les mêmes204 scènes de
+validation indépendante et les mêmes garde-fous morphologiques/latents sont
+conservés. Le palier1500 n'est pas une durée finale ni une preuve d'acceptation.
+Le smoke GPU a réussi sur les trois branches, avec huit niveaux, gradients
+élève finis et non nuls, teacher figé, phases2+2 et pic mémoire6,64 Go.
+Treize tests CPU passent, dont un forward fonctionnel du vrai réseau natif
+avec gradients encodeur/décodeur et un test qui pénalise l'atténuation.
+Job durable : `base-native192-feature-train`, GPU4090 ; checkpoints/données
+hors Git. Aucun changement de la stack runtime approuvée.
+
+L'essai `native192x2-valley-mixed-pilot` s'est arrêté au contrôle qualité au
+pas500. La pénalisation supplémentaire de l'amplitude et de la profondeur
+des vallées ne suffit pas : le score physique passe de7,640 à6,551, mais le
+score de sélection morphologique se dégrade de0,87072 à0,87535 (plus bas est
+meilleur). Avec coarse4, le rappel des vallées fines passe de18,7 % à15,0 %
+sur les plaines tempérées, et de37,2 % à33,4 % sur les côtes humides.
+Le checkpoint est conservé, pas accepté ni installé dans l'application.
+Rapport : `~/data/distill/ckpt/native192x2-valley-mixed-pilot/validation.jsonl`.
+
+Les oracles sur sept sites et deux LODs isolent la perte de détails dans les
+canaux0–3 du base : sur le site côte LOD0, remplacer ces canaux par le teacher
+rétablit environ94–96 % des vallées, contre15–37 % pour les élèves testés.
+Changer seulement le canal de hauteur ne les rétablit pas. Le contrôle avec
+decoder original confirme que le decoder distillé n'est pas la cause.
+Rapports : `~/data/distill/eval/native192-operator15000-matched-oracles/`
+et `~/data/distill/eval/native192-physical500-matched-oracles/`.
+
+Prochaine piste à préparer : supervision des représentations intermédiaires
+du teacher et vérification de l'effet du retrait de blocs/connexions de saut.
+Ne pas prolonger cet essai arrêté ni assouplir ses critères pour le déclarer
+réussi. Aucun gain de performance d'un base de qualité acceptable n'est établi.
+Les planches finales et les contrôles de continuité du candidat final restent
+à produire. Les coarse1/2 complets et les choix approuvés de l'application
+restent livrés sur la branche `distill` ; aucun poids base dans Git.
+
+## Livraison coarse1/coarse2 complets
+
+Les deux entraînements ont terminé 200 000 étapes. Poids best EMA sur 384
+crops : coarse1 pas 200000, coarse2 pas 200000.
+Les trois contrôles export/CUDA Graph par modèle donnent une différence
+maximale 0 ; provenance/SHA et statut complet dans `weights/manifest.json`.
+Best/latest et jalons conservés sous `~/data/distill/ckpt/coarse-full/`.
+Aucun poids base livré. Reprendre maintenant la stratégie base décrite
+ci-dessous : supervision LOD3/LOD0, cas rares, coarse original/4/2.
+
+## Priorité utilisateur : terminer coarse1 et coarse2 avant le base
+
+Le 2026-10-11, l'utilisateur demande explicitement de finir les deux coarse
+avant de reprendre le base. Les jobs `coarse-full1` (4090) et `coarse-full2`
+(5090) reprennent leurs checkpoints latest aux pas54 669 et37 180, avec états
+optimiseur/EMA/RNG, jusqu'à200 000 étapes chacun. Les compteurs ont effectivement
+repris au-delà de ces jalons. Les poids Git étaient alors les EMA partielles
+50k/35k. Cette attente est maintenant terminée : les EMA 200k des deux
+modèles, leurs exports vérifiés et les provenances sont poussés sur `distill`,
+commit `93100542873bf64f7eea2d7404b670633b93fb4f` (SHA distant contrôlé).
+Ne lancer aucun nouvel entraînement base avant cette livraison. Aucun ancien
+superviseur base n'est relancé : ils ne constituent pas le prochain plan.
+
+`python -m distill.bundle_coarse --write` prépare cette livraison : les DEUX
+runs doivent être complets, les exports correspondre aux preuves CUDA Graph
+et au best sélectionné sur384 crops, et leurs SHA être inchangés. Il conserve
+coarse4/8 et decoder et met à jour uniquement coarse1/2 et leur provenance.
+Ce script ne commit/push pas ; cette étape suit l'inspection des deux exports.
+Quatre tests CPU vérifient la sélection best d'un run complet et le refus
+des runs partiels, des poids modifiés ou d'une livraison manquante.
+Le job CPU `coarse-delivery-next` (`python -m distill.coarse_delivery_next --push`)
+attend les identités de processus des deux runs et automatise cette livraison.
+Il refuse une branche différente, des fichiers de livraison modifiés pendant
+l'attente, un staging déjà rempli, un arrêt incomplet ou des preuves altérées.
+Il met à jour poids/provenances et documentation, commit/push `distill`, vérifie
+le SHA distant et écrit `~/data/distill/coarse-delivery-next.json`. Il ne lance
+ni serveur ni base. En cas d'échec, inspecter avant toute reprise.
+
+La priorité confirmée est maintenant le base. Les optimisations du runtime
+d'inférence sont laissées à l'utilisateur ; le benchmark automatique coarse
+supplémentaire a été annulé. Le contrôle coarse1 200k, hors Git sous
+`eval/coarse1-full-continuity/`, donne une identité exacte champ128 / quatre
+tuiles64 avec halos16, deux axes et caches neufs, sur les quatre catégories
+rares. Ce contrôle ne certifie pas le terrain final base/decoder.
+
+L'utilisateur propose ensuite d'entraîner le base aussi avec les coarse
+distillés4/2. Le prochain entraînement base mélangera original/4/2, avec des
+poids coarse figés et identifiés. Chaque cible sera recalculée par le base
+teacher ORIGINAL sur exactement le même conditionnement coarse que l'élève :
+ne pas associer une entrée coarse distillée à une cible produite avec le coarse
+original. Évaluer chaque chaîne sur les mêmes mondes et garder une part de
+coarse original pour préserver la référence. Cela traite la robustesse de la
+chaîne ; les pertes de morphologie LOD3/LOD0 et les raccords restent nécessaires.
+
+Le dernier pilote base physique s'est arrêté automatiquement au pas1000 :
+la MSE relative des canaux0–3 dépasse de10% son point de départ (0,12984 contre
+0,11745). Best750 est conservé ; sa MAE médiane proxy LOD0 est71,07 m contre
+101,81 m au départ. Ce pilote n'est pas accepté et aucun poids base n'est livré.
+La banque rare complémentaire contient56 scènes train et20 val physiquement
+qualifiées par le teacher complet, dont les quatre cas demandés. Au pas500,
+la morphologie fine progresse mais certaines plaines se dégradent au LOD3.
+Le replay BF164090 de ces20 scènes est exact ; les corrélations topographiques
+BF16/FP32 à σ2 sont0,78–0,92 au LOD3 et~0,997 au LOD0 (médianes par cas),
+bien supérieures à celles de l'élève. Ce défaut n'est donc pas expliqué par
+le seul plancher numérique. La prochaine expérience base doit superviser
+explicitement la morphologie du canal4 au LOD3, ainsi que le terrain décodé,
+et équilibrer les cas rares. Preuves sous `~/data/distill/eval/` :
+`native-decoded-rare-validation-500.json`, `native-rare-fp32-floor.json` ;
+banque `~/data/distill/crops/native-rare-scenes-v1/qualification.json`.
+
+## Base : reprise après livraison des coarse complets
+
+`native_mixed_bank.py` fige 700 positions (624 scènes générales, 56 train et
+20 val rares qualifiées) et capture trois branches à chaque position : coarse
+original, coarse4 livré et coarse2 EMA200k. Les 2100 scènes gardent le même
+split par monde : 1896 train, 204 val. Les scènes originales sont hard-linkées
+sans modification ; les deux autres cibles sont recalculées par le base
+teacher original T2 avec leur propre coarse. SHA des sources, poids et code
+figés dans manifest/contrat, aucune graine du banc final. Le job
+`base-native-mixed-capture` génère les données sur4090, sous
+`~/data/distill/crops/native-mixed-scenes-v2/`.
+
+`native_multilod.py` supervise directement la hauteur du canal4 (LOD3), ses
+gradients et sa position topographique aux sigma1/2/4/8 ; le decoder ORIGINAL
+gelé supervise la hauteur fine (LOD0), gradients et sigma2/8/32. Les erreurs
+de hauteur sont relatives au relief teacher avec un plancher10m ; les termes
+absolus en mètres restent enregistrés. Des planchers de gradients/TPI bornent
+les champs plats. Les ancrages latent, canaux0–3, opérateurs on-policy et
+recouvrement empêchent de compenser un défaut du base par un autre défaut.
+La variance est celle des576 scènes TRAIN originales, fixe pour les trois
+coarse et sans moments de validation.
+
+`native_multilod_train.py` part de l'EMA native128×2 opérateur5000 propre,
+avec optimiseur neuf. Les coarse sont équiprobables ;25% des tirages sont
+réservés aux quatre cas rares équiprobables,25% reçoivent de nouveaux bruits
+avec cibles teacher recalculées. La sélection utilise le pire groupe
+coarse/profil ou coarse/cas rare sur les deux LOD. Le garde-fou canaux0–3
+compare toujours au même point de départ, globalement et par coarse. Best,
+latest et jalons sont conservés hors Git. Un premier palier physique2000 pas
+doit décider de la suite ; il ne suffit pas à déclarer le base accepté.
+
+`base-native-multilod-smoke` vérifie un backward par branche, gradients finis
+et non nuls vers les25+9 fenêtres, et decoder gelé. Le job
+`base-native-multilod-next` attend son succès et la capture complète, vérifie
+les SHA de cette preuve puis devient le trainer (même PID et arrêts propres).
+Sorties : `eval/native-multilod-mixed-smoke/`,
+`ckpt/native128x2-multilod-mixed-pilot/`, `native-multilod-next.json`.
+Ni serveur ni optimisation d'inférence ni poids base distribués à ce stade.
+Les évaluations finales complètes, raccords froids et planches restent requis.
+
+La comparaison complète accepte `--conditioning-coarse` et
+`--conditioning-decoder` : les deux chaînes utilisent exactement les mêmes
+poids partagés, seul le base change. SHA et étapes figurent dans le rapport.
+Les chemins sont résolus avant l'import du backend qui change de répertoire.
+Six tests CPU et un contrôle GPU coast aux LOD3/0 vérifient cette comparaison.
+Au pas500 du nouveau pilote, avec coarse4 et decoder200k de l'application,
+les MAE sont263,02m et303,97m ; les vallées restent insuffisamment reproduites.
+La baisse du score proxy de validation ne suffit donc pas à accepter ce base.
+Rapport et quatre champs finis :
+`~/data/distill/eval/native-multilod-matched-500-coast-app/`.
+Le garde-fou a arrêté ce pilote au pas1000 : MSE canaux0–3 de0,164876
+contre0,149701 au départ (+10,14%). Le score physique du pire groupe descend
+à12,998 contre20,976 ; cela ne certifie pas les vallées en terrain complet.
+Best500 et les jalons500/1000 sont conservés. Aucune planche finale publiée.
+
+Le job `base-native-operator-long` reprend le checkpoint propre opérateur5000
+dans un dossier séparé `ckpt/native128x2-operator-long/`, avec optimiseur,
+EMA et RNG identiques, jusqu'à15000 pour le prochain palier. Le run initial
+et ses poids restent inchangés. Ce palier renforce la régression directe
+du teacher avant de reprendre la supervision physique original/4/2 ; il ne
+constitue pas la fin de l'entraînement ni une acceptation du base.
+
+`native_multilod_eval.py` mesure les EMA sur les204 scènes de validation
+original/4/2, avec variance TRAIN fixe, et la morphologie des60 scènes rares
+aux deux LOD. Il refuse le mélange de mondes train/val, les graines réservées,
+les statistiques d'une autre banque et un entraînement interrompu quand un
+palier complet est demandé. Trois tests CPU couvrent ces contaminations.
+Le contrôle GPU de l'opérateur5000 est terminé :204 lignes physiques et60
+lignes de morphologie sous `eval/native-operator5000-matched-validation.json`.
+La même évaluation du best du run prolongé est en attente de sa fin, dans
+le job `base-native-operator-long-validation`. Ces rapports numériques
+préparent la prochaine décision ; aucune planche finale n'est générée.
+Le palier opérateur15000 a terminé ; MSE de validation0,06708 contre0,08049
+au pas5000. La comparaison complète des14 vues avec coarse4/decoder200k
+est terminée, job `base-native-operator15000-app-comparison` :28 champs finis.
+La validation intérieure original/4/2 passe de20,988 à11,567 (pire groupe),
+avec MAE médianes LOD3/0 de71,45m/57,44m contre99,01m/67,30m au pas5000.
+La corrélation fine des vallées rares reste faible au LOD3 (~0,09).
+Sur les14 vues complètes de l'application, MAE médianes141,62m/142,49m :
+le base n'est pas accepté. Le même run reprend maintenant de15000 à50000,
+sans changer les états optimiseur/EMA/RNG ni le dataset ; le checkpoint
+`step15000.pt` et les rapports de ce palier sont conservés.
+En parallèle, `base-native192-operator` entraîne une variante native192×2
+pendant15000 pas sur les mêmes paires teacher. Elle conserve tous les canaux
+du teacher et retire seulement des blocs : ce témoin de capacité vérifie si
+la compression des canaux limite la restitution des vallées. Son résultat
+n'est pas présumé meilleur. Poids sous `ckpt/native192x2-operator-long/`,
+évaluation aux trois coarse et deux LOD par
+`base-native192-operator-validation`. Le run128×2 continue sur5090 ; le192×2
+et les évaluations utilisent la4090. L'évaluation du128×2 à50000 attend aussi
+la fin de son propre entraînement et utilise maintenant la5090 libérée.
+Le192×2 termine15000 pas (198760669 paramètres) : pire groupe physique7,632
+contre11,567 pour128×2 à15000, MAE médianes LOD3/0 de51,16m/41,40m.
+La corrélation des vallées désertiques LOD3 monte à0,293 contre0,082 ; elle
+reste insuffisante. Le job `base-native192-multilod-smoke` teste les gradients
+sur4090, puis `base-native192-multilod-next` entre dans un nouveau pilote
+physique original/4/2 jusqu'à2000 pas. Il vérifie son propre checkpointsource
+immuable15000, sa propre preuve smoke et les mêmes producteurs figés avant
+de devenir le trainer. Sorties sous `eval/native192-multilod-smoke/` et
+`ckpt/native192x2-multilod-mixed-pilot/`. Aucun poids base accepté ou livré.
+Le compact termine50000 pas ; validation original/4/2 : pire groupe6,576,
+MAE médianes LOD3/0 de47,83m/30,66m, corrélation fine des vallées rares0,136
+au LOD3 et0,617 au LOD0 (branche originale). Il reste insuffisant. Les jobs
+`base-native128-50k-multilod-smoke` et `base-native128-50k-multilod-next`
+reprennent la supervision physique depuis le jalon50000 immuable sur5090,
+sous `ckpt/native128x2-multilod50k-mixed-pilot/` ; smoke trois branches vérifié.
+Le192×2 physique atteint500 pas : score6,118 contre7,636 au départ ; MSE
+canaux0–3 +9,48%, encore dans le garde-fou. Contrôle coast en pipeline
+complet (fondation15000 et physique500, mêmes coarse4/decoder200k) en cours.
+Les checkpoints terminaux identiques ont été liés sans changer aucun nom
+ni octet :20,9Go libérés pour les nouveaux jalons. Preuve hors Git sous
+`preparation/native-checkpoint-dedup.json` ; aucun checkpoint unique supprimé.
+
+Les deux pilotes physiques atteignent finalement le garde-fou au pas1000.
+La nouvelle revue Opus5.5 (session5fb5dc79-0013-409e-b7cc-db10366ce984,
+modèle réel contrôlé) est sous
+`review/opus-base-generalization-20261011/REPORT.md` et `OPUS_REVIEW.md`.
+Ses hypothèses ont été testées avant de changer l'entraînement :
+`eval/native192-physical-val-amplitude.json` montre, branche originale,
+une rétention fine des vallées σ2 de0,127 →0,025 →0,005 (op15000/phys500/1000),
+avec RMS élève/teacher de0,356 →0,207 →0,164. Le même défaut existe en
+validation, pas seulement sur la côte finale. Le decoder original donne
+la même régression. Les14 vues de deux contrôles de mélange de canaux
+(`native192-operator15000-matched-oracles/`, `native192-physical500-matched-oracles/`)
+utilisent maintenant exactement les mêmes coarse4/decoder200k dans les deux
+mondes. Réintroduire les canaux0–3 teacher restaure la rétention coast à0,944
+au lieu de0,146 ; remettre seulement le canal4 donne0,148. Le mélange tout
+teacher a une MAE maximale entre vues de0,275m. Les arrays d'élévation seules
+ne permettaient pas ce mélange : les champs latents complets ont été recalculés.
+
+Nouvel essai contrôlé : `native_amplitude.py` ajoute un poids total0,3 sur
+le RMS TPI et la profondeur aux positions des10% de vallées teacher les plus
+profondes, aux deux LOD. Les pertes de position existantes restent actives ;
+du bruit déplacé ne peut pas réussir par son seul spectre. Sept tests CPU
+couvrent vallées peu profondes/déplacées, gradients correctifs, bruit sur plaine,
+mers et candidats plats. `--preserve-valleys` sélectionne le pire groupe par
+IoU des vallées et ajoute des gardes fixes sur rétention/corrélation native/fine,
+en plus des gardes latents. L'ancien score physique reste enregistré séparément
+sous `physical_selection_score` ; ne pas comparer les unités des deux sélections.
+La source192×2 opérateur15000, les tirages, les trois coarse et le seed restent
+les mêmes que dans le contrôle arrêté. Le premier palier est1500 pas, pas une
+acceptation ni la fin de l'entraînement. Jobs `base-native192-valley-smoke`
+puis `base-native192-valley-next`, sorties `eval/native192-valley-smoke/` et
+`ckpt/native192x2-valley-mixed-pilot/`. La preuve smoke et le trainer doivent
+activer la même politique, avec les nouveaux producteurs identifiés par SHA.
+Le contrôle des jobs utilise maintenant un nom tmux EXACT (`=nom`) : un
+job `train-validation` ne peut plus faire apparaître `train` encore vivant
+après sa fin. Une régression avec deux noms de sessions le vérifie sans GPU.
+
+`check_physical_seams.py` accepte également les deux options de stages
+partagés pour comparer les requêtes froides sur les deux axes dans la chaîne
+de l'application. Quatre tests CPU couvrent les conflits de poids et les
+désaccords de halos horizontaux/verticaux. Contrôle coast pas500, coarse4 et
+decoder200k, sous `eval/native-multilod-matched-seams-500-coast-app/` :
+MAE champ entier/quatre tuiles LOD3 teacher4,769m / élève5,201m ;
+LOD0 teacher0,01824m / élève0,02175m. Les erreurs maximales et de raccord
+figurent dans le rapport ; ce résultat isolé ne certifie pas tous les sites.
+
+## Base natif — supervision physique du 2026-10-11
+
+Les pilotes ne sont pas acceptés. Le128×2 opérateur5000 pas donne une MAE
+médiane196,69 m au LOD3 et185,93 m au LOD0, sur7 sites. Après2000 pas
+régionaux fusionnés :195,94 m /167,24 m. Ce gain reste très loin du teacher,
+et les vallées sont mal placées ou disparaissent. EMA, initial, best, latest et
+jalons sont conservés. Preuves hors Git : `~/data/distill/eval/` dossiers
+`native128x2-operator-pilot` et `native128x2-fusion-pilot`, `report.json` et
+`arrays.npz`; le second inclut `rare/` et `cold-seams/`. Aucun poids base livré.
+
+Diagnostic oracle sur14 vues : substituer la hauteur teacher (canal4) donne
+une MAE médiane0,069 m au LOD3 et13,08 m au LOD0 ; substituer seulement les
+canaux0–3 laisse196,70 m /146,71 m. Les deux sont donc à superviser, avec une
+priorité physique sur la hauteur. Au LOD3, le runtime utilise directement le
+canal4 : le decoder n'intervient pas. Le contrôle « tous canaux teacher » donne
+0,069 m /0,028 m. Ce sont des diagnostics, pas des options de modèle.
+
+Revue Opus5.5 high, sessionec6c4cb6-db4b-459f-954b-4b8a7e9481d9, archivée sous
+`review/opus-native-physics-20261011/` : préférer la supervision physique à
+prolonger aveuglément la MSE de vitesse. Deux inférences du rapport ne sont pas
+retenues : les canaux0–3 n'expliquent pas le LOD3 ; aucune comparaison physique
+2500/5000 pas n'avait été faite. Les swaps oracle ci-dessus tranchent l'attribution.
+
+`native_decoded.py` reconstruit un cœur64 latents aligné96 (base32/decoder48),
+25 fenêtres init +9 raffinement, fusion et état élève T2. Le decoder ORIGINAL
+BF16 est gelé mais différentiable sur ses entrées. Loss hauteur en mètres,
+pentes relatives, position topographique σ2/8/32, latent normalisé par variance
+globale TRAIN, opérateurs et recouvrements on-policy ; clip1. Les576 scènes train
+ont toutes une géométrie complète. Deux pas GPU4090 : gradients finis et non
+nuls vers les34 fenêtres,2,33 s après chauffe,7,41 Go pic. Preuves :
+`eval/native-decoded-probe/{channel-statistics,decoder-control,gpu-smoke}.json`.
+
+Le contrôle du proxy distingue les mêmes latents du runtime et les latents
+capturés sur l'autre GPU. Exemple earthlike :17,41 m capturé4090→runtime5090,
+mais0,059 m proxy→pipeline sur les MÊMES latents ; contrôle4090 :0,041 m.
+Ce drift ne doit pas être attribué au decoder. Les six profils sont contrôlés
+avant entraînement (`eval/native-decoded-controls/`). Le replay base sur les
+entrées/batches capturés garde aussi son plancher de précision mesuré.
+
+Job durable `base-native-decoded-next` : contrôles, pilote physique2000 pas sur
+5090 depuis l'EMA opérateur5000 (optimiseur neuf),25% nouveaux bruits teacher,
+validation48 mondes et sélection du pire profil physique. Une dégradation des
+canaux0–3 >10% arrête le pilote à partir de500 pas. Ensuite pipeline complète,
+cas rares et raccords de quatre tuiles froides, deux axes/halos, sans planches.
+Une baisse médiane de30% et le maintien des vallées guideront la poursuite,
+sans constituer une acceptation finale. Entraînement complet, benchmark du
+modèle entraîné sur cartes au repos et planches finales restent à faire.
+**85 tests passent**, log `logs/native-decoded-tests.log`.
+
+## Reprise du 2026-10-11 : livraison coarse partiels, puis base seul
+
+À la demande de l'utilisateur, les full runs coarse ont été arrêtés proprement
+après 41 min 26 s : coarse1 au pas 54 669, coarse2 au pas 37 180. Les checkpoints
+latest, best et jalons restent conservés hors Git. Les EMA best sélectionnées
+sur 384 crops, pas 50 000 et 35 000, sont maintenant livrées dans
+`distill/weights/coarse1.pt` et `coarse2.pt`, avec SHA/provenance et statut
+partiel explicite. Trois fenêtres de validation ont vérifié sorties finies et
+écart nul entre EMA source et export CUDA Graph. Défauts coarse4/base original/
+decoder inchangés. Aucun poids base dans Git.
+
+L'utilisateur demande maintenant de continuer le base, sans attendre la fin des
+coarse. `base-native-next --defer-coarse` exige leurs jobs arrêtés puis lance
+directement benchmark des architectures sur5090, capture teacher sur4090,
+calibration train et pilote natif sur5090. Le serveur reste arrêté. La suite
+fusion/états élève, relief décodé/érosion/côtes, raccords froids, entraînement
+complet et planches finales demeure requise avant acceptation.
+
+## Historique : objectif coarse complets, puis base
+
+### Base natif : mesures et reprise concrète après livraison des coarse
+
+Benchmark réel5090 au repos, champ latent1024²/T2/fenêtres64/pas32/batch16,
+coarse préchargé, préparation/transferts/fusion inclus, médiane3 mesures :
+référence254 M :3,462 s ;192×2 :2,797 s ;128×2 :1,726 s (2,006×) ;
+96×2 :1,540 s ;128×1 :1,541 s ;96×1 :1,481 s. Poids candidats aléatoires,
+coût uniquement. Le128×2 (90,84 M) est retenu pour commencer avec plus de
+capacité. Preuve `bench/native-architectures/gpu1.json`. Aucun gain de qualité
+ou modèle entraîné accepté n'est déduit de cette mesure.
+
+Capture624 scènes terminée :576 train/48 val, deux phases/coordonnées/batches/
+champs fusionnés conservés. Calibration sur64 scènes train uniquement et
+contrôle strict teacher BF16 cached/interface fonctionnelle non comprimée :
+maxabs0 pour les deux, `eval/native-channel-calibration-v1.json`.
+Le pilote natif128×2 de5000 pas tourne sur5090, après projection des canaux,
+têtes et skips calibrée sur train. Première validation au pas500 :MSE vitesse
+0,234, dont initialisation0,308 et raffinement0,093 ; proxy uniquement.
+
+`native_fusion.py` reconstruit le T2 différentiable :16 fenêtres initiales,
+4 fenêtres de raffinement, cœur32² ; bruit global exact et même arithmétique
+BF16 avant fusion. Le raffinement utilise l'état élève. Targets de vitesse
+teacher et différences de recouvrement sont calculés sur ce même état, détaché.
+Loss latent, gradients, courbure hauteur et opérateurs. Test CUDA réel128×2 :
+deux pas avec gradients finis,0,797 s après chauffe,3,76 Go pic. Reconstruction
+des entrées originales exactes ; maxabs final sous1e-6 dû à l'ordre des sommes.
+Ce plancher arithmétique n'est PAS la tolérance physique BF16/FP32 en mètres.
+
+Revue CLI Opus5.5 effort high terminée, session3fd58203-84e8-41cf-a473-eac1fee97eae,
+preuves `review/opus-native-fusion-20261011/`. GO pour pilote, avec corrections
+appliquées : recouvrements on-policy, replay teacher au démarrage, sélection
+composite du pire profil. Validation48 mondes×4 offsets intérieurs,192 cœurs ;
+sampling train indépendant sur les deux axes. Tous les jalons sont conservés.
+`--fresh-noise-fraction` permet de réévaluer les deux étapes teacher sur nouveaux
+bruits pour les futurs runs longs ; le pilote reste sur les bruits capturés.
+Le témoin opérateur à calcul égal proposé par Opus est différé : ce pilote vise
+la comparaison directe au teacher, sans prétendre attribuer causalement le gain
+à une composante de loss. La resélection physique précède toute acceptation.
+
+Job durable CPU `base-native-fusion-next` attend le pilote opérateur, audite la
+reconstruction, entraîne2000 pas régionaux sur5090, puis compare les élévations
+sur7 sites×LOD3/0 et la banque rare complète. `native_inference.py` charge les
+EMA dans le solver de production inchangé. `terrain_shape.py` ajoute position
+topographique multi-échelle, rétention des vallées et directions des gradients,
+calibrées contre FP32/BF16 : proxies morphologiques, pas preuve hydrologique.
+`check_physical_seams --native-base ... --no-preview` vérifie quatre tuiles
+froides et leurs halos contre une grande requête, teacher en contrôle, deux axes.
+Aucune planche intermédiaire, aucun poids base dans Git ou le menu. Entraînement
+complet et sélection finale encore à faire après ces preuves physiques.
+
+Contrôle avant fusion sur5090 : le teacher BF16 ne reproduit pas octet pour
+octet les appels capturés sur4090. Maxabs0,25 sur l'initialisation,0,03125 au
+raffinement. Mesure indépendante FP32 sur les MÊMES entrées/batches :MSE
+BF16 inter-GPU5,93e-5/8,12e-6, plancher FP32/BF168,15e-4/2,50e-5. Les
+écarts inter-GPU sont inférieurs au plancher mesuré. Le contrôle startup garde
+les poids pinned/batches/provenance et exige RMSE ≤110% de ce plancher par
+phase, au lieu d'une identité byte incompatible avec deux architectures GPU.
+Preuve `eval/native-fusion-startup-gpu1-floor.json`. Ce contrôle réseau à
+entrées figées ne remplace pas la mesure physique FP32/BF16 de la pipeline.
+
+Le pilote opérateur est maintenant terminé :5000 pas,579,93 s,exit0, meilleur
+checkpoint au pas5000,MSE vitesse val0,08049 (initialisation0,10382 /
+raffinement0,03595), EMA/checkpoints conservés. Le job régional est réellement
+lancé sur5090 pour2000 pas ; contrôle teacher startup passé dans le plancher,
+validation initiale192 cœurs MSE latente0,08737,score pire profil composite
+0,18582. Ces mesures ne certifient pas le rendu physique ni l'érosion.
+
+L'utilisateur demande les full runs coarse1 et coarse2, puis une distillation
+base réellement plus rapide et fidèle à l'érosion. `coarse_full.py` reprend les
+pilotes5k jusqu'à200k, sur19616 train /384 val. Jobs durables `coarse-full1`
+(4090) et `coarse-full2` (5090), entraînements indépendants en cours. Les scores
+sur deux crops du pilote ne sélectionnent plus les poids du run à384 val.
+Checkpoints25k/50k/100k/150k/200k, best et latest conservés ; dossiers pilotes
+inchangés. Exports sous `ckpt/coarse-full/coarse{1,2}/export/`. Le catalogue
+préfère ces exports seulement après `delivery.json`, smoke CUDA Graph exact et
+SHA conforme. Aucun nouvel audit physique détaillé des coarse n'est demandé.
+Le serveur live est arrêté pour libérer les deux GPU.
+
+Mesure coarse corrigée sur5090 : référence20 :145 ms,8 :195 ms,4 :139 ms,
+2 :110 ms,1 :96 ms, champ128² neuf, médiane3 répétitions, préparation et
+transferts inclus. La référence utilise4 streams, les élèves1. L'ancien
+compteur autour du wrapper CUDA provoquait des captures imbriquées dans le
+banc coarse ; les anciennes accélérations coarse ne sont pas réutilisées.
+Preuve : `bench/coarse-choice-20261011/gpu1.json` et son script externe.
+
+Revue indépendante **Opus5.5, effort high**, session
+479ac10b-9b24-41f7-8ff7-39fc877964ec, lecture seule, terminée. Réponse longue
+archivée, puis reformulation demandée :408 mots, une page. Sources et preuves
+sous `review/opus-base-20261011{,-brief}/`. Analyse : chronométrer avant long
+training ; conserver embeddings/conditionnement58 etT2 ; élaguer les têtes
+entières en respectant QKV entrelacés et les deux groupes de chaque skip ;
+calibrer sur train uniquement ; apprendre la fusion et les états élève en phase2.
+Les gains estimés par Opus restent des hypothèses. Les4 streams concernent le
+coarse, alors que le base conserve le vrai batching de production.
+
+`native_compression.py` implémente la projection explicite des tenseurs et
+conserve la base des embeddings du teacher. Configurations :128×2 :90,84 M,
+96×2 :52,53 M,128×1 :65,77 M,96×1 :38,06 M. Les tests CPU vérifient identité
+teacher non comprimé, skips, QKV entrelacés, têtes, sorties et gradients finis.
+Ce sont des paramètres et des preuves de code, pas des gains GPU ni une
+acceptation visuelle. Le pilote199 M existant reste conservé, sans prolongation.
+
+Job CPU `base-native-next` : attend les handles terminaux et les livraisons
+200k des deux coarse, puis benchmark `bench_native.py` sur5090 au repos,
+sans compteurs. Première architecture native atteignant2× sur le champ complet,
+dans l'ordre128×2/96×2/128×1/96×1, retenue pour un pilote. Ce seuil élimine les
+pilotes sans intérêt de vitesse ; il ne constitue pas l'objectif final.
+`native_bank.py` prépare624 scènes128² :576 propositions terre/côte/mer sur
+192 mondes train,48 nouveaux mondes val séparés, aucun seed réservé. Capture
+GPU4090, appels BF16 stockés en FP32, coordonnées et tailles de batch originales,
+cibles finales fusionnées et champ initial pondéré conservés. Calibration puis
+pilote5000 pas sur5090. Les contrôles teacher reconstruit et interface de training
+non comprimée précèdent le pilote ; erreurs par phase et variance enregistrées.
+
+La suite reste **inachevée** : training à travers la fusion, cibles teacher sur
+états élève, rendu décodé/érosion/côte, raccords froids et halos, entraînement
+complet du meilleur base, mesures de vitesse et planches finales de décision.
+Aucun nouveau base n'est dans le menu ni dans Git. Plan et éléments de revue :
+[BASE_PLAN_20261011.md](BASE_PLAN_20261011.md).
+
+## Reprise autorisée du 2026-10-11
+
+L'utilisateur supprime le diagnostic supplémentaire des anciens bases : leur
+perte visible des vallées d'érosion suffit à les rejeter. Repartir directement
+du teacher. `native_base.py` prépare un pilote à deux blocs par niveau au lieu
+de trois, avec poids transférés, même conditionnement58, attention, fenêtres64
+au pas32 et génération à deux étapes. Ses cibles sont les vrais appels natifs
+du teacher, conservés séparément pour les mondes train/val existants. Le job
+durable `base-native-pilot` est ordonnancé après les essais coarse sur GPU0.
+Les nouvelles planches physiques restent réservées à la sélection finale.
+
+Coarse2 et coarse1 sont autorisés pour essai direct dans l'app, sans évaluation
+physique détaillée. `coarse-short-trials` entraîne chacun5 000 pas depuis les
+poids du coarse4, avec nouvel optimiseur. Ce budget est un pilote, pas une
+garantie de convergence. Une fenêtre complète doit produire des valeurs finies
+et un export identique en CUDA Graph avant disponibilité dans le menu.
+Coarse4/base original/decoder distillé restent les défauts. Les anciens bases
+distillés sont retirés du catalogue. À la demande explicite de l'utilisateur,
+les poids coarse8/coarse4/decoder sont maintenant versionnés sous
+`distill/weights/`, avec SHA et provenance ; aucun poids base n'est versionné.
+
+La reprise initiale est terminée : les deux coarse ont fini5 000 pas chacun,
+leur export donne un écart maximal nul sur une fenêtre complète en CUDA Graph,
+et le catalogue HTTP propose original/8/4/2/1 après redémarrage du serveur.
+Preuve : `live/coarse-short-delivery.json`. Aucun audit physique détaillé des
+coarse2/1 n'a été lancé ; leur qualité reste à juger par l'utilisateur.
+
+Le pilote base natif a terminé1 000 pas, exit0 :199 M paramètres au lieu de254 M,
+300 fenêtres train et150 val issues de mondes distincts, phases d'initialisation
+et de raffinement équilibrées au sampling. Initial, pas250, pas1000, best et
+latest sont conservés sous `ckpt/base-native-pilot/`, avec optimiseur et RNG.
+La validation de l'opérateur s'améliore ; le rendu physique et la conservation
+des vallées n'ont pas encore été vérifiés. Ce prototype n'est pas promu dans
+l'app et ses poids ne sont pas dans Git. Les63 tests CPU passent.
+
+## État avant cette reprise, après les tests live utilisateur
 
 Coarse8 et decoder distillés conviennent visuellement à l'utilisateur.
 **Tous les bases distillés actuels sont insuffisants**, y compris128 initial :

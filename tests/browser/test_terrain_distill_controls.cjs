@@ -18,7 +18,7 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR
     let models = {selection: {coarse: 'solver4', base: 'teacher', decoder: 'distilled200k'},
       revision: 'initial', switching: false, options: {
         coarse: [{id: 'teacher', label: 'Original'}, {id: 'solver4', label: 'Distillé · 4 étapes'}, {id: 'solver8', label: 'Distillé · 8 étapes'}],
-        base: [{id: 'teacher', label: 'Original'}], decoder: [{id: 'teacher', label: 'Original'}, {id: 'distilled200k', label: 'Distillé'}]}};
+        base: [{id: 'teacher', label: 'Original'}, {id: 'nf4_b75', label: 'Distillé · NF4 B75 · 150 Mo'}], decoder: [{id: 'teacher', label: 'Original'}, {id: 'distilled200k', label: 'Distillé'}]}};
     page.on('pageerror', error => errors.push(error.message));
     await page.route('https://nn.test/**', async route => {
       const url = new URL(route.request().url());
@@ -55,10 +55,11 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR
     await page.locator('#distillCoarse option[value="solver8"]').waitFor({state: 'attached'});
     assert.equal(await page.inputValue('#distillCoarse'), 'solver4');
     await page.selectOption('#distillCoarse', 'solver8');
+    await page.selectOption('#distillBase', 'nf4_b75');
     await page.selectOption('#distillDecoder', 'teacher');
     await page.click('#distillApply');
     await page.waitForFunction(() => document.querySelector('#distillStatus').textContent.startsWith('NN appliqués'));
-    assert.deepEqual(changes[0], {selection: {coarse: 'solver8', base: 'teacher', decoder: 'teacher'}, reset: false});
+    assert.deepEqual(changes[0], {selection: {coarse: 'solver8', base: 'nf4_b75', decoder: 'teacher'}, reset: false});
     assert.deepEqual(worlds.at(-1), firstWorld, 'Applying NN retains the seed and Orogen settings');
     await page.click('#distillReset');
     await page.waitForFunction(() => document.querySelector('#distillStatus').textContent.startsWith('Cache NN réinitialisé'));

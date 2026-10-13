@@ -1,5 +1,6 @@
 """Review switching validates choices and separates all neural cache identities."""
 import json
+import hashlib
 from pathlib import Path
 import tempfile
 import threading
@@ -104,16 +105,36 @@ class LiveModelTests(unittest.TestCase):
             models.save_request(dict(selection=selection))
             self.assertEqual(LiveModels(models.path, options).selection, selection)
 
+    def test_full_coarse_replaces_pilot_only_after_matching_export_delivery(self):
+        root = self.install_review_exports()
+        pilot = root/'live/weights/coarse1/coarse.pt'
+        pilot.parent.mkdir(parents=True)
+        pilot.write_bytes(b'preserved-pilot')
+        full = root/'ckpt/coarse-full/coarse1/export/coarse.pt'
+        full.parent.mkdir(parents=True)
+        full.write_bytes(b'full-export')
+        options = lambda: catalog(root, bundled_root=root/'bundled')['coarse']['solver1']
+        self.assertEqual(options()['path'], str(pilot))
+        delivery = full.parent.parent/'delivery.json'
+        proof = dict(status='complete', export_max_abs=0.,
+                     export=dict(export=dict(sha256=hashlib.sha256(full.read_bytes()).hexdigest())))
+        atomic_json(delivery, proof)
+        self.assertEqual(options()['path'], str(full))
+        full.write_bytes(b'changed-after-verification')
+        self.assertEqual(options()['path'], str(pilot))
+
     def test_bundled_weights_work_without_the_external_training_directory(self):
         root = Path(self.directory.name)
         bundled = root/'bundled'
         bundled.mkdir()
-        for name in ('coarse8', 'coarse4', 'decoder'):
+        for name in ('coarse8', 'coarse4', 'coarse2', 'coarse1', 'decoder'):
             (bundled/(name+'.pt')).write_bytes(name.encode())
         options = catalog(root/'empty-data', bundled_root=bundled)
         models = LiveModels(root/'new-config.json', options)
         self.assertEqual(models.selection, DEFAULT_SELECTION)
         self.assertEqual(options['coarse']['solver4']['path'], str(bundled/'coarse4.pt'))
+        self.assertEqual(options['coarse']['solver2']['path'], str(bundled/'coarse2.pt'))
+        self.assertEqual(options['coarse']['solver1']['path'], str(bundled/'coarse1.pt'))
         self.assertEqual(options['decoder']['distilled200k']['path'], str(bundled/'decoder.pt'))
         self.assertEqual(set(options['base']), {'teacher'})
 
@@ -127,6 +148,88 @@ class LiveModelTests(unittest.TestCase):
         self.assertEqual(set(options['base']), {'teacher'})
         with self.assertRaises(ValueError):
             validate_selection(dict(DEFAULT_SELECTION, base='initial128'), options)
+
+    def test_native_candidate_requires_matching_full_tensor_audit(self):
+        root=self.install_review_exports()
+        native=root/'ckpt/native-weight-nf4-100k/step070000.pt'
+        native.parent.mkdir(parents=True);native.write_bytes(b'new-native-export')
+        proof=root/'eval/native-nf4-artifact70000-5090-audit.json'
+        proof.parent.mkdir()
+        options=lambda:catalog(root,bundled_root=root/'bundled')
+        self.assertNotIn('nf4_70k',options()['base'])
+        atomic_json(proof,dict(status='complete',tensor_count=174,
+            checkpoint_sha256=hashlib.sha256(native.read_bytes()).hexdigest()))
+        self.assertEqual(options()['base']['nf4_70k']['format'],'native')
+        self.assertEqual(LiveModels(root/'new-config.json',options()).selection,DEFAULT_SELECTION)
+        native.write_bytes(b'changed-native-export')
+        self.assertNotIn('nf4_70k',options()['base'])
+
+    def test_native_counter_preserves_forward_and_separates_world_counts(self):
+        import torch
+        from distill.native_live_runtime import NativeLiveBase
+        net=torch.nn.Linear(2,2).eval().requires_grad_(False)
+        net._terrain_custom_base=True
+        x=torch.ones(1,2)
+        first=dict(calls=0,output_pixels=0);second=dict(calls=0,output_pixels=0)
+        a,b=NativeLiveBase(net,first),NativeLiveBase(net,second)
+        self.assertTrue(torch.equal(a(x),net(x)))
+        self.assertEqual(first['calls'],1);self.assertEqual(second['calls'],0)
+        self.assertTrue(a._terrain_custom_base)
+        b(x);self.assertEqual(first['calls'],1);self.assertEqual(second['calls'],1)
+
+    def test_compact_b75_requires_both_pinned_files_and_persists_selection(self):
+        from distill.compact_release import RELEASE
+        root = self.install_review_exports()
+        compact = root/'releases'/RELEASE
+        compact.mkdir(parents=True)
+        payloads = {'manifest.json': b'fixed-manifest', 'weights.bin': b'fixed-weights'}
+        hashes = {name: hashlib.sha256(value).hexdigest() for name, value in payloads.items()}
+        with patch('distill.compact_release.HASHES', hashes):
+            for name, payload in payloads.items():
+                (compact/name).write_bytes(payload)
+            options = catalog(root, bundled_root=root/'bundled')
+            self.assertEqual(options['base']['nf4_b75']['format'], 'scalar-packed')
+            models = LiveModels(root/'new-config.json', options)
+            models.save_request(dict(selection=dict(DEFAULT_SELECTION, base='nf4_b75')))
+            self.assertEqual(LiveModels(models.path, options).selection['base'], 'nf4_b75')
+            (compact/'manifest.json').write_bytes(b'changed')
+            self.assertNotIn('nf4_b75', catalog(root, bundled_root=root/'bundled')['base'])
+
+    def test_compact_base_loads_once_and_installs_through_native_interface(self):
+        import torch
+        root = Path(self.directory.name)
+        artifact = root/'weights.bin'
+        artifact.write_bytes(b'packed')
+        options = {stage: {'teacher': dict(label='Original', path=None)} for stage in STAGES}
+        options['base']['nf4_b75'] = dict(label='B75', path=str(artifact), directory=str(root),
+            sha256=hashlib.sha256(artifact.read_bytes()).hexdigest(), format='scalar-packed')
+        atomic_json(self.path, dict(selection=dict.fromkeys(STAGES, 'teacher') | {'base': 'nf4_b75'},
+                                   revision='compact', reset='keep'))
+        models = LiveModels(self.path, options)
+        net = torch.nn.Conv2d(5, 5, 1).eval()
+        world = SimpleNamespace(device='cpu')
+        with patch('distill.compact_release.verified', return_value=True), \
+             patch('distill.native_scalar_pack.runtime_scalar_packed', return_value=net) as load:
+            models.install(world)
+            models.install(SimpleNamespace(device='cpu'))
+            load.assert_called_once_with(str(root), 'cpu')
+        inputs = torch.zeros(1, 5, 8, 8)
+        self.assertTrue(torch.equal(world.base_model(inputs), net(inputs)))
+        self.assertEqual(world._distill_counts['base']['calls'], 1)
+
+    def test_native_install_preserves_other_student_counters(self):
+        import torch
+        from types import SimpleNamespace
+        from distill.native_live_runtime import install
+        counts=dict(coarse=dict(calls=7,output_pixels=16384),decoder=dict(calls=3,output_pixels=256))
+        world=SimpleNamespace(_distill_counts=counts)
+        model=torch.nn.Conv2d(5,5,1).eval().requires_grad_(False)
+        install(world,model)
+        inputs=torch.zeros(2,5,8,8)
+        self.assertTrue(torch.equal(world.base_model(inputs),model(inputs)))
+        self.assertEqual(world._distill_counts['base'],dict(calls=1,output_pixels=128))
+        self.assertEqual(counts['coarse']['calls'],7)
+        self.assertEqual(counts['decoder']['calls'],3)
 
     def test_legacy_base_is_retired_without_resetting_or_changing_other_choices(self):
         root = self.install_review_exports()
