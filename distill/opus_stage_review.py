@@ -21,11 +21,15 @@ def main():
         raise ValueError('Preserve the existing review; no automatic duplicate.')
     output.mkdir(parents=True)
     session = str(uuid.uuid4())
+    companion = args.report.parent/'ADDITIONAL_EVIDENCE.md'
+    additional = [dict(path=str(companion), sha256=file_sha(companion))] if companion.exists() else []
     contract = dict(report=str(args.report), report_sha256=file_sha(args.report),
                     requested_model='claude-opus-5-5', effort='xhigh', session_id=session,
+                    additional_evidence=additional,
                     scope='Full read-only stage review; no training or model changes')
     atomic_json(output/'contract.json', contract)
     prompt = f'''Lis le rapport de fin d'étape {args.report}, puis le code et les preuves auxquels il renvoie.
+Lis également les preuves complémentaires si présentes : {json.dumps(additional, ensure_ascii=False)}.
 L'utilisateur demande ton avis après chaque grande étape pour accélérer le base tout en conservant un look correct.
 Fais une revue complète, pas une version condensée. Distingue les faits des hypothèses.
 Évalue la récupération du relief et des vallées humides, le grain des plaines, les côtes, le biais d'altitude,

@@ -51,6 +51,18 @@ conserve la revue **complète**, le transcript et l'identité du modèle sous
 contrôle concerné ; aucun redémarrage silencieux. L'avis doit être analysé avant
 de fixer la récupération suivante.
 
+Un contrôle BF16/FP32 utilise exactement les mêmes sept scènes, bruits et
+conditionnements sur4090, avec le même decoder original et les deux coarses.
+Résultats : `~/data/distill/eval/native-progressive160-precision-floor-v2-4090/`.
+Les28 lignes sont reproduites exactement, les14 répétitions du teacher BF16
+identiques, et les56 champs NPZ vérifiés. MAE moyenne naturelle :9–10m au
+LOD3,9m au LOD0. Les métriques par scène servent aussi à apprécier le grain,
+les côtes et les vallées ; cette moyenne n'est pas un critère suffisant.
+Le premier calcul avait des clés NPZ ambiguës entre deux catégories partageant
+une seed ; le dossierv2 corrige l'archive et reproduit les métriques exactement.
+`ADDITIONAL_EVIDENCE.md` à côté du rapport de palier référence ce contrôle et
+les observations à2k ; le lanceur Opus lit et trace aussi ce complément.
+
 ## Paliers suivants
 
 1. Récupération du réseau160, ordre de grandeur30kpas, ajustée avec la revue.
