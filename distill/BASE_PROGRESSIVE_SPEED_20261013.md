@@ -1,5 +1,10 @@
 # Programme lancé : accélérer le base par réduction progressive
 
+Objectif actif étendu le13octobre : **accélérer le base et les deux autres
+réseaux**. La réussite finale inclut les poids intégrables des trois réseaux,
+leurs comparaisons qualité/vitesse et le gain mesuré de la chaîne complète.
+Le base demeure le premier chantier ; decoder et coarse suivent.
+
 Autorisation du 13 octobre : lancer les entraînements et faire reviewer chaque
 grande étape par **Opus 5.5**. B75 publié reste disponible pour l'intégration.
 La nouvelle cible est le gain de calcul à qualité visuelle proche, avec poids
