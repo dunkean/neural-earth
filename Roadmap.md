@@ -4,13 +4,11 @@ Now:
 - Render noises sont bien loins et très pres nul le reste
 - map/view compressed UID > to upgrade
 - Exports
-
-Short term:
-- Saisons
-- Negative LOD finetuning: either Decoder retraining ((RGE ALTI, swissALTI3D, USGS 3DEP) - fake heightmap normalization + noise (done)
 - Basins then multiscale rivers: try Magna Urbis gpu erosions rivers (fix FP16 straight lines / test on IG reliefs)
 
-Mid/Long term:
+Later:
+- Saisons
+- Negative LOD finetuning: either Decoder retraining ((RGE ALTI, swissALTI3D, USGS 3DEP) - fake heightmap normalization + noise (done)
 - Brush map layer
 - Multiscale ressources / roads / settlements implantation
 - Full WASM engine

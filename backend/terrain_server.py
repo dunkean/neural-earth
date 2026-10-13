@@ -1241,6 +1241,11 @@ def globe_script():
     return send_from_directory(WEB_ROOT, 'terrain_globe.js')
 
 
+@app.get('/terrain_transport.js')
+def transport_script():
+    return send_from_directory(WEB_ROOT, 'terrain_transport.js')
+
+
 @app.get('/terrain_styles.js')
 def styles_script():
     source='window.TerrainStyles='+json.dumps(STYLES)+';\n'+(source_path('terrain_style_rendering.js', root=ROOT)).read_text(encoding='utf-8')
@@ -1250,6 +1255,20 @@ def styles_script():
 @app.get('/terrain_lighting.js')
 def lighting_script():
     return send_from_directory(WEB_ROOT, 'terrain_lighting.js')
+
+
+@app.get('/fantasy_brush_assets.js')
+@app.get('/fantasy_painting.js')
+@app.get('/terrain_fantasy.js')
+@app.get('/fantasy-ink-atlas.png')
+@app.get('/fantasy-color-atlas.png')
+def fantasy_assets():
+    return send_from_directory(WEB_ROOT, request.path.rsplit('/', 1)[-1])
+
+
+@app.get('/fantasy-brushes/<path:filename>')
+def fantasy_brush_sheet(filename):
+    return send_from_directory(WEB_ROOT / 'fantasy-brushes', filename)
 
 
 @app.get('/terrain_renderer.js')

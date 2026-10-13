@@ -7,7 +7,7 @@ window.TerrainInferenceControls=(()=>{
     throughput:'Coarse windows stay on the coarse GPU. Latent/decoder tiles are shared between GPUs by blocks of 2×2 tiles. Tiles from different GPU models may differ by a few metres at block borders.',
     consistent:'Coarse on one GPU, latent/decoder on the other: each window always comes from the same GPU. Uses a different coarse GPU, hence a new world cache.'};
   function gib(bytes){return Math.round(bytes/1024**3)+' GB'}
-  function mountGpus(panel,{fetchGpu=(path,options)=>fetch(path,options),reload=()=>location.reload()}={}){
+  function mountGpus(panel,{fetchGpu=(path,options)=>(window.TerrainTransport?.fetch||fetch)(path,options),reload=()=>location.reload()}={}){
     const section=document.createElement('div');
     section.id='gpuSettings';
     section.innerHTML='<label>GPUs <select id="gpuMode" aria-label="GPU mode"></select></label><ul id="gpuDevices" aria-label="GPU devices"></ul><small id="gpuHelp"></small><small id="gpuStatus" role="status"></small><button id="gpuRestart" type="button" hidden>Restart server to apply</button>';

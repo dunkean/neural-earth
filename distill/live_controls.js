@@ -35,7 +35,7 @@
   }
   let state;
   async function read() {
-    const response = await fetch('/api/distill/models', {cache: 'no-store'});
+    const response = await (window.TerrainTransport?.fetch||fetch)('/api/distill/models', {cache: 'no-store'});
     if (!response.ok) throw Error('Modèles indisponibles');
     return response.json();
   }
@@ -60,7 +60,7 @@
     clearTimeout(timer);
     status.textContent = 'Application…';
     try {
-      const response = await fetch('/api/distill/models', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({selection, reset})});
+      const response = await (window.TerrainTransport?.fetch||fetch)('/api/distill/models', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({selection, reset})});
       const change = await response.json();
       if (!response.ok) throw Error(change.error || 'Changement refusé');
       const deadline = Date.now() + 180000;

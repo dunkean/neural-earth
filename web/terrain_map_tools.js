@@ -50,7 +50,7 @@
         if (tile.lod===4) params.set('coarse_interpolation',s.coarseInterpolation||'monotone');
         if (tile.source_lod) params.set('source_lod',String(tile.source_lod));
         if (s.world.world_identity) params.set('world_identity', s.world.world_identity);
-        const response = await fetch(`${s.backendPrefix||''}/height/${s.world.version}/${tile.path}.bin?${params}`, {signal:controller.signal});
+        const response = await (window.TerrainTransport?.fetch||fetch)(`${s.backendPrefix||''}/height/${s.world.version}/${tile.path}.bin?${params}`, {signal:controller.signal});
         if (!response.ok) throw Error('Elevation unavailable');
         if(tile.source_lod&&Number(response.headers.get('X-Terrain-Source-Resolution'))!==30*2**tile.source_lod)throw Error('Unexpected elevation source');
         const bytes = await response.arrayBuffer(), width = Number(response.headers.get('X-Terrain-Width') || 304);

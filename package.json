@@ -6,7 +6,12 @@
   },
   "scripts": {
     "test": "node tools/run-tests.cjs tests/browser",
-    "test:webgpu": "node tools/run-tests.cjs webgpu"
+    "test:webgpu": "node tools/run-tests.cjs webgpu",
+    "build:wasm": "node tools/wasm/build.mjs",
+    "serve:wasm": "node tools/wasm/serve.mjs",
+    "test:wasm": "node tools/run-tests.cjs tests/wasm",
+    "verify:wasm": "node tools/wasm/verify-browser.cjs",
+    "bench:wasm": "node tools/wasm/bench-browser.cjs"
   },
   "devDependencies": {
     "playwright": "1.63.0"

@@ -51,7 +51,7 @@ window.TerrainToolbar=(()=>{
     ].map(([color,name])=>`<span style="display:inline-block;margin-right:10px"><i style="display:inline-block;width:9px;height:9px;margin-right:4px;background:${color}"></i>${name}</span>`).join('');
     $('hud').prepend(pedologyLegend);
     const sections=[
-      ['Main maps',['relief','render','soil','pedology','orogen-biomes','temperature','precipitation','orogen-koppen']],
+      ['Main maps',['fantasy-ink','fantasy-color','relief','render','soil','pedology','orogen-biomes','temperature','precipitation','orogen-koppen']],
       ['Map styles',Object.keys(window.TerrainStyles||{})],
       ['Seasonal climate',['orogen-temperature-summer','orogen-temperature-winter','orogen-precip-summer','orogen-precip-winter']],
       ['Atmosphere',['orogen-pressure-summer','orogen-pressure-winter','orogen-wind-summer','orogen-wind-winter','orogen-rain-shadow','orogen-continentality']],

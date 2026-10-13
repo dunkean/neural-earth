@@ -46,7 +46,15 @@ The menu also includes seasonal climate, crust types, plate boundaries, converge
 
 ## Install and run
 
-This is a **local Linux/Windows Python application**. Neural inference requires an **NVIDIA GPU with CUDA and BF16 support**. A **24 GB GPU such as the RTX 3090** is the tested reference for comfortable exploration; smaller cards have no certified minimum configuration. Browser WebGPU accelerates rendering; the neural networks run on the Python server. PNG fallback still needs CUDA.
+The **browser WASM edition** runs rendering and Rust neural inference locally,
+with no Python/PyTorch backend. Build with `npm run build:wasm`, then run
+`npm run serve:wasm` and open **http://127.0.0.1:8780**. It reuses the viewer,
+Orogen sources and the existing Rust network port. It uses the distilled NF4 B75
+base and downloads about 162 MB of model weights. WebGPU is required; FP16 and
+subgroups are optional, with FP32 inference on devices without FP16. See the
+[browser build, shared architecture and current feature differences](docs/wasm.md).
+
+The **Python/PyTorch edition** is a local Linux/Windows application. Its neural inference requires an **NVIDIA GPU with CUDA and BF16 support**. A **24 GB GPU such as the RTX 3090** is the tested reference for comfortable exploration; smaller cards have no certified minimum configuration. Browser WebGPU accelerates rendering; the neural networks run on the Python server. PNG fallback still needs CUDA.
 
 Install Python 3.12, Node.js 20+ and an NVIDIA driver compatible with the locked CUDA 12.8 build:
 
@@ -148,7 +156,7 @@ The camera remains responsive while visible regions receive priority. Parent til
 - **Settings** controls source relief, erosion and climate. Each tab generates its stage; **Generate full pipeline** runs all three.
 - **Layer menu** selects surface, climate, geology and cartographic views.
 - **Rendering** controls lighting, contours, materials, cache budget and refinement depth.
-- **NN** selects original or distilled coarse and decoder models. **Apply NN** reloads the same view; **Reset after Orogen** recalculates neural terrain while retaining the generated world. The initial selection uses coarse at four steps, the original base and the distilled decoder. [Model controls](distill/LIVE.md).
+- **NN** selects original or distilled models in the Python edition. **Apply NN** reloads the same view; **Reset after Orogen** recalculates neural terrain while retaining the generated world. Python initially selects coarse at four steps, the original base and the distilled decoder; the browser edition uses the distilled NF4 B75 base. [Model controls](distill/LIVE.md).
 - **SNR** controls allowed conditioning noise: lower values follow the source more closely. Per-LOD controls separately scale displayed relief detail.
 - **Tools → Prepare neural world** enables optional global coarse preparation. Visible regions remain prioritized.
 - Share the URL to preserve seed, generation settings, camera and display preferences. **Save A / Show A** compares applied variants.
