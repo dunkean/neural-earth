@@ -5,6 +5,14 @@ grande étape par **Opus 5.5**. B75 publié reste disponible pour l'intégration
 La nouvelle cible est le gain de calcul à qualité visuelle proche, avec poids
 compatibles avec le budget de téléchargement. Aucun gain final n'est déclaré.
 
+Priorité précisée par l'utilisateur : accélérer fortement toute la chaîne,
+en acceptant un peu de noise si le résultat reste visuellement correct.
+Ne pas attendre la perfection pour proposer un modèle plus rapide. Conserver
+des candidats de compromis qualité/vitesse pour les essais dans l'application,
+avec leurs défauts documentés. Les vallées, l'organisation du relief et les
+côtes restent les points de vigilance ; l'égalité numérique avec le teacher
+n'est pas une condition de sélection.
+
 ## Premier palier en cours
 
 Job `base-progressive160-anneal20k-5090`, données et checkpoints sous
@@ -79,11 +87,21 @@ les observations à2k ; le lanceur Opus lit et trace aussi ce complément.
    ne sont pas encore figées, les avis et images peuvent les modifier.
 3. QAT/stockage du réseau retenu, réel benchmark CPU/GPU selon intégration,
    lieux rares/réservés, raccords canoniques et ordinaires, bonnes planches512px
-   et nouvelle release. Objectif initial : environ2× mesuré, sans promettre
+   et nouvelle release. Premier objectif intermédiaire : environ2× mesuré, sans promettre
    que la baisse de FLOPs se convertira exactement en baisse de latence.
 
-La suppression de blocs puis la distillation vers une passe restent des
-étapes ultérieures, après un modèle plus étroit jugé correct.
+4. Pousser ensuite le gain : moins de blocs, puis une passe réellement
+   distillée vers la sortie du teacher à deux passes. Tester ces réductions
+   séparément en gardant les meilleurs compromis précédents. Supprimer
+   directement la seconde passe du teacher n'est pas cette distillation.
+   La priorité de vitesse justifie ces paliers au-delà du premier gain2×,
+   si les résultats visuels restent corrects. Mesurer chaque gain effectif.
+
+Les métriques servent à expliquer et comparer les défauts, et à surveiller
+les cas rares ; un peu de bruit résiduel ne bloque pas à lui seul un candidat
+utile et sensiblement plus rapide. Les comparaisons de vitesse incluront les
+réseaux isolés et une vue complète avec la même chaîne et le même protocole
+de cache, afin de détecter le déplacement du goulot.
 
 ## Après validation du base : accélérer les autres réseaux
 
@@ -105,6 +123,8 @@ métriques de comparaison, et demander une revue complète à Opus 5.5 après
 chaque grande étape. Les versions actuelles restent disponibles pour les
 comparaisons et l'intégration. Les recettes précises seront choisies à partir
 des mesures ; aucun entraînement de ces réseaux ne précède la fin du base.
+L'objectif est aussi une forte accélération pour ces réseaux, avec la même
+tolérance explicite à un peu de bruit et des compromis à tester en live.
 
 ## Contrôles de lancement
 

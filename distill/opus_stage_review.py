@@ -31,6 +31,9 @@ def main():
     prompt = f'''Lis le rapport de fin d'étape {args.report}, puis le code et les preuves auxquels il renvoie.
 Lis également les preuves complémentaires si présentes : {json.dumps(additional, ensure_ascii=False)}.
 L'utilisateur demande ton avis après chaque grande étape pour accélérer le base tout en conservant un look correct.
+Sa priorité est une forte accélération de toute la chaîne ; il accepte un peu de bruit si le relief reste correct.
+N'attends pas la perfection numérique pour recommander un candidat utile. Distingue le bruit tolérable d'une perte
+des vallées, de l'organisation du relief ou des côtes, et propose des compromis qualité/vitesse concrets.
 Fais une revue complète, pas une version condensée. Distingue les faits des hypothèses.
 Évalue la récupération du relief et des vallées humides, le grain des plaines, les côtes, le biais d'altitude,
 la continuité prévue entre tuiles, et le gain de vitesse effectivement mesuré.
@@ -38,6 +41,8 @@ Audite la réduction progressive des canaux, les normalisations MP, skips, QKV e
 Explique les défauts observés, les risques ou erreurs de protocole, et recommande concrètement la prochaine étape :
 récupération prolongée en160, modification ciblée, ou passage ultérieur vers128. Ne conclue pas à une limite de
 capacité à partir d'une courte récupération. Le base B75 publié est la référence de produit, le teacher original la cible.
+Pour les paliers suivants, considère aussi moins de blocs et une passe réellement distillée vers la sortie du teacher
+à deux passes ; le gain2× du réseau plus étroit est un premier objectif intermédiaire, pas la limite du programme.
 Lis les résultats utiles et quelques planches. Ne lance aucun calcul, n'écris aucun fichier et ne change rien.
 Donne l'avis final complet dans ta réponse, avec les chemins des preuves utilisées.'''
     (output/'prompt.txt').write_text(prompt)
