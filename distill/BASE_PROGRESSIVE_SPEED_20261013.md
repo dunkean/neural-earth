@@ -55,6 +55,12 @@ de fixer la récupération suivante.
 
 1. Récupération du réseau160, ordre de grandeur30kpas, ajustée avec la revue.
    Nouvelle revue Opus sur qualité, vitesse et raccords.
+   Le helper `native_progressive_features.py` prépare l'alignement des features :
+   après compaction, seuls les canaux du teacher sont sélectionnés suivant
+   `original_teacher_channel_mapping`, ceux de l'élève sont déjà consécutifs.
+   Trois testsCPU vérifient des coordonnées non contiguës, le gradient réservé
+   à l'élève et le rejet des mappings incohérents. Cela prépare la reprise ;
+   son entraînement attend toujours la revue du premier palier.
 2. Réduction graduelle160→128 en conservant les trois blocs/deux passes, puis
    récupération. Ordre de grandeur20k+30kpas, avec revue entre grands paliers.
    Environ100kpasses au total pour cette proposition ; les recettes suivantes
