@@ -83,7 +83,10 @@ def evaluate(checkpoint, output, coarse='coarse4', label='progressive160'):
     draw.text((12, 10), f'Reduction192 vers160 | etape {saved["step"]} | retrait {saved["amount"]:.3f} | {coarse}', fill='white', font=font)
     draw.text((12, 40), 'Teacher recalcule meme GPU/bruit, decoder original. Champs32/256px agrandis; pas de lissage ajoute.', fill='white', font=font)
     draw.text((left, 83), 'Teacher BF16', fill='white', font=font)
-    draw.text((left+size+gap, 83), 'Eleve progressif EMA', fill='white', font=font)
+    selected_weights = saved.get('selected_weights', 'ema')
+    caption = {'ema':'Eleve progressif EMA', 'raw':'Eleve, poids bruts',
+               'untrained':'Teacher projete, sans entrainement'}.get(selected_weights, selected_weights)
+    draw.text((left+size+gap, 83), caption, fill='white', font=font)
     names = LABELS|{KIND:'Haute montagne humide'}
     for i, (row, pair) in enumerate(zip(rows, fields, strict=True)):
         y = header+i*row_height
@@ -98,6 +101,7 @@ def evaluate(checkpoint, output, coarse='coarse4', label='progressive160'):
     stem.with_suffix('.txt').write_text('Comparaison appariee meme GPU/bruit, teacher BF16 recalcule, decoder original. Champs natifs32/256px agrandis. CSV/JSON donnent les metriques et la morphologie.\n')
     report = dict(status='complete', checkpoint=str(checkpoint), checkpoint_sha256=file_sha(checkpoint),
         gpu=torch.cuda.get_device_name(), step=saved['step'], amount=saved['amount'], rows=rows,
+        selected_weights=selected_weights,
         reference_scope='Teacher original BF16 recomputed on same GPU, source noise and conditioning.', accepted=False)
     atomic_json(stem.with_suffix('.json'), report)
     append_json(DATA/'_base/image-publications.jsonl', dict(image=str(stem.with_suffix('.png')), step=saved['step'], coarse=coarse, label='progressive160'))

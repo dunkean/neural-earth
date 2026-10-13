@@ -28,7 +28,7 @@ def main():
                     additional_evidence=additional,
                     scope='Full read-only stage review; no training or model changes')
     atomic_json(output/'contract.json', contract)
-    prompt = f'''Lis le rapport de fin d'étape {args.report}, puis le code et les preuves auxquels il renvoie.
+    prompt = f'''Lis le rapport d'étape {args.report}, puis le code et les preuves auxquels il renvoie.
 Lis également les preuves complémentaires si présentes : {json.dumps(additional, ensure_ascii=False)}.
 L'utilisateur demande ton avis après chaque grande étape pour accélérer le base tout en conservant un look correct.
 Sa priorité est une forte accélération de toute la chaîne ; il accepte un peu de bruit si le relief reste correct.
