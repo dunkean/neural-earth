@@ -70,6 +70,8 @@ def main():
     parser.add_argument('--bundled', type=Path, default=REPO/'distill/weights')
     parser.add_argument('--write', action='store_true', help='Replace the bundled coarse1/2 and their manifest.')
     args = parser.parse_args()
+    if args.write and (args.bundled.resolve()==REPO or REPO in args.bundled.resolve().parents):
+        parser.error('Retired distribution: use python -m distill.bundle_selected_models --write. Historical coarse1/2 exports belong outside Git.')
     manifest_path = args.bundled/'manifest.json'
     try:
         payloads, manifest = prepare(args.root, json.loads(manifest_path.read_text()))

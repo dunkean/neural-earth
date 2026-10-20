@@ -79,6 +79,15 @@ Prepare the geography inputs and runtime directory using the [installation guide
 
 On Linux, use `./start-neural-earth.sh` (add `--no-open` for unattended startup). On Windows, double-click **start-neural-earth.cmd**. Open **http://127.0.0.1:8765**. Pinned model weights download on first use; loading all three networks and preparing CUDA Graphs takes time.
 
+The **NN** menu offers the three original models and the curated coarse8/25k,
+coarse2/200k, decoder64/200k and decoder16/10k versions. The continuous map
+defaults to coarse8, the original base and decoder64. The linked **40 × 40 km
+tile** workflow uses residual48/8k with coarse2 and either selected decoder;
+it offers Python server inference (CUDA or CPU, selected by default), or browser
+CPU/WebGPU inference. Other experimental weights are excluded.
+See [model selection and installation](distill/LIVE.md). To download the three
+originals ahead of first use, run `python tools/download_models.py`.
+
 The default **Tectonic** generator uses bundled Orogen code. **Custom → Continental atlas** additionally requires Rust/Cargo and a pinned sibling `world-builder-rs` checkout. Optional GPU erosion has separate dependencies. The installation guide documents these and configurable storage (`~/.cache/neural-earth` on Linux, `E:/TerrainDiffusionRuntime` on Windows).
 
 ## How it works

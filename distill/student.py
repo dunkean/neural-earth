@@ -58,8 +58,9 @@ class Student(nn.Module):
         super().__init__()
         if config.stage not in ('base', 'coarse', 'decoder'):
             raise ValueError(config.stage)
-        if config.width < 16 or config.width % 16 or not 2 <= config.depth <= 5:
-            raise ValueError('Width must be a multiple of 16; depth must be 2–5.')
+        multiple = 8 if config.stage == 'decoder' else 16
+        if config.width < multiple or config.width % multiple or not 2 <= config.depth <= 5:
+            raise ValueError(f'Width must be a multiple of {multiple}; depth must be 2–5.')
         if not math.isfinite(config.norm_eps) or config.norm_eps <= 0:
             raise ValueError('Pixel normalization epsilon must be finite and positive.')
         self.config = config
@@ -144,6 +145,18 @@ def load_student(path, device='cpu', ema=True):
     checkpoint = torch.load(path, map_location='cpu', weights_only=True)
     config = checkpoint['config'].copy()
     config['dilations'] = tuple(config['dilations'])
-    model = Student(StudentConfig(**config))
+    architecture=checkpoint.get('conditioning_architecture')
+    if checkpoint.get('flow_architecture') is not None:
+        from distill.tile40_flow_network import TimeFlow, ARCHITECTURE
+        if checkpoint['flow_architecture'] != ARCHITECTURE:
+            raise ValueError('Unknown finite-tile flow architecture.')
+        model = TimeFlow(StudentConfig(**config))
+    elif architecture is not None:
+        from distill.tile40_conditioned import ConditionedStudent, ARCHITECTURE
+        if architecture!=ARCHITECTURE:
+            raise ValueError('Unknown conditioned generator architecture.')
+        model=ConditionedStudent(StudentConfig(**config))
+    else:
+        model = Student(StudentConfig(**config))
     model.load_state_dict(checkpoint['ema'] if ema and 'ema' in checkpoint else checkpoint['model'])
     return model.to(device).eval(), checkpoint

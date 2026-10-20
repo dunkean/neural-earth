@@ -57,15 +57,24 @@ def coarse_inputs(condition, labels, seed, y, x, device):
 
 def coarse_graph_forward(model, inputs):
     """Share a bounded whole-solver capture across worlds borrowing this model."""
-    if not inputs.is_cuda or torch.is_grad_enabled():
+    return student_graph_forward(model, inputs, stage='coarse')
+
+
+def student_graph_forward(model, inputs, *, stage):
+    """Capture a whole student, preserving exact outputs and bounded storage."""
+    if stage not in ('coarse', 'decoder'):
+        raise ValueError('Whole-window graphs support coarse and decoder students.')
+    if not inputs.is_cuda or torch.is_grad_enabled() or model.training:
         return model(inputs)
+    cache_name = '_distill_'+stage+'_graph'
     lock = model.__dict__.setdefault('_distill_graph_lock', threading.Lock())
     with lock:
         key = (tuple(inputs.shape), tuple(inputs.stride()), inputs.dtype, inputs.device,
+               torch.is_autocast_enabled('cuda'), torch.get_autocast_dtype('cuda'),
                tuple((id(p), p._version) for p in model.parameters()))
-        cached = model.__dict__.get('_distill_coarse_graph')
+        cached = model.__dict__.get(cache_name)
         if cached is None or cached[0] != key:
-            model.__dict__.pop('_distill_coarse_graph', None)
+            model.__dict__.pop(cache_name, None)
             cached = None
             static = inputs.clone()
             stream = torch.cuda.Stream(device=inputs.device)
@@ -79,16 +88,16 @@ def coarse_graph_forward(model, inputs):
                 output = model(static)
             graph.replay()
             if not torch.equal(reference, output):
-                raise RuntimeError('Coarse student graph differs from its eager output.')
+                raise RuntimeError(stage.capitalize()+' student graph differs from its eager output.')
             cached = (key, graph, static, output)
-            model.__dict__['_distill_coarse_graph'] = cached
+            model.__dict__[cache_name] = cached
         _, graph, static, output = cached
         static.copy_(inputs)
         graph.replay()
         return output.clone()
 
 
-def install(world, checkpoints, tile_size=512):
+def install(world, checkpoints, tile_size=512, *, batch_coarse=False):
     """Install before bind. Mapping is stage -> checkpoint; combinations supported."""
     if tile_size < 32 or tile_size % 32:
         raise ValueError('Base tile size must align to 32.')
@@ -110,13 +119,15 @@ def install(world, checkpoints, tile_size=512):
 
     def forward(stage, features):
         model = students[stage]
-        inputs = features[None].to(world.device)
+        batched = features.ndim == 4
+        inputs = (features if batched else features[None]).to(world.device)
         with torch.autocast('cuda', dtype=torch.bfloat16):
-            output = (coarse_graph_forward(model, inputs) if stage == 'coarse' else model(inputs))[0].float()
+            output = (student_graph_forward(model, inputs, stage=stage)
+                      if stage in ('coarse', 'decoder') else model(inputs)).float()
         if not torch.isfinite(output).all():
             raise FloatingPointError(f'Non-finite {stage} student output.')
         world._distill_counts[stage]['calls'] += 1
-        return output
+        return output if batched else output[0]
 
     if 'base' in students:
         halo = students['base'].halo
@@ -162,15 +173,23 @@ def install(world, checkpoints, tile_size=512):
             stds = torch.as_tensor(stds, device=self.device)[:, None, None]
 
             def predict(ctxs):
-                outputs = []
+                outputs, features_batch = [], []
                 for ctx in ctxs:
                     prepared = _coarse_batch(self, [ctx], scheduler, weight, t_cond, labels, 1, prepare_only=True)
                     condition = prepared.conditions[0][0]
                     scalars = torch.stack([v[0] for v in prepared.conditions[1:]])
                     features = coarse_inputs(condition, scalars, self.seed, ctx[1]*48, ctx[2]*48, self.device)
+                    if batch_coarse:
+                        features_batch.append(features)
+                        continue
                     pred = forward('coarse', features)*stds+means
                     self._distill_counts['coarse']['output_pixels'] += 64**2
                     outputs.append(torch.cat([pred*weight[None], weight[None]]))
+                if features_batch:
+                    predictions = forward('coarse', torch.stack(features_batch))*stds[None]+means[None]
+                    for pred in predictions:
+                        self._distill_counts['coarse']['output_pixels'] += 64**2
+                        outputs.append(torch.cat([pred*weight[None], weight[None]]))
                 return outputs
             tensor._f = predict
             return tensor

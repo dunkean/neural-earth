@@ -93,6 +93,7 @@ class ServerWorldConstructionTests(unittest.TestCase):
             terrestrial_file_snapshot=lambda generator='native':deepcopy(reference['files']),
             lru_cache=lru_cache, hashlib=hashlib, json=json,
             load_pipeline=self.loader, WorldPipeline=WorldPipeline, COARSE_DEVICE=0,
+            live_models=lambda:SimpleNamespace(install=Mock()),
             runtime_profile=profile, coarse_stream_setting={'coarse':1}, OUTPUT=Path(self.temporary.name),
             WORLD_BOUNDS=(-20e6, -10e6, 20e6, 10e6), profile_bounds=profile_bounds,
             CoarsePreparation=CoarsePreparation, worlds=OrderedDict(), active_seed=None,

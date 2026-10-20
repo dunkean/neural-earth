@@ -1,57 +1,69 @@
-# Comparaison des NN en direct
+# Modèles fournis dans Neural Earth
 
-Le serveur de revue utilise le viewer existant, avec un menu **NN** dans la barre
-du haut. Au premier lancement, les choix sont **coarse distillé 4 étapes,
-base original et decoder distillé**. Coarse et decoder peuvent être comparés
-à leurs modèles d'origine ; coarse8 reste disponible si son export existe.
-Coarse **2 étapes** et **1 étape** sont inclus sous `distill/weights/coarse2.pt`
-et `coarse1.pt`. Les deux runs ont terminé leurs **200 000 étapes**.
-Les EMA retenues sur384 crops sont aux pas200000 et200000 respectivement.
-Les états latest/best et les jalons restent archivés hors Git ; seuls les
-poids d’inférence sont distribués. Sorties finies et équivalence export/
-CUDA Graph sont vérifiées ; la qualité visuelle reste à juger dans l’app.
-Le modèle par défaut reste coarse4.
-Les bases distillés rejetés ne figurent plus dans le menu ni dans l'API.
-Une ancienne configuration qui les sélectionnait est migrée vers le base original,
-sans modifier coarse, decoder ou le reset. Les autres choix sauvegardés sont
-conservés au redémarrage. Les choix sont communs aux onglets de ce serveur.
+Le menu **NN** fait partie du serveur habituel (`python launch_terrain.py`).
+La carte continue démarre avec **coarse8/25k, base original, décodeur64/200k**.
+Les trois modèles originaux restent sélectionnables séparément. Coarse2/200k
+et décodeur16/10k sont les seules autres variantes de la carte continue.
+Les anciens choix coarse4/coarse1 migrent vers coarse8/coarse2 ; les anciens
+bases expérimentaux migrent vers l'original. Les réglages valides et le reset
+sont conservés. Les choix s'appliquent à tous les onglets du même serveur.
 
-Les poids coarse8, coarse4, coarse2, coarse1 et decoder sont inclus dans Git, à la demande de
-l'utilisateur, sous `distill/weights/`. Le catalogue les utilise en priorité.
-Le manifest enregistre leur provenance, leurs SHA256 et la révision du teacher.
-Aucun poids de base distillé n'est inclus. Les checkpoints d'entraînement et
-les données restent hors Git. Si les exports inclus sont absents, ces chemins
-externes restent utilisables (relatifs à `DISTILL_ROOT`, par défaut `~/data/distill`) :
+Le lien **Tuile40×40km** ouvre `/tile40/`. Ce mode utilise coarse2/200k et
+le **base résiduel48/8k brut**, avec décodeur16/10k par défaut ou décodeur64/200k
+pour la qualité. Le résiduel est entraîné pour une tuile finie ; il n'est pas
+installé dans le pipeline de carte continue. Seuls le sketch et le terrain
+final sont affichés. **Lieu du calcul** propose **Backend Python (serveur)**
+par défaut pour comparer rapidement la qualité : CUDA automatique ou CPU,
+avec possibilité de forcer l'un des deux. Les modèles restent en mémoire
+entre les générations ; changer de décodeur remplace la configuration résidente.
+Le choix **Navigateur** utilise un worker sur CPU ou WebGPU, avec repli CPU
+en mode automatique. Les deux modes reçoivent le même croquis, climat et seed.
 
-- `live/weights/coarse4/coarse.pt` : coarse à 4 étapes, checkpoint 50 000.
-- `final/weights/candidate-1/decoder.pt` : decoder distillé, checkpoint 200 000.
+| Poids d'inférence distribués | Sélection |
+|---|---|
+| `distill/weights/coarse8.pt` | EMA25k, solveur8étapes |
+| `distill/weights/coarse2.pt` | EMA200k, solveur2étapes |
+| `distill/weights/base-residual8k.pt` | Poids bruts8k, altitude résiduelle |
+| `distill/weights/decoder.pt` | Décodeur64, EMA200k |
+| `distill/weights/decoder16-10k.pt` | Décodeur16, EMA10k contre l'original |
 
-Le démarrage échoue avec un message explicite si un export par défaut manque.
-Le coarse4 a été jugé bon visuellement en direct ; les seuils physiques stricts
-ne sont pas tous validés. Les anciens checkpoints base restent archivés pour
-la recherche et ne sont jamais chargés par ce serveur.
+Le manifest contient étapes, configurations et SHA256. Les paquets ne
+contiennent ni optimiseur ni deuxième copie EMA. Aucun autre poids distillé
+n'est distribué ; les archives de recherche restent hors Git et ne peuvent
+pas ajouter de choix au catalogue. Le constructeur de distribution est
+`python -m distill.bundle_selected_models --write`, depuis les checkpoints
+externes. L'ancien exporteur coarse1/2 ne peut plus écrire dans Git.
 
-**Appliquer les NN** recharge le moteur et rouvre la même vue. **Reset après
-Orogen** change le namespace des caches neuronaux : coarse, latent, decoder et
-leurs tuiles sont recalculés. Le cache Orogen reste intact, ainsi que les réglages
-de génération, le seed et la caméra. Les anciens caches neuronaux ne sont pas
-effacés du disque : ils deviennent inactifs. Une combinaison réutilise son cache
-tant qu'aucun reset n'est demandé.
+Les trois originaux viennent de `xandergos/terrain-diffusion-30m`, révision
+`9ef8030cb805b433b98ec25c5dddefbac07a9e26`. Le chargement normal les télécharge
+automatiquement ; on peut les installer ou vérifier séparément :
 
 ```bash
-source distill/env.sh
-python -m distill.jobs start live-model-review --gpu 1 -- python -u -m distill.live_server --port 8765
-python -m distill.jobs status live-model-review --compact
-python -m distill.jobs stop live-model-review
+python tools/download_models.py
+python tools/download_models.py --check
 ```
 
-Adresse depuis Windows ou WSL : <http://localhost:8765/>. Le serveur est local,
-sur la 5090 seule ; le changement de modèles prend quelques secondes. Il est
-supervisé dans tmux et conserve les choix dans `~/data/distill/live/config.json`.
-Les exports sont lus aux chemins indiqués ci-dessus.
+Le mode Python utilise directement les cinq poids fournis et la configuration
+originale épinglée, sans export ONNX. La première sélection de **Navigateur**
+prépare les ONNX localement, avec contrôle
+numérique, sans banque d'entraînement ni checkpoint externe. Les fichiers
+vont dans `TERRAIN_RUNTIME_ROOT/browser-models/` et sont partagés entre les
+deux choix de décodeur. Les paquets complets pèsent42,63Mo avec décodeur16,
+55,10Mo avec décodeur64. Une installation peut préparer les exports en avance :
 
-Les deux hooks du serveur de production sont actifs uniquement sous
-`TERRAIN_DISTILL_LIVE=1`. Le lancement habituel reste sur les modèles d'origine.
-L'identité des poids et du code participe à chaque cache neuronal ; les poids
-sont revérifiés avant chargement. Les candidats restent expérimentaux : ouvrir
-ce serveur ne constitue pas une acceptation des seuils de qualité.
+```bash
+python -m distill.tile40_prepare
+# Serveur autonome du mode40km, sans serveur CUDA de carte continue :
+python -m distill.tile40_demo --port 8782
+```
+
+Dans le menuNN, **Appliquer les NN** recharge les modèles et conserve la vue.
+**Reset après Orogen** invalide seulement les caches neuronaux, en conservant
+Orogen, le seed, la caméra et les réglages de génération. Les sélections et
+les empreintes participent à l'identité des caches. Le serveur de revue
+supervisé reste compatible (`python -m distill.live_server --port 8765`) ;
+il utilise le même catalogue et les mêmes routes que le serveur normal.
+
+La qualité du résiduel reste expérimentale. Les temps natifs des réseaux ne
+sont pas des temps navigateur et l'intégration n'ajoute aucune nouvelle
+acceptation de qualité ou de vitesse.

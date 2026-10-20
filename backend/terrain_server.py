@@ -13,6 +13,8 @@ from contextlib import nullcontext, contextmanager, ExitStack
 import re
 import subprocess
 import sys
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0,str(REPO_ROOT))
 import threading
 import time
 import uuid
@@ -213,9 +215,8 @@ else:
     profile_data.pop('name', None)  # Free memory is not an identity of numerical output.
     profile_data.pop('coarse_streams', None)  # Batch-one execution count preserves physical output.
 coarse_stream_setting = {'coarse': runtime_profile.coarse_streams if runtime_profile else 1}
-if os.environ.get('TERRAIN_DISTILL_LIVE') == '1':
-    from distill.live_runtime import current as live_models
-    profile_data['distillation_review'] = live_models().identity()
+from distill.live_runtime import current as live_models
+profile_data['models'] = live_models().identity()
 # Numerical identity follows the coarse device: it decides every learned coarse
 # window. In single-GPU mode it is the selected device, as before multi-GPU.
 profile_data.update(model_revision=getattr(terrain_runtime, 'MODEL_REVISION', 'unversioned'),
@@ -395,8 +396,7 @@ def _create_world(seed, world_profile, cache_limit, *, polar=False):
             from terrain_polar import conditioning
             world._terrain_polar_conditioning = conditioning(seed,world_profile)
         configure_world(world, runtime_profile, world_profile=world_profile)
-        if os.environ.get('TERRAIN_DISTILL_LIVE') == '1':
-            live_models().install(world)
+        live_models().install(world)
         world.bind()
         from terrain_inference import set_coarse_streams
         set_coarse_streams(world, coarse_stream_setting['coarse'])
@@ -2368,6 +2368,11 @@ def wait_for_replaced_server(port=8765):
             except OSError:
                 time.sleep(.2)
 
+
+from terrain_models import register_model_routes
+register_model_routes(sys.modules[__name__])
+from terrain_tile40 import register_tile40_routes
+register_tile40_routes(app)
 
 if __name__ == '__main__':
     import argparse

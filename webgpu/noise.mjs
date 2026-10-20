@@ -1,5 +1,6 @@
 // Port of terrain_diffusion.inference.portable_rng plus world_pipeline tile
-// mapping. BigInt preserves 64-bit state and negative coordinate semantics.
+// mapping. BigInt preserves seed/coordinate semantics;the hot loop uses exact
+// pairs of32-bit words to avoid millions of BigInt allocations per terrain tile.
 const MASK64 = (1n << 64n) - 1n;
 const MULT = 6364136223846793005n;
 const INC = 1442695040888963407n;
@@ -13,22 +14,35 @@ export function tileSeed(seed, tileY, tileX) {
   return h;
 }
 
-function next(state) {
-  const s = (state * MULT + INC) & MASK64;
-  const x = (((s >> 18n) ^ s) >> 27n) & 0xffffffffn;
-  const rot = Number((s >> 59n) & 31n);
-  const out = Number(((x >> BigInt(rot)) | (x << BigInt((32 - rot) & 31))) & 0xffffffffn);
-  return [s, out];
+function unsignedProductHigh(a, b) {
+  const al = a & 65535, ah = a >>> 16;
+  const bl = b & 65535, bh = b >>> 16;
+  const low = al * bl, middleA = ah * bl, middleB = al * bh;
+  const carry = (low >>> 16) + (middleA & 65535) + (middleB & 65535);
+  return (ah * bh + (middleA >>> 16) + (middleB >>> 16) + (carry >>> 16)) >>> 0;
 }
 
 export function standardNormal(seed, count) {
   const out = new Float32Array(count);
-  let state = BigInt(seed) & MASK64;
+  const state = BigInt(seed) & MASK64;
+  let lo = Number(state & 0xffffffffn), hi = Number(state >> 32n);
+  const multLo = Number(MULT & 0xffffffffn), multHi = Number(MULT >> 32n);
+  const incLo = Number(INC & 0xffffffffn), incHi = Number(INC >> 32n);
+  function next32() {
+    const oldLo = lo;
+    const lowSum = (Math.imul(oldLo, multLo) >>> 0) + incLo;
+    hi = (Math.imul(hi, multLo) + Math.imul(oldLo, multHi) +
+          unsignedProductHigh(oldLo, multLo) + incHi + (lowSum >= 4294967296 ? 1 : 0)) >>> 0;
+    lo = lowSum >>> 0;
+    const xorLo = ((lo >>> 18) | (hi << 14)) ^ lo;
+    const xorHi = (hi >>> 18) ^ hi;
+    const x = (xorLo >>> 27) | (xorHi << 5);
+    const rot = hi >>> 27;
+    return ((x >>> rot) | (x << ((32 - rot) & 31))) >>> 0;
+  }
   let i = 0;
   while (i < count) {
-    let u1, u2;
-    [state, u1] = next(state);
-    [state, u2] = next(state);
+    const u1 = next32(), u2 = next32();
     const v1 = 2 * (u1 + 1) * INV32 - 1;
     const v2 = 2 * (u2 + 1) * INV32 - 1;
     const s = v1 * v1 + v2 * v2;

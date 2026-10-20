@@ -75,6 +75,24 @@ Existing `HF_HOME`, `HF_HUB_CACHE` (or the legacy `HUGGINGFACE_HUB_CACHE`), `TER
 
 The three neural models download automatically from `xandergos/terrain-diffusion-30m`, pinned at `9ef8030cb805b433b98ec25c5dddefbac07a9e26`. First installation needs internet access. A complete pinned local snapshot avoids Hub validation on later starts.
 
+`python tools/download_models.py` installs that original snapshot explicitly;
+add `--check` for an offline check. Only coarse8/25k, coarse2/200k,
+residual48/8k, decoder64/200k and decoder16/10k inference weights are bundled
+under `distill/weights`, with a checked provenance manifest. Training states
+and other experimental models are excluded from the application catalogue.
+
+The normal viewer includes model choices and a `/tile40/` sketch workflow.
+Its **Lieu du calcul** selector defaults to **Backend Python (serveur)** for
+quality comparisons, using CUDA when available or CPU. Models stay resident
+between generations; Python mode requires no ONNX preparation. Select
+**Navigateur** to run inference locally on browser CPU or WebGPU.
+The first switch to browser mode prepares verified ONNX exports in
+`TERRAIN_RUNTIME_ROOT/browser-models`; this requires the locked Python ONNX
+dependencies, but no training dataset. Run `python -m distill.tile40_prepare`
+to prepare them ahead of time. To serve only that finite-tile workflow
+without starting the CUDA map server, run `python -m distill.tile40_demo --port 8782`
+and open `http://127.0.0.1:8782/tile40/`.
+
 ## Startup
 
 Linux:

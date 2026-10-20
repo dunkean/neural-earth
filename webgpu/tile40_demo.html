@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Une tuile de 40 km</title>
+<style>
+:root{color-scheme:dark;font:16px system-ui;background:#161b20;color:#edf0f3}body{max-width:1300px;margin:24px auto;padding:0 20px}h1{margin:0;font-size:28px}p{line-height:1.5;color:#c5ced6}.grid{display:grid;grid-template-columns:340px 1fr;gap:24px}label{display:block;margin:12px 0 6px}input,select,button{font:inherit;padding:9px;border:1px solid #788897;background:#26323c;color:inherit;border-radius:5px}input,select{box-sizing:border-box;max-width:100%}button{cursor:pointer;min-height:44px}button:disabled{opacity:.5;cursor:default}button:focus-visible,select:focus-visible,input:focus-visible{outline:3px solid #80c3ff}canvas{max-width:100%;height:auto;background:#252d33}#sketch{touch-action:none;cursor:crosshair;width:320px}.row{display:flex;gap:8px;flex-wrap:wrap}.cell input{width:74px}#status{min-height:48px}#result{width:100%}details{margin-top:16px}summary{cursor:pointer}pre{white-space:pre-wrap}a{color:#9cd0ff}@media(max-width:750px){.grid{grid-template-columns:1fr}}
+</style>
+<p><a href="/">← Neural Earth · carte et modèles originaux</a></p>
+<h1>Du croquis au relief · 40 × 40 km</h1>
+<p>Prototype expérimental. Les formes du terrain sont encore en cours d’amélioration. Seul le relief final est affiché.</p>
+<main class="grid"><section aria-label="Croquis et paramètres">
+<label for="preset">Forme de départ</label><select id="preset"></select>
+<p>Dessine les altitudes sur le croquis. Il décrit toute la tuile de 40 km.</p>
+<canvas id="sketch" width="320" height="320" aria-label="Croquis d’altitude éditable, également modifiable avec les champs ligne et colonne"></canvas>
+<label for="altitude">Altitude du pinceau (mètres)</label><input id="altitude" type="number" min="-1000" max="8000" step="50" value="2200">
+<div class="row cell"><label>Ligne <input id="row" type="number" min="1" max="16" value="8"></label><label>Colonne <input id="column" type="number" min="1" max="16" value="8"></label></div>
+<button id="edit">Appliquer à cette case</button><p id="sketchSummary"></p>
+<label for="climate">Climat</label><select id="climate"><option value="arid">Aride</option><option value="cold">Froid</option><option value="tropical">Tropical</option><option value="temperate" selected>Tempéré</option><option value="oceanic">Océanique</option></select>
+<label for="seed">Graine</label><input id="seed" type="number" min="0" max="4294950000" value="9100000" step="1">
+<label for="engine">Lieu du calcul</label><select id="engine"><option value="python">Backend Python (serveur)</option><option value="browser">Navigateur</option></select>
+<label for="provider">Calcul</label><select id="provider"><option value="auto">Automatique : CUDA, sinon CPU</option><option value="cpu">CPU du serveur</option><option value="cuda">GPU CUDA du serveur</option></select>
+<p id="engineHelp">Python utilise les modèles sur le serveur pour comparer rapidement la qualité.</p>
+<p>Coarse2 · 200k → base résiduel48 · 8k</p>
+<label for="decoder">Décodeur</label><select id="decoder" disabled><option value="decoder16">Décodeur16 · 10k · compact</option><option value="decoder64">Décodeur64 · 200k · qualité</option></select>
+<p>Compact privilégie la rapidité. Qualité conserve davantage de détails et prend plus de temps, surtout sur CPU.</p>
+<p id="bundleSize"></p><button id="generate" disabled>Générer le relief</button>
+<button id="prepareRetry" hidden>Réessayer la préparation</button>
+</section><section aria-label="Terrain généré"><p id="status" role="status" aria-live="polite">Choisis une forme et un climat, puis génère une tuile.</p>
+<canvas id="result" width="800" height="800" aria-label="Ombrage du terrain généré, altitudes et export disponibles ci-dessous"></canvas>
+<p id="heightSummary">Sortie : 1334 × 1334 altitudes en mètres, soit environ 30 m par pixel.</p>
+<p id="cursor"></p><div class="row"><button id="image" disabled>Image PNG</button><button id="dem" disabled>Hauteurs .f32</button><button id="parameters" disabled>Paramètres JSON</button></div>
+<details><summary>Valeurs et provenance du résultat</summary><pre id="metadata">Aucun résultat calculé.</pre></details>
+</section></main><script type="module" src="./demo.mjs"></script></html>
