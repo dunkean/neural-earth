@@ -2,6 +2,7 @@
 import argparse
 import csv
 import json
+from contextlib import nullcontext
 from pathlib import Path
 
 import numpy as np
@@ -33,18 +34,37 @@ class TeacherForward:
 
 
 @torch.no_grad()
-def evaluate(checkpoint, output, coarse='coarse4', label='progressive160'):
+def evaluate(checkpoint, output, coarse='coarse4', label='progressive160', packed=None):
     configure()
     saved = torch.load(checkpoint, map_location='cpu', weights_only=True, mmap=True)
     stem = output/f'base-{label}-{saved["step"]:06d}-{coarse}'
     if stem.with_suffix('.json').exists():
         raise ValueError('Existing progress report must be preserved.')
     architecture = saved['architecture']
-    if architecture == 'native-progressive-width':
+    packed_manifest = None
+    if packed is not None:
+        from distill.native_onepass_residual_pack import ResidualPackedRuntime
+        packed_manifest = json.loads((packed/'manifest.json').read_text())
+        if (architecture != 'native-two-noise-onepass-residual-nf4' or
+                packed_manifest['step'] != saved['step'] or
+                packed_manifest['source_contract'] != saved['contract'] or
+                packed_manifest['config'] != saved['config']):
+            raise ValueError('Packed artifact must match the selected QAT checkpoint.')
+        model = ResidualPackedRuntime(packed, 'cuda')
+    elif architecture == 'native-progressive-width':
         model = load_progressive(saved, 'cuda')
     elif architecture == 'native-weight-quant-scalar':
         from distill.native_scalar_precision import load_scalar_precision
         model = load_scalar_precision(saved, 'cuda')
+    elif architecture == 'native-two-noise-onepass':
+        from distill.native_onepass_runtime import OnePassRuntime
+        model = OnePassRuntime(saved, 'cuda')
+    elif architecture == 'native-two-noise-onepass-residual':
+        from distill.native_onepass_residual import ResidualOnePassRuntime
+        model = ResidualOnePassRuntime(saved, 'cuda')
+    elif architecture == 'native-two-noise-onepass-residual-nf4':
+        from distill.native_onepass_residual_pack import ResidualQuantRuntime
+        model = ResidualQuantRuntime(saved, 'cuda')
     else:
         raise ValueError('Unsupported paired progress/reference architecture.')
     amount = saved.get('amount')
@@ -61,10 +81,17 @@ def evaluate(checkpoint, output, coarse='coarse4', label='progressive160'):
     from terrain_diffusion.inference.world_pipeline import linear_weight_window
     weight = linear_weight_window(64, 'cuda', torch.float32)
     rows, fields = [], []
-    with model.cached_weights():
+    with model.cached_weights() if hasattr(model, 'cached_weights') else nullcontext():
         for root, record in selected:
             region = DecodedRegion(root/record['file'], 'cuda')
-            cores = [decoded_region_forward(net, region, weight)['core'] for net in (teacher, model)]
+            cores = [decoded_region_forward(teacher, region, weight)['core']]
+            if architecture in ('native-two-noise-onepass', 'native-two-noise-onepass-residual',
+                                'native-two-noise-onepass-residual-nf4'):
+                from distill.native_onepass import noise_windows
+                noises = noise_windows(record['metadata']['seed'], region.ref_origins, 'cuda')
+                cores.append(region.core_crop(model(noises, region.stages[1]['condition']), weight))
+            else:
+                cores.append(decoded_region_forward(model, region, weight)['core'])
             heights = []
             for latent in cores:
                 q = latent[4].float()*38.6-31.4
@@ -91,14 +118,31 @@ def evaluate(checkpoint, output, coarse='coarse4', label='progressive160'):
     title = (f'Reduction192 vers160 | etape {saved["step"]} | retrait {amount:.3f} | {coarse}'
              if architecture == 'native-progressive-width' else
              f'Base NF4 produit | etape {saved["step"]} | {coarse}')
+    if saved.get('phase') == 'compact160' and 'parent_step' in saved:
+        title = f'Base compact160 | recuperation {saved["step"]} | {coarse}'
+    if architecture in ('native-two-noise-onepass', 'native-two-noise-onepass-residual',
+                        'native-two-noise-onepass-residual-nf4'):
+        title = f'Base natif une passe | etape {saved["step"]} | {coarse}'
+    if architecture == 'native-two-noise-onepass-residual-nf4':
+        title = f'Base une passe NF4 | etape {saved["step"]} | {coarse}'
+        if packed_manifest is not None:
+            title += f' | {packed_manifest["onepass_wrapper"]["download_weight_bytes"]/1e6:.1f} Mo'
     draw.text((12, 10), title, fill='white', font=font)
     draw.text((12, 40), 'Teacher recalcule meme GPU/bruit, decoder original. Champs32/256px agrandis; pas de lissage ajoute.', fill='white', font=font)
     draw.text((left, 83), 'Teacher BF16', fill='white', font=font)
     selected_weights = saved.get('selected_weights', 'ema')
     caption = {'ema':'Eleve progressif EMA', 'raw':'Eleve, poids bruts',
                'untrained':'Teacher projete, sans entrainement'}.get(selected_weights, selected_weights)
+    if saved.get('phase') == 'compact160' and 'parent_step' in saved:
+        caption = {'ema':'Compact160, EMA500', 'ema2000':'Compact160, EMA2000',
+                   'raw':'Compact160, poids bruts'}[selected_weights]
     if architecture == 'native-weight-quant-scalar':
         caption = 'Base NF4 produit, '+selected_weights
+    elif architecture in ('native-two-noise-onepass', 'native-two-noise-onepass-residual',
+                          'native-two-noise-onepass-residual-nf4'):
+        caption = 'Une passe, '+selected_weights
+        if architecture == 'native-two-noise-onepass-residual-nf4':
+            caption += ', NF4 compact' if packed is not None else ', QAT NF4'
     draw.text((left+size+gap, 83), caption, fill='white', font=font)
     names = LABELS|{KIND:'Haute montagne humide'}
     for i, (row, pair) in enumerate(zip(rows, fields, strict=True)):
@@ -115,8 +159,12 @@ def evaluate(checkpoint, output, coarse='coarse4', label='progressive160'):
     report = dict(status='complete', checkpoint=str(checkpoint), checkpoint_sha256=file_sha(checkpoint),
         gpu=torch.cuda.get_device_name(), step=saved['step'], amount=amount, rows=rows,
         architecture=architecture,
+        solver_evaluations=saved.get('solver_evaluations', 2),
         selected_weights=selected_weights,
         reference_scope='Teacher original BF16 recomputed on same GPU, source noise and conditioning.', accepted=False)
+    if packed_manifest is not None:
+        report.update(packed_directory=str(packed), packed_weights_sha256=packed_manifest['sha256'],
+            weight_bytes=packed_manifest['onepass_wrapper']['download_weight_bytes'], representation='packed-nf4')
     atomic_json(stem.with_suffix('.json'), report)
     append_json(DATA/'_base/image-publications.jsonl', dict(image=str(stem.with_suffix('.png')), step=saved['step'], coarse=coarse, label=label))
     print(json.dumps(dict(image=str(stem.with_suffix('.png')), step=saved['step'], coarse=coarse)), flush=True)
@@ -129,8 +177,9 @@ def main():
     parser.add_argument('--output', type=Path, default=DATA/'_base')
     parser.add_argument('--coarse', choices=('coarse4', 'coarse2'), default='coarse4')
     parser.add_argument('--label', default='progressive160')
+    parser.add_argument('--packed', type=Path, help='Evaluate an exported residual NF4 artifact.')
     args = parser.parse_args()
-    evaluate(args.checkpoint, external_path(args.output), args.coarse, args.label)
+    evaluate(args.checkpoint, external_path(args.output), args.coarse, args.label, args.packed)
 
 
 if __name__ == '__main__':

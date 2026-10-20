@@ -3,7 +3,8 @@ import unittest
 
 import torch
 
-from distill.native_progressive_recovery_loss import height_terms, x0_height_terms, field_terms
+from distill.native_progressive_recovery_loss import (
+    height_terms, x0_height_terms, field_terms, multiscale_height_terms, multiscale_x0_terms)
 
 
 def latent_from_root(q):
@@ -13,6 +14,33 @@ def latent_from_root(q):
 
 
 class RecoveryLossTests(unittest.TestCase):
+    def test_multiscale_identity_and_teacher_detachment(self):
+        torch.manual_seed(4)
+        target = latent_from_root(10.+torch.randn(2, 1, 64, 64)).requires_grad_(True)
+        actual = target.detach().clone().requires_grad_(True)
+        loss = sum(multiscale_height_terms(actual, target).values())
+        self.assertEqual(float(loss.detach()), 0.)
+        loss.backward()
+        self.assertIsNone(target.grad)
+        self.assertEqual(float(actual.grad.abs().sum()), 0.)
+
+    def test_multiscale_per_scene_scaling_keeps_plain_gradient(self):
+        grid = (torch.arange(64)[:, None]+torch.arange(64)[None, :])%2*2-1
+        roots = torch.cat([10.+grid[None, None]*.5, 100.+grid[None, None]*.5])
+        target = latent_from_root(roots)
+        actual = latent_from_root(roots+grid[None, None]*.1).requires_grad_(True)
+        multiscale_height_terms(actual, target)['high'].backward()
+        norms = actual.grad[:, 4].abs().sum((-2, -1))
+        self.assertTrue(torch.isfinite(norms).all())
+        self.assertGreater(float(norms[0]), 0.)
+        # A tenfold elevation root must not suppress the plain by100x.
+        self.assertLess(float(norms[1]/norms[0]), 2.)
+
+    def test_multiscale_requires_both_phases(self):
+        values = torch.ones((2, 5, 64, 64))
+        with self.assertRaisesRegex(ValueError, 'Both pinned'):
+            multiscale_x0_terms(values, values, dict(inputs=values, labels=torch.full((2,), 1.5625)))
+
     def test_height_units_match_known_elevations(self):
         target = latent_from_root(torch.full((1, 1, 4, 4), 10.))
         actual = latent_from_root(torch.full((1, 1, 4, 4), 11.))
