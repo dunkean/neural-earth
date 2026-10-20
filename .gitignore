@@ -33,3 +33,11 @@ research_projects/orogen_probe/*.f32
 !/distill/weights/base-residual8k.pt
 !/distill/weights/decoder.pt
 !/distill/weights/decoder16-10k.pt
+/native/neural-earth/target/
+/native/neural-earth-render/target/
+/native/neural-earth-weights/target/
+/native/neural-earth/generated-engine/
+/wasm/pkg/
+/wasm/render-pkg/
+/wasm/models/
+/wasm/dist/

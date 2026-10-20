@@ -4,6 +4,8 @@
 
 `backend/terrain_generation.py` normalizes settings. `backend/terrain_orogen_stages.py` retains relief, erosion and climate as immutable stage artifacts. Orogen's bundled graph algorithms run through Node; CUDA rasterizes spherical triangles into a 2,048 × 1,024 atlas. Optional CUDA acceleration and City wgpu erosion are separate choices.
 
+A stage's raster projection, hashing and saving run on a worker while Node computes the next stage. The server writes stage and atlas files after responding (`backend/terrain_array_io.py`), serves them from memory meanwhile, and flushes before exiting. Recent stage artifacts stay in memory while their files are unchanged.
+
 The spherical world uses an equirectangular map: width `pi × diameter`, height `pi × diameter / 2`. The default diameter is `40,000 / pi` km. Longitude wraps. A planar world is a finite square whose side is the diameter, with Cartesian distances and no globe view. Selecting planar geometry does not replace Orogen's spherical tectonic construction with a new planar tectonic model.
 
 The optional World Builder bridge samples a native cube-sphere CPU atlas, then produces a 1,024 × 512 raster. Separate area-weighted quantile transforms match positive land heights and ocean depths to ETOPO distributions. They preserve sign and rank without copying Earth's geographic locations. Native candidates are selected deterministically for the requested continent layout; receipts distinguish requested and selected seeds.
@@ -28,13 +30,14 @@ InfiniteDiffusion uses deterministic spatial noise and overlapping dependency wi
 | 6–4 | 1,920–480 m | Learned coarse at 7,680 m |
 | 3 | 240 m | Base latent reconstruction |
 | 2–0 | 120–30 m | Decoder at 30 m |
-| -1–-3 | 15–3.75 m | Experimental refinement below model resolution |
+| -1 | 15 m | Experimental decoder refinement below model resolution |
+| -2–-6 | 7.5 m–47 cm | Experimental procedural detail |
 
-The source resolution and display spacing are different quantities. Parent tiles remain visible while target coverage arrives. Negative LODs add optional detail below the trained resolution; they are not a higher-resolution checkpoint. The glacier and hydrology content of learned tiles has no feature-specific guarantee.
+The source resolution and display spacing are different quantities. Parent tiles remain visible while target coverage arrives. Negative LODs add optional detail below the trained resolution; they are not a higher-resolution checkpoint. `backend/terrain_refinement.py` works in the checkpoint's signed-sqrt height space, where coasts cross zero nearly linearly. It samples a C2 cubic B-spline of the native DEM directly at the requested spacing and adds one decoder octave at LOD -1, also a C2 spline. Finer decoder octaves would need latents stretched beyond the checkpoint's training distribution, so LOD -2 to -6 add deterministic sparse-convolution octaves instead. Their amplitude continues the local roughness of the decoder and native octaves, decays more slowly on steep ground, is smaller in valleys and is capped in slope; the two coarsest octaves elongate down steep slopes. A low-frequency noise and the relief gather the finer octaves into rocky patches, with heavy-tailed impulse weights, so metre-scale grain does not cover every slope evenly. Within a few cells of sea level the base comes from a smoothed spline, so the coastline ignores the 30 m raster and stays the same curve at every level, up to sub-metre bends of about 2° at most. Height detail never changes land or sea. Hillshading therefore shows no 30 m grid or coastal staircase. Optional CuPy kernels fuse these steps on CUDA and match the PyTorch fallback bit for bit. This detail is plausible texture, not learned or measured terrain. The glacier and hydrology content of learned tiles has no feature-specific guarantee.
 
 ## Rendering and polar sampling
 
-The Flask server returns FP32 heights and compact climate/appearance planes. `web/terrain_renderer.js` shades them in WebGPU. `backend/terrain_render.py` is the independent CPU/PNG material reference. `web/terrain_globe.js` projects the same physical terrain onto a sphere. Above 60° latitude at local zoom, the globe uses a 90° rotated chart so the geographic poles lie near its equator. This improves sampling geometry without retraining the model on polar terrain.
+The Flask server returns FP32 heights and compact climate/appearance planes. `web/terrain_renderer.js` shades them in WebGPU. `backend/terrain_render.py` is the independent NumPy material reference; `backend/terrain_render_torch.py` runs it on CUDA for PNG tiles and overviews. `web/terrain_globe.js` projects the same physical terrain onto a sphere. Above 60° latitude at local zoom, the globe uses a 90° rotated chart so the geographic poles lie near its equator. This improves sampling geometry without retraining the model on polar terrain.
 
 Biomes sample source Köppen classes and recompute altitude/slope appearance on the visible DEM. Climate diagnostic layers keep a stable coarse view. Render materials combine climate, slope, terrain position and filtered deterministic noise; pedology remains a regional source-world diagnostic.
 

@@ -10,6 +10,7 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4n
  const browser=await chromium.launch({headless:true,executablePath:browserExecutable(),args:['--enable-unsafe-webgpu']});
  try{
   const page=await browser.newPage({viewport:{width:1000,height:720}}),errors=[],requests=[];
+    await page.addInitScript(()=>{if(!localStorage.getItem('neural-earth-preferences-v1'))localStorage.setItem('neural-earth-preferences-v1',JSON.stringify({gpuAcceleration:true,rendering:{gpuRender:true,coarseGpu:true}}))});
   page.on('pageerror',e=>errors.push(e.message));
   let holdCoarse=true,releaseCoarse=[],holdOverview=true,releaseOverview=[],preparations=[];
   await page.route('https://continuity.test/**',async route=>{

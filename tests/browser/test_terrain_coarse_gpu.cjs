@@ -11,6 +11,7 @@ assert.equal(sampleHeight({heights:new Float32Array(16).fill(-10),heightOptions:
   const browser=await chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu']});
   try{
     const page=await browser.newPage({viewport:{width:1024,height:768}}),errors=[],requests=[],subscriptions=[];
+    await page.addInitScript(()=>{if(!localStorage.getItem('neural-earth-preferences-v1'))localStorage.setItem('neural-earth-preferences-v1',JSON.stringify({gpuAcceleration:true,rendering:{gpuRender:true,coarseGpu:true}}))});
     page.on('pageerror',e=>errors.push(e.message));
     const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM0LJrHwMDAxAAGAA7JAUW48M0QAAAAAElFTkSuQmCC','base64');
     await page.route('https://coarse.test/**',async route=>{

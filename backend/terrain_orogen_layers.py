@@ -26,7 +26,7 @@ EXTRA = {
     'orogen-biomes': ('biomes', 'Biomes · classification and altitude following terrain LOD'),
     'render': ('surface', 'Render · vegetation, substrate, rock and seasonal snow'),
     'soil': ('substrate', 'Soils · soil and exposed rock on terrain'),
-    'pedology': ('pedology', 'Pedology · soil provinces on a 200 km grid: sandy, calcareous, clay-rich, ferrallitic, organic, podzolic, mineral'),
+    'pedology': ('pedology', 'Pedology · regional soil provinces from climate, relief and parent rock: sandy, calcareous, clay-rich, ferrallitic, organic, podzolic, mineral'),
     'orogen-koppen': ('koppen', 'Köppen following terrain LOD and altitude'),
     'orogen-temperature-summer': ('temperature_summer', 'Northern summer temperature · -45 to +45 °C'),
     'orogen-temperature-winter': ('temperature_winter', 'Northern winter temperature · -45 to +45 °C'),
@@ -39,10 +39,41 @@ EXTRA = {
 }
 MODES += tuple(EXTRA)
 LEGENDS.update({k:v[1] for k,v in EXTRA.items()})
-LEGENDS['orogen-convergence']='Original propagated tectonic stress · positive compression'
-LEGENDS['orogen-uplift']='Original tectonic elevation contribution · internal Orogen units'
+LEGENDS['orogen-convergence']='Original propagated Orogen stress · positive compression'
+LEGENDS['orogen-uplift']='Original Orogen elevation contribution · internal units'
 _PLATE_COLORS = np.array([colorsys.hsv_to_rgb((i*.61803398875)%1, .55, .9)
                           for i in range(120)], np.float32)
+
+
+# Large grids (2048x1024 overviews sample ~80 layers) blend on CUDA with the
+# NumPy float64 operation sequence: IEEE multiply/add, so identical values.
+_CUDA_PIXELS = 1 << 18
+
+
+def _cuda():
+    import os
+    if os.environ.get('TERRAIN_RENDER_DEVICE', 'auto').lower() == 'cpu':
+        return False
+    import terrain_render_torch
+    return terrain_render_torch.available()
+
+
+def _sample_cuda(source, j0, j1, tx, ty, a_rows, b_rows):
+    import torch
+    from terrain_device import current_cuda_index
+    dev = torch.device('cuda', current_cuda_index())
+    up = lambda array: torch.from_numpy(np.ascontiguousarray(array)).to(dev, non_blocking=True)
+    stream = torch.cuda.Stream(device=dev)
+    with torch.inference_mode(), torch.cuda.stream(stream):
+        source, tx, ty = up(source), up(tx), up(ty)
+        across = source[:, up(j0)]*(1-tx)
+        across += source[:, up(j1)]*tx
+        a, b = across[up(a_rows)], across[up(b_rows)]
+        a *= 1-ty
+        b *= ty
+        a += b
+        result = a.float().cpu().numpy()
+    return result
 
 
 def sample(world, field, xs, ys, *, categorical=False):
@@ -59,12 +90,20 @@ def sample(world, field, xs, ys, *, categorical=False):
     j0 = ix % world.width if periodic else np.clip(ix, 0, world.width-1)
     j1 = (ix+1) % world.width if periodic else np.clip(ix+1, 0, world.width-1)
     tx, ty = (xx-ix)[None,:], (yy-iy)[:,None]
-    a = field[iy[:,None], j0[None,:]]*(1-tx)+field[
-        iy[:,None], j1[None,:]]*tx
-    by = np.minimum(iy+1, world.height-1)[:,None]
-    b = field[by, j0[None,:]]*(1-tx)+field[
-        by, j1[None,:]]*tx
-    return np.asarray(a*(1-ty)+b*ty, np.float32)
+    by = np.minimum(iy+1, world.height-1)
+    # Separable: interpolate each distinct source row once, then blend rows.
+    # Same float64 operations as a per-pixel gather, hence identical values.
+    rows = np.unique(np.concatenate((iy, by)))
+    source = field[rows]
+    if len(xs)*len(ys) >= _CUDA_PIXELS and source.dtype in (np.float32, np.float64) and _cuda():
+        return _sample_cuda(source, j0, j1, tx, ty, np.searchsorted(rows, iy), np.searchsorted(rows, by))
+    across = source[:, j0]*(1-tx)
+    across += source[:, j1]*tx
+    a, b = across[np.searchsorted(rows, iy)], across[np.searchsorted(rows, by)]
+    a *= 1-ty
+    b *= ty
+    a += b
+    return a.astype(np.float32)
 
 
 def render(world, mode, xs, ys):

@@ -2,6 +2,10 @@
 
 **Procedural worlds, from tectonic plates to neural terrain.**
 
+**Experimental base under 100 MB:** [download native3-base99m-v1](https://github.com/dunkean/neural-earth/releases/tag/native3-base99m-v1)
+contains the climate-conditioned native base in a **99.24 MB complete package**.
+See the [loader, checksums and quality limitations](distill/BASE_NATIVE3_RELEASE.md).
+
 [![Watch the Neural Earth teaser (1 min)](docs/images/teaser-poster.jpg)](docs/videos/neural-earth-teaser.mp4)
 
 **[Watch the 1-minute teaser](docs/videos/neural-earth-teaser.mp4)**: World Orogen, InfiniteDiffusion, then live Neural Earth navigation from world view to 7.5 m terrain. Loading times are accelerated, and on-screen badges show each speed-up. The project is open source and looking for contributors.
@@ -46,7 +50,15 @@ The menu also includes seasonal climate, crust types, plate boundaries, converge
 
 ## Install and run
 
-This is a **local Linux/Windows Python application**. Neural inference requires an **NVIDIA GPU with CUDA and BF16 support**. A **24 GB GPU such as the RTX 3090** is the tested reference for comfortable exploration; smaller cards have no certified minimum configuration. Browser WebGPU accelerates rendering; the neural networks run on the Python server. PNG fallback still needs CUDA.
+The **browser WASM edition** runs rendering and Rust neural inference locally,
+with no Python/PyTorch backend. Build with `npm run build:wasm`, then run
+`npm run serve:wasm` and open **http://127.0.0.1:8780**. It reuses the viewer,
+Orogen sources and the existing Rust network port. It uses the distilled NF4 B75
+base and downloads about 162 MB of model weights. WebGPU is required; FP16 and
+subgroups are optional, with FP32 inference on devices without FP16. See the
+[browser build, shared architecture and current feature differences](docs/wasm.md).
+
+The **Python/PyTorch edition** is a local Linux/Windows application. Its neural inference requires an **NVIDIA GPU with CUDA and BF16 support**. A **24 GB GPU such as the RTX 3090** is the tested reference for comfortable exploration; smaller cards have no certified minimum configuration. Browser WebGPU accelerates rendering; the neural networks run on the Python server. PNG fallback still needs CUDA.
 
 Install Python 3.12, Node.js 20+ and an NVIDIA driver compatible with the locked CUDA 12.8 build:
 
@@ -77,7 +89,7 @@ Prepare the geography inputs and runtime directory using the [installation guide
 .\.venv\Scripts\python.exe launch_terrain.py
 ```
 
-On Linux, use `./start-neural-earth.sh` (add `--no-open` for unattended startup). On Windows, double-click **start-neural-earth.cmd**. Open **http://127.0.0.1:8765**. Pinned model weights download on first use; loading all three networks and preparing CUDA Graphs takes time.
+On Linux, use `./start-neural-earth.sh` (add `--no-open` for unattended startup). On Windows, double-click **start-neural-earth.cmd**. `restart-neural-earth.bat` / `restart-neural-earth.sh` first stop any running server. Open **http://127.0.0.1:8765**. Pinned model weights download on first use.
 
 The **NN** menu offers the three original models and the curated coarse8/25k,
 coarse2/200k, decoder64/200k and decoder16/10k versions. The continuous map
@@ -88,7 +100,11 @@ CPU/WebGPU inference. Other experimental weights are excluded.
 See [model selection and installation](distill/LIVE.md). To download the three
 originals ahead of first use, run `python tools/download_models.py`.
 
-The default **Tectonic** generator uses bundled Orogen code. **Custom → Continental atlas** additionally requires Rust/Cargo and a pinned sibling `world-builder-rs` checkout. Optional GPU erosion has separate dependencies. The installation guide documents these and configurable storage (`~/.cache/neural-earth` on Linux, `E:/TerrainDiffusionRuntime` on Windows).
+The start and restart scripts pass `--gpu`, which is also the launcher default: a browser's first launch enables every optional GPU acceleration without asking. Pass `--cpu` (for example `start-neural-earth.cmd --cpu`) to choose the CPU options instead. Launching `http://127.0.0.1:8765` directly without the launcher asks the question once. A browser's saved choice, then its Settings and Rendering toggles, take precedence over later launches.
+
+A plain launch reopens the last world opened in that browser (seed and settings), so its cached Orogen stages and overview are reused. Use a new seed in the viewer for another world. The world appears while the networks load: model weights load beside world generation, and CUDA Graph preparation yields to it. Neural tiles follow once the networks are ready.
+
+The default **Orogen** generator uses bundled Orogen code, with 100,000 mesh points, three continents, continent variety 0.85 and erosion enabled. Orogen erosion is active by default for every UI generator: the first-launch GPU answer selects GPU or CPU erosion. It also enables or disables the other optional GPU acceleration settings and map rendering. Existing browsers receive a one-time correction of the old erosion default; later edits are saved locally. **Custom → Continental atlas** additionally requires Rust/Cargo and a pinned sibling `world-builder-rs` checkout. Optional GPU erosion has separate dependencies. The installation guide documents these and configurable storage (`~/.cache/neural-earth` on Linux, `E:/TerrainDiffusionRuntime` on Windows).
 
 ## How it works
 
@@ -153,6 +169,7 @@ The camera remains responsive while visible regions receive priority. Parent til
 - **Settings** controls source relief, erosion and climate. Each tab generates its stage; **Generate full pipeline** runs all three.
 - **Layer menu** selects surface, climate, geology and cartographic views.
 - **Rendering** controls lighting, contours, materials, cache budget and refinement depth.
+- **NN** selects original or distilled models in the Python edition. **Apply NN** reloads the same view; **Reset after Orogen** recalculates neural terrain while retaining the generated world. Python initially selects coarse at four steps, the original base and the distilled decoder; the browser edition uses the distilled NF4 B75 base. [Model controls](distill/LIVE.md).
 - **SNR** controls allowed conditioning noise: lower values follow the source more closely. Per-LOD controls separately scale displayed relief detail.
 - **Tools → Prepare neural world** enables optional global coarse preparation. Visible regions remain prioritized.
 - Share the URL to preserve seed, generation settings, camera and display preferences. **Save A / Show A** compares applied variants.
@@ -160,6 +177,8 @@ The camera remains responsive while visible regions receive priority. Parent til
 ## Scope and performance
 
 Neural Earth produces a complete geographic world to explore, with finite spherical or planar geometry. It does not generate an entire planet at 30 m on startup. Larger visible regions, deeper refinement and more streams increase computation and memory. Four coarse streams are the default scheduling balance; the coarse network batch remains one.
+
+`tools/benchmarks/benchmark_startup.py` measures the cold start on a separate port (8775): server response, model loading and CUDA Graph preparation, `/api/world` and the Render overview. `--gpu` (default) runs every optional Orogen stage on CUDA, `--cpu` runs Orogen on the CPU; without `--seed` it generates a new random world, and a seed already generated measures a reopened world. Stop other servers first, because they share GPU memory. On an RTX 3090, a reopened world shows its overview after about 9 s, and a new world with CPU Orogen after about 16 s.
 
 Terrain and climate target worldbuilding plausibility. Biomes and materials are visual models, without independent ecosystem simulation. Neural detail does not guarantee globally connected rivers or preservation of every source erosion feature. Optional sub-30 m refinement is experimental.
 
@@ -169,6 +188,7 @@ Runtime modules live in `backend/`, browser assets in `web/`, automated tests in
 
 - [Installation and troubleshooting](docs/installation.md)
 - [Architecture and neural generation](docs/architecture.md)
+- [Orogen modifications and upstream tracking](docs/orogen-maintenance.md)
 - [Layers](docs/layers.md), [biomes](docs/biomes.md) and [materials](docs/materials.md)
 - [Third-party provenance and licenses](THIRD_PARTY_NOTICES.md)
 

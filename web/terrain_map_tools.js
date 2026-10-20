@@ -19,7 +19,7 @@
     let flight = null, fetchTimer = null, generation = null;
     const samples = new Map(), failures = new WeakMap();
     const inside = (point, b) => point.x >= b[0] && point.x < b[2] && point.y >= b[1] && point.y < b[3];
-    const screenPoint = event => { const r = view.getBoundingClientRect(); return {x:event.clientX-r.left, y:event.clientY-r.top}; };
+    const screenPoint = event => { const r = view.getBoundingClientRect(); return {x:(event.clientX-r.left)*view.clientWidth/r.width, y:(event.clientY-r.top)*view.clientHeight/r.height}; };
     const worldPoint = (p, s) => ({x:s.cx+(p.x-s.W/2)*s.mpp, y:s.cy+(p.y-s.H/2)*s.mpp});
     function setArmed(value) {
       armed = value;
@@ -50,7 +50,7 @@
         if (tile.lod===4) params.set('coarse_interpolation',s.coarseInterpolation||'monotone');
         if (tile.source_lod) params.set('source_lod',String(tile.source_lod));
         if (s.world.world_identity) params.set('world_identity', s.world.world_identity);
-        const response = await fetch(`${s.backendPrefix||''}/height/${s.world.version}/${tile.path}.bin?${params}`, {signal:controller.signal});
+        const response = await (window.TerrainTransport?.fetch||fetch)(`${s.backendPrefix||''}/height/${s.world.version}/${tile.path}.bin?${params}`, {signal:controller.signal});
         if (!response.ok) throw Error('Elevation unavailable');
         if(tile.source_lod&&Number(response.headers.get('X-Terrain-Source-Resolution'))!==30*2**tile.source_lod)throw Error('Unexpected elevation source');
         const bytes = await response.arrayBuffer(), width = Number(response.headers.get('X-Terrain-Width') || 304);
@@ -130,7 +130,7 @@
     }
     button.addEventListener('click', () => { const next = !armed; clearMeasurement(); setArmed(next); view.focus(); queueUpdate(); });
     view.addEventListener('pointerdown', event => {
-      if (getState().sceneView==='globe' || !armed || event.button !== 0 || event.target === mini || event.target.closest?.('#hud') || !getState().world) return;
+      if (event.altKey || event.target.closest?.('.mapPin') || getState().sceneView==='globe' || !armed || event.button !== 0 || event.target === mini || event.target.closest?.('#hud') || !getState().world) return;
       event.preventDefault(); event.stopImmediatePropagation();
       pointer = screenPoint(event);
       const point = worldPoint(pointer,getState());

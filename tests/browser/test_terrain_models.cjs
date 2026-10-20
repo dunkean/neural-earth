@@ -36,7 +36,7 @@ const {readRepositoryFile}=require(root+'/tools/repository-files.cjs');
       if(url.pathname.startsWith('/api/'))return route.fulfill({json:{accepted:true}});
       return route.fulfill({contentType:'image/png',body:png});
     });
-    await page.goto('https://models.test/?seed=42&profile=natural&coarse_gpu=0');
+    await page.goto('https://models.test/?seed=42&profile=natural&coarse_gpu=0&gpu=0');
     await page.waitForFunction(()=>terrainDebug.snapshot().world&&document.querySelectorAll('#distillCoarse option').length===3);
     await page.locator('#distillPanel').evaluate(el=>el.open=true);
     assert.deepEqual(await page.locator('#distillCoarse option').evaluateAll(els=>els.map(e=>e.value)),['teacher','solver8','solver2']);

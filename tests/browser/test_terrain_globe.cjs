@@ -7,6 +7,16 @@ const listeners={},canvas={clientHeight:600,getContext:()=>gl,addEventListener:(
 const context=vm.createContext({window:{},document:{createElement:()=>({getContext:()=>({clearRect(){},drawImage(){}})})},Math,Number,Float32Array,Uint8Array});
 vm.runInContext(readRepositoryFile('terrain_globe.js','utf8'),context);
 const globe=context.window.TerrainGlobe.create(canvas,{isActive:()=>true}),wb=[-20e6,-10e6,20e6,10e6];
+const originalOrbit=globe.snapshot();
+for(const [yaw,pitch,altitude] of [[Math.PI/2,0,2.1],[3*Math.PI/2,.8,.05],[.2,-1.5,.001]]){
+ globe.restore({yaw,pitch,altitude});
+ for(const [x,y]of [[500,300],[475,280],[520,325]]){
+  const point=globe.screenToWorld(x,y,1000,600,wb);assert(point,'pin ray intersects the globe');
+  const projected=globe.worldToScreen(...point,1000,600,wb);
+  assert(projected&&Math.hypot(projected[0]-x,projected[1]-y)<1e-5,'geographic pins project back to the clicked pixel, including seams and poles');
+ }
+}
+globe.restore(originalOrbit);
 const start=globe.snapshot();globe.orbit(.1,0);const far=globe.snapshot().yaw-start.yaw;
 globe.zoom(100);const before=globe.snapshot();globe.orbit(.1,0);const near=globe.snapshot().yaw-before.yaw;
 assert(Math.abs(near/far-.01)<1e-10,'orbit scales with altitude for keyboard and dragging');

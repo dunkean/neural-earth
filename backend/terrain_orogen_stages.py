@@ -3,25 +3,33 @@
 Stage commands restore the original graph, rather than generating it again.
 Composition retains untouched raster fields, even when their inputs are stale.
 """
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from copy import deepcopy
 import hashlib
-import io
 import json
 from pathlib import Path
 import re
 import shutil
 import subprocess
-from terrain_generation_session import check_generation, cancellable_process, run_process
+from terrain_generation_session import check_generation, cancellable_process, run_process, current_generation, generation_scope
 import tempfile
+import threading
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import torch
+
+import terrain_array_io as array_io
 
 from terrain_generation import (OROGEN_PARAMETERS, OROGEN_CLIMATE_PARAMETERS,
     OROGEN_GPU_PARAMETERS, OROGEN_STAGE_PARAMETERS, CITY_EROSION_PARAMETERS)
 
 VERSION = 'orogen-independent-stages-v1'
+# One FIFO worker: a stage's projection follows its parent's.
+_PROJECTION = ThreadPoolExecutor(max_workers=1, thread_name_prefix='orogen-projection')
 EROSION_KEYS = {'relief_pipeline', 'orogen_warp', 'orogen_smoothing',
     'orogen_hydraulic', 'orogen_thermal', 'orogen_glacial', 'orogen_sharpening',
     'orogen_gpu_post', 'orogen_gpu_erosion'} | set(CITY_EROSION_PARAMETERS)
@@ -63,27 +71,86 @@ def _path(key):
     return core.CACHE_ROOT/core.VERSION/'stages'/(key+'.npz')
 
 
-def load_stage(key, stage=None, *, seed=None, width=None, height=None):
+# Recently built or verified artifacts, keyed by file path. A hit is reused
+# only while the file keeps the size/mtime it had when written or verified,
+# so external edits are re-read and re-checked. Deferred writes are served
+# from memory until their file is in place.
+_MEMORY = OrderedDict()
+_MEMORY_LOCK = threading.Lock()
+_MEMORY_SIZE = 8
+
+
+def _remember(path, artifact, signature):
+    with _MEMORY_LOCK:
+        _MEMORY[path] = [artifact, signature]
+        _MEMORY.move_to_end(path)
+        while len(_MEMORY) > _MEMORY_SIZE:
+            _MEMORY.popitem(last=False)
+
+
+def _signed(path, signature):
+    with _MEMORY_LOCK:
+        if path in _MEMORY:
+            _MEMORY[path][1] = signature
+
+
+def _recall(path):
+    with _MEMORY_LOCK:
+        entry = _MEMORY.get(path)
+    if entry is None:
+        return None
+    artifact = entry[0]
+    if entry[1] is None and array_io.pending(path):
+        return artifact
+    signature = entry[1]
     try:
-        with np.load(_path(key),allow_pickle=False) as saved:
-            meta=json.loads(str(saved['metadata']))
-            arrays={name:saved[name] for name in meta['sha256']}
-        if hashlib.sha256(_json(meta['namespace'])).hexdigest()!=key:
-            raise ValueError('Stage identity mismatch')
-        for name,value in arrays.items():
-            if hashlib.sha256(value.tobytes()).hexdigest()!=meta['sha256'][name]:
+        stat = path.stat()
+        if signature == (stat.st_size, stat.st_mtime_ns):
+            return artifact
+    except OSError:
+        pass
+    with _MEMORY_LOCK:
+        if _MEMORY.get(path) is entry:
+            del _MEMORY[path]
+    return None
+
+
+def _validated(key, meta, arrays, stage, seed, width, height, *, verify, rasters=None):
+    if hashlib.sha256(_json(meta['namespace'])).hexdigest()!=key:
+        raise ValueError('Stage identity mismatch')
+    if verify:
+        digests=array_io.sha256_arrays(arrays)
+        for name in arrays:
+            if digests[name]!=meta['sha256'][name]:
                 raise ValueError('Stage data checksum mismatch')
-            value.flags.writeable=False
-        ns=meta['namespace']
-        for name,wanted in [('stage',stage),('seed',seed),('width',width),('height',height)]:
-            if wanted is not None and ns[name]!=wanted:
-                raise ValueError('Stage '+name+' mismatch')
+    ns=meta['namespace']
+    for name,wanted in [('stage',stage),('seed',seed),('width',width),('height',height)]:
+        if wanted is not None and ns[name]!=wanted:
+            raise ValueError('Stage '+name+' mismatch')
+    if verify if rasters is None else rasters:
         shape=(ns['height'],ns['width'])
         for name,value in arrays.items():
             if name=='height_m' or name.startswith('layer_'):
                 if value.shape!=shape or value.dtype!=np.float32 or not np.isfinite(value).all():
                     raise ValueError('Invalid stage raster')
-        return dict(id=key,metadata=meta,arrays=arrays)
+
+
+def load_stage(key, stage=None, *, seed=None, width=None, height=None):
+    try:
+        path=_path(key)
+        artifact=_recall(path)
+        if artifact is not None:
+            _validated(key,artifact['metadata'],artifact['arrays'],stage,seed,width,height,verify=False)
+            return artifact
+        with np.load(path,allow_pickle=False) as saved:
+            meta=json.loads(str(saved['metadata']))
+            arrays={name:saved[name] for name in meta['sha256']}
+        signature=path.stat();signature=(signature.st_size,signature.st_mtime_ns)
+        for value in arrays.values():value.flags.writeable=False
+        _validated(key,meta,arrays,stage,seed,width,height,verify=True)
+        artifact=dict(id=key,metadata=meta,arrays=arrays)
+        _remember(path,artifact,signature)
+        return artifact
     except (OSError,ValueError,KeyError) as error:
         raise ValueError('Cannot load '+str(stage or '')+' generation stage: '+str(error)) from error
 
@@ -93,12 +160,20 @@ def _json(value):
 
 
 def _save(key,namespace,arrays,details):
-    import terrain_orogen as core
-    metadata=dict(namespace=namespace,sha256={k:hashlib.sha256(v.tobytes()).hexdigest()
-                  for k,v in arrays.items()},**details)
-    stream=io.BytesIO()
-    np.savez(stream,metadata=np.asarray(json.dumps(metadata,sort_keys=True)),**arrays)
-    core._atomic(_path(key),stream.getvalue())
+    arrays={k:np.ascontiguousarray(v) for k,v in arrays.items()}
+    for value in arrays.values():value.flags.writeable=False
+    metadata=dict(namespace=namespace,sha256=array_io.sha256_arrays(arrays),**details)
+    encoded=json.dumps(metadata,sort_keys=True)
+    # The same metadata a reload would parse, without rereading the arrays.
+    artifact=dict(id=key,metadata=json.loads(encoded),arrays=arrays)
+    try:
+        _validated(key,artifact['metadata'],arrays,namespace['stage'],None,None,None,verify=False,rasters=True)
+    except ValueError as error:
+        raise ValueError('Cannot load '+namespace['stage']+' generation stage: '+str(error)) from error
+    path=_path(key)
+    _remember(path,artifact,None)
+    array_io.save_npz(path,dict(metadata=np.asarray(encoded),**arrays),
+                      on_complete=lambda signature:_signed(path,signature))
     return load_stage(key,namespace['stage'])
 
 
@@ -116,19 +191,43 @@ def _request(seed,config):
                          for k in OROGEN_CLIMATE_PARAMETERS})
 
 
-def _execute(stage, seed, style, config, width, height, parent=None, relief=None):
+def _resolved(artifact):
+    """A stage artifact, waiting for its projection if that is still running."""
+    if artifact is not None and 'pending' in artifact:
+        return artifact['pending'].result()
+    return artifact
+
+
+def _execute(stage, seed, style, config, width, height, parent=None, relief=None, finish=None):
+    """Run one stage: graph pipeline, then raster projection.
+
+    With ``finish``, projection continues on a worker while the caller starts
+    the next stage's graph pipeline. The result is then the retained snapshot
+    the next stage needs plus a future of ``finish(arrays, details)``.
+    Parents and relief may themselves be pending.
+    """
+    context=_native(stage,seed,style,config,width,height,parent,relief)
+    if finish is None:
+        return _project(context)
+    token=current_generation()
+    def job():
+        with generation_scope(token) if token is not None else nullcontext():
+            return finish(*_project(context))
+    return context.snapshot,_PROJECTION.submit(job)
+
+
+def _native(stage, seed, style, config, width, height, parent, relief):
     import terrain_orogen as core
-    from terrain_orogen_cuda import rasterize
     begun=time.perf_counter()
     identity=core.implementation_identity()
     request=_request(seed,config)
     flags={key:False for key in ('relief','propagation','post','erosion','climate')}
     for key in {'relief':('relief','propagation'),'erosion':('post','erosion'),'climate':('climate',)}[stage]:
         flags[key]=config['orogen_gpu_'+key]
-    gpu=None;erosion=None
-    device=torch.device('cuda',identity['cuda_device']['index'])
-    with tempfile.TemporaryDirectory(prefix='orogen-'+stage+'-') as tmp:
-        directory=Path(tmp)
+    gpu=None
+    temporary=tempfile.TemporaryDirectory(prefix='orogen-'+stage+'-')
+    try:
+        directory=Path(temporary.name)
         snapshot=directory/'snapshot.bin'
         if stage!='climate':request['snapshotOutput']=str(snapshot)
         base=None
@@ -145,14 +244,13 @@ def _execute(stage, seed, style, config, width, height, parent=None, relief=None
                            legacyHeightConvention=parent['metadata'].get('height_convention')!=core.HYPSOMETRY_RULE,
                            imported=relief['metadata']['namespace']['settings']['height_source']!='orogen',
                            skipPost=config['relief_pipeline']!='orogen',skipClimate=stage=='erosion')
-        geometry=relief['arrays'] if relief is not None else None
         city=stage=='erosion' and config['relief_pipeline']=='city-gpu' and config['city_erosion_strength']>0
         city_result={}
         def city_callback():
             from terrain_city_erosion import erode
             from terrain_geometry import world_bounds
             extent=world_bounds(_settings(config,style))
-            eroded,meta=erode(parent['arrays']['height_m'],world_height_m=extent[3]-extent[1],strength=config['city_erosion_strength'],
+            eroded,meta=erode(_resolved(parent)['arrays']['height_m'],world_height_m=extent[3]-extent[1],strength=config['city_erosion_strength'],
                 iterations=config['city_erosion_iterations'],talus=config['city_erosion_talus'],
                 motif_km=config['city_erosion_motif_km'])
             _,p,_,f=core._graph_fields(directory)
@@ -189,38 +287,58 @@ def _execute(stage, seed, style, config, width, height, parent=None, relief=None
                                   capture_output=True,text=True,timeout=600)
             if result.returncode:raise RuntimeError('Orogen '+stage+' failed: '+result.stderr[-6000:])
         graph,points,triangles,fields=core._graph_fields(directory)
-        if stage=='relief':
-            xyz=core.sphere_raster(width,height)
-            nearest=core._nearest_regions(points,xyz,config)
-            geometry=dict(points=points,triangles=triangles.astype(np.int32),nearest=nearest.astype(np.int32))
-        else:xyz=core.sphere_raster(width,height);nearest=geometry['nearest'].copy()
-        selected={k:v for k,v in fields.items() if
-            (is_climate_field(k) if stage=='climate' else
-             k in EROSION_FIELDS or k=='elevation' if stage=='erosion' else
-             not is_climate_field(k) and k not in EROSION_FIELDS)}
-        projected,fallback=rasterize(points,triangles,nearest,xyz,selected,device)
-        layers={k:v.reshape(height,width) for k,v in projected.items()}
-        if stage=='relief':
-            raw=core._metres(layers.pop('elevation')) if base is None else np.asarray(base,np.float32).copy()
-            layers['uplift']=np.maximum(layers.get('tectonic',np.zeros_like(raw)),0).astype(np.float32)
-        elif stage=='erosion':
-            raw=core._metres(layers.pop('elevation')) if config['relief_pipeline']=='orogen' else parent['arrays']['height_m'].copy()
-            if city:
-                raw=city_result['height'];erosion=city_result['metadata']
-                layers['city_erosion_delta_m']=(raw-parent['arrays']['height_m']).astype(np.float32)
-        else:raw=parent['arrays']['height_m']
-        arrays={**{'layer_'+k:v for k,v in layers.items()}}
-        if stage!='climate':
-            arrays.update(height_m=raw,snapshot=np.frombuffer(snapshot.read_bytes(),np.uint8).copy())
-        else:
-            arrays['layer_climate_height_m']=np.asarray(raw,np.float32).copy()
-        if stage=='relief':arrays.update(geometry)
-    return arrays,dict(height_convention=core.HYPSOMETRY_RULE,seconds=time.perf_counter()-begun,original_pipeline=graph['timing'],
+        snapshot=np.frombuffer(snapshot.read_bytes(),np.uint8).copy() if stage!='climate' else None
+    finally:
+        temporary.cleanup()
+    return SimpleNamespace(stage=stage,config=config,width=width,height=height,parent=parent,relief=relief,
+        begun=begun,base=base,city=city,city_result=city_result,gpu=gpu,
+        graph=graph,points=points,triangles=triangles,fields=fields,snapshot=snapshot)
+
+
+def _project(context):
+    import terrain_orogen as core
+    from terrain_orogen_cuda import rasterize
+    c=context
+    stage,config,width,height,base,city,city_result=c.stage,c.config,c.width,c.height,c.base,c.city,c.city_result
+    graph,points,triangles,fields=c.graph,c.points,c.triangles,c.fields
+    gpu=c.gpu;erosion=None
+    device=torch.device('cuda',core.implementation_identity()['cuda_device']['index'])
+    check_generation()
+    relief=_resolved(c.relief)
+    parent=_resolved(c.parent) if stage!='relief' else None
+    geometry=relief['arrays'] if relief is not None else None
+    if stage=='relief':
+        xyz=core.sphere_raster(width,height)
+        nearest=core._nearest_regions(points,xyz,config)
+        geometry=dict(points=points,triangles=triangles.astype(np.int32),nearest=nearest.astype(np.int32))
+    else:xyz=core.sphere_raster(width,height);nearest=geometry['nearest'].copy()
+    selected={k:v for k,v in fields.items() if
+        (is_climate_field(k) if stage=='climate' else
+         k in EROSION_FIELDS or k=='elevation' if stage=='erosion' else
+         not is_climate_field(k) and k not in EROSION_FIELDS)}
+    projected,fallback=rasterize(points,triangles,nearest,xyz,selected,device)
+    layers={k:v.reshape(height,width) for k,v in projected.items()}
+    if stage=='relief':
+        raw=core._metres(layers.pop('elevation')) if base is None else np.asarray(base,np.float32).copy()
+        layers['uplift']=np.maximum(layers.get('tectonic',np.zeros_like(raw)),0).astype(np.float32)
+    elif stage=='erosion':
+        raw=core._metres(layers.pop('elevation')) if config['relief_pipeline']=='orogen' else parent['arrays']['height_m'].copy()
+        if city:
+            raw=city_result['height'];erosion=city_result['metadata']
+            layers['city_erosion_delta_m']=(raw-parent['arrays']['height_m']).astype(np.float32)
+    else:raw=parent['arrays']['height_m']
+    arrays={**{'layer_'+k:v for k,v in layers.items()}}
+    if stage!='climate':
+        arrays.update(height_m=raw,snapshot=c.snapshot)
+    else:
+        arrays['layer_climate_height_m']=np.asarray(raw,np.float32).copy()
+    if stage=='relief':arrays.update(geometry)
+    return arrays,dict(height_convention=core.HYPSOMETRY_RULE,seconds=time.perf_counter()-c.begun,original_pipeline=graph['timing'],
         original_elevation_timing=graph.get('elevationTiming',[]),original_post_timing=graph.get('postTiming',[]),
         gpu_pipeline=gpu,erosion=erosion,projection_fallback_pixels=fallback)
 
 
-def build_stage(stage,seed,style,config,width,height,parent=None,relief=None):
+def build_stage(stage,seed,style,config,width,height,parent=None,relief=None,*,defer=False):
     import terrain_orogen as core
     check_generation()
     settings=_settings(config,style)
@@ -235,6 +353,12 @@ def build_stage(stage,seed,style,config,width,height,parent=None,relief=None):
     key=hashlib.sha256(_json(namespace)).hexdigest()
     try:return load_stage(key,stage,seed=seed,width=width,height=height),False
     except ValueError:pass
+    if defer:
+        # Callers resolve the artifact with _resolved once they need rasters.
+        snapshot,future=_execute(stage,seed,style,config,width,height,parent,relief,
+                                 finish=lambda arrays,details:_save(key,namespace,arrays,details))
+        return dict(id=key,metadata=dict(namespace=json.loads(_json(namespace)),height_convention=core.HYPSOMETRY_RULE),
+                    arrays=dict(snapshot=snapshot),pending=future),True
     arrays,details=_execute(stage,seed,style,config,width,height,parent,relief)
     check_generation()
     return _save(key,namespace,arrays,details),True
@@ -266,13 +390,11 @@ def compose(seed,style,config,width,height,stages,height_stage):
             layers[name]=np.zeros_like(raw)
     for name in ('boundaries','convergence','uplift'):layers.setdefault(name,np.zeros_like(raw))
     settings=_settings(config,style)
-    from terrain_soil import generate_soil, VERSION as SOIL_VERSION
+    from terrain_soil import VERSION as SOIL_VERSION
+    from terrain_pedology import generate_substrate, cell_metres, VERSION as PEDOLOGY_VERSION
     from terrain_geometry import world_bounds
-    layers.update(generate_soil(raw,layers,seed,world_bounds(settings),
-                                settings.get('world_topology','sphere')!='plane'))
-    from terrain_pedology import generate_pedology, VERSION as PEDOLOGY_VERSION
-    layers.update(generate_pedology(raw,layers,seed,world_bounds(settings),
-                                   settings.get('world_topology','sphere')!='plane'))
+    layers.update(generate_substrate(raw,layers,seed,world_bounds(settings),
+                                     settings.get('world_topology','sphere')!='plane'))
     state=dict(height_stage=height_stage,active_height=active['id'])
     for name,artifact in stages.items():
         ns=artifact['metadata']['namespace'];wanted={k:settings[k] for k in sorted(STAGE_KEYS[name])}
@@ -287,7 +409,7 @@ def compose(seed,style,config,width,height,stages,height_stage):
             'original Orogen: ocean 10000*e; land 6000*t^4*(5-4*t)')),sign_preserved=True,
         substrate=dict(version=SOIL_VERSION,composition=['sand','clay','humus'],
                        interpretation='procedural appearance; not surveyed geology'),
-        pedology=dict(version=PEDOLOGY_VERSION,cell_metres=200000,
+        pedology=dict(version=PEDOLOGY_VERSION,cell_metres=cell_metres(raw.shape,world_bounds(settings)),
                       types=['sandy','calcareous','clayey','ferrallitic','organic','podzolic','mineral']),
         stage_state=state,generation_seconds=0.,timings={},projection_fallback_pixels=sum(
             a['metadata']['projection_fallback_pixels'] for a in stages.values()),
@@ -314,7 +436,8 @@ def generate_staged_atlas(seed,style='earthlike',*,width,height,include_layers=F
     else:
         for stage in STAGE_KEYS:
             parent=stages.get('relief' if stage=='erosion' else 'erosion') if stage!='relief' else None
-            stages[stage],execution[stage]=build_stage(stage,seed,style,config,width,height,parent,stages.get('relief'))
+            stages[stage],execution[stage]=build_stage(stage,seed,style,config,width,height,parent,stages.get('relief'),defer=True)
+        stages={name:_resolved(artifact) for name,artifact in stages.items()}
         height_stage='erosion'
     result=compose(seed,style,config,width,height,stages,height_stage)
     result[2].update(generation_seconds=time.perf_counter()-begun,stage_execution=execution)
@@ -354,8 +477,9 @@ def run_generation(seed,base,settings,stage,source_profile=None):
             parent=stages.get('relief' if name=='erosion' else height_stage) if name!='relief' else None
             check_generation()
             stages[name],execution[name]=build_stage(name,seed,descriptor.bootstrap_style,config,
-                core.WIDTH,core.HEIGHT,parent,stages.get('relief'))
+                core.WIDTH,core.HEIGHT,parent,stages.get('relief'),defer=True)
             if name in ('relief','erosion'):height_stage=name
+        stages={name:_resolved(artifact) for name,artifact in stages.items()}
         if stage=='all':height_stage='erosion'
     for name,artifact in stages.items():applied['orogen_'+name+'_stage']=artifact['id']
     applied['orogen_height_stage']=height_stage

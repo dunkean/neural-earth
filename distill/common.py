@@ -49,11 +49,14 @@ def atomic_write(path, writer):
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        # Windows cannot open directories for fsync; the file is already flushed
+        # before the atomic replace. Keep directory durability on POSIX.
+        if os.name != 'nt':
+            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
     finally:
         Path(temporary).unlink(missing_ok=True)
 

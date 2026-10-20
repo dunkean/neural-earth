@@ -41,7 +41,7 @@ class GenerationSessionTests(unittest.TestCase):
         namespace=dict(app=self.app,request=request,jsonify=jsonify,subprocess=subprocess,
             jobs=self.jobs,coarse_background=self.background,generation_coordinator=self.coordinator,
             GenerationCancelled=GenerationCancelled,generation_scope=generation_scope,
-            all_gpu_locks=lambda:nullcontext([]),synchronize_gpus=Mock(),
+            all_gpu_locks=lambda:nullcontext([]),generation_gpu_locks=lambda:nullcontext([]),synchronize_gpus=Mock(),
             resolve_generation=lambda profile:SimpleNamespace(base_profile=profile),
             generation_profile=lambda profile=None:profile or request.args.get('world_profile','natural'),world_manifest=lambda *args:None,
             json=json,

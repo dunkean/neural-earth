@@ -1,0 +1,11 @@
+Use case: stylized-concept. Asset type: a production UI icon atlas for a cartography world-building application. Create ONE square transparent PNG containing exactly 16 distinct icons in a strict 4 by 4 equally spaced grid, each icon centered within its equal square cell, ample transparent padding, no text or labels. Read row by row: row 1 folded map, globe with longitude lines, compass rose, ruler; row 2 dice showing five dots, mountain range, stacked map layers, sliders/settings; row 3 map location pin, export arrow emerging from a tray, sun above horizon, square tile grid; row 4 organic contour lines, artist paintbrush, magnifying glass with plus, magnifying glass with minus. Style: refined atlas engraving simplified for toolbar use, strong clean outlines, flat restrained ink illustration, consistent line weights, highly recognizable at small scale, deep forest green ink #284b43 with small antique brass #a77938 accents. No circles or boxes surrounding icons, no shadows, no lettering, no decorative flourishes, no paper background. Actual transparent background. Exactly regular 4x4 grid so this single atlas can be used as a CSS sprite.
+
+Generated with the built-in image_gen tool. Original: atlas-icons.png.
+Optimized web asset: atlas-icons.webp, 640 by 640, alpha preserved.
+Atlas order (left to right, top to bottom): map, globe, compass, ruler;
+dice, mountains, layers, settings; pin, export, sun, tiles;
+contours, brush, zoom in, zoom out.
+
+The stylesheet and optimized atlas are embedded in terrain_toolbar.js.
+After changing atlas-theme.css or atlas-icons.webp, run:
+node tools/build-atlas-theme.cjs

@@ -92,12 +92,13 @@ class ServerWorldConstructionTests(unittest.TestCase):
             profile_data=profile_data, deepcopy=deepcopy, _reference_manifest=reference,
             terrestrial_file_snapshot=lambda generator='native':deepcopy(reference['files']),
             lru_cache=lru_cache, hashlib=hashlib, json=json,
+            os=SimpleNamespace(environ={'TERRAIN_DISTILL_LIVE': '0'}),
             load_pipeline=self.loader, WorldPipeline=WorldPipeline, COARSE_DEVICE=0,
             live_models=lambda:SimpleNamespace(install=Mock()),
             runtime_profile=profile, coarse_stream_setting={'coarse':1}, OUTPUT=Path(self.temporary.name),
             WORLD_BOUNDS=(-20e6, -10e6, 20e6, 10e6), profile_bounds=profile_bounds,
             CoarsePreparation=CoarsePreparation, worlds=OrderedDict(), active_seed=None,
-            all_gpu_locks=lambda:nullcontext([]), synchronize_gpus=Mock(),
+            all_gpu_locks=lambda:nullcontext([]), generation_gpu_locks=lambda:nullcontext([]), synchronize_gpus=Mock(),
             share_windows=lambda world, kind: world,
             app=self.app, jsonify=jsonify, Response=Response, request=request,
             MODES=MODES+OROGEN_MODES+SNR_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=OROGEN_MODES,
@@ -136,6 +137,13 @@ class ServerWorldConstructionTests(unittest.TestCase):
     def close_worlds(self):
         for world in self.namespace['worlds'].values():
             world.close()
+
+    def test_live_review_installs_selected_models_in_server_world(self):
+        models = Mock()
+        self.namespace['os'].environ['TERRAIN_DISTILL_LIVE'] = '1'
+        self.namespace['live_models'] = lambda: models
+        world = self.namespace['get_world'](42, 'natural')
+        models.install.assert_called_once_with(world)
 
     def test_full_orogen_configuration_is_accepted_by_world_endpoint(self):
         settings=resolve_generation('orogen').settings

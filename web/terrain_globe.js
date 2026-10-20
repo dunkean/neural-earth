@@ -99,12 +99,21 @@ window.TerrainGlobe=(()=>{
       return{cx:wb[0]+center[0]*(wb[2]-wb[0]),cy:wb[1]+center[1]*(wb[3]-wb[1]),geographicCenter:[wb[0]+geographic[0]*(wb[2]-wb[0]),wb[1]+geographic[1]*(wb[3]-wb[1])],neuralChart:polarChart?'polar':null,detailProjection,mpp:resolution,regions,uvBounds,bounds:[Math.min(...regions.map(b=>b[0])),Math.min(...regions.map(b=>b[1])),Math.max(...regions.map(b=>b[2])),Math.max(...regions.map(b=>b[3]))]};
     }
     canvas.addEventListener('pointerdown',e=>{if(e.button!==0||!isActive())return;e.stopPropagation();drag={id:e.pointerId,x:e.clientX,y:e.clientY};canvas.setPointerCapture(e.pointerId);canvas.parentElement.focus();});
-    canvas.addEventListener('pointermove',e=>{if(!drag||drag.id!==e.pointerId)return;e.stopPropagation();const scale=3/Math.max(100,canvas.clientHeight);orbitBy((e.clientX-drag.x)*scale,(e.clientY-drag.y)*scale);drag.x=e.clientX;drag.y=e.clientY;});
+    canvas.addEventListener('pointermove',e=>{if(!drag||drag.id!==e.pointerId)return;e.stopPropagation();const scale=3/Math.max(100,canvas.getBoundingClientRect?.().height??canvas.clientHeight);orbitBy((e.clientX-drag.x)*scale,(e.clientY-drag.y)*scale);drag.x=e.clientX;drag.y=e.clientY;});
     for(const name of ['pointerup','pointercancel','lostpointercapture'])canvas.addEventListener(name,e=>{if(drag?.id!==e.pointerId)return;e.stopPropagation();drag=null;});
     canvas.addEventListener('wheel',e=>{if(!isActive())return;e.preventDefault();e.stopPropagation();api.zoom(Math.exp(-e.deltaY*.0015));},{passive:false});
     canvas.addEventListener('dblclick',e=>{e.stopPropagation();api.zoom(2);});
     const api={
       orbit:orbitBy,zoom(f){if(!Number.isFinite(f)||f<=0)return;altitude=Math.max(1e-9,Math.min(11,altitude/f));onChange();},fit(){altitude=2.1;onChange();},camera,
+      restore(state){if(![state.yaw,state.pitch,state.altitude].every(Number.isFinite))throw Error('Invalid globe camera');yaw=state.yaw;pitch=Math.max(-Math.PI*.499999,Math.min(Math.PI*.499999,state.pitch));altitude=Math.max(1e-9,Math.min(11,state.altitude));onChange();},
+      screenToWorld(x,y,width,height,wb){const uv=surfacePoint(2*x/width-1,1-2*y/height,width,height);return uv?[wb[0]+((uv[0]%1+1)%1)*(wb[2]-wb[0]),wb[1]+uv[1]*(wb[3]-wb[1])]:null;},
+      worldToScreen(x,y,width,height,wb){
+        const longitude=((x-wb[0])/(wb[2]-wb[0])-.5)*2*Math.PI,latitude=(.5-(y-wb[1])/(wb[3]-wb[1]))*Math.PI;
+        const nx=Math.cos(latitude)*Math.cos(longitude),ny=Math.sin(latitude),nz=Math.cos(latitude)*Math.sin(longitude);
+        const px=nx*Math.cos(yaw)-nz*Math.sin(yaw),qz=nx*Math.sin(yaw)+nz*Math.cos(yaw),py=ny*Math.cos(pitch)-qz*Math.sin(pitch),pz=ny*Math.sin(pitch)+qz*Math.cos(pitch);
+        if(pz<1/(1+altitude))return null;const distance=1+altitude-pz;
+        return[width/2-2.41421356*px/distance*height/2,height/2-2.41421356*py/distance*height/2];
+      },
       setImage(image){if(lost||image===lastImage)return;lastImage=image;gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,texture);if(image){gl.texImage2D(gl.TEXTURE_2D,0,gl.RGBA,gl.RGBA,gl.UNSIGNED_BYTE,image);ready=true;}else ready=false;},
       setTiles(plan,state,wb,renderer=null){
         if(lost)return[];if(!state){detailReady=false;gpuDetailReady=false;surfaceSignature=null;surfaceTiles=[];surfacePresented=[];return[];}

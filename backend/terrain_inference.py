@@ -18,8 +18,9 @@ import torch
 import torch.nn.functional as F
 from infinite_tensor import InfiniteTensor, TensorWindow
 from terrain_diffusion.inference.world_pipeline import (
-    WorldPipeline, gaussian_noise_patch, linear_weight_window,
+    WorldPipeline, linear_weight_window,
 )
+from terrain_noise import noise_patch, upload as upload_noise
 from terrain_diffusion.models.mp_layers import MPConv, MPConvResample, normalize
 from terrain_diffusion.models import mp_layers
 from terrain_diffusion.scheduler.dpmsolver import EDMDPMSolverMultistepScheduler
@@ -184,10 +185,10 @@ def _coarse_batch(world, ctxs, scheduler, weight_window, t_cond, cond_inputs, po
             regional = window_snr(world._terrain_generation_settings, world.kwargs['cond_snr'], value,
                                   latitude=lat)
         synthetic.append((value - means[[0, 2, 3, 4, 5], None, None]) / stds[[0, 2, 3, 4, 5], None, None])
-        cond_noises.append(gaussian_noise_patch(world.seed, i1, j1, 64, 64, channels=5, tile_h=64, tile_w=64))
-        sample_noises.append(gaussian_noise_patch(world.seed + 1, i1, j1, 64, 64, channels=6, tile_h=64, tile_w=64))
+        cond_noises.append(noise_patch(world.seed, i1, j1, 64, 64, channels=5, tile_h=64, tile_w=64))
+        sample_noises.append(noise_patch(world.seed + 1, i1, j1, 64, 64, channels=6, tile_h=64, tile_w=64))
     synthetic = torch.stack(synthetic).to(world.device, dtype=dtype)
-    cond_noise = torch.from_numpy(np.stack(cond_noises)).to(world.device, dtype=dtype)
+    cond_noise = upload_noise(np.stack(cond_noises), world.device, dtype)
     if regional is not None:
         # Production coarse batches remain scalar. Cache all conditioning and
         # timestep embeddings per quantized regional policy, bounded per world.
@@ -208,7 +209,7 @@ def _coarse_batch(world, ctxs, scheduler, weight_window, t_cond, cond_inputs, po
     t_view = t_cond.view(1, -1, 1, 1)
     cond_img = torch.cos(t_view) * synthetic + torch.sin(t_view) * cond_noise
     scheduler.set_timesteps(20)
-    sample = torch.from_numpy(np.stack(sample_noises)).to(world.device, dtype=dtype) * scheduler.sigmas[0]
+    sample = upload_noise(np.stack(sample_noises), world.device, dtype) * scheduler.sigmas[0]
 
     # The original cnoise.item() waits for CUDA on *every* solver step. Compute
     # labels with the same CUDA operation and pass tensors without a host read.
@@ -443,7 +444,7 @@ def _latent_inference(self, ctxs, samples, cond_imgs, t, scheduler, weight_windo
             cond, histogram_raw, cond_means, cond_stds, torch.tensor(0.0),
             seed_offset=ctx[1] * 65536 + ctx[2])
         conditions.append(processed.to(self.device, dtype=dtype))
-        noise = torch.from_numpy(gaussian_noise_patch(
+        noise = torch.from_numpy(noise_patch(
             self.seed + seed_offset, ctx[1] * 32, ctx[2] * 32, 64, 64,
             channels=5, tile_h=64, tile_w=64,
         ))[None].to(self.device, dtype=dtype)
@@ -501,10 +502,10 @@ def _latent_gpu_batch(world, ctxs, samples, cond_imgs, t, scheduler, weight,
         histogram_gpu.expand(n, -1), noise_level.expand(n, -1),
     ], dim=1).float().to(dtype)
     # The same portable noise patches in the same window order are assembled
-    # on the host first. This replaces sixteen synchronising pageable copies.
-    noise = torch.from_numpy(np.stack([gaussian_noise_patch(
+    # on the host first, then copied once without a stream synchronisation.
+    noise = upload_noise(np.stack([noise_patch(
         world.seed+seed_offset, ctx[1]*32, ctx[2]*32, 64, 64,
-        channels=5, tile_h=64, tile_w=64) for ctx in ctxs])).to(world.device, dtype=dtype)
+        channels=5, tile_h=64, tile_w=64) for ctx in ctxs]), world.device, dtype)
     z = noise*scheduler.config.sigma_data
     x_t = cosine*sample+sine*z
     pred = -world.base_model(x_t/scheduler.config.sigma_data, noise_labels=labels.expand(n),
@@ -529,6 +530,11 @@ def _build_latent(self):
 
 
 def _decoder_batch(world, ctxs, latents, scheduler, weight, t_list, size, stride, *, noise_seed=None):
+    # A selected decoder student computes every decoder window of this world,
+    # refinement octaves included, with the same noise seeds and blending.
+    student = world.__dict__.get('_terrain_decoder_windows')
+    if student is not None:
+        return student(ctxs, latents, weight, size, stride, noise_seed)
     dtype = world._dtype or torch.float32
     lc = world.latent_compression
     normalised = [(value[:-1] / value[-1:])[:4].view(1, 4, size // lc, size // lc) for value in latents]
@@ -538,10 +544,10 @@ def _decoder_batch(world, ctxs, latents, scheduler, weight, t_list, size, stride
     n = len(ctxs)
     sample = torch.zeros((n, 1, size, size), device=world.device, dtype=dtype)
     for idx, t in enumerate(t_list):
-        noises = [gaussian_noise_patch((world.seed if noise_seed is None else noise_seed) + 5819 + idx, ctx[1] * stride, ctx[2] * stride,
+        noises = [noise_patch((world.seed if noise_seed is None else noise_seed) + 5819 + idx, ctx[1] * stride, ctx[2] * stride,
                                      size, size, channels=1, tile_h=size, tile_w=size) for ctx in ctxs]
-        noise = torch.from_numpy(np.stack(noises)).to(world.device, dtype=dtype)
-        t = t.view(1, 1, 1, 1).to(world.device, dtype=dtype)
+        noise = upload_noise(np.stack(noises), world.device, dtype)
+        t = upload_noise(t.view(1, 1, 1, 1).numpy(), world.device, dtype)
         z = noise * scheduler.config.sigma_data
         x_t = torch.cos(t) * sample + torch.sin(t) * z
         model_in = torch.cat([x_t / scheduler.config.sigma_data, upsampled], dim=1)
@@ -705,6 +711,13 @@ def inference_status(world):
     stream_pool = world.coarse_model.__dict__.get('_terrain_stream_pool')
     if stream_pool:
         graph_stats['coarse_streams'] = stream_pool[1].stats()
+    # Stages computed by a selected distilled student instead of the teacher.
+    students = {stage: dict(calls=world._distill_counts[stage]['calls'],
+                            graph_slots=len(getattr(model.__dict__.get('_distill_graphs'), 'slots', ())),
+                            memory_format='channels_last' if not model.config.solver_steps else 'contiguous',
+                            refinement=stage == 'decoder' and '_terrain_decoder_windows' in world.__dict__)
+                for stage, model in getattr(world, '_distill_students', {}).items()}
+    from terrain_noise import stats as noise_stats
     from terrain_device import select_cuda_device
     return {'version': VERSION, 'device': str(world.device), 'device_selection': select_cuda_device(),
             'world_profile': getattr(world, '_terrain_world_profile', 'natural'),
@@ -720,5 +733,6 @@ def inference_status(world):
             'precision': str(world._dtype), 'compile': world.torch_compile,
             'pointwise_kernels': __import__('terrain_nn_constants').kernel_status(),
             'window_cache_bytes': getattr(world.tile_store, '_bytes', 0), 'cuda_graphs': graph_stats,
+            'students': students, 'noise_tiles': dict(noise_stats),
             'coarse_persistence': getattr(world,'_terrain_coarse_preparation').status() if hasattr(world,'_terrain_coarse_preparation') else None,
             'windows': __import__('terrain_window_scheduler').scheduler_status(world)}

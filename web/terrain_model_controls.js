@@ -16,13 +16,26 @@
   menu.id = 'distillPanel';
   menu.innerHTML = '<summary aria-label="Modèles neuronaux">NN</summary><div class="toolPanel"></div>';
   menu.querySelector('.toolPanel').append(panel);
-  document.getElementById('controls').append(menu);
+  document.getElementById('controls').insertBefore(menu, document.getElementById('mapActivity'));
+  menu.addEventListener('toggle', () => {
+    if (menu.open) for (const other of document.querySelectorAll('#controls > details')) if (other !== menu) other.open = false;
+  });
+  for (const other of document.querySelectorAll('#controls > details')) {
+    if (other !== menu) other.addEventListener('toggle', () => { if (other.open) menu.open = false; });
+  }
+  document.addEventListener('keydown', event => {
+    if (event.key === 'Escape' && menu.open) { menu.open = false; menu.querySelector('summary').focus(); }
+  });
   const stages = ['coarse', 'base', 'decoder'];
   const selects = Object.fromEntries(stages.map(stage => [stage, panel.querySelector('#distill' + stage[0].toUpperCase() + stage.slice(1))]));
   const status = panel.querySelector('#distillStatus');
+  for (const note of panel.querySelectorAll('small')) { note.style.display = 'block'; note.style.marginTop = '6px'; }
+  function selectionLabels(data) {
+    return stages.map(stage => data.options[stage].find(option => option.id === data.selection[stage]).label).join(' / ');
+  }
   let state;
   async function read() {
-    const response = await fetch('/api/models', {cache: 'no-store'});
+    const response = await (window.TerrainTransport?.fetch||fetch)('/api/models', {cache: 'no-store'});
     if (!response.ok) throw Error('Modèles indisponibles');
     return response.json();
   }
@@ -32,7 +45,7 @@
       selects[stage].replaceChildren(...data.options[stage].map(option => new Option(option.label, option.id)));
       selects[stage].value = data.selection[stage];
     }
-    status.textContent = 'Actif · ' + stages.map(stage => data.selection[stage]).join(' / ');
+    status.textContent = 'Actif · ' + selectionLabels(data);
   }
   async function apply(reset) {
     if (generationPending) { status.textContent = 'Attends la fin de la génération en cours.'; return; }
@@ -47,7 +60,7 @@
     clearTimeout(timer);
     status.textContent = 'Application…';
     try {
-      const response = await fetch('/api/models', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({selection, reset})});
+      const response = await (window.TerrainTransport?.fetch||fetch)('/api/models', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({selection, reset})});
       const change = await response.json();
       if (!response.ok) throw Error(change.error || 'Changement refusé');
       const deadline = Date.now() + 180000;
@@ -64,7 +77,7 @@
       nnEngine = 'exact'; document.getElementById('nnEngine').value = nnEngine;
       const opened = await openWorld(seed, profile, {preserveCamera: true, generation});
       if (!opened) throw Error('Modèles appliqués, mais la vue n’a pas pu être recalculée.');
-      status.textContent = (reset ? 'Cache NN réinitialisé · ' : 'NN appliqués · ') + stages.map(stage => ready.selection[stage]).join(' / ');
+      status.textContent = (reset ? 'Cache NN réinitialisé · ' : 'NN appliqués · ') + selectionLabels(ready);
     } catch (error) { status.textContent = error.message; }
     finally { generationPending = false; controls.forEach(control => control.disabled = false); draw(); schedule(); }
   }

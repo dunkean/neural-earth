@@ -127,7 +127,7 @@
     }
     // Climate: sea-level seasonal temperatures/lapse and seasonal precipitation.
     // bare=true returns the substrate shown by the Soil layer.
-    fn surfaceMaterial(height:f32,gradient:vec2<f32>,tpi:f32,point:vec3<f32>,north:vec2<f32>,footprint:f32,soil:vec3<f32>,pedology:vec3<f32>,substrateRock:vec3<f32>,sandFraction:f32,ts0:f32,ps:f32,ls:f32,tw0:f32,pw:f32,lw:f32,bare:bool)->vec3<f32>{
+    fn surfaceMaterial(height:f32,gradient:vec2<f32>,tpi:f32,point:vec3<f32>,north:vec2<f32>,footprint:f32,soil:vec3<f32>,pedology:vec3<f32>,substrateRock:vec3<f32>,sandFraction:f32,ts0:f32,ps:f32,ls:f32,tw0:f32,pw:f32,lw:f32,bare:bool,shore:f32,openness:f32)->vec3<f32>{
       let season=params.render0.x;let variation=params.render0.y;let forestAmount=params.render0.z;let rockTan=params.render0.w;
       let snowAmount=params.render1.x;let moisture=params.render1.y;
       let salt=u32(surfaceMeta(6));let fp=footprint;let phase=surfaceSeason();let h=max(height,0.);
@@ -211,8 +211,25 @@
       trees=trees*(1.-.22*ridge)+.14*valley*sstep(2.,10.,tHot)*sstep(.4,1.2,humid)*(1.-outcrop)*forestAmount;
       let woods=surfaceCover(clamp(trees,0.,1.),grove,.65*variation);
       color=surfaceMix(color,canopy,woods);
-      let beach=(1.-sstep(1.5,6.,height))*(1.-sstep(.05,.2,grade))*(1.-sstep(40.,120.,fp));
-      color=surfaceMix(color,vec3<f32>(.76,.70,.56),beach*.8*(1.-.5*wBoreal));
+      let flats=(1.-sstep(1.5,6.,height))*(1.-sstep(.05,.2,grade));
+      // Beaches: an intermittent strip along open water (none beside ponds), up to
+      // ~190 m wide with a ragged inner edge, as area coverage (visible at 240 m
+      // samples); low flats behind it stay as wetter river/estuary bars.
+      let reach=surfaceFbm(point,20000.,3,fp,salt+7u);
+      let width=140.*sstep(-.15,.75,.65*reach.x*sqrt(reach.y)+.5*grove.x*sqrt(grove.y))*sstep(.15,.4,openness)*(1.+.35*fine.x*sqrt(fine.y));
+      let beach=clamp((min(width,20.*fp)-shore+fp)/fp,0.,1.)*(1.-sstep(4.,12.,height))*(1.-sstep(.2,.5,grade));
+      // Sediment follows the coast's geology: quartz or golden sand by province,
+      // tropical coral sand, and local stone on cool or rugged coasts. Summer
+      // warmth preserves sandy continental coasts despite their winter frost.
+      // Reuse slope/TPI and resolved noise, with no additional samples or FBM.
+      let shingle=max(1.-sstep(4.,14.,tHot),sstep(.04,.22,grade)*terrain);
+      var sediment=surfaceMix(vec3<f32>(.80,.75,.61),vec3<f32>(.76,.63,.43),sstep(-.2,.9,pv));
+      sediment=surfaceMix(sediment,vec3<f32>(.86,.84,.76),wTrop*sstep(0.,-.8,pv)*.7);
+      sediment=surfaceMix(sediment,rock,shingle*.9);
+      sediment=surfaceMix(sediment,surfaceMix(ground,rock,.4),sstep(-.9,-1.5,m2)*.85);
+      sediment=surfaceMix(sediment,vec3<f32>(.27,.26,.25),sstep(1.25,1.75,m1+.35*shingle)*.9);
+      color=surfaceMix(color,sediment*.9,flats*(1.-sstep(240.,960.,fp))*.8);
+      color=surfaceMix(color,sediment,beach*.8);
       // Snow: seasonal and perennial, exposure-aware, sheds from steep ridges.
       let hemisphere=point.y/max(sqrt(point.y*point.y+.0064*dot(point,point)),1.);
       let aspect=dot(gradient,north)/max(length(gradient),.00001)*hemisphere;
@@ -246,15 +263,44 @@
       return mix(mix(textureLoad(climate,lo,layer,0).r,textureLoad(climate,vec2<i32>(hi.x,lo.y),layer,0).r,f.x),mix(textureLoad(climate,vec2<i32>(lo.x,hi.y),layer,0).r,textureLoad(climate,hi,layer,0).r,f.x),f.y);
     }
     ${materialShader.replaceAll('PTYPE','i32')}
+    // Metres to the nearest sea sample (terrain_render.shore_distance), searched
+    // in square rings until no closer sample can remain; only low land needs it.
+    // Beaches reach 189 m (and at most 20 samples): farther sea is irrelevant.
+    fn shoreDistance(p:vec2<i32>,height:f32,r:f32)->f32{
+      var best=1e9;
+      if(height<0.||height>=12.){return best;}
+      let last=vec2<i32>(textureDimensions(elevation))-1;let reach=min(21,i32(ceil((190.+r)/r)));
+      for(var k=1;k<=reach;k++){
+        if(f32(k)*r>best){break;}
+        for(var i=-k;i<=k;i++){
+          for(var side=0;side<4;side++){
+            var o=vec2<i32>(i,-k);if(side==1){o=vec2<i32>(i,k);}else if(side==2){o=vec2<i32>(-k,i);}else if(side==3){o=vec2<i32>(k,i);}
+            if(textureLoad(elevation,clamp(p+o,vec2<i32>(0),last),0).r<0.){best=min(best,length(vec2<f32>(o))*r);}
+          }
+        }
+      }
+      return best;
+    }
+    // Sea share of terrain_render.openness_probes around a shore sample.
+    fn shoreOpenness(p:vec2<i32>,shore:f32,r:f32)->f32{
+      if(shore>=190.+r){return 0.;}
+      let last=vec2<i32>(textureDimensions(elevation))-1;let radius=clamp(300./r,2.,20.);var sea=0.;
+      for(var k=0;k<24;k++){
+        let a=6.2831853/12.*(f32(k%12)+.25+.5*f32(k/12));let o=vec2<i32>(round(vec2<f32>(cos(a),sin(a))*radius*select(.5,1.,k>=12)));
+        if(textureLoad(elevation,clamp(p+o,vec2<i32>(0),last),0).r<0.){sea+=1.;}
+      }
+      return sea/24.;
+    }
     fn renderSurface(p:vec2<i32>,height:f32)->vec3<f32>{
       // Derivatives match terrain_render.terrain_derivatives: central gradient and
       // the difference of the two Gaussian scales already used for hillshade.
       let local=vec2<f32>(p);let r=params.resolution;let blur=textureLoad(blurred,p,0).rg;
       let gradient=vec2<f32>(textureLoad(elevation,p+vec2<i32>(1,0),0).r-textureLoad(elevation,p-vec2<i32>(1,0),0).r,
         textureLoad(elevation,p+vec2<i32>(0,1),0).r-textureLoad(elevation,p-vec2<i32>(0,1),0).r)*.5/r;
+      let shore=shoreDistance(p,height,r);
       return surfaceMaterial(height,gradient,(blur.g-blur.r)/(6.*r),surfacePoint(local,params.style.xy,r),surfaceNorth(local,params.style.xy,r),r,
         vec3<f32>(clim(p,36),clim(p,37),clim(p,38)),surfacePedology(p),vec3<f32>(clim(p,39),clim(p,40),clim(p,41)),clim(p,42),
-        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.mode == -4.);
+        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.mode == -4.,shore,shoreOpenness(p,shore,r));
     }
     fn shade(d:vec2<f32>) -> f32 {
       // Same directional light/vertical exaggeration as upstream relief_map.py.
@@ -428,6 +474,18 @@
       return sampled;
     }`;
 
+  // Shaded colours of a refined tile, box-averaged per mip: a finer cached
+  // tile shown below one sample per pixel would otherwise alias its metre
+  // relief into speckle.
+  const colorMipShader=`
+    @group(0) @binding(0) var source:texture_2d<f32>;
+    @group(0) @binding(1) var dest:texture_storage_2d<rgba8unorm,write>;
+    @compute @workgroup_size(8,8) fn main(@builtin(global_invocation_id) id:vec3<u32>){
+      if(any(id.xy>=textureDimensions(dest))){return;}
+      let last=vec2<i32>(textureDimensions(source))-1;let p=vec2<i32>(id.xy)*2;
+      let sum=textureLoad(source,min(p,last),0)+textureLoad(source,min(p+vec2<i32>(1,0),last),0)+textureLoad(source,min(p+vec2<i32>(0,1),last),0)+textureLoad(source,min(p+vec2<i32>(1,1),last),0);
+      textureStore(dest,vec2<i32>(id.xy),sum*.25);
+    }`;
   // Coarse stays in its native signed-sqrt representation. Mips average
   // physical metres, then encode again; averaging signed roots is incorrect.
   const coarseMipShader=`
@@ -534,9 +592,26 @@
       // Box mips approximate the Gaussian relief position of fine tiles.
       let tpi=(height-heightAt(p,3.))/(6.*r);
       let point=surfacePoint(p,params.style.xy,r);
+      // Same sea distance and openness as the fine tiles (shoreDistance and
+      // shoreOpenness), on the coarse grid.
+      var shore=1e9;var openness=0.;
+      if(height>=0.&&height<12.){
+        let reach=min(21,i32(ceil((190.+r)/r)));
+        for(var j=-reach;j<=reach;j++){for(var i=-reach;i<=reach;i++){
+          let o=vec2<f32>(f32(i),f32(j));
+          if(length(o)*r<shore&&heightAt(p+o,0.)<0.){shore=length(o)*r;}
+        }}
+      }
+      if(shore<190.+r){
+        let radius=clamp(300./r,2.,20.);
+        for(var k=0;k<24;k++){
+          let a=6.2831853/12.*(f32(k%12)+.25+.5*f32(k/12));
+          if(heightAt(p+round(vec2<f32>(cos(a),sin(a))*radius*select(.5,1.,k>=12)),0.)<0.){openness+=1./24.;}
+        }
+      }
       let land=surfaceMaterial(max(height,.5),gradient,tpi,point,surfaceNorth(p,params.style.xy,r),r,
         vec3<f32>(clim(p,36),clim(p,37),clim(p,38)),surfacePedology(p),vec3<f32>(clim(p,39),clim(p,40),clim(p,41)),clim(p,42),
-        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.field.z == -4.);
+        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.field.z == -4.,shore,openness);
       textureStore(albedo,vec2<i32>(id.xy),vec4<f32>(land,surfaceSeaIce(point,clim(p,21),clim(p,24),r)));
     }`;
 
@@ -574,7 +649,7 @@
         if(errors.length)throw Error(errors.map(x=>`${label}:${x.lineNum} ${x.message}`).join('\n'));
         return result;
       };
-      const [blur,shade,render,coarse,mip,contour,bake]=await Promise.all([module(blurShader,'terrain Gaussian'),module(shadeShader,'terrain relief'),module(renderShader,'terrain quads'),module(coarseShader,'native coarse relief'),module(coarseMipShader,'native coarse mips'),module(contourShader,'terrain vector contours'),module(coarseBakeShader,'native coarse materials')]);
+      const [blur,shade,render,coarse,mip,contour,bake,colorMip]=await Promise.all([module(blurShader,'terrain Gaussian'),module(shadeShader,'terrain relief'),module(renderShader,'terrain quads'),module(coarseShader,'native coarse relief'),module(coarseMipShader,'native coarse mips'),module(contourShader,'terrain vector contours'),module(coarseBakeShader,'native coarse materials'),module(colorMipShader,'terrain colour mips')]);
       this.blurLayout=device.createBindGroupLayout({entries:[
         {binding:0,visibility:GPUShaderStage.COMPUTE,texture:{sampleType:'unfilterable-float'}},
         {binding:1,visibility:GPUShaderStage.COMPUTE,storageTexture:{access:'write-only',format:'rg32float'}},
@@ -610,6 +685,7 @@
       this.noAlbedo=this.makeTexture(1,1,'rgba8unorm');
       this.coarsePipeline=await device.createRenderPipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[this.coarseLayout]}),vertex:{module:coarse,entryPoint:'vertex'},fragment:{module:coarse,entryPoint:'fragment',targets:[{format:this.format}]},primitive:{topology:'triangle-list'}});
       this.coarseMipPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:mip,entryPoint:'main'}});
+      this.colorMipPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:colorMip,entryPoint:'main'}});
       [this.horizontal,this.vertical,this.shade,this.pipeline]=await Promise.all([
         device.createComputePipelineAsync({layout:blurLayout,compute:{module:blur,entryPoint:'horizontal'}}),
         device.createComputePipelineAsync({layout:blurLayout,compute:{module:blur,entryPoint:'vertical'}}),
@@ -619,7 +695,7 @@
       this.contourLayout=device.createBindGroupLayout({entries:[{binding:0,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:208}}]});
       this.contourPipeline=await device.createRenderPipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[this.contourLayout]}),vertex:{module:contour,entryPoint:'vertex',buffers:[{arrayStride:20,stepMode:'instance',attributes:[{shaderLocation:0,offset:0,format:'float32x4'},{shaderLocation:1,offset:16,format:'float32'}]}]},fragment:{module:contour,entryPoint:'fragment',targets:[{format:this.format,blend:{color:{srcFactor:'src-alpha',dstFactor:'one-minus-src-alpha'},alpha:{srcFactor:'one',dstFactor:'one-minus-src-alpha'}}}]},primitive:{topology:'triangle-list'}});
       const validation=await device.popErrorScope(); if(validation)throw Error(validation.message);
-      this.sampler=device.createSampler({magFilter:'linear',minFilter:'linear'});
+      this.sampler=device.createSampler({magFilter:'linear',minFilter:'linear',mipmapFilter:'linear'});
       this.available=true; this.notify('webgpu'); return this;
     }
     fail(message) {
@@ -644,7 +720,8 @@
       this.deleteTile(key); const started=performance.now(); this.scratch(width,height);
       const innerWidth=width-2*halo,innerHeight=height-2*halo;
       const elevation=this.makeTexture(width,height,'r32float',GPUTextureUsage.COPY_DST);
-      const color=this.makeTexture(innerWidth,innerHeight,'rgba8unorm',GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_SRC);
+      const colorMips=Math.min(5,Math.floor(Math.log2(Math.min(innerWidth,innerHeight)))+1);
+      const color=this.device.createTexture({size:[innerWidth,innerHeight],format:'rgba8unorm',mipLevelCount:colorMips,usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.STORAGE_BINDING|GPUTextureUsage.COPY_SRC});
       if(climate!==null&&(!(climate instanceof Float32Array)||![5,21,36,46,50].includes(climate.length/(climateWidth*climateHeight))))throw Error('Invalid ticlimatee');
       const climateLayers=climate?climate.length/(climateWidth*climateHeight):5;
       const climateTexture=this.device.createTexture({size:[climateWidth,climateHeight,climateLayers],format:'r32float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
@@ -654,7 +731,7 @@
       const selectedMode=modeNumber(this.mode??mode);
       const tile={elevation,color,climate:climateTexture,halo,resolution:metresPerSample,params:[width,height,selectedMode,0],origin,lod,heights};
       this.shadeTile(tile);
-      const bytes=width*height*4+innerWidth*innerHeight*4+climateWidth*climateHeight*climateLayers*4;
+      const bytes=width*height*4+Math.ceil(innerWidth*innerHeight*16/3)+climateWidth*climateHeight*climateLayers*4;
       this.tiles.set(key,Object.assign(tile,{bytes,lastUsed:++this.serial}));this.bytes+=bytes;this.uploads++;this.lastUploadSubmitMs=performance.now()-started;
       window.TerrainTiming.record('render.upload_and_shade_submit',started,{key,bytes});
       window.TerrainTiming.queue(this.device.queue,'render.shade');
@@ -668,10 +745,14 @@
       const selectedMode=tile.params[2];
       this.device.queue.writeBuffer(params,0,new Float32Array([metresPerSample,halo,innerWidth,innerHeight,selectedMode,0,0,0,...(window.TerrainLighting?.vectors(lod)||[1,.35,1,1,-.5,-.5,.70710678,0]),...origin,0,0,...this.renderVectors()]));
       const horizontalGroup=this.device.createBindGroup({layout:this.blurLayout,entries:[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchA.createView()}]});
-      const shadeGroup=this.device.createBindGroup({layout:this.shadeLayout,entries:[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchB.createView()},{binding:2,resource:color.createView()},{binding:3,resource:{buffer:params}},{binding:4,resource:climateTexture.createView({dimension:'2d-array'})}]});
+      const shadeGroup=this.device.createBindGroup({layout:this.shadeLayout,entries:[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchB.createView()},{binding:2,resource:color.createView({baseMipLevel:0,mipLevelCount:1})},{binding:3,resource:{buffer:params}},{binding:4,resource:climateTexture.createView({dimension:'2d-array'})}]});
       const encoder=this.device.createCommandEncoder({label:'terrain shade once'});
       for(const [pipeline,group,w,h] of [[this.horizontal,horizontalGroup,width,height],[this.vertical,this.verticalGroup,width,height],[this.shade,shadeGroup,innerWidth,innerHeight]]) {
         const pass=encoder.beginComputePass(); pass.setPipeline(pipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil(w/8),Math.ceil(h/8));pass.end();
+      }
+      for(let level=1;level<color.mipLevelCount;level++){
+        const group=this.device.createBindGroup({layout:this.colorMipPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:color.createView({baseMipLevel:level-1,mipLevelCount:1})},{binding:1,resource:color.createView({baseMipLevel:level,mipLevelCount:1})}]});
+        const pass=encoder.beginComputePass();pass.setPipeline(this.colorMipPipeline);pass.setBindGroup(0,group);pass.dispatchWorkgroups(Math.ceil((innerWidth>>level)/8),Math.ceil((innerHeight>>level)/8));pass.end();
       }
       this.device.queue.submit([encoder.finish()]); params.destroy();tile.shadedMode=selectedMode;
     }

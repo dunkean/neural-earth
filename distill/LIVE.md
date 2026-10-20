@@ -1,5 +1,19 @@
 # Modèles fournis dans Neural Earth
 
+La base native climatique sous 100 Mo dispose d'une
+[fiche de téléchargement et de chargement](BASE_NATIVE3_RELEASE.md), avec les
+empreintes et les limites de qualité. Son paquet complet fait 99 235 840 octets.
+
+Le base compact **Distillé · NF4 B75 · 150 Mo** est disponible après installation
+de la release auditée : `python -m distill.compact_release` depuis la racine.
+Les poids restent hors Git, dans `DISTILL_ROOT/releases/base-nf4-b75-v1`
+(`~/data/distill` par défaut). Le manifeste et le binaire sont vérifiés contre
+leurs SHA256 publiés avant affichage et chargement. Dans **NN**, sélectionner
+ce base puis **Appliquer les NN** ; coarse et decoder restent indépendants.
+Le défaut reste le base original. Le runtime CUDA déquantifie en BF16 en
+conservant le gain FP32 et le solver original à deux étapes.
+Voir [la fiche de release](BASE_COMPACT_RELEASE.md) pour les résultats de qualité.
+
 Le menu **NN** fait partie du serveur habituel (`python launch_terrain.py`).
 La carte continue démarre avec **coarse8/25k, base original, décodeur64/200k**.
 Les trois modèles originaux restent sélectionnables séparément. Coarse2/200k

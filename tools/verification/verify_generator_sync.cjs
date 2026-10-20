@@ -41,6 +41,7 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
 
  });
 
+ await page.addInitScript(()=>localStorage.setItem('neural-earth-preferences-v1',JSON.stringify({gpuAcceleration:false})));
  await page.goto('https://lod.test/?seed=42&profile=natural');await page.waitForFunction(()=>terrainDebug.snapshot().world==='42'&&terrainDebug.snapshot().visible.pending===0);
 
  assert.equal(await page.locator('#renderPanel #refinementDepth').count(),1);
@@ -54,7 +55,7 @@ const root=process.cwd(),png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAA
  assert.equal(await page.locator('#controls > #climatePanel, #controls > #noisePanel').count(),0);
  const before=worldRequests.length;
 
- await page.getByRole('button',{name:'Tectonic',exact:true}).click();
+ await page.getByRole('button',{name:'Orogen',exact:true}).click();
 
  assert.equal(await page.inputValue('#generatorType'),'orogen');
 

@@ -12,7 +12,7 @@ import json
 import hashlib
 from pathlib import Path
 import numpy as np
-from scipy.ndimage import gaussian_filter
+from scipy.ndimage import gaussian_filter, distance_transform_edt
 from terrain_soil import coordinates, seed_value, sample_soil
 from terrain_koppen import seasonal_fields
 
@@ -27,7 +27,7 @@ def appearance_identity(root=None):
     """Display revision, separate from the immutable neural terrain identity."""
     root=Path(root) if root is not None else REPO_ROOT
     digest=hashlib.sha256()
-    for name in ('terrain_render.py','terrain_renderer.js','terrain_render_controls.js','terrain_soil.py','terrain_pedology.py'):
+    for name in ('terrain_render.py','terrain_render_torch.py','terrain_renderer.js','terrain_render_controls.js','terrain_soil.py','terrain_pedology.py'):
         digest.update(name.encode());digest.update((source_path(name, root=root)).read_bytes())
     return digest.hexdigest()[:16]
 
@@ -37,7 +37,8 @@ def parse_settings(value=None):
         value = json.loads(value)
     if value is not None and not isinstance(value,dict):
         raise ValueError('Render settings must be an object')
-    value = value or {}
+    # ``coasts`` toggled the coastal model while it was opt-in; it is always on now.
+    value = {k:v for k,v in (value or {}).items() if k!='coasts'}
     if set(value)-set(DEFAULTS):
         raise ValueError('Unknown Render settings')
     result = {k:list(v) if isinstance(v,list) else v for k,v in DEFAULTS.items()}
@@ -119,11 +120,54 @@ def cover(fraction, pattern, sharpness=.35):
     return c+F(np.clip(sharpness,0,1))*c*(1-c)*v
 
 
+def shore_distance(height, resolution):
+    """Metres from each sample centre to the nearest sea (height < 0) centre."""
+    sea = np.asarray(height)<0
+    if not sea.any():
+        return np.full(sea.shape,np.inf,F)
+    spacing = (resolution,resolution) if np.isscalar(resolution) else (resolution[1],resolution[0])
+    return distance_transform_edt(~sea,sampling=spacing).astype(F)
+
+
+def openness_probes(resolution):
+    """Sample offsets around a shore sample: two rings of 12 at about 150 and
+    300 m, kept within 2-20 samples (the GPU tile halo is 24)."""
+    radius = min(max(300./float(resolution),2.),20.)
+    probes = []
+    for ring,rad in enumerate((radius*.5,radius)):
+        for k in range(12):
+            a = np.float32(2*np.pi/12)*np.float32(k+.25+.5*ring)
+            probes.append((int(np.round(np.float32(np.cos(a))*np.float32(rad))),
+                           int(np.round(np.float32(np.sin(a))*np.float32(rad)))))
+    return probes
+
+
+def shore_openness(height, resolution):
+    """Share of the probes around each sample that fall in the sea: about half
+    on an open coast, near zero beside a pond. Indices clamp at the edges."""
+    height = np.asarray(height)
+    sea = np.atleast_2d(height<0).astype(F)
+    step = resolution if np.isscalar(resolution) else max(resolution)
+    ny,nx = sea.shape[-2:]; out = np.zeros(sea.shape,F); probes = openness_probes(step)
+    for dx,dy in probes:
+        out += sea[...,np.clip(np.arange(ny)+dy,0,ny-1),:][...,np.clip(np.arange(nx)+dx,0,nx-1)]
+    return (out/F(len(probes))).reshape(height.shape)
+
+
+def coast_band(shore, width, fp):
+    """Fraction of a sample covered by the strip within ``width`` of the sea:
+    the shoreline lies half a sample from the first land centre, so a beach
+    keeps its area (and mean colour) at every footprint."""
+    return np.clip((width-shore+F(fp))/F(fp),0,1)
+
+
 def surface_material(height, gradient, tpi, point, north, footprint, soil, seasons,
-                     salt, settings=None, bare=False, pedology=None):
+                     salt, settings=None, bare=False, pedology=None, shore=None, openness=None):
     """Satellite-like albedo. ``seasons`` are sea-level ts, ps, lapse_s, tw, pw, lapse_w.
 
     ``bare`` returns the substrate (soil + exposed bedrock) used by the Soil layer.
+    ``shore`` (metres to the sea, see ``shore_distance``) and ``openness``
+    (see ``shore_openness``) are derived from ``height`` when omitted.
     """
     s = parse_settings(settings)
     var, forest_amount, rock_tan = F(s['variation']), F(s['forest']), F(np.tan(np.deg2rad(s['rock_slope'])))
@@ -224,8 +268,30 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
     trees = trees*(1-F(.22)*ridge)+F(.14)*valley*smooth(2,10,t_hot)*smooth(.4,1.2,humid)*(1-outcrop)*forest_amount
     woods = cover(np.clip(trees,0,1),patch,.65*float(var))
     color = mix(color,canopy,woods)
-    beach = (1-smooth(1.5,6,height))*(1-smooth(.05,.2,grade))*F(1-float(smooth(40,120,fp)))
-    color = mix(color,[.76,.70,.56],beach*F(.8)*(1-F(.5)*w_boreal))
+    flats = (1-smooth(1.5,6,height))*(1-smooth(.05,.2,grade))
+    # Beaches: an intermittent strip along open water, up to ~190 m wide by
+    # coast stretch with a ragged inner edge, kept as area coverage so wide
+    # ones stay visible at 240 m samples. Ponds and narrow inlets (little
+    # water around) get none. Low flats behind it (estuary and river bars)
+    # stay as darker, wetter sediment.
+    shore = shore_distance(height,fp) if shore is None else np.asarray(shore,F)
+    openness = shore_openness(height,fp) if openness is None else np.asarray(openness,F)
+    reach = fbm(point,20000.,3,fp,salt+7)
+    stretch = F(.65)*reach[0]*np.sqrt(reach[1])+F(.5)*patch[0]*np.sqrt(patch[1])
+    width = F(140)*smooth(-.15,.75,stretch)*smooth(.15,.4,openness)*(1+F(.35)*fine[0]*np.sqrt(fine[1]))
+    beach = coast_band(shore,np.minimum(width,F(20*fp)),fp)*(1-smooth(4,12,height))*(1-smooth(.2,.5,grade))
+    # Sediment follows the coast's geology: pale quartz or golden sand by
+    # province, coral sand in the tropics, and local stone on cool or rugged
+    # coasts. Summer warmth, not winter frost, distinguishes cold shingle
+    # from sandy continental coasts. Reuse slope/TPI and resolved noise.
+    shingle = np.maximum(1-smooth(4,14,t_hot),smooth(.04,.22,grade)*terrain)
+    sediment = mix([.80,.75,.61],[.76,.63,.43],smooth(-.2,.9,pv))
+    sediment = mix(sediment,[.86,.84,.76],w_trop*smooth(0,-.8,pv)*F(.7))
+    sediment = mix(sediment,rock,shingle*F(.9))
+    sediment = mix(sediment,mix(ground,rock,F(.4)),smooth(-.9,-1.5,m2)*F(.85))
+    sediment = mix(sediment,[.27,.26,.25],smooth(1.25,1.75,m1+F(.35)*shingle)*F(.9))
+    color = mix(color,sediment*F(.9),flats*F(1-float(smooth(240,960,fp)))*F(.8))
+    color = mix(color,sediment,beach*F(.8))
 
     # Snow: seasonal and perennial, exposure-aware, sheds from steep ridges.
     gnorm = np.linalg.norm(gradient,axis=-1)
@@ -284,5 +350,18 @@ def colorize_surface(world,xs,ys,elevation,resolution,generation_settings,settin
     north = np.stack((nx,ny),axis=-1)
     north /= np.maximum(np.linalg.norm(north,axis=-1,keepdims=True),1e-5)
     if not spherical:north.fill(0)
-    return surface_material(elevation,gradient,tpi,point,north,step,soil,seasons,
-                            seed_value(getattr(getattr(world,'source',world),'seed',0)),settings,mode=='soil',pedology)
+    shore = shore_distance(elevation,resolution)
+    return material(elevation,gradient,tpi,point,north,step,soil,seasons,
+                    seed_value(getattr(getattr(world,'source',world),'seed',0)),settings,mode=='soil',pedology,
+                    shore,shore_openness(elevation,resolution))
+
+
+def material(*args):
+    """``surface_material`` on CUDA when available (milliseconds rather than
+    seconds per tile); this NumPy module remains the reference and fallback."""
+    import os
+    if os.environ.get('TERRAIN_RENDER_DEVICE','auto').lower()!='cpu':
+        import terrain_render_torch
+        if terrain_render_torch.available():
+            return terrain_render_torch.surface_material(*args)
+    return surface_material(*args)

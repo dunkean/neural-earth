@@ -33,6 +33,10 @@ def start_server():
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--no-open', action='store_true', help='Start without opening a browser (verification).')
+    parser.add_argument('--gpu', dest='gpu', action='store_true', default=True,
+                        help="Enable GPU acceleration on a browser's first launch (default).")
+    parser.add_argument('--cpu', dest='gpu', action='store_false',
+                        help="Use the CPU options on a browser's first launch.")
     args = parser.parse_args(argv)
     if not alive():
         process = start_server()
@@ -45,7 +49,8 @@ def main(argv=None):
         else:
             raise SystemExit('Server failed to start. See server-error.log.')
     if not args.no_open:
-        webbrowser.open(url)
+        # Replaces the first-launch GPU question; a browser's saved choice wins.
+        webbrowser.open(url + '/?gpu=' + ('1' if args.gpu else '0'))
     print('Neural Earth available: ' + url)
 
 

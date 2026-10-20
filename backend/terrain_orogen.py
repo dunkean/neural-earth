@@ -17,6 +17,7 @@ from terrain_generation_session import check_generation, cancellable_process, ru
 import tempfile
 import threading
 import time
+import zipfile
 
 import numpy as np
 import torch
@@ -24,6 +25,7 @@ from scipy.spatial import cKDTree
 
 from terrain_bootstrap import WorldHeightmap, WORLD_BOUNDS, STYLES, CACHE_ROOT, _seed, _sha_file, _json_bytes, _atomic
 from terrain_device import select_cuda_device
+import terrain_array_io as array_io
 
 # Keep the storage namespace readable for saved immutable stage references.
 # Source digests invalidate every newly generated atlas and stage automatically.
@@ -34,7 +36,7 @@ ROOT = REPO_ROOT
 NATIVE = ROOT / 'native' / 'orogen'
 _LOCK = threading.RLock()
 _SOURCES = [source_path('terrain_paths.py', root=ROOT), source_path('terrain_orogen.py', root=ROOT), source_path('terrain_orogen_cuda.py', root=ROOT),
-            source_path('terrain_city_erosion.py', root=ROOT), source_path('terrain_orogen_gpu.py', root=ROOT), source_path('terrain_orogen_stages.py', root=ROOT), source_path('terrain_orogen_layers.py', root=ROOT), source_path('terrain_soil.py', root=ROOT), source_path('terrain_pedology.py', root=ROOT), source_path('terrain_conditioning.py', root=ROOT), source_path('terrain_generation.py', root=ROOT), source_path('terrain_world.py', root=ROOT), source_path('terrain_geometry.py', root=ROOT), source_path('terrain_bootstrap.py', root=ROOT)] + sorted(
+            source_path('terrain_city_erosion.py', root=ROOT), source_path('terrain_orogen_gpu.py', root=ROOT), source_path('terrain_orogen_stages.py', root=ROOT), source_path('terrain_orogen_layers.py', root=ROOT), source_path('terrain_soil.py', root=ROOT), source_path('terrain_pedology.py', root=ROOT), source_path('terrain_conditioning.py', root=ROOT), source_path('terrain_generation.py', root=ROOT), source_path('terrain_world.py', root=ROOT), source_path('terrain_geometry.py', root=ROOT), source_path('terrain_bootstrap.py', root=ROOT), source_path('terrain_array_io.py', root=ROOT)] + sorted(
                 p for directory in (NATIVE, ROOT / 'native' / 'city_erosion') for p in directory.rglob('*') if p.is_file())
 _IMPORTED_DIGESTS = {str(p.relative_to(ROOT)).replace('\\', '/'): _sha_file(p) for p in _SOURCES}
 
@@ -56,13 +58,25 @@ def implementation_identity():
                 relief='original-Orogen-superplates-relief-climate; CUDA-spherical-barycentric-rasterization')
 
 
+_FILE_DIGESTS = {}
+
+
+def _file_digest(path):
+    # Rehash only files whose size or modification time changed.
+    stat = Path(path).stat()
+    key = (str(path), stat.st_size, stat.st_mtime_ns)
+    if key not in _FILE_DIGESTS:
+        _FILE_DIGESTS[key] = _sha_file(path)
+    return _FILE_DIGESTS[key]
+
+
 def verify_implementation_identity(expected=None):
     identity = implementation_identity() if expected is None else expected
-    current = {str(p.relative_to(ROOT)).replace('\\', '/'): _sha_file(p) for p in _SOURCES}
+    current = {str(p.relative_to(ROOT)).replace('\\', '/'): _file_digest(p) for p in _SOURCES}
     if current != identity['sources']:
         raise RuntimeError('Orogen sources changed during this process; restart before generating a new world')
     node = shutil.which('node')
-    if not node or _sha_file(node) != identity['node_sha256']:
+    if not node or _file_digest(node) != identity['node_sha256']:
         raise RuntimeError('Orogen Node runtime changed; restart before generating a new world')
     return True
 
@@ -173,7 +187,10 @@ def _elevation(metres):
 
 def _graph_fields(directory):
     graph=json.loads((directory/'graph.json').read_text())
-    fields={k:np.fromfile(directory/(k+'.f32'),dtype='<f4') for k in graph['fields']}
+    flat=np.fromfile(directory/'fields.f32',dtype='<f4')
+    ends=np.cumsum(list(graph['fields'].values()))
+    if len(flat)!=(ends[-1] if len(ends) else 0):raise RuntimeError('Orogen graph fields are incomplete')
+    fields={k:flat[end-length:end] for (k,length),end in zip(graph['fields'].items(),ends)}
     points=fields.pop('xyz').reshape(-1,3)
     triangles=fields.pop('triangles').astype(np.int64)
     fields={k:v for k,v in fields.items() if len(v)==len(points) and k not in
@@ -198,7 +215,7 @@ def _nearest_regions(points, xyz, config):
     if config.get('orogen_gpu_raster') and config.get('orogen_gpu_identity',{}).get('available'):
         from terrain_orogen_gpu import nearest_regions
         return nearest_regions(points,xyz)
-    return cKDTree(points).query(xyz,k=4,workers=4)[1]
+    return cKDTree(points).query(xyz,k=4,workers=-1)[1]
 
 
 def _run_city_pipeline(node, directory, request, width, height, device, base, config):
@@ -399,11 +416,11 @@ class OrogenHeightmap(WorldHeightmap):
                 from terrain_orogen_stages import generate_staged_atlas
                 raw, ocean, metadata, _, self.layers = generate_staged_atlas(self.seed, style,
                     width=self.width, height=self.height, include_layers=True, options=options)
+                digests = array_io.sha256_arrays(dict(raw=raw, ocean=ocean, **{'layer_'+k:v for k,v in self.layers.items()}))
                 metadata.update(namespace=namespace, cache_key=self.cache_key,
-                    raw_height_sha256=hashlib.sha256(raw.tobytes()).hexdigest(),
-                    height_sha256=hashlib.sha256(raw.tobytes()).hexdigest(),
-                    physical_ocean_sha256=hashlib.sha256(ocean.tobytes()).hexdigest(),
-                    layer_sha256={k:hashlib.sha256(v.tobytes()).hexdigest() for k,v in self.layers.items()})
+                    raw_height_sha256=digests['raw'], height_sha256=digests['raw'],
+                    physical_ocean_sha256=digests['ocean'],
+                    layer_sha256={k:digests['layer_'+k] for k in self.layers})
                 self._save(raw, raw, ocean, metadata)
                 loaded = raw, raw, ocean, metadata
             self.raw_height_m, self.height_m, self.physical_ocean, self.metadata = loaded
@@ -413,28 +430,35 @@ class OrogenHeightmap(WorldHeightmap):
             array.flags.writeable = False
 
     def _load(self, namespace):
-        loaded = super()._load(namespace)
-        if loaded is None:
-            return None
+        # WorldHeightmap's checks, plus the layers, hashed in parallel.
+        array_io.wait(self.cache_path)
         try:
             with np.load(self.cache_path, allow_pickle=False) as data:
-                layers = {name:data['layer_'+name] for name in loaded[3]['layer_sha256']}
-            for name, array in layers.items():
-                if (array.shape != (self.height, self.width) or not np.isfinite(array).all()
-                        or hashlib.sha256(array.tobytes()).hexdigest() != loaded[3]['layer_sha256'][name]):
+                metadata = json.loads(str(data['metadata'].item()))
+                if metadata['namespace'] != namespace or metadata['cache_key'] != self.cache_key:
                     return None
-            self.layers = layers
-            return loaded
-        except (OSError, ValueError, KeyError):
+                arrays = dict(raw_height=data['raw_height_m'], height=data['height_m'], physical_ocean=data['physical_ocean'],
+                              **{'layer_'+name:data['layer_'+name] for name in metadata['layer_sha256']})
+            for name, array in arrays.items():
+                dtype = np.dtype('bool') if name == 'physical_ocean' else np.dtype('float32')
+                if array.shape != (self.height, self.width) or (array.dtype != dtype and not name.startswith('layer_')) or not np.isfinite(array).all():
+                    return None
+            digests = array_io.sha256_arrays(arrays)
+            for name in arrays:
+                expected = metadata['layer_sha256'][name[6:]] if name.startswith('layer_') else metadata[name+'_sha256']
+                if digests[name] != expected:
+                    return None
+            if not np.array_equal(arrays['raw_height'] < 0, arrays['height'] < 0):
+                return None
+            self.layers = {name[6:]:array for name, array in arrays.items() if name.startswith('layer_')}
+            return arrays['raw_height'], arrays['height'], arrays['physical_ocean'], metadata
+        except (OSError, ValueError, TypeError, KeyError, AttributeError, EOFError, zipfile.BadZipFile):
             return None
 
     def _save(self, raw, final, physical_ocean, metadata):
-        import io
-        stream = io.BytesIO()
-        np.savez(stream, raw_height_m=raw, height_m=final,
+        array_io.save_npz(self.cache_path, dict(raw_height_m=raw, height_m=final,
             physical_ocean=physical_ocean, metadata=np.asarray(json.dumps(metadata, sort_keys=True)),
-            **{'layer_'+k:v for k,v in self.layers.items()})
-        _atomic(self.cache_path, stream.getvalue())
+            **{'layer_'+k:v for k,v in self.layers.items()}))
 
 
 @lru_cache(maxsize=4)

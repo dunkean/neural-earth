@@ -33,5 +33,5 @@ window.TerrainRender=(()=>{
     sync=()=>{for(const [key,pair] of Object.entries(inputs))for(const input of pair){const value=settings[key];if(Array.isArray(value)){input.dataset.rgb=JSON.stringify(value);input.value='#'+value.map(x=>Math.round(x*255).toString(16).padStart(2,'0')).join('');}else input.value=value;}};
     field.querySelector('#renderMaterialReset').onclick=reset;sync();
   }
-  return {normalize,mount,reset,get:()=>clone(settings),defaults:()=>clone(defaults),serialize:()=>JSON.stringify(settings)};
+  return {normalize,mount,reset,set(value){settings=normalize(value);sync();},get:()=>clone(settings),defaults:()=>clone(defaults),serialize:()=>JSON.stringify(settings)};
 })();

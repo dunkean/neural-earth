@@ -2,7 +2,7 @@
  * Historical fine tiles stay hidden unless finer rendering is requested. */
 (function(root) {
   'use strict';
-  const MIN_LOD=-3, MAX_LOD=11, MAX_METRES_PER_PIXEL=30*2**MAX_LOD;
+  const MIN_LOD=-6, MAX_LOD=11, MAX_METRES_PER_PIXEL=30*2**MAX_LOD;
   function subtract(bounds,protectedBounds){
     if(!protectedBounds)return[bounds];
     const [x0,y0,x1,y1]=bounds,[px0,py0,px1,py1]=protectedBounds;

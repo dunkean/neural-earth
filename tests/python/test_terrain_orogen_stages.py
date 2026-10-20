@@ -39,7 +39,7 @@ class IndependentStages(unittest.TestCase):
         return profile,world,executed
 
     def test_full_cpu_chain_matches_original_reference(self):
-        reference=core.generate_atlas(50,width=128,height=64,options={'detail':20000},include_layers=True)
+        reference=core.generate_atlas(50,self.settings['continental_style'],width=128,height=64,options={'detail':20000},include_layers=True)
         _,world,execution=self.run_stage(self.settings,'all')
         self.assertEqual(set(execution),{'relief','erosion','climate'})
         np.testing.assert_array_equal(world.height_m,reference[0])
@@ -63,7 +63,10 @@ class IndependentStages(unittest.TestCase):
         self.assertFalse(np.array_equal(climate.layers['soil_humus'],initial.layers['soil_humus']))
         from terrain_pedology import NAMES as PEDOLOGY_NAMES
         self.assertTrue(all(name in climate.layers for name in PEDOLOGY_NAMES))
-        self.assertEqual(climate.metadata['pedology']['cell_metres'],200000)
+        from terrain_pedology import cell_metres
+        from terrain_geometry import world_bounds
+        self.assertEqual(climate.metadata['pedology']['cell_metres'],
+                         cell_metres(climate.height_m.shape,world_bounds(resolve_generation(climate_profile).settings)))
         self.assertFalse(np.array_equal(climate.layers['pedology_red'],initial.layers['pedology_red']))
         self.assertEqual(climate.metadata['stage_state']['erosion']['id'],initial.metadata['stage_state']['erosion']['id'])
         self.assertEqual(resolve_generation(climate_profile).settings['orogen_hydraulic'],self.settings['orogen_hydraulic'])

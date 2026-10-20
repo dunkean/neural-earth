@@ -1,4 +1,4 @@
-"""Curated application model choices and immutable neural-cache identities."""
+"""Explicit model choices and immutable identities for the local review server."""
 from __future__ import annotations
 
 import hashlib
@@ -44,6 +44,12 @@ def catalog(root=DATA, bundled_root=REPO/'distill/weights'):
             if manifest and (expected is None or expected['sha256']!=digest or expected['stage']!=stage):
                 raise ValueError('Bundled model differs from its manifest: '+name)
             result[stage][key] = dict(label=label,path=str(path),sha256=digest,bytes=path.stat().st_size)
+    from distill.compact_release import HASHES, RELEASE, verified
+    compact = Path(root)/'releases'/RELEASE
+    if verified(compact):
+        result['base']['nf4_b75'] = dict(
+            label='Distillé · NF4 B75 · 150 Mo', path=str(compact/'weights.bin'),
+            directory=str(compact), sha256=HASHES['weights.bin'], format='scalar-packed')
     return result
 
 
@@ -92,16 +98,18 @@ class LiveModels:
     def identity(self):
         # A reset changes only neural namespaces. Orogen's request/identity is
         # unchanged and its persisted bootstrap remains reusable.
-        files = ('student.py','features.py','inference.py','coarse_solver.py','live_runtime.py')
+        files = ('student.py', 'features.py', 'inference.py', 'coarse_solver.py', 'live_runtime.py',
+                 'native_live_runtime.py','native_inference.py','native_weight_runtime.py','native_weight_quant.py','native_base.py',
+                 'native_scalar_pack.py', 'native_scalar_precision.py', 'compact_release.py')
         return dict(teacher_revision=REVISION, reset=self.config['reset'],
             selection=self.selection,
             checkpoints={stage: self.options[stage][key].get('sha256')
                          for stage, key in self.selection.items()},
             code={name: hashlib.sha256((REPO/'distill'/name).read_bytes()).hexdigest() for name in files})
 
-    def install(self, world):
+    def students(self, device):
+        """Selected students resident on ``device``, shared by all its worlds."""
         import torch
-        from distill.inference import install
         from distill.student import load_student
         models = {}
         with self.lock:
@@ -109,19 +117,53 @@ class LiveModels:
                 if choice == 'teacher':
                     continue
                 option = self.options[stage][choice]
-                key = (str(world.device), stage, choice)
+                key = (str(device), stage, choice)
                 if key not in self.models:
                     payload = Path(option['path']).read_bytes()
                     if hashlib.sha256(payload).hexdigest() != option['sha256']:
-                        raise ValueError('Model export changed since startup;restart the server.')
+                        raise ValueError('Model export changed since server startup; restart the review server.')
                     with torch.inference_mode(False):
-                        model, _ = load_student(io.BytesIO(payload), world.device)
-                    if model.config.stage != stage:
+                        if option.get('format') == 'scalar-packed':
+                            from distill.compact_release import verified
+                            from distill.native_scalar_pack import runtime_scalar_packed
+                            if stage != 'base' or not verified(option['directory']):
+                                raise ValueError('Compact B75 export changed; reinstall its release.')
+                            model = runtime_scalar_packed(option['directory'], device)
+                        elif option.get('format') == 'native':
+                            if stage != 'base':
+                                raise ValueError('Native export must be a base.')
+                            from distill.native_inference import load_native
+                            model, _ = load_native(io.BytesIO(payload), device)
+                        else:
+                            model, _ = load_student(io.BytesIO(payload), device)
+                    if option.get('format') not in ('native', 'scalar-packed') and model.config.stage != stage:
                         raise ValueError('Model export stage differs from selected stage.')
                     self.models[key] = model.requires_grad_(False)
                 models[stage] = self.models[key]
+        return models
+
+    def install(self, world):
+        from distill.inference import install
+        models = dict(self.students(world.device))
+        native_base = None
+        if self.options['base'][self.selection['base']].get('format') in ('native', 'scalar-packed'):
+            native_base = models.pop('base')
+
         if models:
             install(world, models, tile_size=512)
+        if native_base is not None:
+            from distill.native_live_runtime import install as install_native
+            # configure_world prepared the original stack before this hook.
+            # Never normalize the already baked native NF4 kernels again.
+            install_native(world,native_base)
+
+    def prewarm(self, world, stages, *, coarse_streams=1):
+        """Capture the selected students' graphs; teacher stages they replace need none."""
+        from distill.inference import prewarm
+        models = {stage: model for stage, model in self.students(world.device).items() if stage in stages
+                  and self.options[stage][self.selection[stage]].get('format') not in ('native', 'scalar-packed')}
+        return prewarm(models, world.device, getattr(world, '_terrain_profile', None),
+                       decoder_size=world.decoder_tile_size, coarse_streams=coarse_streams)
 
     def public(self):
         return dict(selection=self.selection, revision=self.config['revision'],

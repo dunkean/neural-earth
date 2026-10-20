@@ -1,0 +1,13 @@
+/* Icon layout only. Colors and typography come from the original index.html. */
+:root{--atlas-image:none}
+.atlasIcon{display:inline-block;flex:none;width:22px;height:22px;background-image:var(--atlas-image);background-repeat:no-repeat;background-size:400% 400%;vertical-align:middle;pointer-events:none;filter:brightness(1.7) saturate(.7)}
+header h1{display:flex;align-items:center;gap:7px}
+header h1 .atlasIcon{width:20px;height:20px}
+#controls>button,#controls .sceneViews button,#controls .generatorIcons button,#controls>details>summary{display:inline-flex;align-items:center;justify-content:center;gap:5px}
+#controls .iconButton,#controls>details>summary{font-size:12px;line-height:18px}
+#controls #measureDistance{font-size:0}
+#measureDistance .atlasIcon{display:none}
+#measureDistance::before{content:'';width:22px;height:22px;background-image:var(--atlas-image);background-size:400% 400%;background-position:100% 0%;pointer-events:none;filter:brightness(1.7) saturate(.7)}
+#controls>#layerPanel>summary .selectedLayer{flex:1}
+.mapPin svg{visibility:hidden}
+.mapPin::after{content:'';position:absolute;inset:0;background-image:var(--atlas-image);background-size:400% 400%;background-position:0% 66.6667%;filter:brightness(1.7) saturate(.7) drop-shadow(0 1px 1px #dce6eb)}

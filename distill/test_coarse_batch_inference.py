@@ -20,7 +20,7 @@ class CoarseBatchTests(unittest.TestCase):
     def test_batch_matches_scalar_windows_and_uses_one_forward(self):
         model=TinyCoarse().eval()
         def world():
-            return SimpleNamespace(device='cpu',seed=617531,kwargs={'coarse_pooling':1,'cond_snr':[3.]*5},
+            return SimpleNamespace(device='cpu',seed=617531,_terrain_profile=SimpleNamespace(coarse_streams=1),kwargs={'coarse_pooling':1,'cond_snr':[3.]*5},
                 _build_coarse_stage=lambda:SimpleNamespace())
         def prepare(world,ctxs,*args,**kwargs):
             _,y,x=ctxs[0]

@@ -58,6 +58,9 @@ from terrain_profiling import span, trace, measured_lock, snapshot as profiling_
 from functools import lru_cache
 
 app = Flask(__name__)
+from terrain_share import register_share_routes
+register_share_routes(app, OUTPUT / 'share-recipes',
+                      restore_generation=lambda generation: restore_shared_generation(generation))
 from terrain_backend_proxy import register_backend_proxy
 register_backend_proxy(app)
 image_slots = threading.BoundedSemaphore(2)
@@ -163,6 +166,31 @@ def all_gpu_locks():
         for runtime in ordered:
             stack.enter_context(runtime.lock)
         yield ordered
+
+
+# World generation waiting for the GPUs goes ahead of the optional startup
+# graph prewarm, which otherwise holds a device for ~10 s in a row.
+_generation_waiters = threading.Condition()
+_generation_waiting = 0
+
+
+@contextmanager
+def generation_gpu_locks():
+    global _generation_waiting
+    with _generation_waiters:
+        _generation_waiting += 1
+    try:
+        with all_gpu_locks() as ordered:
+            yield ordered
+    finally:
+        with _generation_waiters:
+            _generation_waiting -= 1
+            _generation_waiters.notify_all()
+
+
+def yield_to_generation():
+    with _generation_waiters:
+        _generation_waiters.wait_for(lambda: not _generation_waiting)
 
 
 def synchronize_gpus():
@@ -487,25 +515,44 @@ def warm_base_forms(world):
     return dict(result,warmup_cuda_forward_calls={key:gpu_calls[key]-before[key] for key in before})
 
 
-def warm_graphs(world, *, coarse=True, state=None):
-    """Capture graphs; ``coarse=False`` on detail-only GPUs that never run it."""
+def warm_graphs(world, *, coarse=True, state=None, runtime=None):
+    """Capture graphs; ``coarse=False`` on detail-only GPUs that never run it.
+
+    With ``runtime``, each stage takes its compute lock separately and lets a
+    waiting world generation run first."""
     from terrain_inference import prewarm_coarse_graphs, set_coarse_streams
     from terrain_cuda_graphs import prewarm_decoder_form
     state = preload_state if state is None else state
     set_coarse_streams(world, coarse_stream_setting['coarse'])
-    stages = [('coarse', lambda: prewarm_coarse_graphs(world))] if coarse else []
+    # A selected student replaces its teacher stage everywhere: capture the
+    # student's graphs instead, and none of the teacher's it will never replay.
+    selection = (live_models().selection if os.environ.get('TERRAIN_DISTILL_LIVE', '1') == '1'
+                 else dict(coarse='teacher', base='teacher', decoder='teacher'))
+    def students(stage):
+        return lambda: live_models().prewarm(world, (stage,),
+            coarse_streams=coarse_stream_setting['coarse']).get(stage, dict(enabled=False))
+    stages = []
+    if coarse:
+        stages.append(('coarse', students('coarse') if selection['coarse'] != 'teacher'
+                       else lambda: prewarm_coarse_graphs(world)))
     if os.environ.get('TERRAIN_PREWARM_BASE', '1') == '1':
         stages.append(('base', lambda: warm_base_forms(world)))
-    stages.append(('decoder', lambda: prewarm_decoder_form(world.decoder_model, world.decoder_tile_size)))
+    stages.append(('decoder', students('decoder') if selection['decoder'] != 'teacher'
+                   else lambda: prewarm_decoder_form(world.decoder_model, world.decoder_tile_size)))
     results = {}
     for name, prepare in stages:
-        state['warming_model'] = name
-        try:
-            results[name] = prepare()
-        except Exception as exc:
-            # Optional capture failure must not discard resident usable weights.
-            results[name] = dict(enabled=True, fully_warmed=False, state='failed',
-                                 error=f'{type(exc).__name__}: {exc}'[:400])
+        if runtime is not None:
+            yield_to_generation()
+        with runtime.lock if runtime is not None else nullcontext():
+            if runtime is not None and runtime.shared_pipeline is not world:
+                break  # Released from the plan meanwhile.
+            state['warming_model'] = name
+            try:
+                results[name] = prepare()
+            except Exception as exc:
+                # Optional capture failure must not discard resident usable weights.
+                results[name] = dict(enabled=True, fully_warmed=False, state='failed',
+                                     error=f'{type(exc).__name__}: {exc}'[:400])
     state.pop('warming_model', None)
     return dict(models=results, fully_warmed=all(
         not result.get('enabled') or result.get('fully_warmed', False) for result in results.values()))
@@ -617,6 +664,29 @@ def finish_generation(token):
                     worker.suspend(False)
             finally:
                 generation_coordinator.finish(token)
+
+
+def restore_shared_generation(generation):
+    """Rebuild portable stage dependencies through the normal exclusive GPU gate."""
+    from terrain_share_stages import restore_stages
+    if not generation.get('stages'):
+        return restore_stages(generation)
+    token = generation_coordinator.begin()
+    try:
+        with generation_scope(token):
+            with generation_coordinator.lock:
+                token.check()
+                worker = app.extensions.get('terrain_reference_worker')
+                if worker is not None:
+                    worker.suspend(True)
+            with generation_gpu_locks():
+                token.check()
+                synchronize_gpus()
+                return restore_stages(generation)
+    except GenerationCancelled as exc:
+        raise RuntimeError(str(exc)) from exc
+    finally:
+        finish_generation(token)
 
 
 @app.post('/api/terrain/suspend')
@@ -1168,6 +1238,11 @@ def globe_script():
     return send_from_directory(WEB_ROOT, 'terrain_globe.js')
 
 
+@app.get('/terrain_transport.js')
+def transport_script():
+    return send_from_directory(WEB_ROOT, 'terrain_transport.js')
+
+
 @app.get('/terrain_styles.js')
 def styles_script():
     source='window.TerrainStyles='+json.dumps(STYLES)+';\n'+(source_path('terrain_style_rendering.js', root=ROOT)).read_text(encoding='utf-8')
@@ -1177,6 +1252,20 @@ def styles_script():
 @app.get('/terrain_lighting.js')
 def lighting_script():
     return send_from_directory(WEB_ROOT, 'terrain_lighting.js')
+
+
+@app.get('/fantasy_brush_assets.js')
+@app.get('/fantasy_painting.js')
+@app.get('/terrain_fantasy.js')
+@app.get('/fantasy-ink-atlas.png')
+@app.get('/fantasy-color-atlas.png')
+def fantasy_assets():
+    return send_from_directory(WEB_ROOT, request.path.rsplit('/', 1)[-1])
+
+
+@app.get('/fantasy-brushes/<path:filename>')
+def fantasy_brush_sheet(filename):
+    return send_from_directory(WEB_ROOT / 'fantasy-brushes', filename)
 
 
 @app.get('/terrain_renderer.js')
@@ -1202,6 +1291,16 @@ def generation_controls_script():
 @app.get('/terrain_toolbar.js')
 def toolbar_script():
     return send_from_directory(WEB_ROOT,'terrain_toolbar.js')
+
+
+@app.get('/terrain_share.js')
+def share_script():
+    return send_from_directory(WEB_ROOT, 'terrain_share.js')
+
+
+@app.get('/terrain_pins.js')
+def pins_script():
+    return send_from_directory(WEB_ROOT, 'terrain_pins.js')
 
 
 @app.get('/terrain_inference_controls.js')
@@ -1316,18 +1415,26 @@ def warm_device(index):
     runtime = runtime_for(index)
     state = runtime.preload
     try:
-        with using_runtime(runtime), runtime.lock, torch.inference_mode(), span('startup.load_models', device=index):
+        with using_runtime(runtime), torch.inference_mode(), span('startup.load_models', device=index):
             if index not in gpu_plan['devices']:
                 return
             state.update(state='loading', error=None)
-            if runtime.shared_pipeline is None:
-                runtime.shared_pipeline = load_pipeline(42, device=index)
+            # Weights load without the compute lock, so the first world can be
+            # generated meanwhile; load_pipeline never loads a device twice.
+            pipeline = runtime.shared_pipeline or load_pipeline(42, device=index)
+            with runtime.lock:
+                if index not in gpu_plan['devices']:
+                    if runtime.shared_pipeline is None:
+                        getattr(terrain_runtime, 'release_pipeline', lambda index: None)(index)
+                    return
+                runtime.shared_pipeline = pipeline
             if os.environ.get('TERRAIN_PREWARM', '1') == '1':
                 state.update(state='warming')
                 try:
-                    state['cuda_graphs'] = warm_graphs(runtime.shared_pipeline, coarse=index == COARSE_DEVICE, state=state)
+                    state['cuda_graphs'] = warm_graphs(pipeline, coarse=index == COARSE_DEVICE, state=state, runtime=runtime)
                 finally:
-                    runtime.shared_pipeline.empty_cache()
+                    with runtime.lock:
+                        pipeline.empty_cache()
             state.update(state='ready')
     except Exception as exc:
         state.update(state='failed',error=str(exc)[:400])
@@ -1398,6 +1505,8 @@ def _shutdown_for_restart():
         if worker is not None:
             worker.close()
         physical_delivery.flush()
+        import terrain_array_io
+        terrain_array_io.flush(timeout=120)
     finally:
         os._exit(0)
 
@@ -1455,7 +1564,7 @@ def world_info():
                     worker=app.extensions.get('terrain_reference_worker')
                     if worker is not None:
                         worker.suspend(True)
-                with all_gpu_locks():
+                with generation_gpu_locks():
                     token.check()
                     synchronize_gpus()
                     result=metadata(seed,profile)
@@ -1496,7 +1605,7 @@ def generation_run():
                 worker=app.extensions.get('terrain_reference_worker')
                 if worker is not None:
                     worker.suspend(True)
-            with all_gpu_locks():
+            with generation_gpu_locks():
                 token.check()
                 # Drain the NN's asynchronous transfers/streams before Orogen.
                 synchronize_gpus()
@@ -1799,10 +1908,11 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
             report.update(generation_profile=wp,neural_chart='polar' if polar else None,climate_width=CLIMATE_SIZE,climate_height=CLIMATE_SIZE)
             report.update(world_identity=world_identity(world_manifest(seed,wp)),
                           source_kind='experimental-neural-refinement' if stage=='decoder-refinement' else 'conditioning-input' if stage=='conditioning-preview' else 'learned-approximation' if stage in ('coarse','coarse-area-mean','latent') else 'native-dem-reduction',
-                           exact_final_mip=stage=='final-dem-mip',height_filter='native-bilinear-coast+interior-parent-mean-preserving-decoder-cascade' if stage=='decoder-refinement' else 'block-mean-native' if stage=='final-dem-mip' else 'coarse-physical-area-mean+gaussian-sigma-0.65px' if stage=='coarse-area-mean' else f'coarse-{"monotone-cubic" if coarse_interpolation=="monotone" else "bilinear"}+gaussian-sigma-0.65px' if stage=='coarse' and lod==4 else 'conditioning-preview+gaussian-sigma-0.65px' if stage=='conditioning-preview' else 'source-approximation+gaussian-sigma-0.65px' if stage in ('coarse','latent') else 'native')
+                           exact_final_mip=stage=='final-dem-mip',height_filter=('signed-sqrt-cubic-bspline+smoothed-coast+decoder-half-band-bspline-octave'+('+procedural-sparse-convolution-octaves' if lod < -1 else '')) if stage=='decoder-refinement' else 'block-mean-native' if stage=='final-dem-mip' else 'coarse-physical-area-mean+gaussian-sigma-0.65px' if stage=='coarse-area-mean' else f'coarse-{"monotone-cubic" if coarse_interpolation=="monotone" else "bilinear"}+gaussian-sigma-0.65px' if stage=='coarse' and lod==4 else 'conditioning-preview+gaussian-sigma-0.65px' if stage=='conditioning-preview' else 'source-approximation+gaussian-sigma-0.65px' if stage in ('coarse','latent') else 'native')
             if stage=='decoder-refinement':
                 report.update(refinement_level=-lod, refinement_version=REFINEMENT_VERSION,
-                              checkpoint_resolution=NATIVE, detail_amplitude_scale=0.5**(-lod))
+                              checkpoint_resolution=NATIVE, detail_amplitude_scale=0.5,
+                              procedural_octaves=max(0, -lod-1))
             report['climate_source']='conditioning-input' if stage=='conditioning-preview' else 'learned-coarse'
             return elevation,climate,report
     def finalize(value):
@@ -2223,6 +2333,38 @@ def _remember_overview(key, value):
         while len(_OVERVIEW_BYTES)>12:_OVERVIEW_BYTES.popitem(last=False)
 
 
+# Render/Soil albedo is independent of lighting and contours; a lighting edit
+# only relights this cached 2048x1024 material instead of recomputing it.
+_OVERVIEW_ALBEDO=OrderedDict()
+
+
+def overview_albedo(key, compute):
+    with _OVERVIEW_LOCK:
+        albedo=_OVERVIEW_ALBEDO.get(key)
+        if albedo is not None:
+            _OVERVIEW_ALBEDO.move_to_end(key)
+            return albedo
+    albedo=compute()
+    albedo.flags.writeable=False
+    with _OVERVIEW_LOCK:
+        _OVERVIEW_ALBEDO[key]=albedo;_OVERVIEW_ALBEDO.move_to_end(key)
+        while len(_OVERVIEW_ALBEDO)>4:_OVERVIEW_ALBEDO.popitem(last=False)
+    return albedo
+
+
+def _prune_overview_variants(directory, keep=6):
+    try:
+        variants=sorted(directory.glob('overview.*.light-*.png'),key=lambda f:f.stat().st_mtime_ns,reverse=True)
+    except OSError:
+        return  # A concurrent prune removed one; the next overview retries.
+    for stale in variants[keep:]:
+        for name in (stale,stale.with_suffix('.json')):
+            try:
+                name.unlink()
+            except OSError:
+                pass
+
+
 @app.get('/api/overview/natural-v1/<int:seed>.png')
 @pin_cache_io(lambda seed: f'{VERSION}/{generation_profile()}/{seed}/overview')
 def overview(seed):
@@ -2254,8 +2396,12 @@ def overview(seed):
         cached_identity=json.loads(receipt_path.read_text()).get('world_identity')
     except (OSError,ValueError):
         cached_identity=None
+    display_variant=lighting is not None or contours is not None or render_settings is not None
     if path.exists() and cached_identity==identity:
         disk_cache.record(cache_key,cache_paths)
+        if display_variant:
+            response=Response(path.read_bytes(),mimetype='image/png');response.cache_control.no_store=True
+            return response
         return send_file(path, mimetype='image/png', max_age=31536000)
     memory_key=(identity,wp,seed,mode,suffix)
     with _OVERVIEW_LOCK:
@@ -2296,10 +2442,10 @@ def overview(seed):
                 rgb=physical_koppen_colors(seed,wp,xs,ys,elevation)
             elif mode in ('render','soil'):
                 atlas,settings=biome_atlas(seed,wp)
-                rgb=colorize_surface(atlas,xs,ys,elevation,((x1-x0)/2048,(y1-y0)/1024),settings,render_settings,mode=mode)
-                if mode in ('render','soil'):
-                    from terrain_lighting import relief_intensity
-                    rgb*=np.where(elevation<0,1,relief_intensity(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting))[...,None]
+                albedo=overview_albedo((identity,APPEARANCE_IDENTITY,wp,seed,mode,json.dumps(render_settings,sort_keys=True)),
+                    lambda:colorize_surface(atlas,xs,ys,elevation,((x1-x0)/2048,(y1-y0)/1024),settings,render_settings,mode=mode))
+                from terrain_lighting import relief_intensity
+                rgb=albedo*np.where(elevation<0,1,relief_intensity(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting))[...,None]
             else:
                 fields=physical_biome_fields(seed,wp,xs,ys,elevation)
                 rgb=colorize_biomes(elevation,fields,resolution)
@@ -2320,8 +2466,14 @@ def overview(seed):
             rgb=apply_contours(rgb,elevation,contours,mode)
         buffer = io.BytesIO()
         Image.fromarray((np.clip(rgb, 0, 1)*255).astype(np.uint8)).save(buffer, format='PNG')
-        if lighting is not None or contours is not None or render_settings is not None:
+        if display_variant:
             _remember_overview(memory_key,buffer.getvalue())
+            # The last few display variants also persist, so reopening the
+            # same world at the next launch shows its overview at once.
+            _atomic_bytes(path, buffer.getvalue())
+            _atomic_bytes(receipt_path,json.dumps({'world_identity':identity,'mode':mode}).encode())
+            _prune_overview_variants(directory)
+            disk_cache.record(cache_key,cache_paths)
             return buffer.getvalue()
         _atomic_bytes(path, buffer.getvalue())
         _atomic_bytes(receipt_path,json.dumps({'world_identity':identity,'mode':mode}).encode())
@@ -2380,6 +2532,10 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=8765)
     arguments = parser.parse_args()
     RESTART_COMMAND = [sys.executable, '-u', str(Path(__file__).resolve()), *sys.argv[1:]]
+    import terrain_array_io
+    # Generated atlases and stages reach the disk after the response; this
+    # process serves them from memory meanwhile and flushes before exiting.
+    terrain_array_io.deferred = True
     wait_for_replaced_server(arguments.port)
     if os.environ.get('TERRAIN_PRELOAD_MODELS', '1') == '1':
         preload_devices(gpu_plan['devices'])
