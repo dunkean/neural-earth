@@ -60,7 +60,7 @@ window.TerrainFantasy = (() => {
     if (!painter.isFantasyStyle(mode)) return;
     const atlas = atlases[mode];
     // Discrete cartographic scale: stable world anchors at each tier, bounded screen density.
-    const pitch = Math.max(20,2**Math.floor(Math.log2(mpp*21))) * settings.spacing;
+    const brushPitch = Math.max(20,2**Math.floor(Math.log2(mpp*21))), pitch = brushPitch * settings.spacing;
     const bx = cx-width*mpp/2, by = cy-height*mpp/2;
     const tiles = [...new Map(entries.filter(e=>e.tile.heights).map(e=>[e.tile.key,{tile:e.tile,bounds:e.tile.b}])).values()].sort((a,b)=>(a.tile.sourceResolution||Infinity)-(b.tile.sourceResolution||Infinity));
     if (!tiles.length) return;
@@ -80,10 +80,17 @@ window.TerrainFantasy = (() => {
         const entry=(buckets.get(Math.floor(x/step)+','+Math.floor(y/step))||[]).find(e=>x>=e.bounds[0]&&x<e.bounds[2]&&y>=e.bounds[1]&&y<e.bounds[3]);
         if(!entry)return;
         const t=entry.tile,d=t.heightOptions.metresPerSample;
-        return {height:heightAt(t,x,y),slope:Math.hypot(heightAt(t,x+d,y)-heightAt(t,x-d,y),heightAt(t,x,y+d)-heightAt(t,x,y-d))/(2*d),temperature:climateAt(t,x,y,0,18),rain:climateAt(t,x,y,2,1000)};
+        const height = heightAt(t,x,y), radius = brushPitch*3;
+        let sum=0,lo=height,hi=height;
+        for(let i=0;i<8;i++) {
+          const a=i*Math.PI/4,px=x+Math.cos(a)*radius,py=y+Math.sin(a)*radius;
+          const other=(buckets.get(Math.floor(px/step)+','+Math.floor(py/step))||[]).find(e=>px>=e.bounds[0]&&px<e.bounds[2]&&py>=e.bounds[1]&&py<e.bounds[3]);
+          const v=heightAt(other?.tile||t,px,py);sum+=v;lo=Math.min(lo,v);hi=Math.max(hi,v);
+        }
+        return {height,tpi:(height-sum/8)/radius,relief:hi-lo,slope:Math.hypot(heightAt(t,x+d,y)-heightAt(t,x-d,y),heightAt(t,x,y+d)-heightAt(t,x,y-d))/(2*d),temperature:climateAt(t,x,y,0,18),rain:climateAt(t,x,y,2,1000)};
       };
       const start=performance.now();
-      const stamps=painter.planPainting({x:x0,y:y0,width:w,height:h},sample,{seed:String(seed),pitch,...settings});
+      const stamps=painter.planPainting({x:x0,y:y0,width:w,height:h},sample,{seed:String(seed),pitch,brushPitch,...settings});
       cached = {key,mode,stamps,families:[...new Set(stamps.map(stamp=>painter.brushFrame(atlas,stamp).family))],ms:performance.now()-start};
     }
     const ready = new Map();

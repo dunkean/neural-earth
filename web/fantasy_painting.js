@@ -18,7 +18,7 @@ var FantasyPainting = (() => {
   };
   var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-  // ../rust/bridge/fantasyPainting.ts
+  // rust/bridge/fantasyPainting.ts
   var fantasyPainting_exports = {};
   __export(fantasyPainting_exports, {
     ATLAS_GEOMETRY: () => ATLAS_GEOMETRY,
@@ -31,6 +31,7 @@ var FantasyPainting = (() => {
     isFantasyStyle: () => isFantasyStyle,
     paintSeed: () => paintSeed,
     paintingCanvas: () => paintingCanvas,
+    paintingCover: () => paintingCover,
     paintingSvg: () => paintingSvg,
     planPainting: () => planPainting
   });
@@ -39,22 +40,23 @@ var FantasyPainting = (() => {
   var FAMILY_NAMES = ["pines", "broadleaf", "tropical", "cypress", "hills", "mountains", "snow-mountains", "rocks", "dunes", "wetlands", "crops", "orchards", "grasses"];
   var BRUSH_FAMILY = ["pines", "broadleaf", "tropical", "cypress", "hills", "mountains", "snow-mountains", "rocks", "dunes", "wetlands", "crops", "orchards", "pines", "broadleaf", "tropical", "grasses"];
   function createBrushLibrary(style, families) {
-    const frames = [];
-    for (let brush = 0; brush < 16; brush++) for (let v = 0; v < 8; v++) {
+    const frames = [], offsets = [];
+    const variants = Math.max(...Object.values(families).map((a) => a.variantsPerStyle ?? 8));
+    for (let brush = 0; brush < 16; brush++) {
+      offsets.push(frames.length);
       const family = BRUSH_FAMILY[brush], atlas = families[family];
       if (!atlas) throw new Error(`Missing fantasy brush sheet: ${family}`);
-      let variant = v;
-      if (brush === 0 || brush === 1) variant %= 6;
-      if (brush === 12 || brush === 13) variant = 6 + v % 2;
-      if (brush === 2) variant = [0, 1, 2, 5][v % 4];
-      if (brush === 14) variant = [3, 4, 6, 7][v % 4];
-      const index = variant + (style === "fantasy-color" ? 8 : 0), rect = atlasRect(atlas, index);
-      frames.push({ atlas, family, index, token: `${family}-${index}`, rect, aspect: Math.max(0.4, Math.min(1.8, rect[3] / rect[2])) });
+      const count = atlas.variantsPerStyle ?? 8;
+      for (let v = 0; v < variants; v++) {
+        const variant = v % (brush < 4 || brush >= 12 && brush <= 14 ? Math.min(6, count) : count);
+        const index = variant + (style === "fantasy-color" ? count : 0), rect = atlasRect(atlas, index);
+        frames.push({ atlas, family, index, token: `${family}-${index}`, rect, aspect: rect[3] / rect[2] });
+      }
     }
-    return { kind: "families", style, families, frames };
+    return { kind: "families", style, families, frames, variants, offsets };
   }
   function brushFrame(library, stamp) {
-    return library.frames[stamp.brush * 8 + (stamp.variant ?? 0) % 8];
+    return library.frames[library.offsets[stamp.brush] + (stamp.variant ?? 0) % library.variants];
   }
   var ATLAS_GEOMETRY = {
     "fantasy-ink": { width: 1254, height: 1254, rows: [0, 0.28, 0.52, 0.735, 1], rects: [
@@ -111,80 +113,110 @@ var FantasyPainting = (() => {
     const a = hash(ix, iy, seed), b = hash(ix + 1, iy, seed), c = hash(ix, iy + 1, seed), d = hash(ix + 1, iy + 1, seed);
     return (a + (b - a) * u) * (1 - v) + (c + (d - c) * u) * v;
   }
+  var clamp = (v) => Math.max(0, Math.min(1, v));
+  function smooth(a, b, v) {
+    const t = clamp((v - a) / (b - a));
+    return t * t * (3 - 2 * t);
+  }
+  function paintingCover(s) {
+    const t = s.temperature - 65e-4 * s.height, hot = t + 6, cold = t - 6;
+    const valley = smooth(0, -0.12, s.tpi ?? 0), ridge = smooth(0, 0.12, s.tpi ?? 0);
+    const humid = s.rain / Math.max(20 * t + 280, 120) * (1 + 0.7 * valley - 0.18 * ridge);
+    const rockTan = Math.tan(40 * Math.PI / 180), rockEff = rockTan * (0.55 + 0.45 * smooth(0.3, 1.3, humid));
+    const exposure = clamp(smooth(rockEff * 0.5, rockEff * 1.3, s.slope) + 0.35 * ridge - 0.3 * valley);
+    const woods = clamp((smooth(0.65, 2.1, humid) * smooth(5.5, 13.5, hot + 0.8 * valley) * (1 - smooth(rockTan * 0.9, rockTan * 1.6, s.slope)) * (1 - 0.22 * ridge) + 0.14 * valley * smooth(2, 10, hot) * smooth(0.4, 1.2, humid)) * (1 - exposure));
+    const high = smooth(850, 2600, s.height), rugged = smooth(100, 850, s.relief ?? s.slope * 1800);
+    const mountain = clamp(Math.max(high * (0.45 + 0.55 * rugged), smooth(0.2, 0.65, s.slope) * rugged) * (1 - 0.94 * valley));
+    const hill = clamp(Math.max(smooth(0.07, 0.28, s.slope), smooth(70, 350, s.relief ?? 0)) * (1 - mountain) * (1 - 0.95 * valley) * smooth(-0.035, 0.065, s.tpi ?? 0.065));
+    return {
+      woods,
+      mountain,
+      hill,
+      dry: 1 - smooth(0.35, 1, humid),
+      wet: smooth(1.8, 3.5, humid) * (1 - smooth(0.015, 0.08, s.slope)) * (1 - smooth(50, 250, s.height)),
+      snow: smooth(2.5, -2.5, hot) * smooth(60, 400, s.rain),
+      temperature: cold
+    };
+  }
   function planPainting(bounds, sample, options) {
     const pitch = options.pitch, density = Math.max(0, Math.min(2, options.density ?? 1)), size = Math.max(0.3, Math.min(2, options.size ?? 1));
-    if (!Number.isFinite(pitch) || pitch <= 0 || ![bounds.x, bounds.y, bounds.width, bounds.height, density, size].every(Number.isFinite) || bounds.width <= 0 || bounds.height <= 0) return [];
-    const seed = paintSeed(options.seed), result = [], budget = Number.isFinite(options.maxStamps ?? 4e4) ? Math.max(0, Math.min(8e4, Math.floor(options.maxStamps ?? 4e4))) : 4e4;
-    const pad = pitch * 12 * size;
-    for (const pass of ["summits", "ground", "forest"]) {
-      const step = pitch * (pass === "summits" ? 2 : pass === "forest" ? 1 / 4 : 1);
+    const brushPitch = options.brushPitch ?? pitch;
+    if (![pitch, brushPitch, bounds.x, bounds.y, bounds.width, bounds.height, density, size].every(Number.isFinite) || pitch <= 0 || brushPitch <= 0 || bounds.width <= 0 || bounds.height <= 0 || density === 0) return [];
+    const seed = paintSeed(options.seed), result = [], budget = Number.isFinite(options.maxStamps ?? 8e4) ? Math.max(0, Math.min(8e4, Math.floor(options.maxStamps ?? 8e4))) : 8e4;
+    for (const pass of ["relief", "ground", "forest"]) {
+      const pad = brushPitch * (pass === "relief" ? 8 : 2) * size;
+      const step = pitch * (pass === "relief" ? 0.85 : pass === "forest" ? 0.24 : 0.9);
       const x0 = Math.floor((bounds.x - pad) / step), x1 = Math.ceil((bounds.x + bounds.width + pad) / step);
       const y0 = Math.floor((bounds.y - pad) / step), y1 = Math.ceil((bounds.y + bounds.height + pad) / step);
-      const stride = Math.max(1, Math.ceil(Math.sqrt((x1 - x0 + 1) * (y1 - y0 + 1) / 24e4)));
+      const stride = Math.max(1, Math.ceil(Math.sqrt((x1 - x0 + 1) * (y1 - y0 + 1) / 28e4)));
       if (![x0, x1, y0, y1, stride].every(Number.isSafeInteger)) return [];
-      for (let gy = y0; gy <= y1; gy += stride) for (let gx = x0; gx <= x1; gx += stride) {
-        const r = hash(gx, gy, seed), x = (gx + 0.18 + hash(gx, gy, seed ^ 71) * 0.64) * step;
-        const y = (gy + 0.18 + hash(gx, gy, seed ^ 191) * 0.64) * step, s = sample(x, y);
+      for (let gy = Math.ceil(y0 / stride) * stride; gy <= y1; gy += stride) for (let gx = Math.ceil(x0 / stride) * stride; gx <= x1; gx += stride) {
+        const salt = seed ^ (pass === "relief" ? 181 : pass === "forest" ? 719 : 1231);
+        const x = (gx + 0.1 + hash(gx, gy, salt ^ 71) * 0.8) * step;
+        const y = (gy + 0.1 + hash(gx, gy, salt ^ 191) * 0.8) * step, s = sample(x, y);
         if (!s || ![s.height, s.slope, s.temperature, s.rain].every(Number.isFinite) || s.height <= 0 || s.water || s.occupied) continue;
-        const patch = noise(x / (pitch * 11), y / (pitch * 11), seed ^ 891);
-        const detail = noise(x / (pitch * 3), y / (pitch * 3), seed ^ 421);
-        const temp = s.temperature - s.height * 6e-3, arid = s.rain < 350;
-        let brush, cover, scale = 1;
-        if (s.height > 1850 || s.slope > 0.48) {
-          brush = temp < 0 || s.height > 2900 ? 6 : 5;
-          cover = 0.46 + 0.25 * detail;
-          scale = 5.6;
-        } else if (s.slope > 0.22) {
-          brush = s.slope > 0.36 ? 7 : 4;
-          cover = 0.32 + 0.32 * patch;
-          scale = 2.1;
-        } else if (arid) {
-          brush = 8;
-          cover = 0.16 + 0.48 * patch;
-          scale = 1.35;
-        } else if (s.height < 70 && s.rain > 1600 && s.slope < 0.04 && patch > 0.66) {
-          brush = 9;
-          cover = 0.22 + patch * 0.36;
-        } else {
-          cover = Math.max(0, Math.min(1, (s.rain - 250) / 1300)) * Math.max(0, Math.min(1, (patch * 0.75 + detail * 0.25 - 0.4) * 4.5));
-          const conifer = temp < 9 || s.height > 1e3, tropical = temp > 22 && s.rain > 1100;
-          brush = tropical ? r < 0.18 ? 2 : 14 : conifer ? r < 0.22 ? 12 : 0 : r < 0.22 ? 13 : 1;
-          if (!tropical && !conifer && temp > 14 && s.rain < 850 && r < 0.14) brush = 3;
-          scale = 0.48;
-          if (cover < 0.16) {
-            brush = patch > 0.18 && patch < 0.28 && s.slope < 0.05 && temp > 5 && temp < 24 ? detail > 0.6 ? 11 : 10 : 15;
-            cover = brush === 15 ? 0.035 : 0.13;
-            scale = brush === 15 ? 0.65 : 1.05;
-          }
-        }
-        const tree = brush < 4 || brush >= 12 && brush <= 14;
-        if (pass !== (brush === 5 || brush === 6 ? "summits" : tree ? "forest" : "ground")) continue;
-        if (hash(gx, gy, seed ^ 9811) > cover * density) continue;
-        if (brush === 5 || brush === 6 || brush === 7) {
-          let crowded = false;
-          for (let oy = -1; oy <= 1 && !crowded; oy++) for (let ox = -1; ox <= 1; ox++) {
-            if (!ox && !oy || hash(gx + ox, gy + oy, seed) >= r) continue;
-            const neighbour = sample(x + ox * step, y + oy * step);
-            if (neighbour && !neighbour.water && (neighbour.height > 1850 || neighbour.slope > 0.36)) {
-              crowded = true;
-              break;
+        const c = paintingCover(s), patch = noise(x / (brushPitch * 7), y / (brushPitch * 7), seed ^ 891);
+        const detail = noise(x / (brushPitch * 1.8), y / (brushPitch * 1.8), seed ^ 421);
+        let brush, cover, scale;
+        if (pass === "relief") {
+          const mountain = c.mountain > 0.16;
+          if (!mountain && c.hill < 0.12) continue;
+          if (mountain) {
+            let support = 0;
+            for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+              const neighbour = sample(x + dx * step, y + dy * step);
+              if (neighbour && !neighbour.water && neighbour.height > 0 && paintingCover(neighbour).mountain > 0.16) support++;
             }
+            if (support < 2) continue;
           }
-          if (crowded) continue;
+          brush = mountain ? c.snow > 0.45 ? 6 : 5 : 4;
+          scale = mountain ? 2.2 + 4.4 * smooth(650, 2800, s.height) * (0.65 + 0.35 * smooth(0, 0.12, s.tpi ?? 0.12)) : 0.9 + 1.8 * c.hill;
+          cover = smooth(0.12, 0.65, mountain ? c.mountain : c.hill) * (0.88 + 0.12 * detail);
+        } else if (pass === "forest") {
+          if (c.woods < 0.015) continue;
+          const tropical = c.temperature > 13 && s.rain > 1100, conifer = c.temperature < 3 || s.height > 1100;
+          brush = tropical ? 2 : conifer ? 0 : c.temperature > 8 && s.rain < 850 ? 3 : 1;
+          const mask = smooth(0.24, 0.43, 0.72 * patch + 0.28 * detail + 0.16 * c.woods);
+          cover = c.woods * mask * (1 - 0.45 * c.wet);
+          scale = 0.48;
+        } else {
+          if (c.dry > 0.2) {
+            brush = 8;
+            cover = c.dry * 0.16 * smooth(0.2, 0.65, patch);
+            scale = 1.25;
+          } else if (c.wet > 0.3) {
+            brush = 9;
+            cover = c.wet * 0.16 * smooth(0.3, 0.7, detail);
+            scale = 0.85;
+          } else if (c.woods < 0.35 && s.slope < 0.05 && c.temperature > -1 && c.temperature < 18 && patch > 0.2 && patch < 0.33) {
+            brush = detail > 0.6 ? 11 : 10;
+            cover = 0.13;
+            scale = 1.05;
+          } else {
+            brush = 15;
+            cover = (1 - c.woods) * (1 - c.mountain) * 0.025;
+            scale = 0.55;
+          }
         }
-        const w = pitch * scale * size * (0.85 + 0.3 * hash(gx, gy, seed ^ 319));
-        const margin = (brush === 5 || brush === 6 ? Math.min(w, pitch * 2.8 * size) : w) * 0.36;
-        if ([-1, 1].some((d) => [-1, 1].some((e) => {
-          const edge = sample(x + d * margin, y + e * margin * 0.25);
-          return !edge || edge.height <= 0 || edge.water || edge.occupied;
-        }))) continue;
-        result.push({ x, y, width: w, height: w * (brush >= 4 && brush <= 11 ? 0.78 : 1.15), brush, variant: Math.floor(hash(gx, gy, seed ^ 6317) * 8), flip: hash(gx, gy, seed ^ 97) > 0.5, opacity: brush === 15 ? 0.65 : 1 });
+        if (hash(gx, gy, salt ^ 9811) > clamp(cover * density)) continue;
+        const tree = pass === "forest", variation = tree ? 1 : 0.95 + 0.1 * hash(gx, gy, salt ^ 319);
+        const w = brushPitch * scale * size * variation;
+        result.push({
+          x,
+          y,
+          width: w,
+          height: w * (tree ? 1.15 : 0.78),
+          heightScale: tree ? 0.95 + 0.1 * hash(gx, gy, salt ^ 519) : 0.95 + 0.1 * hash(gx, gy, salt ^ 619),
+          brush,
+          variant: Math.floor(hash(gx, gy, salt ^ 6317) * 32),
+          flip: hash(gx, gy, salt ^ 97) > 0.5,
+          opacity: brush === 15 ? 0.65 : 1
+        });
       }
     }
     result.sort((a, b) => a.y - b.y || a.x - b.x);
     if (result.length > budget) {
-      const relief = result.filter((s) => s.brush >= 4 && s.brush <= 8);
-      const ground = result.filter((s) => s.brush < 4 || s.brush > 8);
+      const relief = result.filter((s) => s.brush >= 4 && s.brush <= 8), ground = result.filter((s) => s.brush < 4 || s.brush > 8);
       const thin = (items, count) => items.filter((_, i) => Math.floor(i * count / items.length) !== Math.floor((i - 1) * count / items.length)).slice(0, count);
       const reliefBudget = Math.min(relief.length, budget);
       return [...thin(relief, reliefBudget), ...thin(ground, budget - reliefBudget)].sort((a, b) => a.y - b.y || a.x - b.x);
@@ -233,6 +265,11 @@ var FantasyPainting = (() => {
     }
     ctx.restore();
   }
+  function stampHeight(stamp, frame) {
+    const tree = stamp.brush < 4 || stamp.brush >= 12 && stamp.brush <= 14;
+    const aspect = tree ? frame.family === "pines" || frame.family === "cypress" ? 1.8 : 1.25 : frame.aspect;
+    return stamp.width * aspect * (stamp.heightScale ?? 1);
+  }
   function familyPaintingSvg(stamps, library, id) {
     const frames = /* @__PURE__ */ new Map(), families = /* @__PURE__ */ new Map();
     for (const stamp of stamps) {
@@ -249,8 +286,8 @@ var FantasyPainting = (() => {
     svg += '</defs><g class="fantasy-brushes">';
     const f = (n) => n.toFixed(2);
     for (const s of stamps) {
-      const frame = brushFrame(library, s), h = s.width * frame.aspect;
-      svg += `<use class="${s.brush >= 4 && s.brush <= 8 ? "fantasy-relief" : "fantasy-landuse"}" data-brush="${frame.family}" data-variant="${frame.index % 8}" href="#${id}-${frame.token}" x="${f(-s.width / 2)}" y="${f(-h * 0.95)}" width="${f(s.width)}" height="${f(h)}" opacity="${s.opacity}" transform="translate(${f(s.x)} ${f(s.y)}) scale(${s.flip ? -1 : 1} 1)"/>`;
+      const frame = brushFrame(library, s), h = stampHeight(s, frame);
+      svg += `<use class="${s.brush >= 4 && s.brush <= 8 ? "fantasy-relief" : "fantasy-landuse"}" data-brush="${frame.family}" data-variant="${frame.index % (frame.atlas.variantsPerStyle ?? 8)}" href="#${id}-${frame.token}" x="${f(-s.width / 2)}" y="${f(-h * 0.95)}" width="${f(s.width)}" height="${f(h)}" opacity="${s.opacity}" transform="translate(${f(s.x)} ${f(s.y)}) scale(${s.flip ? -1 : 1} 1)"/>`;
     }
     return svg + "</g>";
   }
@@ -259,7 +296,7 @@ var FantasyPainting = (() => {
     for (const s of stamps) {
       const frame = brushFrame(library, s), image = images.get(frame.family);
       if (!image) continue;
-      const [sx, sy, sw, sh] = frame.rect, w = s.width * camera.scale, h = w * frame.aspect;
+      const [sx, sy, sw, sh] = frame.rect, w = s.width * camera.scale, h = stampHeight(s, frame) * camera.scale;
       const x = (s.x - camera.x) * camera.scale, y = (s.y - camera.y) * camera.scale;
       ctx.globalAlpha = s.opacity;
       if (s.flip) {
