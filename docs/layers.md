@@ -6,6 +6,8 @@ Choose a layer from the menu next to the map controls. Map and globe share the s
 | --- | --- |
 | Relief | Height-colored shaded terrain |
 | Render | Climate-informed soil, vegetation, rock, snow and water materials |
+| Render3D | Render at distance; per-pixel ground, stands and tree crowns as you zoom, down to 1/128 m per pixel ([method](render3d.md)) |
+| Render3D Brush | Render3D with painted overhead crowns and shrubs |
 | Soils | Exposed soil and rock, with terrain shading |
 | Pedology | Regional soil-mixture provinces on an approximately 200 km source grid |
 | Biomes | Source Köppen class colors adjusted to current DEM altitude, slopes and coastlines |
@@ -20,7 +22,17 @@ Choose a layer from the menu next to the map controls. Map and globe share the s
 
 Some diagnostics describe the source atlas rather than every fine neural pixel. Imported Custom/Noise sources have diagnostic land/water regions rather than simulated moving tectonic plates. The visible Biomes layer follows the current DEM; source climate classes do not get recomputed for every neural tile.
 
-Rendering settings apply immediately: global or per-LOD lighting, sun direction, contours, materials and styles. Every fifth contour is major; automatic spacing follows zoom, while manual spacing uses meters. These controls reuse physical heights without neural generation.
+Rendering settings apply immediately: global or per-LOD lighting, sun direction, contours, materials, Render3D forest density and clearings, and styles. Every fifth contour is major; automatic spacing follows zoom, while manual spacing uses meters. These controls reuse physical heights without neural generation.
+
+**Water** controls rivers, lakes and their basin/flow inspector. River density,
+minimum catchment and line width adjust a discharge-based hierarchy across
+zooms. Seasonal/dry streams are hidden initially. Lakes use simple vector
+surfaces with a 1 km² default minimum; incomplete coarse shores remain outlines
+at fine zoom. Display settings reuse the stored network without neural work.
+Detailed carving and valley fitting remain optional and slower. See
+[rendering](methods/hydrology-rendering.md),
+[climate and lakes](methods/hydrology-hierarchy-climate-lakes.md), and
+[Magna Urbis options](methods/hydrology-magna-options.md).
 
 The globe supports orbit and progressive terrain detail. A planar world disables globe view. The scale bar, cursor altitude, measurement tool and diagnostics expose physical scale. Cache and refinement controls determine when parent terrain is replaced by finer tiles.
 
@@ -30,8 +42,10 @@ Codes use `NE1:<generation UID>:<rendering UID> layer=relief view=map zoom=1600 
 
 Keep `recipe` when sharing across installations: a UID alone cannot describe arbitrary settings to a server that has never seen them. The compressed recipe contains full settings and the dependency graph needed to rebuild retained relief, erosion and climate stages, including older parents. Saved UID recipes persist under `generated/share-recipes/` (or the configured output root). Links keep the portable recipe in the URL fragment. Newly opened codes override local generation and rendering preferences. An imported view keeps its original viewport footprint, scaling down to fit the window; **Use full window** releases that size constraint.
 
+When `size` is omitted from a link, the viewer restores the recipe and camera using the recipient's current window. An explicitly supplied size must still contain two valid pixel dimensions.
+
 **Alt+click** on the map or globe adds a pin. **Click a pin** to remove it. Pins have only coordinates, stored visibly as `pins=x,y;x,y` in the URL and share code. Their positions survive reloads and portable sharing.
 
 Sharing restores the generation recipe and view, rather than freezing an in-progress frame. Missing tiles regenerate and refinement progresses normally. Use a forced Render LOD when sharing a specific detail level. Different model versions or GPU runtimes can produce different terrain values; the Share panel reports a world-identity mismatch after import. Pixel-identical output across different hardware is not guaranteed.
 
-See [materials](materials.md), [biomes](biomes.md) and the [architecture](architecture.md) for the scientific limits of these views.
+See [materials](materials.md), [Render3D](render3d.md), [biomes](biomes.md) and the [architecture](architecture.md) for the scientific limits of these views.

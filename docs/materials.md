@@ -16,4 +16,8 @@ The annual-cycle control runs from northern winter to summer and back; southern 
 
 Coarse material colors are baked per block, mode and settings; frames reuse filtered albedo with terrain lighting. Fine tiles also cache GPU colors. Appearance sources have a separate identity from neural heights, so material-only edits do not rerun the networks. The full appearance transport contains 50 planes, including physical climate/biomes, substrate, metadata and pedology; older 46-plane transport remains readable.
 
+Shore distances use an exact separable search: a row pass stores each sample's nearest sea column within the beach reach, and the shading pass reads one value per row instead of every ring sample. Output is unchanged; on low coastal 3.75 m tiles, GPU shading time fell from 0.31 to 0.17 ms per tile (RTX 3090).
+
+[Render3D](render3d.md) keeps this material as its distant appearance and adds a per-pixel ground and canonical forest as the footprint shrinks.
+
 Implementations: [CPU reference](../backend/terrain_render.py), [CUDA mirror](../backend/terrain_render_torch.py) for server PNG tiles and overviews (`TERRAIN_RENDER_DEVICE=cpu` forces NumPy), [WebGPU renderer](../web/terrain_renderer.js), [soil model](../backend/terrain_soil.py), [pedology](../backend/terrain_pedology.py) and [material controls](../web/terrain_render_controls.js).

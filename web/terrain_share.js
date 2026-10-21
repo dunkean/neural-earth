@@ -14,8 +14,9 @@ window.TerrainShare=(()=>{
   function fromParams(params){
     const parts=(params.get('share')||'').split('.');
     if(parts.length!==2||!uid.test(parts[0])||parts[0][0]!=='g'||!uid.test(parts[1])||parts[1][0]!=='r')throw Error('Invalid share UID');
-    const layer=params.get('layer'),view=params.get('view'),zoom=number(params.get('zoom')??''),position=(params.get('position')||'').split(',').map(number),size=(params.get('size')||'').split(',').map(number),lod=params.get('lod');
-    if(!/^[a-z0-9-]+$/.test(layer||'')||!['map','globe'].includes(view)||zoom<=0||position.length!==2||size.length!==2||size.some(n=>!Number.isInteger(n)||n<1||n>16384)||!(lod==='auto'||Number.isInteger(number(lod??''))&&Number(lod)>=-6&&Number(lod)<=11))throw Error('Invalid shared view');
+    // A link without a logical size uses the recipient's current viewport.
+    const layer=params.get('layer'),view=params.get('view'),zoom=number(params.get('zoom')??''),position=(params.get('position')||'').split(',').map(number),size=params.has('size')?params.get('size').split(',').map(number):null,lod=params.get('lod');
+    if(!/^[a-z0-9-]+$/.test(layer||'')||!['map','globe'].includes(view)||zoom<=0||position.length!==2||size&&(size.length!==2||size.some(n=>!Number.isInteger(n)||n<1||n>16384))||!(lod==='auto'||Number.isInteger(number(lod??''))&&Number(lod)>=-6&&Number(lod)<=11))throw Error('Invalid shared view');
     const orbit=view==='globe'?(params.get('orbit')||'').split(',').map(number):null;
     if(orbit&&(orbit.length!==3||orbit[2]<1e-9||orbit[2]>11||Math.abs(orbit[1])>Math.PI/2))throw Error('Invalid globe camera');
     const recipe=params.get('recipe')||null;if(recipe&&(!/^[A-Za-z0-9_-]+$/.test(recipe)||recipe.length>174764))throw Error('Invalid portable recipe');
@@ -25,7 +26,8 @@ window.TerrainShare=(()=>{
     return {generation:parts[0],rendering:parts[1],layer,view,zoom,position,size,lod,orbit,recipe,pins,latentGeometry};
   }
   function params(state){
-    const p=new URLSearchParams({share:state.generation+'.'+state.rendering,layer:state.layer,view:state.view,zoom:String(state.zoom),position:state.position.join(','),size:state.size.join(','),lod:String(state.lod)});
+    const p=new URLSearchParams({share:state.generation+'.'+state.rendering,layer:state.layer,view:state.view,zoom:String(state.zoom),position:state.position.join(','),lod:String(state.lod)});
+    if(state.size)p.set('size',state.size.join(','));
     if(state.orbit)p.set('orbit',state.orbit.join(','));if(state.pins)p.set('pins',state.pins);if(state.latentGeometry)p.set('latent_geometry',state.latentGeometry);return p;
   }
   function format(state){return 'NE1:'+state.generation+':'+state.rendering+' '+[...params(state)].filter(([key])=>key!=='share').map(([key,value])=>key+'='+value).join(' ')+(state.recipe?' recipe='+state.recipe:'')}

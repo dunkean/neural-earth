@@ -56,6 +56,10 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4n
    $('grid').checked=true;$('renderSea').checked=true;$('seaMaxLod').value=2;$('prefetch').checked=false;$('cacheLodGap').value=5;
    $('refinementDepth').value=2;forcedView={lod:6,signature:viewSignature()};$('forcedLod').value=6;draw();schedule();
   });
+  const retainedLod=await sender.page.evaluate(()=>{hydrology.set({month:7});return requestedLod();});
+  assert.equal(retainedLod,6,'Changing the water month preserves the applied forced LOD');
+  const steadyEpoch=await sender.page.evaluate(()=>{refresh();const before=cameraEpoch;refresh();return [before,cameraEpoch];});
+  assert.equal(steadyEpoch[0],steadyEpoch[1],'An unchanged view does not cancel its own in-flight tiles');
   const viewport=await sender.page.locator('#viewport').boundingBox();
   const click={x:viewport.width/2+60,y:viewport.height/2-40};
   await sender.page.locator('#viewport').click({position:click,modifiers:['Alt']});
@@ -110,6 +114,23 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4n
   assert(await visiblePin.count()>=1,'front-facing globe pins are displayed');
   await visiblePin.last().click();
   assert.equal(await receiver.page.locator('.mapPin').count(),1,'globe pins can be removed with a click');
+  // A link with no size restores the recipe in the recipient's own window.
+  const windowURL=new URL('https://receiver.test'+relative);windowURL.searchParams.delete('size');
+  const unlocked=await receiver.page.evaluate(link=>{
+   const state=TerrainShare.parse(link);return {size:state.size,url:TerrainShare.url(state)};
+  },windowURL.href);
+  assert.equal(unlocked.size,null);
+  assert.equal(new URL('https://receiver.test'+unlocked.url).searchParams.has('size'),false);
+  await receiver.page.goto(windowURL.href);
+  await receiver.page.waitForFunction(()=>world&&!worldLoading&&rendererReady&&!restoringShare);
+  const windowView=await receiver.page.evaluate(()=>({snapshot:captureShare(),seed:$('seed').value,locked:!$('unlockShareSize').hidden}));
+  assert.equal(windowView.seed,'18446744073709551615','missing size does not leave the seed empty');
+  assert.deepEqual(windowView.snapshot.generation.settings,expected.generation.settings);
+  assert.deepEqual(windowView.snapshot.rendering,expected.rendering);
+  assert.deepEqual(windowView.snapshot.camera.position,expected.camera.position);
+  assert.equal(windowView.snapshot.camera.zoom,expected.camera.zoom);
+  assert.equal(windowView.snapshot.camera.size[0],800);
+  assert.equal(windowView.locked,false);
   // Invalid camera data never starts a world with guessed settings.
   await receiver.page.goto('https://receiver.test'+relative.replace('zoom=1600','zoom=NaN'));
   await receiver.page.waitForFunction(()=>$('status').textContent.includes('Invalid camera number'));

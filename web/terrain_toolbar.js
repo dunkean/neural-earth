@@ -41,7 +41,7 @@ window.TerrainToolbar=(()=>{
     panel.innerHTML='<summary title="Layer visible" aria-label="Layer visible"><span class="selectedLayer">Relief</span><span aria-hidden="true">▾</span></summary><div class="toolPanel"><div class="panelHeading"><strong>Layer visible</strong><button type="button" class="panelClose" aria-label="Close layer menu">×</button></div><div class="layerGroups"></div></div>';
     label.hidden=true;controls.append(label,panel);
     const groups=panel.querySelector('.layerGroups'),buttons=[],labels=new Map([
-      ['relief','Relief'],['render','Render'],['soil','Soils'],['pedology','Pedology'],['orogen-biomes','Biomes'],['temperature','Annual temperature'],['precipitation','Annual precipitation'],['orogen-koppen','Köppen']
+      ['relief','Relief'],['render','Render'],['render3d','Render3D'],['render3d-brush','Render3D Brush'],['soil','Soils'],['pedology','Pedology'],['orogen-biomes','Biomes'],['temperature','Annual temperature'],['precipitation','Annual precipitation'],['orogen-koppen','Köppen']
     ]);
     const pedologyLegend=document.createElement('div');pedologyLegend.id='pedologyLegend';pedologyLegend.hidden=true;
     pedologyLegend.style.cssText='max-width:340px;margin-bottom:8px;line-height:1.6';
@@ -51,7 +51,7 @@ window.TerrainToolbar=(()=>{
     ].map(([color,name])=>`<span style="display:inline-block;margin-right:10px"><i style="display:inline-block;width:9px;height:9px;margin-right:4px;background:${color}"></i>${name}</span>`).join('');
     $('hud').prepend(pedologyLegend);
     const sections=[
-      ['Main maps',['fantasy-ink','fantasy-color','relief','render','soil','pedology','orogen-biomes','temperature','precipitation','orogen-koppen']],
+      ['Main maps',['fantasy-ink','fantasy-color','relief','render','render3d','render3d-brush','soil','pedology','orogen-biomes','temperature','precipitation','orogen-koppen']],
       ['Map styles',Object.keys(window.TerrainStyles||{})],
       ['Seasonal climate',['orogen-temperature-summer','orogen-temperature-winter','orogen-precip-summer','orogen-precip-winter']],
       ['Atmosphere',['orogen-pressure-summer','orogen-pressure-winter','orogen-wind-summer','orogen-wind-winter','orogen-rain-shadow','orogen-continentality']],

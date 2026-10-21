@@ -46,7 +46,7 @@ Full-size captures, seeds, coordinates, settings and source resolutions are reco
 
 ![Tectonic plates, uplift, winds and ocean currents](docs/images/layers-dynamics.png)
 
-The menu also includes seasonal climate, crust types, plate boundaries, convergence, hotspots, rain shadows, atmospheric pressure and cartographic styles. [Layer guide](docs/layers.md).
+The menu also includes seasonal climate, crust types, plate boundaries, convergence, hotspots, rain shadows, atmospheric pressure and cartographic styles. **Render3D** and **Render3D Brush** keep Render at distance, then resolve ground grains, forest stands and individual (or painted) tree crowns down to 1/128 m per pixel ([method](docs/render3d.md)). [Layer guide](docs/layers.md).
 
 ## Install and run
 
@@ -181,7 +181,7 @@ Neural Earth produces a complete geographic world to explore, with finite spheri
 
 `tools/benchmarks/benchmark_startup.py` measures the cold start on a separate port (8775): server response, model loading and CUDA Graph preparation, `/api/world` and the Render overview. `--gpu` (default) runs every optional Orogen stage on CUDA, `--cpu` runs Orogen on the CPU; without `--seed` it generates a new random world, and a seed already generated measures a reopened world. Stop other servers first, because they share GPU memory. On an RTX 3090, a reopened world shows its overview after about 9 s, and a new world with CPU Orogen after about 16 s.
 
-Terrain and climate target worldbuilding plausibility. Biomes and materials are visual models, without independent ecosystem simulation. Neural detail does not guarantee globally connected rivers or preservation of every source erosion feature. Optional sub-30 m refinement is experimental.
+Terrain and climate target worldbuilding plausibility. Biomes and materials are visual models, without independent ecosystem simulation. Raw neural detail does not guarantee connected rivers; the separate [hydrology stack](docs/methods/hydrology-integration.md) supplies drainage, river geometry, lakes, watersheds and seasonal estimates. Fine riverbanks and lake shores remain approximate. Optional sub-30 m refinement is experimental.
 
 ## Documentation and credits
 

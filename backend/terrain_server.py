@@ -1238,6 +1238,309 @@ def globe_script():
     return send_from_directory(WEB_ROOT, 'terrain_globe.js')
 
 
+@app.get('/terrain_hydrology.js')
+def hydrology_script():
+    return send_from_directory(WEB_ROOT, 'terrain_hydrology.js')
+
+
+_hydrology_service = None
+_hydrology_lock = threading.Lock()
+_hydrology_base_lock = threading.Lock()
+_hydrology_base_revision = 0
+
+
+def read_hydrology_source(seed, profile):
+    """The selected final physical source, without requesting neural detail."""
+    from terrain_conditioning import make_conditioning_factory
+    from terrain_geometry import world_bounds, world_latitude, reference_coordinates
+    settings = resolve_generation(profile).settings
+    extent = world_bounds(settings)
+    width = int(os.environ.get('TERRAIN_HYDRO_WIDTH', '2048'))
+    if not 64 <= width <= 2048 or width % 2:
+        raise ValueError('TERRAIN_HYDRO_WIDTH must be an even size from 64 to 2048')
+    height = width//2 if settings['world_topology'] == 'sphere' else width
+    if settings['world_topology'] == 'plane':
+        width = min(width, 1024)
+        height = width
+    xs = extent[0]+(np.arange(width)+.5)*(extent[2]-extent[0])/width
+    ys = extent[1]+(np.arange(height)+.5)*(extent[3]-extent[1])/height
+    with all_gpu_locks():
+        factory = make_conditioning_factory(seed, profile)
+    fields = factory.sample(xs, ys)
+    result = dict(height_m=fields[0], climate=fields[1:], bounds=extent,
+                  topology=settings['world_topology'], settings=settings,
+                  latitude_deg=world_latitude(ys, settings)[:, None])
+    if settings['climate_source'] == 'orogen':
+        from terrain_orogen_layers import sample
+        atlas = factory.heightmap
+        xx, yy = reference_coordinates(xs, ys, settings)
+        seasonal = [sample(atlas, atlas.layers[name], xx, yy) for name in
+                    ('temperature_summer', 'temperature_winter', 'precip_summer', 'precip_winter')]
+        result['seasonal'] = dict(temp_summer_c=seasonal[0]*90-45,
+            temp_winter_c=seasonal[1]*90-45, precip_summer_mm=seasonal[2]*1000,
+            precip_winter_mm=seasonal[3]*1000)
+    return result
+
+
+def read_hydrology_detail(seed, profile, core_bounds, *, charts=None):
+    """Canonical 7680/240 m arrays, acquired through the existing GPU lane.
+
+    ``charts=('ordinary'|'polar', ...)`` instead returns each raw chart's own
+    Base at geographic 240 m centres over core + one 240 m cell: no blend, no
+    periodic strip. A display decoder of that chart is composed against this
+    reference; unlike routing, it needs no coarse smoothing halo.
+    """
+    from terrain_hydrology_regions import piece_windows
+    from terrain_hydrology_sampling import canonical_field, sample_points
+    from terrain_geometry import world_bounds
+    from terrain_polar import to_chart
+    base_bounds, coarse_bounds = piece_windows(core_bounds)
+    if charts:
+        base_bounds = (core_bounds[0]-240., core_bounds[1]-240., core_bounds[2]+240., core_bounds[3]+240.)
+    identity = world_identity(world_manifest(seed, profile))
+    def compute():
+        runtime = current_runtime()
+        with measured_lock(runtime.lock, 'hydrology.gpu_lock_wait'), torch.inference_mode():
+            settings = resolve_generation(profile).settings
+            def physical_block(world, source, x0, y0, x1, y1):
+                normalized = _field_block(world, source, x0, y0, x1, y1)
+                return np.sign(normalized)*np.square(normalized)
+            def axes(extent, spacing):
+                return [np.arange(round(extent[i]/spacing), round(extent[i+2]/spacing), dtype=np.float64)*spacing+spacing*.5
+                        for i in (0, 1)]
+            if charts:
+                x, y = np.meshgrid(*axes(base_bounds, 240.))
+                if settings['world_topology'] == 'sphere':
+                    extent = world_bounds(settings)
+                    x = (x-extent[0]) % (extent[2]-extent[0])+extent[0]
+                    y = np.clip(y, extent[1], extent[3])
+                bases = {}
+                for chart in charts:
+                    polar = chart == 'polar' and settings['world_topology'] == 'sphere'
+                    px, py = to_chart(x, y, settings) if polar else (x, y)
+                    world = get_polar_world(seed, profile) if polar else get_world(seed, profile)
+                    bases[chart] = sample_points(world, px.ravel(), py.ravel(), 'latent',
+                                                 physical_block).reshape(x.shape).astype(np.float32)
+                return dict(chart_base=bases, base_bounds=base_bounds)
+            result = {}
+            for source, spacing, extent in (('coarse', 7680., coarse_bounds), ('latent', 240., base_bounds)):
+                xs, ys = axes(extent, spacing)
+                def sample_chart(chart, x, y):
+                    world = get_polar_world(seed, profile) if chart else get_world(seed, profile)
+                    return sample_points(world, x, y, source, physical_block)
+                result['coarse_height' if source == 'coarse' else 'base_height'] = canonical_field(xs, ys, settings, sample_chart)
+            return dict(result, coarse_bounds=coarse_bounds, base_bounds=base_bounds)
+    key = ('hydrology-parent', identity, tuple(core_bounds), tuple(charts or ()))
+    job = jobs.submit(key, compute, lambda value: value, lane='gpu', role='detail',
+                      affinity=('hydrology', profile, seed, tuple(core_bounds)))
+    return job.wait()
+
+
+def read_hydrology_coarse_points(seed, profile, xs, ys):
+    """Sparse Coarse samples for one canonical downstream water profile."""
+    from terrain_hydrology_sampling import canonical_points, sample_points
+    xs, ys = np.asarray(xs, np.float64), np.asarray(ys, np.float64)
+    signature = hashlib.blake2b(xs.tobytes()+ys.tobytes(), digest_size=12).hexdigest()
+    identity = world_identity(world_manifest(seed, profile))
+    def compute():
+        with measured_lock(current_runtime().lock, 'hydrology.profile_gpu_wait'), torch.inference_mode():
+            def block(world, source, x0, y0, x1, y1):
+                value = _field_block(world, source, x0, y0, x1, y1)
+                return np.sign(value)*np.square(value)
+            def sample_chart(chart, x, y):
+                world = get_polar_world(seed, profile) if chart else get_world(seed, profile)
+                return sample_points(world, x, y, 'coarse', block)
+            return canonical_points(xs, ys, resolve_generation(profile).settings, sample_chart)
+    job = jobs.submit(('hydrology-water-profile', identity, signature), compute,
+                      lane='gpu', role='coarse', priority=1500)
+    return job.wait()
+
+
+def read_hydrology_cached_base(seed, profile, bounds):
+    """Read existing ordinary Base contributors; never create a world or run NN.
+
+    The canonical seam/pole blend needs both charts and stays on the source
+    overview here. Complete fused Base windows are read under their store's
+    eviction pin and device lock, without InfiniteTensor's generation path.
+    """
+    global _hydrology_base_revision
+    settings = resolve_generation(profile).settings
+    if settings.get('world_topology', 'sphere') == 'sphere':
+        extent = profile_bounds(profile)
+        period, height = extent[2]-extent[0], extent[3]-extent[1]
+        center = (extent[0]+extent[2])*.5
+        if (max(abs(bounds[1]), abs(bounds[3])) >= height*54./180. or
+                max(abs(bounds[0]-center), abs(bounds[2]-center)) >= period*.45):
+            return None
+    j0, i0, j1, i1 = (round(v/240.) for v in bounds)
+    if i1 <= i0 or j1 <= j0:
+        return None
+    with runtimes_lock:
+        candidates = list(runtimes.values())
+    for runtime in candidates:
+        world = runtime.worlds.get((profile, seed))
+        cached = getattr(world, '_terrain_hydro_base', {}).get(tuple(bounds))
+        if cached is not None:
+            return dict(cached)  # immutable CPU arrays remain usable while NN is busy
+        if not runtime.lock.acquire(blocking=False):
+            continue
+        try:
+            world = runtime.worlds.get((profile, seed))
+            if world is None:
+                continue
+            tensor = world.latents
+            region = (slice(0, tensor.shape[0], 1), slice(i0, i1, 1), slice(j0, j1, 1))
+            store = tensor._store
+            store.begin_access(tensor.uuid)
+            try:
+                windows = tensor.output_window.intersecting_windows(region, tensor_shape=tensor.shape)
+                if not all(store.is_window_processed(tensor.uuid, index) for index in windows):
+                    continue
+                with torch.inference_mode():
+                    data = store.read_pixels(tensor.uuid, region)
+                    # Exactly the normalization used by _field_block('latent').
+                    normalized = ((data[4]/(data[-1]+1e-8))*38.6-31.4).float().cpu().numpy()
+                base = np.sign(normalized)*np.square(normalized)
+                if not np.isfinite(base).all():
+                    return None
+                base.setflags(write=False)
+                cached = dict(base_height=base, base_bounds=tuple(bounds))
+                if not hasattr(world, '_terrain_hydro_base'):
+                    world._terrain_hydro_base = OrderedDict()
+                world._terrain_hydro_base[tuple(bounds)] = cached
+                while len(world._terrain_hydro_base) > 64:
+                    world._terrain_hydro_base.popitem(last=False)
+                with _hydrology_base_lock:
+                    _hydrology_base_revision += 1
+                return dict(cached)
+            finally:
+                store.end_access(tensor.uuid)
+        finally:
+            runtime.lock.release()
+    return None
+
+
+def capture_hydrology_cached_base(seed, profile, lod, tx, ty):
+    """Save ready Base near a completed terrain tile before GPU LRU eviction.
+
+    Called inside the existing GPU job/lock. Reads only completed contributors;
+    64 ordinary 192² float grids cost about 9 MiB of CPU memory per world.
+    """
+    if _hydrology_service is None or lod > 3:
+        return
+    from terrain_hydrology_service import VECTOR_CORE_M
+    span, core = TILE*NATIVE*2**lod, VECTOR_CORE_M
+    x0, y0, x1, y1 = tx*span, ty*span, (tx+1)*span, (ty+1)*span
+    candidates = [(x, y) for y in range(math.floor(y0/core)-1, math.ceil(y1/core)+1)
+                  for x in range(math.floor(x0/core)-1, math.ceil(x1/core)+1)]
+    candidates.sort(key=lambda p: ((p[0]+.5)*core-(x0+x1)*.5)**2+
+                                 ((p[1]+.5)*core-(y0+y1)*.5)**2)
+    for x, y in candidates[:16]:
+        read_hydrology_cached_base(seed, profile,
+            (x*core-7680., y*core-7680., (x+1)*core+7680., (y+1)*core+7680.))
+
+
+def hydrology_service():
+    global _hydrology_service
+    with _hydrology_lock:
+        if _hydrology_service is None:
+            from terrain_hydrology_service import HydrologyService
+            _hydrology_service = HydrologyService(read_hydrology_source, read_detail=read_hydrology_detail,
+                                                  read_coarse_points=read_hydrology_coarse_points,
+                                                  read_cached_base=read_hydrology_cached_base)
+        return _hydrology_service
+
+
+def hydrology_options():
+    """Display refinements are opt-in and never change neural cache identity."""
+    detail = request.args.get('hydro_detail', '0')
+    if detail not in ('0', '1'):
+        raise ValueError('hydro_detail must be 0 or 1')
+    cosmetics = tuple(sorted(set(filter(None, request.args.get('hydro_cosmetics', '').split(',')))))
+    allowed = {'valleyFit', 'meanders', 'nestedMeanders', 'smoothBanks'}
+    if set(cosmetics) - allowed:
+        raise ValueError('Unknown hydrology cosmetic option')
+    return dict(detail=detail == '1', cosmetics=cosmetics)
+
+
+def hydrology_display(seed, profile, lod, tx, ty, elevation, report):
+    if request.args.get('hydro') != '1':
+        return elevation, None, report
+    options = hydrology_options()
+    session = request.args.get('session')
+    # A completed raw tile remains valid when another tile changes the view's
+    # subscription epoch. The client already discards obsolete display tasks.
+    # Only expensive regional work needs the extra admission check here.
+    if session and options['detail']:
+        with jobs.condition:
+            view = jobs.views.get(_session(session))
+            if not view or view['epoch'] != int(request.args.get('epoch', 0)):
+                raise JobCancelled('Obsolete hydrology tile request')
+    month = int(request.args.get('hydro_month', 0))
+    if not 0 <= month <= 12:
+        raise ValueError('Hydrology month must be 0..12')
+    service = hydrology_service()
+    entry = service.ensure(seed, profile, world_identity(world_manifest(seed, profile)))
+    # Fast browsing draws the shared vector network once in the viewer. Source
+    # courses cannot condition a neural bed, so rasterising them again in every
+    # binary height tile adds cost without a trustworthy physical water surface.
+    # PNG consumers still use physical() to composite their image on the CPU.
+    if not options['detail'] and request.endpoint == 'height_tile':
+        return elevation, None, dict(report, hydro_state=entry['status'], hydro_id=entry['key'],
+            hydro_month=month, hydro_vector_preview=True, hydro_detail=False, hydro_seconds=0.,
+            hydro_base_revision=_hydrology_base_revision)
+    resolution, halo = report['resolution'], report.get('halo', HALO)
+    x0 = tx*TILE*NATIVE*2**lod-halo*resolution
+    y0 = ty*TILE*NATIVE*2**lod-halo*resolution
+    extent = (x0, y0, x0+elevation.shape[1]*resolution, y0+elevation.shape[0]*resolution)
+    height, water, details = service.physical(entry, elevation, extent, lod=lod, month=month,
+                                            chart=selected_neural_chart(), **options)
+    if not options['detail']:
+        details = dict(details, hydro_vector_preview=True)
+    details = dict(details, hydro_base_revision=_hydrology_base_revision)
+    return height, water, dict(report, **details)
+
+
+@app.get('/api/hydrology/<int:seed>')
+def hydrology_network(seed):
+    if not 0 <= seed < 2**64:
+        return jsonify(error='Invalid seed'), 400
+    profile = generation_profile()
+    identity = world_identity(world_manifest(seed, profile))
+    if request.args.get('world_identity', identity) != identity:
+        return jsonify(error='World changed; refresh hydrology'), 409
+    extent = profile_bounds(profile)
+    values = request.args.get('bounds')
+    try:
+        bounds = [float(x) for x in values.split(',')] if values else list(extent)
+        lod, month = int(request.args.get('lod', 4)), int(request.args.get('month', 0))
+        options = hydrology_options()
+    except (ValueError, TypeError):
+        return jsonify(error='Invalid hydrology coordinates, level or month'), 400
+    if len(bounds) != 4 or not np.isfinite(bounds).all() or bounds[2] <= bounds[0] or bounds[3] <= bounds[1]:
+        return jsonify(error='Invalid hydrology bounds'), 400
+    if not MIN_LOD <= lod <= 11 or not 0 <= month <= 12:
+        return jsonify(error='Invalid hydrology level or month'), 400
+    service = hydrology_service()
+    entry = service.ensure(seed, profile, identity)
+    started = time.perf_counter()
+    try:
+        if 'reach_id' in request.args or 'basin_id' in request.args:
+            data = service.catchment(entry, reach_id=request.args.get('reach_id'), basin_id=request.args.get('basin_id'))
+        else:
+            data = service.features(entry, bounds, lod=lod, month=month, **options)
+    except (ValueError, TypeError) as exc:
+        return jsonify(error=str(exc)), 400
+    response = jsonify(data)
+    response.headers['X-Terrain-Hydro-Seconds'] = f'{time.perf_counter()-started:.4f}'
+    return response, 202 if data['status'] == 'building' else 503 if data['status'] == 'error' else 200
+
+
+@app.get('/docs/methods/<path:name>')
+def hydrology_method_note(name):
+    return send_from_directory(ROOT / 'docs' / 'methods', name)
+
+
 @app.get('/terrain_transport.js')
 def transport_script():
     return send_from_directory(WEB_ROOT, 'terrain_transport.js')
@@ -1271,6 +1574,13 @@ def fantasy_brush_sheet(filename):
 @app.get('/terrain_renderer.js')
 def renderer_script():
     return send_from_directory(WEB_ROOT, 'terrain_renderer.js')
+
+
+@app.get('/terrain_render3d.js')
+@app.get('/terrain_forest_brushes.js')
+@app.get('/forest-brushes.bin')
+def render3d_assets():
+    return send_from_directory(WEB_ROOT, request.path.rsplit('/', 1)[-1])
 
 
 @app.get('/terrain_render_controls.js')
@@ -1887,6 +2197,13 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
                                 world,seed,wp,lod,tx,ty,coarse_interpolation=coarse_interpolation)
                         else:
                             elevation,climate,stage=sample_physical(world,seed,wp,lod,tx,ty)
+                    if world is not None and not polar and not source_lod and lod <= 3:
+                        try:
+                            capture_hydrology_cached_base(seed, wp, lod, tx, ty)
+                        except Exception as exc:
+                            # A best-effort cache copy must not discard a
+                            # completed terrain tile (e.g. external eviction).
+                            app.logger.debug('Hydrology Base capture skipped: %s', exc)
             finally:
                 metrics['stage'] = 'Ready'
             jobs.check_current_interest()
@@ -2164,6 +2481,7 @@ def height_tile(seed, lod, tx, ty):
         path, report, cached, arrays = physical_tile(seed, lod, tx, ty, return_arrays=True)
         with span('tile.binary_response', cache_hit=cached, from_memory=arrays is not None):
             elevation = arrays[0] if arrays is not None else np.load(path, allow_pickle=False)
+            elevation, hydrology, report = hydrology_display(seed, generation_profile(), lod, tx, ty, elevation, report)
             payload=elevation.astype('<f4',copy=False).tobytes()
             if request.args.get('climate')=='1':
                 climate=arrays[1] if arrays is not None else np.load(path.with_suffix('.climate.npy'),allow_pickle=False)
@@ -2174,12 +2492,16 @@ def height_tile(seed, lod, tx, ty):
                 ys = ty*TILE*NATIVE*2**lod+(np.linspace(-halo+.5,width-halo-.5,CLIMATE_SIZE))*resolution
                 climate = transport_climate(seed,generation_profile(),xs,ys,climate)
                 payload+=climate.astype('<f4',copy=False).tobytes()
+            if hydrology is not None:
+                payload+=hydrology.astype('<f4',copy=False).tobytes()
         report = dict(report, **tile_relief_stats(elevation, HALO))
         response = Response(payload, mimetype='application/octet-stream')
         if request.args.get('climate')=='1':
             response.headers['X-Terrain-Climate-Width']=str(climate.shape[2])
             response.headers['X-Terrain-Climate-Height']=str(climate.shape[1])
             response.headers['X-Terrain-Climate-Layers']=str(climate.shape[0])
+        if hydrology is not None:
+            response.headers['X-Terrain-Hydro-Layers']='4'
         response.cache_control.max_age = 31536000
         response.cache_control.public = True
         return _tile_headers(response, report, cached)
@@ -2210,14 +2532,17 @@ def tile(seed, lod, tx, ty):
         lighting = parse_lighting(request.args.get('lighting'))
         from terrain_styles import parse_contours
         contours = parse_contours(request.args.get('contours'))
-        if lighting is not None or contours is not None or mode in ('orogen-biomes','orogen-koppen','render','soil'):
+        if request.args.get('hydro')=='1' or lighting is not None or contours is not None or mode in ('orogen-biomes','orogen-koppen','render','soil'):
             # Reuse physical caches, without accumulating PNGs for slider values.
             physical_path, report, cached, arrays = physical_tile(seed,lod,tx,ty,return_arrays=True)
             with image_slots:
                 started=time.perf_counter()
                 elevation=arrays[0] if arrays is not None else np.load(physical_path,allow_pickle=False)
                 climate=arrays[1] if arrays is not None else np.load(physical_path.with_suffix('.climate.npy'),allow_pickle=False)
-                rgb=render_elevation(elevation,latent_preview_source(lod) or lod,climate=climate,mode=mode,seed=seed,world_profile=wp,lighting=lighting,contours=contours,render_settings=render_settings,origin=(tx*256*NATIVE*2**lod-HALO*report['resolution'],ty*256*NATIVE*2**lod-HALO*report['resolution']))
+                elevation, hydrology, report = hydrology_display(seed,wp,lod,tx,ty,elevation,report)
+                from terrain_hydrology_render import ground_for_shading, composite_water
+                rgb=render_elevation(ground_for_shading(elevation,hydrology),latent_preview_source(lod) or lod,climate=climate,mode=mode,seed=seed,world_profile=wp,lighting=lighting,contours=contours,render_settings=render_settings,origin=(tx*256*NATIVE*2**lod-HALO*report['resolution'],ty*256*NATIVE*2**lod-HALO*report['resolution']))
+                rgb=composite_water(rgb,elevation,hydrology,crop=HALO)
                 buffer=io.BytesIO();Image.fromarray(rgb).save(buffer,format='PNG')
                 report=dict(report,**tile_relief_stats(elevation,HALO),render_seconds=round(time.perf_counter()-started,4))
             return _tile_headers(Response(buffer.getvalue(),mimetype='image/png'),report,cached)
@@ -2276,6 +2601,18 @@ def tile(seed, lod, tx, ty):
 
 
 def _tile_headers(response, report, cache_hit):
+    if report.get('hydro_state'):
+        response.headers['X-Terrain-Hydro-State']=report['hydro_state']
+        response.headers['X-Terrain-Hydro-Id']=report.get('hydro_id','')
+        response.headers['X-Terrain-Hydro-Month']=str(report.get('hydro_month',0))
+        response.headers['X-Terrain-Hydro-Seconds']=str(report.get('hydro_seconds',0))
+        response.headers['X-Terrain-Hydro-Base-Revision']=str(report.get('hydro_base_revision',0))
+        response.headers['X-Terrain-Hydro-Vector-Preview']='1' if report.get('hydro_vector_preview') else '0'
+        channel = report.get('hydro_channel') or {}
+        response.headers['X-Terrain-Hydro-Blocked-Bed']=str(channel.get('blocked_bed_cells',0))
+        response.headers['X-Terrain-Hydro-Max-Cut-M']=str(report.get('hydro_max_cut_m',0))
+        response.cache_control.max_age = 2 if report['hydro_state'] != 'ready' else 3600
+        response.cache_control.must_revalidate = report['hydro_state'] != 'ready'
     if report['stage']=='decoder-refinement':
         response.cache_control.no_store=True
         response.cache_control.max_age=None
