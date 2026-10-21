@@ -23,7 +23,11 @@ sensitive tensors remain BF16, and block scales use FP16. The loader reconstruct
 BF16 weights for inference. The size limit applies to stored base weights;
 working RAM/VRAM, the coarse model and the original decoder are additional.
 This package differs from the older 149.6 MB NF4 B75 release used by the browser
-WASM edition. It does not replace that runtime or the application's saved models.
+WASM edition. In the Python edition, install it with
+`python -m distill.native3_release`, then restart the server. Select
+**NN → Base → Native3 · base99m v1 · 99 Mo · expérimental** and apply.
+The original base remains the default; existing selections are preserved.
+The browser WASM edition still uses NF4 B75.
 
 ## Download and load
 

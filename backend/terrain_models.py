@@ -1,5 +1,6 @@
 """Application model choices shared by normal and supervised server launches."""
 import threading
+from pathlib import Path
 
 from flask import jsonify, request, send_from_directory
 
@@ -7,6 +8,21 @@ from flask import jsonify, request, send_from_directory
 def register_model_routes(server):
     models = server.live_models()
     switching = threading.Event()
+
+    from backend.terrain_paths import REPO_ROOT
+    browser_root = REPO_ROOT/'wasm'/'dist'
+
+    @server.app.get('/api/runtime')
+    def inference_runtime():
+        return jsonify(current='python', default='python', options=[
+            dict(id='python', label='Python / PyTorch · CUDA', url='/', available=True),
+            dict(id='wasm', label='Rust / WASM · WebGPU navigateur', url='/browser/',
+                 available=(browser_root/'index.html').is_file())])
+
+    @server.app.get('/browser/')
+    @server.app.get('/browser/<path:asset>')
+    def browser_runtime(asset='index.html'):
+        return send_from_directory(browser_root, asset)
 
     @server.app.after_request
     def model_no_cache(response):

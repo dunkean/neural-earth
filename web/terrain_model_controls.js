@@ -4,6 +4,9 @@
   const panel = document.createElement('fieldset');
   panel.id = 'distillModels';
   panel.innerHTML = '<legend>Comparaison des NN</legend><p>Carte continue : choisis chaque modèle séparément.</p>' +
+    '<label>Moteur d’inférence <select id="inferenceRuntime" aria-label="Moteur d’inférence"></select></label>' +
+    '<button id="applyRuntime" type="button">Changer de moteur</button>' +
+    '<small id="runtimeStatus" role="status"></small>' +
     '<label>Coarse <select id="distillCoarse" aria-label="Modèle coarse"></select></label>' +
     '<label>Base <select id="distillBase" aria-label="Modèle base"></select></label>' +
     '<label>Decoder <select id="distillDecoder" aria-label="Modèle decoder"></select></label>' +
@@ -29,6 +32,69 @@
   const stages = ['coarse', 'base', 'decoder'];
   const selects = Object.fromEntries(stages.map(stage => [stage, panel.querySelector('#distill' + stage[0].toUpperCase() + stage.slice(1))]));
   const status = panel.querySelector('#distillStatus');
+  const runtimeSelect = panel.querySelector('#inferenceRuntime');
+  const runtimeStatus = panel.querySelector('#runtimeStatus');
+  const browserRuntime = window.NeuralEarthRuntime?.kind === 'wasm';
+  const currentRuntime = browserRuntime ? 'wasm' : 'python';
+  let runtimeOptions = [];
+  async function readRuntimes() {
+    // Engine discovery contacts the host; inference still uses TerrainTransport.
+    try {
+      if (browserRuntime && window.NeuralEarthRuntime?.basePath !== '/browser/') throw Error('Standalone runtime');
+      const response = await fetch('/api/runtime', {cache:'no-store'});
+      if (!response.ok) throw Error('Standalone runtime');
+      const data = await response.json();
+      if (!Array.isArray(data.options)) throw Error('No runtime catalog');
+      runtimeOptions = data.options;
+    } catch (_) {
+      runtimeOptions = [{id:currentRuntime, label:browserRuntime ? 'Rust / WASM · WebGPU navigateur' : 'Python / PyTorch · CUDA', available:true}];
+    }
+    runtimeSelect.replaceChildren(...runtimeOptions.map(item => {
+      const option = new Option(item.label + (item.available ? '' : ' · à construire'), item.id);
+      option.disabled = !item.available;
+      return option;
+    }));
+    runtimeSelect.value = currentRuntime;
+    runtimeStatus.textContent = browserRuntime
+      ? 'Actif : Rust compilé en WASM, calcul sur le GPU du navigateur. Base NF4 B75, 30 m minimum. Le changement de moteur peut modifier le terrain.'
+      : 'Actif : Python / PyTorch sur CUDA. Moteur par défaut. Le WebGPU de rendu est indépendant de l’inférence.';
+  }
+  panel.querySelector('#applyRuntime').onclick = async () => {
+    if (runtimeSelect.value === currentRuntime) return;
+    if (!world || worldLoading || generationPending || restoringShare) {
+      runtimeStatus.textContent = 'Attends la fin de la génération.'; return;
+    }
+    const target = runtimeOptions.find(item => item.id === runtimeSelect.value && item.available);
+    if (!target?.url) return;
+    const button = panel.querySelector('#applyRuntime'); button.disabled = true;
+    try {
+      const snapshot = captureShare();
+      if (target.id === 'wasm') {
+        const settings = snapshot.generation.settings;
+        if (snapshot.generation.profile !== 'orogen' || settings.world_topology !== 'sphere' ||
+            settings.height_source !== 'orogen' || settings.climate_source !== 'orogen' ||
+            !['orogen','original'].includes(settings.relief_pipeline))
+          throw Error('Le moteur navigateur prend en charge les planètes Orogen avec érosion Orogen ou sans érosion.');
+        if (!['render','relief','biomes','temperature','precipitation','orogen-height','fantasy-ink','fantasy-color'].includes(snapshot.camera.layer))
+          throw Error('Choisis une couche prise en charge par WASM : Render, Relief, Biomes ou Fantasy.');
+        if (snapshot.camera.lod !== 'auto' && Number(snapshot.camera.lod) < 0)
+          throw Error('WASM descend à 30 m : choisis une LOD automatique ou positive.');
+        for (const stage of ['relief','propagation','post','climate','erosion','raster']) settings['orogen_gpu_'+stage] = false;
+        snapshot.rendering.gpuRender = false; snapshot.rendering.coarseGpu = false;
+      }
+      snapshot.rendering.nnEngine = 'exact';
+      const response = await (window.TerrainTransport?.fetch || fetch)('/api/share', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({generation:snapshot.generation, rendering:snapshot.rendering})});
+      const recipes = await response.json();
+      if (!response.ok) throw Error(recipes.error || 'Transfert du monde impossible');
+      const path = TerrainShare.url({...snapshot.camera, ...recipes});
+      const url = new URL(path, location.origin); url.pathname = target.url;
+      location.assign(url.href);
+    } catch (error) { runtimeStatus.textContent = error.message; }
+    finally { button.disabled = false; }
+  };
+  readRuntimes();
   for (const note of panel.querySelectorAll('small')) { note.style.display = 'block'; note.style.marginTop = '6px'; }
   function selectionLabels(data) {
     return stages.map(stage => data.options[stage].find(option => option.id === data.selection[stage]).label).join(' / ');

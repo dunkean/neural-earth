@@ -62,11 +62,11 @@ html=html.replaceAll('src="/','src="./');
 await writeFile(join(out,'index.html'),html);
 const styles=JSON.parse(await readFile(join(root,'web/terrain_styles.json'),'utf8'));
 await writeFile(join(out,'terrain_styles.js'),`window.TerrainStyles=${JSON.stringify(styles)};\n`+await readFile(join(root,'web/terrain_style_rendering.js'),'utf8'));
-const live=join(out,'distill/live_controls.js');await mkdir(dirname(live),{recursive:true});await cp(join(root,'distill/live_controls.js'),live);
 // This optional NN panel accesses the viewer's lexical state. Keep it in the
 // same generated module, as Python's classic scripts share that state globally.
+html=html.replace('<script src="./terrain_model_controls.js"></script>','');
 const closing=html.lastIndexOf('</script>');
-html=html.slice(0,closing)+'\n'+await readFile(join(root,'distill/live_controls.js'),'utf8')+'\n'+html.slice(closing);
+html=html.slice(0,closing)+'\n'+await readFile(join(root,'web/terrain_model_controls.js'),'utf8')+'\n'+html.slice(closing);
 await writeFile(join(out,'index.html'),html);
 const models={};
 for(const name of ['coarse','base','decoder']) {

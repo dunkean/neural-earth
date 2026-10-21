@@ -50,6 +50,12 @@ def catalog(root=DATA, bundled_root=REPO/'distill/weights'):
         result['base']['nf4_b75'] = dict(
             label='Distillé · NF4 B75 · 150 Mo', path=str(compact/'weights.bin'),
             directory=str(compact), sha256=HASHES['weights.bin'], format='scalar-packed')
+    from distill.native3_release import HASHES as NATIVE3_HASHES, RELEASE as NATIVE3_RELEASE, verified as native3_verified
+    native3 = Path(root)/'releases'/NATIVE3_RELEASE/'base'
+    if native3_verified(native3):
+        result['base']['native3_base99m_v1'] = dict(
+            label='Native3 · base99m v1 · 99 Mo · expérimental', path=str(native3/'weights.bin'),
+            directory=str(native3), sha256=NATIVE3_HASHES['weights.bin'], format='native3-packed')
     return result
 
 
@@ -100,7 +106,7 @@ class LiveModels:
         # unchanged and its persisted bootstrap remains reusable.
         files = ('student.py', 'features.py', 'inference.py', 'coarse_solver.py', 'live_runtime.py',
                  'native_live_runtime.py','native_inference.py','native_weight_runtime.py','native_weight_quant.py','native_base.py',
-                 'native_scalar_pack.py', 'native_scalar_precision.py', 'compact_release.py')
+                 'native_scalar_pack.py', 'native_scalar_precision.py', 'compact_release.py', 'native3_release.py')
         return dict(teacher_revision=REVISION, reset=self.config['reset'],
             selection=self.selection,
             checkpoints={stage: self.options[stage][key].get('sha256')
@@ -123,7 +129,10 @@ class LiveModels:
                     if hashlib.sha256(payload).hexdigest() != option['sha256']:
                         raise ValueError('Model export changed since server startup; restart the review server.')
                     with torch.inference_mode(False):
-                        if option.get('format') == 'scalar-packed':
+                        if option.get('format') == 'native3-packed':
+                            from distill.native3_release import load
+                            model = load(option['directory'], device)
+                        elif option.get('format') == 'scalar-packed':
                             from distill.compact_release import verified
                             from distill.native_scalar_pack import runtime_scalar_packed
                             if stage != 'base' or not verified(option['directory']):
@@ -136,7 +145,7 @@ class LiveModels:
                             model, _ = load_native(io.BytesIO(payload), device)
                         else:
                             model, _ = load_student(io.BytesIO(payload), device)
-                    if option.get('format') not in ('native', 'scalar-packed') and model.config.stage != stage:
+                    if option.get('format') not in ('native', 'scalar-packed', 'native3-packed') and model.config.stage != stage:
                         raise ValueError('Model export stage differs from selected stage.')
                     self.models[key] = model.requires_grad_(False)
                 models[stage] = self.models[key]
@@ -146,7 +155,7 @@ class LiveModels:
         from distill.inference import install
         models = dict(self.students(world.device))
         native_base = None
-        if self.options['base'][self.selection['base']].get('format') in ('native', 'scalar-packed'):
+        if self.options['base'][self.selection['base']].get('format') in ('native', 'scalar-packed', 'native3-packed'):
             native_base = models.pop('base')
 
         if models:
@@ -161,7 +170,7 @@ class LiveModels:
         """Capture the selected students' graphs; teacher stages they replace need none."""
         from distill.inference import prewarm
         models = {stage: model for stage, model in self.students(world.device).items() if stage in stages
-                  and self.options[stage][self.selection[stage]].get('format') not in ('native', 'scalar-packed')}
+                  and self.options[stage][self.selection[stage]].get('format') not in ('native', 'scalar-packed', 'native3-packed')}
         return prewarm(models, world.device, getattr(world, '_terrain_profile', None),
                        decoder_size=world.decoder_tile_size, coarse_streams=coarse_streams)
 

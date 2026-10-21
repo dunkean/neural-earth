@@ -38,6 +38,28 @@ class ModelRouteTests(unittest.TestCase):
         self.assertEqual(response.json['selection'],DEFAULT_SELECTION)
         self.assertEqual(response.json['tile40_url'],'/tile40/')
 
+    def test_runtime_catalog_keeps_cuda_default_and_browser_under_same_origin(self):
+        data = self.client.get('/api/runtime').json
+        self.assertEqual(data['default'], 'python')
+        self.assertEqual(data['current'], 'python')
+        self.assertEqual([item['url'] for item in data['options']], ['/', '/browser/'])
+
+    def test_native3_can_be_selected_without_changing_default(self):
+        self.models.options['base']['native3_base99m_v1'] = dict(label='Native3 99 Mo', path=None)
+        self.assertEqual(self.client.get('/api/models').json['selection']['base'], 'teacher')
+        desired = dict(DEFAULT_SELECTION, base='native3_base99m_v1')
+        self.assertEqual(self.client.post('/api/models',json=dict(selection=desired)).status_code,202)
+        self.assertEqual(json.loads(self.path.read_text())['selection'], desired)
+
+    def test_modified_native3_release_is_not_advertised_or_loaded(self):
+        from distill.native3_release import verified, load
+        directory = Path(self.temp.name)/'release'
+        directory.mkdir()
+        (directory/'weights.bin').write_bytes(b'corrupt')
+        self.assertFalse(verified(directory))
+        with self.assertRaisesRegex(ValueError, 'release changed'):
+            load(directory, 'cpu')
+
     def test_retired_choice_rejected_without_restart_or_persisted_changes(self):
         before=self.path.read_bytes()
         response=self.client.post('/api/models',json=dict(selection=dict(DEFAULT_SELECTION,coarse='solver4')))
