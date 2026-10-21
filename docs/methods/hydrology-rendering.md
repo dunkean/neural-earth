@@ -4,6 +4,8 @@ Module: `web/terrain_hydrology.js` (`TerrainHydrology`), wired in `web/index.htm
 
 The overlay is a display aid. It never changes hydraulic quantities: reach width, flow and course come from `/api/hydrology/<seed>` unchanged.
 
+Fast water settings retain terrain tiles: visibility, month and vector cosmetics do not enter physical tile keys. Monthly flow and navigation use the stored twelve-month series; a new cosmetic variant loads behind the current network. Fast PNG tiles contain no baked water. Only detailed channel carving has a separate tile identity, and the previous tiles remain visible until replacements arrive.
+
 ## Which reaches are drawn
 
 All filters below are display only. They read the stored reply and redraw it: no fetch, no `requestParams`/`tileParams`/`optionsIdentity` change. A routed flow, width or lake budget is never changed.

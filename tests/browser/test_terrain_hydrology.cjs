@@ -48,7 +48,9 @@ const settle=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const atlas={...state,lod:5,mpp:960,width:400,height:300,view:'map',bounds:[0,-1e5,3e5,2e5],project:(x,y)=>[x/960,y/960+100]};
   options.draw(recorder(),atlas);await settle(0);
   assert.equal(urls[0].get('hydro_cosmetics'),'valleyFit');assert.equal(urls[0].get('hydro_detail'),null);
-  assert.deepEqual(options.tileParams(),{hydro:'1',hydro_month:'0',hydro_cosmetics:'valleyFit'});
+  assert.deepEqual(options.tileParams(),{hydro:'1'});
+  assert.equal(options.tileParams({physical:false}),null,'Fast PNG tiles contain no baked water');
+  assert.equal(options.tileIdentity(),'','Fast water options leave terrain keys unchanged');
   options.set({density:2,widthScale:1.5,minLakeArea:0,intermittent:true});options.draw(recorder(),atlas);await settle(0);
   assert.equal(urls.length,1,'Display settings restyle the stored network without a fetch');
   options.set({density:1,widthScale:1,terrainDetail:true});options.draw(recorder(),atlas);await settle(0);
@@ -96,7 +98,7 @@ const settle=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   layered.set({intermittent:true});({r:frame,snap}=drawAt(120));
   assert.equal(fetches.length,1);assert.equal(snap.shownReaches,4);
   const dashed=frame.strokes.find(s=>s.dash.length);assert(dashed&&dashed.colour!=='#9b7a50','Seasonal stream: dashed water in the annual view');
-  layered.set({month:7});drawAt(120);await settle(0);assert.equal(fetches.length,2,'Month changes refetch');
+  layered.set({month:7});drawAt(120);await settle(0);assert.equal(fetches.length,1,'Month changes reuse the stored monthly series');
   ({r:frame}=drawAt(120));
   assert(frame.strokes.some(s=>s.colour==='#9b7a50'&&s.dash.length),'Dry in the selected month: dashed brown');
   // Density 0 keeps only the main river and its continuation.
@@ -119,7 +121,7 @@ const settle=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   assert.equal(frame.fills.length,1,'An approximate source lake must not paint water over detailed terrain; only the small Base lake is filled');
   delete network.lakes[0].resolution;
   layered.set({lakes:false});({snap}=drawAt(120));assert.equal(snap.shownLakes,0);
-  layered.set({lakes:true,minLakeArea:1,smoothShores:false});assert.equal(fetches.length,3,'Lake settings never refetch');
+  layered.set({lakes:true,minLakeArea:1,smoothShores:false});assert.equal(fetches.length,1,'Lake settings never refetch');
   // Inspector hit tests: a lake interior, then a river line.
   drawAt(120);
   assert.equal(layered.inspect((3.5e4+2e4)/120,(4.8e3+5e4)/120),true);assert.equal(layered.snapshot().selected,'big');

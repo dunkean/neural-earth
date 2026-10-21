@@ -56,8 +56,8 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4n
    $('grid').checked=true;$('renderSea').checked=true;$('seaMaxLod').value=2;$('prefetch').checked=false;$('cacheLodGap').value=5;
    $('refinementDepth').value=2;forcedView={lod:6,signature:viewSignature()};$('forcedLod').value=6;draw();schedule();
   });
-  const retainedLod=await sender.page.evaluate(()=>{hydrology.set({month:7});return requestedLod();});
-  assert.equal(retainedLod,6,'Changing the water month preserves the applied forced LOD');
+  const retainedWaterState=await sender.page.evaluate(()=>{const identity=cacheIdentity(),backend=backendEpoch;hydrology.set({month:7});return [requestedLod(),cacheIdentity()===identity,backendEpoch===backend];});
+  assert.deepEqual(retainedWaterState,[6,true,true],'Changing the water month preserves the applied LOD, terrain identity and loaded backend');
   const steadyEpoch=await sender.page.evaluate(()=>{refresh();const before=cameraEpoch;refresh();return [before,cameraEpoch];});
   assert.equal(steadyEpoch[0],steadyEpoch[1],'An unchanged view does not cancel its own in-flight tiles');
   const viewport=await sender.page.locator('#viewport').boundingBox();

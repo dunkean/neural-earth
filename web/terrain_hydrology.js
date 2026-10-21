@@ -84,6 +84,13 @@
     const s=normalize(value);
     return s.enabled ? Object.entries(requestParams(s)).map(([k,v])=>`/${k}-${v}`).join('') : '';
   }
+  // Physical tile identity. Only detailed carving changes terrain (with its
+  // month and cosmetics); the fast network is drawn as vectors over unchanged
+  // tiles, so visibility, month and cosmetics never reach a fast tile key.
+  function tileIdentity(value) {
+    const s=normalize(value);
+    return s.enabled&&s.terrainDetail ? `/hydro-${s.month}${optionsIdentity(s)}` : '';
+  }
   // RGBA tile fields (level, coverage, class, authority): any authoritative
   // river coverage. A ready tile without it leaves every river to the vectors.
   function hasRiver(fields) {
@@ -118,6 +125,22 @@
     }
     if(annual<DRY_Q||reach.regime==='ephemeral'||reach.regime==='dry') return {regime:'ephemeral',dry:MONTHS.map((_,i)=>i+1),count};
     return {regime:'unresolved',dry:[],count};
+  }
+  // Navigation in `month`, derived as the server does from the reach's vessel
+  // classes: the largest navigable that month, or all year for the annual
+  // mean. The server's own value is used for the month it was computed for.
+  function navigation(reach,month,served) {
+    const nav=reach.navigation||{};
+    if(month===served||!Array.isArray(nav.vessels)) return {navigable:!!(reach.navigable||nav.navigable),label:nav.label};
+    let capability=month?-1:nav.year_round_class??-1;
+    if(month) (reach.navigation_months||[]).forEach((flags,v)=>{if(flags?.[month-1])capability=v;});
+    return {navigable:capability>=0,label:capability>=0?nav.vessels[capability]:'no continuous route'};
+  }
+  // A reply serves every month when its monthly navigation flags are complete;
+  // flows are always selected here from monthly_flow_m3s.
+  function servesMonth(network,month) {
+    return Number(network.month??0)===month||(network.reaches||[]).every(r=>
+      (!r.navigation||Array.isArray(r.navigation.vessels))&&(!r.navigation_months||r.navigation_months.every(f=>f?.length===12)));
   }
   function riverClass(annual) {return CLASSES.find(([q])=>annual>=q)[1];}
   // Display threshold catchment (m²) for a view at `mpp` metres per pixel.
@@ -164,9 +187,9 @@
     }
     return shown;
   }
-  function color(reach, diagnostic, month) {
+  function color(reach, diagnostic, month, served) {
     if(diagnostic==='basins') return `hsl(${((Number(reach.basin_id)||0)*137.508)%360} 58% 55%)`;
-    if(diagnostic==='navigation') return reach.navigable||reach.navigation?.navigable ? '#75cba8' : '#ba936a';
+    if(diagnostic==='navigation') return navigation(reach,month,served).navigable ? '#75cba8' : '#ba936a';
     if(diagnostic==='discharge'||diagnostic==='lowflow') {
       const q=diagnostic==='lowflow' ? Math.min(...(reach.monthly_flow_m3s||[reach.flow_m3s||0])) : monthlyFlow(reach,month);
       return `hsl(${205-Math.min(1,Math.log1p(Math.max(0,q))/Math.log(10001))*55} 65% 55%)`;
@@ -216,21 +239,28 @@
   function create({getState, requestFrame=()=>{}, onChange=()=>{}, fetchJSON=null, initial=null}={}) {
     if(typeof getState!=='function') throw Error('Hydrology needs a geographic view state');
     let settings=normalize(initial||fromParams(new URLSearchParams(typeof location==='undefined'?'':location.search)));
-    let network=null, index=null, identity=null, queryBounds=null, queryLod=Infinity, queryRevision=null, refreshAt=0, controller=null, timer=null, fetching=false, nextAttempt=0;
-    let status='idle', failure=null, panel=null, statusLabel=null, inspector=null, selected=null, catchment=null, inspection=0, shownCount=0;
+    // `identity` is the world of the stored network; `networkOptions` and
+    // `networkMonth` are the server options and month it was requested with.
+    let network=null, index=null, identity=null, networkOptions=null, networkMonth=null, queryBounds=null, queryLod=Infinity, queryRevision=null, refreshAt=0, controller=null, timer=null, fetching=false, nextAttempt=0;
+    let status='idle', failure=null, panel=null, statusLabel=null, inspector=null, selected=null, selection=null, catchment=null, inspection=0, shownCount=0;
     const projected=[], lakeShapes=[];
     const fetcher=fetchJSON||((url,options)=>fetch(url,options));
-    function reset() {
-      controller?.abort(); controller=null; network=null; index=null; identity=null; queryBounds=null; queryLod=Infinity; queryRevision=null; refreshAt=0; selected=null;
-      fetching=false; nextAttempt=0; status='idle'; catchment=null;inspection++;projected.length=0;lakeShapes.length=0;shownCount=0;
-      if(inspector)inspector.textContent='Click a river or lake to inspect it.';
+    function cancel() {
+      controller?.abort(); controller=null; fetching=false; nextAttempt=0;
       if(timer!==null) clearTimeout(timer); timer=null;
     }
-    // Month and server options refetch; display settings only redraw.
+    function reset() {
+      cancel(); network=null; index=null; identity=null; networkOptions=null; networkMonth=null; queryBounds=null; queryLod=Infinity; queryRevision=null; refreshAt=0; selected=null; selection=null;
+      status='idle'; catchment=null;inspection++;projected.length=0;lakeShapes.length=0;shownCount=0;
+      if(inspector)inspector.textContent='Click a river or lake to inspect it.';
+    }
+    function showSelection() {if(inspector&&selection)inspector.textContent=describe(selection.entry)+selection.suffix;}
+    // Server options refetch in the background while the stored network of
+    // the same world stays drawn; the month and display settings only redraw.
     function set(value) {
       const before=settings; settings=normalize({...settings,...value});
-      if(before.month!==settings.month||optionsIdentity(before)!==optionsIdentity(settings)) reset();
-      if(!settings.enabled) controller?.abort();
+      if(optionsIdentity(before)!==optionsIdentity(settings)||!settings.enabled) {cancel(); failure=null;}
+      if(before.month!==settings.month) showSelection();
       syncControls(); onChange({...settings},before); requestFrame();
     }
     function syncStatus() {
@@ -277,17 +307,19 @@
       }
       syncControls();
     }
-    function key(state) {return `${state.seed}/${state.profile}/${state.worldIdentity||''}/${settings.month}${optionsIdentity(settings)}`;}
+    function key(state) {return `${state.seed}/${state.profile}/${state.worldIdentity||''}`;}
     async function ensure(state) {
       if(!settings.enabled||!state||state.seed==null||!state.bounds||!state.worldBounds||state.engine==='wasm') return;
-      const id=key(state);
+      const id=key(state),options=optionsIdentity(settings),month=settings.month;
+      // Another world never inherits a network, current or stale.
       if(identity!==id) {reset(); identity=id;}
       if(fetching||Date.now()<nextAttempt) return;
       // The default network adds local routes from Base already loaded on the
       // server, so newly arrived terrain may refine a covered view. Coalesce
       // arrivals; one deferred frame catches the last one.
       const revision=state.terrainRevision??0;
-      if(network&&contains(queryBounds,state.bounds)&&queryLod<=(state.lod??4)) {
+      const current=network&&networkOptions===options&&(networkMonth===month||servesMonth(network,month));
+      if(current&&contains(queryBounds,state.bounds)&&queryLod<=(state.lod??4)) {
         if(settings.terrainDetail||queryRevision===revision) return;
         const wait=refreshAt-Date.now();
         if(wait>0) {if(timer===null)timer=setTimeout(()=>{timer=null;requestFrame();},wait+10);return;}
@@ -298,7 +330,7 @@
       if(extent[2]-extent[0]>=wb[2]-wb[0]){extent[0]=wb[0];extent[2]=wb[2];}
       if(extent[2]<=extent[0]||extent[3]<=extent[1]) return;
       controller=new AbortController(); const active=controller; fetching=true;
-      const params=new URLSearchParams({world_profile:state.profile,bounds:extent.join(','),lod:String(state.lod??4),month:String(settings.month)});
+      const params=new URLSearchParams({world_profile:state.profile,bounds:extent.join(','),lod:String(state.lod??4),month:String(month)});
       if(state.worldIdentity) params.set('world_identity',state.worldIdentity);
       for(const [k,v] of Object.entries(requestParams(settings))) params.set(k,v);
       try {
@@ -308,10 +340,11 @@
         if(identity!==id||controller!==active) return;
         if(data.status==='error') throw Error(data.error||'generation failed');
         status=data.status||'ready'; failure=null;
+        // A building reply without reaches keeps the network already drawn.
         if(response.status===202||status==='building'||status==='pending') {
-          if(data.reaches?.length){network=data;queryBounds=extent;queryLod=Infinity;queryRevision=revision;}nextAttempt=Date.now()+1200;
+          if(data.reaches?.length){network=data;networkOptions=options;networkMonth=month;queryBounds=extent;queryLod=Infinity;queryRevision=revision;}nextAttempt=Date.now()+1200;
           timer=setTimeout(()=>{timer=null;requestFrame();},1250);
-        } else {network=data;queryBounds=extent;queryLod=state.lod??4;queryRevision=revision;nextAttempt=0;refreshAt=Date.now()+REVISION_INTERVAL_MS;}
+        } else {network=data;networkOptions=options;networkMonth=month;queryBounds=extent;queryLod=state.lod??4;queryRevision=revision;nextAttempt=0;refreshAt=Date.now()+REVISION_INTERVAL_MS;}
         syncControls(); requestFrame();
       } catch(error) {
         if(error.name!=='AbortError'&&identity===id) {failure=error.message;status='error';nextAttempt=Date.now()+10000;syncControls();timer=setTimeout(()=>{timer=null;requestFrame();},10100);}
@@ -350,7 +383,7 @@
         const width=dry&&water?carto:Math.max(water?carto:Math.max(1.4,carto),pixelWidth);
         const thin=pixelWidth<width,alpha=dry?.55:water?Math.min(1,.6+.13*decades):q>0?1:.5;
         const dash=water?(dry?[3,3]:seasonal?[Math.max(4,3*width),Math.max(3,2*width)]:[]):q>0?[]:[3,4];
-        const colour=water?(dry?DRY:thin?THIN:SHORE):color(reach,s.diagnostic,s.month);
+        const colour=water?(dry?DRY:thin?THIN:SHORE):color(reach,s.diagnostic,s.month,networkMonth);
         projected.push({reach,entry:e,segments,q,pixelWidth,width,alpha,dash,colour});
       }
       if(shownCount!==projected.length){shownCount=projected.length;syncStatus();}
@@ -410,17 +443,17 @@
         const data=await response.json();if(ticket!==inspection||data.status!=='ready')return;
         catchment=data;
         const label=reach.kind==='tributary'&&reach.parent_id!=null?'parent river watershed':'catchment';
-        if(inspector)inspector.textContent+=` · ${label} ${km2(data.area_m2)} · drains to ${data.outlet_kind}`;
+        if(selection?.entry.reach===reach){selection.suffix=` · ${label} ${km2(data.area_m2)} · drains to ${data.outlet_kind}`;showSelection();}
         requestFrame();
       }catch(_){/* The reach inspector remains usable during a world switch. */}
     }
-    // Text for a drawn reach: cartographic class, regime, flows, drainage.
-    function describe(item) {
-      const r=item.reach,e=item.entry,low=Math.min(...(r.monthly_flow_m3s?.length===12?r.monthly_flow_m3s.map(Number):[e.annual]));
+    // Text for a drawn reach in the selected month: class, regime, flows, drainage.
+    function describe(e) {
+      const r=e.reach,q=monthlyFlow(r,settings.month),nav=navigation(r,settings.month,networkMonth),low=Math.min(...(r.monthly_flow_m3s?.length===12?r.monthly_flow_m3s.map(Number):[e.annual]));
       const lowMonth=r.monthly_flow_m3s?.length===12?` (${MONTHS[r.monthly_flow_m3s.map(Number).indexOf(low)]})`:'';
       return `${riverClass(e.annual)}${r.morphology==='connector'?' through a lake':''} · ${regimeText(e)} · mean ${formatFlow(e.annual)}`+
-        `${settings.month?` · ${MONTHS[settings.month-1]} ${formatFlow(item.q)}`:''} · lowest month ${formatFlow(low)}${lowMonth} · ${km2(r.area_m2)} upstream · basin ${r.basin_id}`+
-        `${r.navigation?.label?` · navigation estimate: ${r.navigation.label}`:''}`;
+        `${settings.month?` · ${MONTHS[settings.month-1]} ${formatFlow(q)}`:''} · lowest month ${formatFlow(low)}${lowMonth} · ${km2(r.area_m2)} upstream · basin ${r.basin_id}`+
+        `${nav.label?` · navigation estimate: ${nav.label}`:''}`;
     }
     function inspect(x,y) {
       let best=null,distance=8;
@@ -430,22 +463,29 @@
       }
       const lake=best?null:lakeShapes.slice().reverse().find(shape=>insideRings(x,y,shape.rings))?.lake;
       if(lake){
-        selected=lake.id??null;catchment=null;inspection++;
+        selected=lake.id??null;selection=null;catchment=null;inspection++;
         if(inspector)inspector.textContent=`Lake${lake.resolution==='source'?' (approximate shore)':''} · ${km2(lake.area_m2)}${Number.isFinite(Number(lake.level_m))?` · surface ${Math.round(lake.level_m)} m`:''}`+
           `${Number.isFinite(Number(lake.max_depth_m))?` · max depth ${Number(lake.max_depth_m).toFixed(1)} m`:''}${lake.closed===true?' · closed basin, no outlet':lake.closed===false?' · drains through an outlet':''}`;
         if(panel)panel.open=true;requestFrame();return true;
       }
-      if(!best)return false; selected=best.reach.id;catchment=null;
-      if(inspector)inspector.textContent=describe(best);
+      if(!best)return false; selected=best.reach.id;selection={entry:best.entry,suffix:''};catchment=null;
+      showSelection();
       if(panel)panel.open=true;loadCatchment(best.reach);return true;
     }
     function snapshot() {return {settings:{...settings},status,error:failure,hydroId:network?.hydro_id||null,reaches:network?.reaches?.length||0,lakes:network?.lakes?.length||0,
       shownReaches:shownCount,shownLakes:lakeShapes.length,selected,catchmentArea:catchment?.area_m2||null,fetching};}
-    // Tile request parameters, snapshotted into each task with its cache key.
-    function tileParams() {return settings.enabled?{hydro:'1',hydro_month:String(settings.month),...requestParams(settings)}:null;}
+    // Tile request parameters, snapshotted into each task with its cache key
+    // (tileIdentity). Fast height tiles only request hydrology headers (state,
+    // Base revision): the server returns their elevation unchanged. Fast PNGs
+    // ask for nothing, so the server bakes no water into the image.
+    function tileParams({physical=true}={}) {
+      if(!settings.enabled) return null;
+      if(settings.terrainDetail) return {hydro:'1',hydro_month:String(settings.month),...requestParams(settings)};
+      return physical?{hydro:'1'}:null;
+    }
     return {get:()=>({...settings}),set,reset,mount,draw,inspect,snapshot,writeParams:params=>writeParams(params,settings),tileParams,
-      optionsIdentity:()=>optionsIdentity(settings),dispose:reset};
+      optionsIdentity:()=>optionsIdentity(settings),tileIdentity:()=>tileIdentity(settings),dispose:reset};
   }
-  return {defaults:()=>({...DEFAULTS}),normalize,fromParams,writeParams,requestParams,optionsIdentity,hasRiver,contains,segmentDistance,monthlyFlow,
-    regime,thresholdArea,riverClass,create};
+  return {defaults:()=>({...DEFAULTS}),normalize,fromParams,writeParams,requestParams,optionsIdentity,tileIdentity,hasRiver,contains,segmentDistance,monthlyFlow,
+    regime,navigation,servesMonth,thresholdArea,riverClass,create};
 });
