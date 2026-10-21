@@ -1,5 +1,5 @@
 Now:
-- Calotte glacière déguelasse avec un vieux noise !!!!! 
+- Calotte glacière déguelasse avec un vieux noise !!!!!
 - Noise dalmatien LOD 2 1
 - Render noises sont bien loins et très pres nul le reste
 - map/view compressed UID > to upgrade

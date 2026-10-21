@@ -23,12 +23,11 @@ const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR
     await page.route('https://nn.test/**', async route => {
       const url = new URL(route.request().url());
       if (url.pathname === '/') return route.fulfill({contentType: 'text/html', body:
-        readRepositoryFile('index.html', 'utf8').replace('</html>', '<script src="/distill/live-controls.js"></script></html>')});
-      if (url.pathname === '/distill/live-controls.js') return route.fulfill({contentType: 'application/javascript', body: fs.readFileSync(root + '/distill/live_controls.js', 'utf8')});
+        readRepositoryFile('index.html', 'utf8')});
       if (url.pathname === '/terrain_renderer.js') return route.fulfill({contentType: 'application/javascript', body: 'window.createTerrainRenderer=async()=>({available:true,clear(){},draw(){return true},deleteTile(){},getStats(){return{}}})'});
       if (url.pathname === '/terrain_styles.js') return route.fulfill({contentType: 'application/javascript', body: 'window.TerrainStyles=' + readRepositoryFile('terrain_styles.json', 'utf8') + ';\n' + readRepositoryFile('terrain_style_rendering.js', 'utf8')});
       if (url.pathname.endsWith('.js')) return route.fulfill({contentType: 'application/javascript', body: readRepositoryFile(url.pathname.slice(1), 'utf8')});
-      if (url.pathname === '/api/distill/models') {
+      if (url.pathname === '/api/models') {
         if (route.request().method() === 'POST') {
           const change = route.request().postDataJSON();
           changes.push(change);

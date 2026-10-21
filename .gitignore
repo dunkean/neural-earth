@@ -25,6 +25,14 @@ research_projects/orogen_probe/*.f32
 /output/
 /p.out
 /native/terrain_bootstrap/target/
+
+# Only the curated inference selection belongs in the distribution.
+/distill/weights/*.pt
+!/distill/weights/coarse8.pt
+!/distill/weights/coarse2.pt
+!/distill/weights/base-residual8k.pt
+!/distill/weights/decoder.pt
+!/distill/weights/decoder16-10k.pt
 /native/neural-earth/target/
 /native/neural-earth-render/target/
 /native/neural-earth-weights/target/

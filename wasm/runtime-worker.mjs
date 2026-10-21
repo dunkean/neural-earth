@@ -96,7 +96,7 @@ async function dispatch(request) {
     await generate(String(body.seed),body.settings);return json({profile:'orogen',generation_profile:'orogen',settings,seed:world.seed,generation_settings:settings});
   }
   if(path==='/api/generation/schema'){await ready();return json(schema);}
-  if(path==='/api/distill/models') {
+  if(path==='/api/models'||path==='/api/distill/models') {
     const selection={coarse:'solver4',base:'nf4_b75',decoder:'distilled200k'};
     if(request.method==='POST') {
       if(body.selection&&Object.keys(selection).some(k=>body.selection[k]!==selection[k]))throw Error('This build includes coarse4, the distilled NF4 B75 base and the distilled decoder.');

@@ -149,6 +149,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base', type=Path)
     parser.add_argument('--native-base', type=Path, help='Native base EMA; optionally share frozen coarse/decoder stages.')
+    parser.add_argument('--native-onepass', action='store_true', help='Use a true two-noise one-pass native base checkpoint.')
     parser.add_argument('--coarse', type=Path)
     parser.add_argument('--decoder', type=Path)
     parser.add_argument('--conditioning-coarse', type=Path, help='Use these coarse weights in BOTH reference and native chains.')
@@ -165,6 +166,8 @@ def main():
     parser.add_argument('--output', type=Path, required=True)
     parser.add_argument('--no-preview', action='store_true', help='Keep numerical/raw evidence only; final plates are produced separately.')
     args = parser.parse_args()
+    if args.native_onepass and not args.native_base:
+        parser.error('--native-onepass requires --native-base.')
     if args.validation_scenes:
         args.validation_scenes=[p.expanduser().resolve() for p in args.validation_scenes]
         if args.sites or args.historical_sites or args.include_rare_sites:
@@ -233,10 +236,20 @@ def main():
         payload = args.native_base.read_bytes()
         fingerprint['base'] = hashlib.sha256(payload).hexdigest()
         with torch.inference_mode(False):
-            models['native_base'], saved = load_native(io.BytesIO(payload), 'cuda')
+            if args.native_onepass:
+                from distill.native_onepass_runtime import OnePassRuntime
+                saved=torch.load(io.BytesIO(payload),map_location='cpu',weights_only=True)
+                if saved.get('teacher_revision')!=REVISION:
+                    raise ValueError('One-pass teacher revision is missing or mismatched.')
+                models['native_base']=OnePassRuntime(saved,'cuda')
+            else:
+                models['native_base'], saved = load_native(io.BytesIO(payload), 'cuda')
         fingerprint['training_step'] = saved['step']
         fingerprint['architecture'] = saved.get('architecture','native')
         del payload, saved
+    if args.native_onepass:
+        for name in ('distill/native_onepass.py','distill/native_onepass_runtime.py','distill/native_onepass_graph.py'):
+            fingerprint['code:'+name]=hashlib.sha256((REPO/name).read_bytes()).hexdigest()
     code_files = (('distill/native_inference.py', 'backend/terrain_inference.py',
                    'terrain-diffusion/terrain_diffusion/inference/world_pipeline.py') if args.native_base else
                   ('distill/student.py', 'distill/features.py', 'distill/inference.py', 'distill/coarse_solver.py'))
@@ -291,8 +304,13 @@ def main():
             install(world, models)
         elif variant == 'native_student':
             from terrain_inference import prepare_models
-            world.base_model = models['native_base']
-            if getattr(world.base_model,'_terrain_custom_base',False):
+            if args.native_onepass:
+                from distill.native_onepass_graph import install_onepass_graphs
+                install_onepass_graphs(world,models['native_base'],enabled=False,
+                    exact_kernels=loaded._terrain_profile.exact_kernels)
+            else:
+                world.base_model = models['native_base']
+            if args.native_onepass or getattr(world.base_model,'_terrain_custom_base',False):
                 # Quantized kernels already include MP normalization. Preserve
                 # their exact forward; prepare only the shared native stages.
                 prepare_models(SimpleNamespace(coarse_model=world.coarse_model,

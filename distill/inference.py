@@ -169,6 +169,15 @@ def coarse_graph_forward(model, inputs):
     return run_graphs(model, 'coarse', [inputs], 1)[0]
 
 
+def student_graph_forward(model, inputs, *, stage):
+    """Whole-student replay with eager fallbacks for training and CPU probes."""
+    if stage not in ('coarse', 'decoder'):
+        raise ValueError('Whole-window graphs support coarse and decoder students.')
+    if not inputs.is_cuda or torch.is_grad_enabled() or model.training:
+        return model(inputs)
+    return run_graphs(model, stage, [inputs], 1)[0]
+
+
 class FiniteGuard:
     """Non-finite student outputs are refused without a per-window host sync.
 
@@ -243,7 +252,7 @@ def prewarm(models, device, profile, *, decoder_size=512, coarse_streams=1):
     return results
 
 
-def install(world, checkpoints, tile_size=512):
+def install(world, checkpoints, tile_size=512, *, batch_coarse=False):
     """Install before bind. Mapping is stage -> checkpoint; combinations supported."""
     if tile_size < 32 or tile_size % 32:
         raise ValueError('Base tile size must align to 32.')
@@ -268,6 +277,13 @@ def install(world, checkpoints, tile_size=512):
         inputs = [value[None].to(world.device) for value in batch]
         if stage != 'coarse':
             inputs = [value.contiguous(memory_format=torch.channels_last) for value in inputs]
+        batched = stage == 'coarse' and batch_coarse
+        if batched:
+            with autocast(stage):
+                outputs = list(model(torch.cat(inputs)).unbind(0))
+            guard.add(stage, outputs)
+            world._distill_counts[stage]['calls'] += 1
+            return [value.float() for value in outputs]
         if graphs_enabled(stage, world.device, profile) and not torch.is_grad_enabled():
             outputs = run_graphs(model, stage, inputs, slots)
         else:

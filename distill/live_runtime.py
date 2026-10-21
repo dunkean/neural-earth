@@ -11,53 +11,39 @@ import threading
 from distill.common import DATA, REPO, REVISION, atomic_json
 
 STAGES = ('coarse', 'base', 'decoder')
-DEFAULT_SELECTION = dict(coarse='solver4', base='teacher', decoder='distilled200k')
-RETIRED_BASE_CHOICES = {'initial128', 'coupled128', 'refined128', 'refined192'}
+DEFAULT_SELECTION = dict(coarse='solver8', base='teacher', decoder='distilled200k')
+RETIRED_CHOICES = {
+    'coarse': {'solver4': 'solver8', 'solver1': 'solver2'},
+    'base': {key: 'teacher' for key in ('initial128','coupled128','refined128','refined192','nf4_70k')},
+    'decoder': {},
+}
 
 
 def catalog(root=DATA, bundled_root=REPO/'distill/weights'):
-    weights = Path(root)/'final/weights'
-    def weight_path(name, fallback):
-        bundled = Path(bundled_root)/name
-        return bundled if bundled.is_file() else fallback
-
-    def short_coarse_path(evaluations):
-        full = Path(root)/'ckpt/coarse-full'/f'coarse{evaluations}'/'export/coarse.pt'
-        delivery = full.parent.parent/'delivery.json'
-        # A half-finished export must not replace the reviewed pilot.
-        if full.is_file() and delivery.is_file():
-            proof = json.loads(delivery.read_text())
-            if (proof.get('status') == 'complete' and proof.get('export_max_abs') == 0. and
-                    proof.get('export', {}).get('export', {}).get('sha256') ==
-                    hashlib.sha256(full.read_bytes()).hexdigest()):
-                return full
-        return Path(root)/f'live/weights/coarse{evaluations}/coarse.pt'
-
+    """An allowlist: research files can never add application model choices."""
+    bundled_root = Path(bundled_root)
     specifications = {
-        'coarse': [
-            ('solver8', 'Distillé · 8 étapes', weight_path('coarse8.pt', weights/'candidate-1/coarse.pt')),
-            ('solver4', 'Distillé · 4 étapes', weight_path('coarse4.pt', Path(root)/'live/weights/coarse4/coarse.pt')),
-            ('solver2', 'Distillé · 2 étapes', weight_path('coarse2.pt', short_coarse_path(2))),
-            ('solver1', 'Distillé · 1 étape', weight_path('coarse1.pt', short_coarse_path(1))),
-        ],
-        'base': [],
-        'decoder': [('distilled200k', 'Distillé · 13 Mo', weight_path('decoder.pt', weights/'candidate-1/decoder.pt'))],
+        'coarse': [('solver8','Coarse8 · 25k · qualité','coarse8.pt'),
+                   ('solver2','Coarse2 · 200k · rapide','coarse2.pt')],
+        'base': [],  # Residual8k belongs to the separate finite40km workflow.
+        'decoder': [('distilled200k','Décodeur64 · 200k · qualité','decoder.pt'),
+                    ('compact10k','Décodeur16 · 10k · compact','decoder16-10k.pt')],
     }
-    native=Path(root)/'ckpt/native-weight-nf4-100k/step070000.pt'
-    proof=Path(root)/'eval/native-nf4-artifact70000-5090-audit.json'
-    if native.is_file() and proof.is_file():
-        audit=json.loads(proof.read_text())
-        if (audit.get('status')=='complete' and audit.get('tensor_count')==174 and
-                audit.get('checkpoint_sha256')==hashlib.sha256(native.read_bytes()).hexdigest()):
-            specifications['base'].append(('nf4_70k','Essai NF4 · 70k · 150 Mo',native))
+    manifest_path = bundled_root/'manifest.json'
+    manifest = json.loads(manifest_path.read_text()) if manifest_path.is_file() else None
+    by_file = {value['file']:value for value in manifest['exports'].values()} if manifest else {}
     result = {}
     for stage, entries in specifications.items():
-        result[stage] = {'teacher': dict(label='Original · référence', path=None)}
-        for key, label, path in entries:
-            if path.is_file():
-                result[stage][key] = dict(label=label, path=str(path),
-                    sha256=hashlib.sha256(path.read_bytes()).hexdigest())
-                if stage=='base':result[stage][key]['format']='native'
+        result[stage] = {'teacher': dict(label='Original · référence',path=None)}
+        for key,label,name in entries:
+            path = bundled_root/name
+            if not path.is_file():
+                continue
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            expected = by_file.get(name)
+            if manifest and (expected is None or expected['sha256']!=digest or expected['stage']!=stage):
+                raise ValueError('Bundled model differs from its manifest: '+name)
+            result[stage][key] = dict(label=label,path=str(path),sha256=digest,bytes=path.stat().st_size)
     from distill.compact_release import HASHES, RELEASE, verified
     compact = Path(root)/'releases'/RELEASE
     if verified(compact):
@@ -90,11 +76,12 @@ def prepare_config(config_path, options):
     else:
         config = json.loads(path.read_text())
         selection = config.get('selection')
-        if isinstance(selection, dict) and selection.get('base') in RETIRED_BASE_CHOICES:
-            selection = dict(selection, base='teacher')
-            validate_selection(selection, options)
-            config = dict(config, selection=selection, revision=uuid.uuid4().hex)
-            atomic_json(path, config)
+        if isinstance(selection, dict):
+            migrated = {stage:RETIRED_CHOICES[stage].get(selection.get(stage),selection.get(stage)) for stage in STAGES}
+            if migrated != selection:
+                validate_selection(migrated, options)
+                config = dict(config,selection=migrated,revision=uuid.uuid4().hex)
+                atomic_json(path,config)
     validate_selection(config['selection'], options)
     return config
 
@@ -181,7 +168,7 @@ class LiveModels:
     def public(self):
         return dict(selection=self.selection, revision=self.config['revision'],
             pid=os.getpid(), reset=self.config['reset'],
-            options={stage: [dict(id=key, label=value['label']) for key, value in choices.items()]
+            tile40_url='/tile40/', options={stage: [dict(id=key, label=value['label']) for key, value in choices.items()]
                      for stage, choices in self.options.items()})
 
     def save_request(self, data):
@@ -203,5 +190,7 @@ _current = None
 def current():
     global _current
     if _current is None:
-        _current = LiveModels(os.environ['DISTILL_LIVE_CONFIG'])
+        from backend.terrain_paths import OUTPUT_ROOT
+        path = os.environ.get('DISTILL_LIVE_CONFIG') or os.environ.get('TERRAIN_MODELS_CONFIG') or OUTPUT_ROOT/'models.json'
+        _current = LiveModels(path)
     return _current

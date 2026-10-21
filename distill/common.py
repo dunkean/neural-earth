@@ -19,8 +19,8 @@ def bootstrap():
     for path in (REPO, REPO / 'backend', REPO / 'terrain-diffusion'):
         if str(path) not in sys.path:
             sys.path.insert(0, str(path))
-    # The standard app has already resolved storage and GPU preferences. Keep
-    # its environment intact, including the environment inherited on restart.
+    # Application model selection imports research inference helpers. Do not
+    # replace its configured storage/GPU policy with research-only defaults.
     if 'terrain_app' in sys.modules:
         return
     os.environ.setdefault('CUDA_DEVICE_ORDER', 'PCI_BUS_ID')

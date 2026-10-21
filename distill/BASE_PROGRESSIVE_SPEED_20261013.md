@@ -1,0 +1,164 @@
+# Programme lancé : accélérer le base par réduction progressive
+
+Objectif actif étendu le13octobre : **accélérer le base et les deux autres
+réseaux**. La réussite finale inclut les poids intégrables des trois réseaux,
+leurs comparaisons qualité/vitesse et le gain mesuré de la chaîne complète.
+Le base demeure le premier chantier ; decoder et coarse suivent.
+
+Autorisation du 13 octobre : lancer les entraînements et faire reviewer chaque
+grande étape par **Opus 5.5**. B75 publié reste disponible pour l'intégration.
+La nouvelle cible est le gain de calcul à qualité visuelle proche, avec poids
+compatibles avec le budget de téléchargement. Aucun gain final n'est déclaré.
+
+Priorité précisée par l'utilisateur : accélérer fortement toute la chaîne,
+en acceptant un peu de noise si le résultat reste visuellement correct.
+Ne pas attendre la perfection pour proposer un modèle plus rapide. Conserver
+des candidats de compromis qualité/vitesse pour les essais dans l'application,
+avec leurs défauts documentés. Les vallées, l'organisation du relief et les
+côtes restent les points de vigilance ; l'égalité numérique avec le teacher
+n'est pas une condition de sélection.
+
+## Premier palier en cours
+
+Job `base-progressive160-anneal20k-5090`, données et checkpoints sous
+`~/data/distill/ckpt/native-progressive160-v1/anneal/`.
+
+- Départ teacher original BF16, identité exacte vérifiée avant réduction.
+- **20 000 mises à jour** : extinction graduelle des canaux192→160, trois blocs,
+  attention, conditionnement58, fenêtres64/32 et **deux passes** conservés.
+- Les kernels projetés, normalisations encoder/embedding et facteurs du concat
+  évoluent graduellement. À l'extrémité, leur sémantique correspond au réseau
+  physiquement plus étroit ; les petites différences numériques BF16 liées
+  aux dimensions des opérations sont mesurées séparément.
+- Teacher original figé ; supervision de vitesse, gradients et états x0 sur
+  les cinq canaux, plus features dans les coordonnées retenues. Un auxiliaire
+  basse fréquence TT traverse les deux étapes et protège le niveau des terres
+  et mers. Pas de loss d'énergie seule qui récompense du grain inventé.
+- Données TRAIN indépendantes : 25%montagnes humides, environ15%cas critiques,
+  reste général, coarse original/4/2 ; moitié des batchs sur l'état courant de
+  l'élève. Réserve mémoire CPU bornée à96 régions.
+- Gain de sortie ancréFP32 ; gains d'embedding gelés durant ce premier palier.
+  LR warmup1000 vers1e-5, décroissance vers3e-6 ; EMA demi-vie500 ; clipping1.
+  L'auxiliaire est plafonné à25% des gradients bruts et préconditionnésAdam.
+
+La **5090 entraîne**. Le job
+`base-progressive160-evaluation-review-4090` évalue sur la4090 tous les2000pas
+avec coarse4 et coarse2 : plaines désertiques/tempérées, côte humide, plaine
+basse/mer et trois montagnes humides à vallées incisées. Teacher BF16 recalculé
+sur le même GPU et le même bruit. PNG/CSV/JSON/TXT dans `_base`, en vrac :
+`base-progressive160-<step>-<coarse>.*`. Les images de progression agrandissent
+les champs natifs32/256px ; elles ne remplacent pas les planches finales512px.
+
+## Fin de palier et revue automatique
+
+Le suivi attend la fin du trainer, puis matérialise le réseau160, vérifie les
+kernels, mesure le changement numérique sur cinq champs TRAIN et exporte un
+checkpoint compact. Ce réseau compte **178 138 245 paramètres**. Les temps
+d'inférence et les vrais raccords froids seront mesurés sur les poids entraînés,
+sur les deux axes et halos, avec coarse4 et decoder livré communs.
+
+Le suivi rédige `STAGE1_REPORT.md` avec les preuves et lance le CLI
+`claude-opus-5-5 --effort xhigh`, lecture seule et outils pré-autorisés. Il
+conserve la revue **complète**, le transcript et l'identité du modèle sous
+`~/data/distill/review/opus-progressive160-stage1/`. Une erreur termine le
+contrôle concerné ; aucun redémarrage silencieux. L'avis doit être analysé avant
+de fixer la récupération suivante.
+
+Un contrôle BF16/FP32 utilise exactement les mêmes sept scènes, bruits et
+conditionnements sur4090, avec le même decoder original et les deux coarses.
+Résultats : `~/data/distill/eval/native-progressive160-precision-floor-v2-4090/`.
+Les28 lignes sont reproduites exactement, les14 répétitions du teacher BF16
+identiques, et les56 champs NPZ vérifiés. MAE moyenne naturelle :9–10m au
+LOD3,9m au LOD0. Les métriques par scène servent aussi à apprécier le grain,
+les côtes et les vallées ; cette moyenne n'est pas un critère suffisant.
+Le premier calcul avait des clés NPZ ambiguës entre deux catégories partageant
+une seed ; le dossierv2 corrige l'archive et reproduit les métriques exactement.
+`ADDITIONAL_EVIDENCE.md` à côté du rapport de palier référence ce contrôle et
+les observations à2k ; le lanceur Opus lit et trace aussi ce complément.
+
+## Paliers suivants
+
+La revue intermédiaire Opus5.5 a été obtenue à14k :
+`REVIEW_OPUS_PROGRESSIVE_INTERIM_20261013.md`. Les décisions et les contrôles
+sont dans `PROGRESSIVE_INTERIM_REVIEW_RESPONSE_20261013.md`. Elle confirme
+de terminer20k et recommande une récupération en mètres/côtes, puis de
+prioriser moins de blocs/une passe pour la vitesse. Ce n'est pas encore la
+revue finale du palier.
+
+1. Récupération du réseau160, ordre de grandeur30kpas, ajustée avec la revue.
+   Nouvelle revue Opus sur qualité, vitesse et raccords.
+   Comparer raw etEMA ; garder les maîtres FP32 du départ choisi. Préparer
+   le canal4 de x0 en mètres aux deux passes, l'auxiliaire TT pleine résolution
+   avec côte près de0m, et la décroissance du featureKD. Calibrer les gradients
+   surTRAIN ; corriger la journalisation par phase/état/catégorie. Les fonctions
+   physiques et les contrôles identitaires sont prêts, le trainer de reprise
+   n'est pas encore lancé.
+   Le helper `native_progressive_features.py` prépare l'alignement des features :
+   après compaction, seuls les canaux du teacher sont sélectionnés suivant
+   `original_teacher_channel_mapping`, ceux de l'élève sont déjà consécutifs.
+   Trois testsCPU vérifient des coordonnées non contiguës, le gradient réservé
+   à l'élève et le rejet des mappings incohérents. Cela prépare la reprise ;
+   son entraînement attend toujours la revue du premier palier.
+2. Priorité vitesse : moins de blocs et/ou une passe réellement distillée
+   vers la sortie du teacher à deux passes, avec contexte et fusion supervisés.
+   Choisir l'ordre à partir des gains mesurés aux batchs1/4/16 et sur une vue
+   complète. Conserver le160 à deux passes comme référence et solution de repli.
+3. Réduction vers128 si les mesures la justifient. Séparer la sélection des
+   canaux résiduels de celle des têtes d'attention ; la sélection par blocs64
+   de l'ancien code ne sera pas reconduite pour cette réduction. Comparer les
+   projections sans entraînement surTRAIN. La proposition reste environ100k
+   mises à jour comme point de départ ; les paliers et recettes évoluent avec
+   les revues et les résultats, sans arrêt automatique à ce nombre.
+4. QAT/stockage du réseau retenu, réel benchmark CPU/GPU selon intégration,
+   lieux rares/réservés, raccords canoniques et ordinaires, bonnes planches512px
+   et nouvelle release. Premier objectif intermédiaire : environ2× mesuré, sans promettre
+   que la baisse de FLOPs se convertira exactement en baisse de latence.
+
+Tester ces réductions séparément en gardant les meilleurs compromis précédents.
+Supprimer directement la seconde passe du teacher n'est pas cette distillation.
+La priorité de vitesse justifie les paliers au-delà du premier gain2× si le
+rendu reste correct ; aucun gain futur n'est présenté comme déjà mesuré.
+
+Les métriques servent à expliquer et comparer les défauts, et à surveiller
+les cas rares ; un peu de bruit résiduel ne bloque pas à lui seul un candidat
+utile et sensiblement plus rapide. Les comparaisons de vitesse incluront les
+réseaux isolés et une vue complète avec la même chaîne et le même protocole
+de cache, afin de détecter le déplacement du goulot.
+
+## Après validation du base : accélérer les autres réseaux
+
+Instruction supplémentaire du 13 octobre : poursuivre l'accélération des
+autres réseaux une fois le base terminé. Le base garde la priorité jusqu'à
+la validation de sa qualité, de ses raccords et de sa vitesse, puis la
+publication des poids retenus.
+
+1. **Decoder** : mesurer les poids livrés, puis réduire le coût du réseau en
+   protégeant les détails du relief, les côtes et la continuité entre tuiles.
+   Il devient le prochain goulot lorsque le base accélère.
+2. **Coarse** : partir des versions actuelles acceptées visuellement, mesurer
+   leur coût réel et améliorer leur vitesse en surveillant surtout le bruit
+   haute fréquence en plaine et la dispersion des pixels côtiers. Conserver
+   les versions deux et quatre passes comme références.
+
+Pour chacun, garder les meilleurs checkpoints, fournir les planches et
+métriques de comparaison, et demander une revue complète à Opus 5.5 après
+chaque grande étape. Les versions actuelles restent disponibles pour les
+comparaisons et l'intégration. Les recettes précises seront choisies à partir
+des mesures ; aucun entraînement de ces réseaux ne précède la fin du base.
+L'objectif est aussi une forte accélération pour ces réseaux, avec la même
+tolérance explicite à un peu de bruit et des compromis à tester en live.
+
+## Contrôles de lancement
+
+32batchs TRAIN pour choisir les canaux/têtes ; trois contrôles source exacts ;
+backward à trois amplitudes de réduction ; kernels compactés exacts ; drift
+BF16 explicite ; EMA correctement reliée à ses propres paramètres ; quatre
+vrais pas avec état courant et auxiliaire TT plafonné. Pic du smoke13,2Go.
+Trois testsCPU couvrent normalisations des canaux conservés, identité source,
+chargeur compact et rejet des états encore en cours de réduction.
+
+Le premier smoke au début du calendrier avait des gradients nuls parce que
+la réduction était sous le seuilBF16. Le contrôle a été répété à des amplitudes
+non nulles, avec gradients finis sur les quatre pas. Le premier seuil de
+forward compact1e-5 a été dépassé de peu : des kernels exacts et un budget
+numérique séparé ont remplacé l'exigence d'un forward GPU identique.

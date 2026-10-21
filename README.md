@@ -2,6 +2,10 @@
 
 **Procedural worlds, from tectonic plates to neural terrain.**
 
+**Experimental base under 100 MB:** [download native3-base99m-v1](https://github.com/dunkean/neural-earth/releases/tag/native3-base99m-v1)
+contains the climate-conditioned native base in a **99.24 MB complete package**.
+See the [loader, checksums and quality limitations](distill/BASE_NATIVE3_RELEASE.md).
+
 [![Watch the Neural Earth teaser (1 min)](docs/images/teaser-poster.jpg)](docs/videos/neural-earth-teaser.mp4)
 
 **[Watch the 1-minute teaser](docs/videos/neural-earth-teaser.mp4)**: World Orogen, InfiniteDiffusion, then live Neural Earth navigation from world view to 7.5 m terrain. Loading times are accelerated, and on-screen badges show each speed-up. The project is open source and looking for contributors.
@@ -86,6 +90,15 @@ Prepare the geography inputs and runtime directory using the [installation guide
 ```
 
 On Linux, use `./start-neural-earth.sh` (add `--no-open` for unattended startup). On Windows, double-click **start-neural-earth.cmd**. `restart-neural-earth.bat` / `restart-neural-earth.sh` first stop any running server. Open **http://127.0.0.1:8765**. Pinned model weights download on first use.
+
+The **NN** menu offers the three original models and the curated coarse8/25k,
+coarse2/200k, decoder64/200k and decoder16/10k versions. The continuous map
+defaults to coarse8, the original base and decoder64. The linked **40 × 40 km
+tile** workflow uses residual48/8k with coarse2 and either selected decoder;
+it offers Python server inference (CUDA or CPU, selected by default), or browser
+CPU/WebGPU inference. Other experimental weights are excluded.
+See [model selection and installation](distill/LIVE.md). To download the three
+originals ahead of first use, run `python tools/download_models.py`.
 
 The start and restart scripts pass `--gpu`, which is also the launcher default: a browser's first launch enables every optional GPU acceleration without asking. Pass `--cpu` (for example `start-neural-earth.cmd --cpu`) to choose the CPU options instead. Launching `http://127.0.0.1:8765` directly without the launcher asks the question once. A browser's saved choice, then its Settings and Rendering toggles, take precedence over later launches.
 

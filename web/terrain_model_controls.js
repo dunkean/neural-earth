@@ -1,16 +1,16 @@
-/* NN choices and post-Orogen reset, available in the normal viewer. */
+/* Curated model choices for the normal Neural Earth viewer. */
 (() => {
   const engine = document.getElementById('nnEngine');
-  engine.closest('label').hidden = true;
   const panel = document.createElement('fieldset');
   panel.id = 'distillModels';
-  panel.innerHTML = '<legend>Comparaison des NN</legend><p>Chaque modèle peut être remplacé séparément.</p>' +
+  panel.innerHTML = '<legend>Comparaison des NN</legend><p>Carte continue : choisis chaque modèle séparément.</p>' +
     '<label>Coarse <select id="distillCoarse" aria-label="Modèle coarse"></select></label>' +
     '<label>Base <select id="distillBase" aria-label="Modèle base"></select></label>' +
     '<label>Decoder <select id="distillDecoder" aria-label="Modèle decoder"></select></label>' +
     '<div class="panelActions"><button id="distillApply" type="button">Appliquer les NN</button>' +
     '<button id="distillReset" type="button">Reset après Orogen</button></div>' +
     '<small>Le reset recalcule coarse, base et decoder. Orogen, seed et caméra sont conservés.</small>' +
+    '<p><a href="/tile40/">Tuile 40 × 40 km · base résiduel 8k · CPU / GPU navigateur</a></p>' +
     '<small id="distillStatus" role="status"></small>';
   const menu = document.createElement('details');
   menu.id = 'distillPanel';
@@ -35,7 +35,7 @@
   }
   let state;
   async function read() {
-    const response = await (window.TerrainTransport?.fetch||fetch)('/api/distill/models', {cache: 'no-store'});
+    const response = await (window.TerrainTransport?.fetch||fetch)('/api/models', {cache: 'no-store'});
     if (!response.ok) throw Error('Modèles indisponibles');
     return response.json();
   }
@@ -60,7 +60,7 @@
     clearTimeout(timer);
     status.textContent = 'Application…';
     try {
-      const response = await (window.TerrainTransport?.fetch||fetch)('/api/distill/models', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({selection, reset})});
+      const response = await (window.TerrainTransport?.fetch||fetch)('/api/models', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({selection, reset})});
       const change = await response.json();
       if (!response.ok) throw Error(change.error || 'Changement refusé');
       const deadline = Date.now() + 180000;

@@ -13,18 +13,25 @@ from types import SimpleNamespace
 import torch
 from torch import nn
 
-from distill.common import bootstrap
+from distill.common import bootstrap, REVISION
 bootstrap()
 
 
 class CoarseSolver(nn.Module):
     def __init__(self, steps):
         super().__init__()
-        from terrain_app import resolve_model_source
+        # Portable checkpoint loading must not import the CUDA-only demo server
+        # or change the process working directory.
+        from terrain_paths import model_snapshot
         from terrain_diffusion.models.edm_unet import EDMUnet2D
         if not 1 <= steps <= 20:
             raise ValueError('The coarse solver trial requires 1–20 evaluations.')
-        source = Path(resolve_model_source())
+        source = model_snapshot(REVISION)
+        required = ('config.json', 'coarse_model/config.json', 'coarse_model/diffusion_pytorch_model.safetensors')
+        if not all((source/name).is_file() for name in required):
+            from huggingface_hub import snapshot_download
+            source = Path(snapshot_download(repo_id='xandergos/terrain-diffusion-30m', revision=REVISION,
+                          allow_patterns=['config.json', 'coarse_model/*']))
         self.net = EDMUnet2D.from_pretrained(str(source/'coarse_model'))
         # Production casts weights and Fourier buffers to BF16 before any
         # functional normalization. Reproduce that initial state, then retain

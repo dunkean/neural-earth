@@ -31,7 +31,7 @@ def phase(y, x, h, w, period=64):
                         torch.sin(xx*(2*np.pi/period)), torch.cos(xx*(2*np.pi/period))])
 
 
-def base_features(coarse, coarse_y, coarse_x, seed, y, x, size, histogram):
+def base_features(coarse, coarse_y, coarse_x, seed, y, x, size, histogram, *, include_noise=True):
     if y % 32 or x % 32 or size % 32:
         raise ValueError('Base inputs must align to the 32-latent coarse grid.')
     cy, cx = y//32-int(coarse_y), x//32-int(coarse_x)
@@ -43,8 +43,9 @@ def base_features(coarse, coarse_y, coarse_x, seed, y, x, size, histogram):
     # The upstream mask in the 58-value vector is constant ones, not a land mask.
     mask = field.new_full((1, size, size), (1-.66)/.47)
     scalars = torch.as_tensor(histogram, dtype=torch.float32)[:, None, None].expand(-1, size, size)
-    return pad_channels(torch.cat([noise(seed+5819, y, x, size, size, 5),
-                                  noise(seed+5820, y, x, size, size, 5),
+    first = noise(seed+5819, y, x, size, size, 5) if include_noise else field.new_zeros(5, size, size)
+    second = noise(seed+5820, y, x, size, size, 5) if include_noise else field.new_zeros(5, size, size)
+    return pad_channels(torch.cat([first, second,
                                   field, mask, phase(y, x, size, size), scalars]), 32)
 
 
@@ -55,8 +56,10 @@ def coarse_features(condition, labels, seed, y, x):
     return torch.cat([noise(seed+1, y, x, h, w, 6), condition, scalars])
 
 
-def decoder_features(latents, seed, y, x, size=512):
+def decoder_features(latents, seed, y, x, size=512, *, noise_tile=None):
     field = F.interpolate(torch.as_tensor(latents, dtype=torch.float32)[None],
                           size=(size, size), mode='nearest')[0]
-    # Decoder distillation preserves its original 512/384 window geometry.
-    return pad_channels(torch.cat([noise(seed+5819, y, x, size, size, 1, tile=size), field]), 16)
+    # Noise coordinates retain their training-time512px lattice even when a
+    # finite tile is decoded in one call. The default preserves legacy callers.
+    return pad_channels(torch.cat([noise(seed+5819, y, x, size, size, 1,
+                                        tile=size if noise_tile is None else noise_tile), field]), 16)
