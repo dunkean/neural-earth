@@ -31,6 +31,7 @@ from terrain_biomes import colorize_biomes, parse_rock_slope, sample_biome_field
 from terrain_koppen import COLORS as KOPPEN_COLORS, sample_classes
 from terrain_soil import sample_soil_transport
 from terrain_render import colorize_surface, parse_settings as parse_render_settings
+from terrain_surface_modes import RENDER_V2_MODES
 from terrain_jobs import JobCancelled, QueueFull
 from terrain_orogen_layers import EXTRA, MODES, render, sample
 from terrain_snr_layer import MODES as SNR_MODES
@@ -68,7 +69,8 @@ class BiomeTileRenderingTests(unittest.TestCase):
             np=np, io=io, json=json, Image=Image, time=time, tile_relief_stats=tile_relief_stats,
             TILE=256, HALO=24, NATIVE=30, MIN_LOD=-3, CLIMATE_SIZE=33,
             WORLD_BOUNDS=(-20e6, -10e6, 20e6, 10e6), PROFILE='fixture',
-            MODES=CLIMATE_MODES+STYLE_MODES+MODES+SNR_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=MODES, CACHE=Path(temporary.name),
+            MODES=CLIMATE_MODES+STYLE_MODES+MODES+SNR_MODES+RENDER_V2_MODES,
+            RENDER_V2_MODES=RENDER_V2_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=MODES, CACHE=Path(temporary.name),
             resolve_generation=lambda wp: SimpleNamespace(bootstrap_generator='orogen',
                 settings={'climate_source':'orogen'}),
             generation_profile=lambda: 'orogen',
@@ -76,6 +78,7 @@ class BiomeTileRenderingTests(unittest.TestCase):
             parse_lighting=parse_lighting,render_relief=render_relief,
             pin_cache_io=lambda key: lambda function: function,
             orogen_diagnostic_tile=self.diagnostic, snr_diagnostic_tile=self.snr_diagnostic, physical_tile=self.physical,
+            hydrology_display=lambda seed,wp,lod,tx,ty,elevation,report: (elevation,None,report),
             selected_coarse_interpolation=lambda lod: None,
             latent_preview_source=lambda lod: None, _coarse_cache_level=lambda lod, _: lod,
             _atomic_bytes=lambda path, data: path.write_bytes(data),
@@ -144,11 +147,11 @@ class BiomeTileRenderingTests(unittest.TestCase):
                 response = client.get(f'/height/natural-v1/42/{lod}/0/0.bin?profile=fixture&mode=orogen-biomes&climate=1')
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.headers['X-Terrain-Climate-Width'], '33')
-                self.assertEqual(response.headers['X-Terrain-Climate-Layers'], '50')
+                self.assertEqual(response.headers['X-Terrain-Climate-Layers'], '51')
                 values = np.frombuffer(response.data, dtype='<f4')
                 np.testing.assert_array_equal(values[:304*304], self.elevations[lod].ravel())
                 np.testing.assert_array_equal(values[304*304:304*304+5*33*33], self.climate.ravel())
-                self.assertEqual(values.size,304*304+50*33*33)
+                self.assertEqual(values.size,304*304+51*33*33)
         self.diagnostic.assert_not_called()
 
     def test_koppen_routes_through_current_terrain_at_every_lod(self):
@@ -162,13 +165,53 @@ class BiomeTileRenderingTests(unittest.TestCase):
                 np.testing.assert_array_equal(pixels[128,230],(KOPPEN_COLORS[30]*255).astype(np.uint8))
             response=self.app.test_client().get(f'/height/natural-v1/42/{lod}/0/0.bin?profile=fixture&mode=orogen-koppen&climate=1')
             self.assertEqual(response.status_code,200)
-            self.assertEqual(response.headers['X-Terrain-Climate-Layers'],'50')
+            self.assertEqual(response.headers['X-Terrain-Climate-Layers'],'51')
         self.diagnostic.assert_not_called()
 
     def test_invalid_render_settings_do_not_generate_terrain(self):
         response=self.app.test_client().get('/tiles/natural-v1/42/0/0/0.png?mode=render&render_settings={"rock_slope":90}')
         self.assertEqual(response.status_code,400)
         self.physical.assert_not_called()
+
+    def test_v2_settings_are_validated_before_scheduling_terrain(self):
+        for mode in RENDER_V2_MODES:
+            response=self.app.test_client().get(
+                f'/tiles/natural-v1/42/0/0/0.png?mode={mode}&render_settings={{"season":2}}')
+            self.assertEqual(response.status_code,400)
+        self.physical.assert_not_called()
+
+    def test_v2_and_its_diagnostics_follow_every_physical_stage(self):
+        material=Mock(return_value=np.full((304,304,3),.4,np.float32))
+        self.namespace['colorize_surface']=material
+        for mode in RENDER_V2_MODES:
+            for lod in (9,4,0,-1):
+                with self.subTest(mode=mode,lod=lod):
+                    response=self.app.test_client().get(
+                        f'/tiles/natural-v1/42/{lod}/0/0.png?profile=fixture&mode={mode}'
+                        '&render_settings={"season":0.25}')
+                    self.assertEqual(response.status_code,200)
+                    self.assertEqual(material.call_args.kwargs['mode'],mode)
+                    self.assertEqual(material.call_args.args[6]['season'],.25)
+                    with Image.open(io.BytesIO(response.data)) as image:
+                        self.assertEqual(image.size,(256,256))
+        self.diagnostic.assert_not_called()
+
+    def test_v2_owns_final_water_and_lighting_without_legacy_recomposition(self):
+        water=np.zeros((304,304,4),np.float32)
+        water[:]=[20,1,2,1]
+        material=Mock(return_value=np.full((304,304,3),.75,np.float32))
+        self.namespace['colorize_surface']=material
+        self.namespace['hydrology_display']=lambda seed,wp,lod,tx,ty,h,report:(h,water,report)
+        light={'strength':.6,'ambient':.4}
+        response=self.app.test_client().get(
+            '/tiles/natural-v1/42/0/0/0.png?profile=fixture&mode=render-v2&lighting='+json.dumps(light))
+        self.assertEqual(response.status_code,200)
+        np.testing.assert_array_equal(material.call_args.args[3],self.elevations[0])
+        self.assertIs(material.call_args.kwargs['hydrology'],water)
+        self.assertEqual(material.call_args.kwargs['lighting']['strength'],.6)
+        with Image.open(io.BytesIO(response.data)) as image:
+            # A legacy lake composite would overwrite this colour with blue.
+            np.testing.assert_array_equal(np.array(image)[128,128],[191,191,191])
 
     def test_render_and_soil_follow_terrain_without_diagnostic_inference(self):
         for mode in ('render','soil'):

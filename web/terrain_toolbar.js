@@ -41,7 +41,7 @@ window.TerrainToolbar=(()=>{
     panel.innerHTML='<summary title="Layer visible" aria-label="Layer visible"><span class="selectedLayer">Relief</span><span aria-hidden="true">▾</span></summary><div class="toolPanel"><div class="panelHeading"><strong>Layer visible</strong><button type="button" class="panelClose" aria-label="Close layer menu">×</button></div><div class="layerGroups"></div></div>';
     label.hidden=true;controls.append(label,panel);
     const groups=panel.querySelector('.layerGroups'),buttons=[],labels=new Map([
-      ['relief','Relief'],['render','Render'],['render3d','Render3D'],['render3d-brush','Render3D Brush'],['soil','Soils'],['pedology','Pedology'],['orogen-biomes','Biomes'],['temperature','Annual temperature'],['precipitation','Annual precipitation'],['orogen-koppen','Köppen']
+      ['relief','Relief'],['render','Render'],['render-v2','Render v2'],['render3d','Render3D'],['render3d-brush','Render3D Brush'],['soil','Soils'],['pedology','Pedology'],['orogen-biomes','Biomes'],['temperature','Annual temperature'],['precipitation','Annual precipitation'],['orogen-koppen','Köppen']
     ]);
     const pedologyLegend=document.createElement('div');pedologyLegend.id='pedologyLegend';pedologyLegend.hidden=true;
     pedologyLegend.style.cssText='max-width:340px;margin-bottom:8px;line-height:1.6';
@@ -51,7 +51,7 @@ window.TerrainToolbar=(()=>{
     ].map(([color,name])=>`<span style="display:inline-block;margin-right:10px"><i style="display:inline-block;width:9px;height:9px;margin-right:4px;background:${color}"></i>${name}</span>`).join('');
     $('hud').prepend(pedologyLegend);
     const sections=[
-      ['Main maps',['fantasy-ink','fantasy-color','relief','render','render3d','render3d-brush','soil','pedology','orogen-biomes','temperature','precipitation','orogen-koppen']],
+      ['Main maps',['fantasy-ink','fantasy-color','relief','render','render-v2','render3d','render3d-brush','soil','pedology','orogen-biomes','temperature','precipitation','orogen-koppen']],
       ['Map styles',Object.keys(window.TerrainStyles||{})],
       ['Seasonal climate',['orogen-temperature-summer','orogen-temperature-winter','orogen-precip-summer','orogen-precip-winter']],
       ['Atmosphere',['orogen-pressure-summer','orogen-pressure-winter','orogen-wind-summer','orogen-wind-winter','orogen-rain-shadow','orogen-continentality']],
@@ -60,8 +60,8 @@ window.TerrainToolbar=(()=>{
       ['Relief formation',['orogen-height','orogen-uplift','orogen-orogeny','orogen-back-arc','orogen-fold-ridges','orogen-hotspots','orogen-erosion']]
     ];
     const options=new Map();
-    // SNR remains an internal diagnostic, outside the visible layer menu.
-    for(const option of select.options){if(option.value==='biomes'||option.value.startsWith('snr-')){option.hidden=true;continue;}options.set(option.value,option);}
+    // V2 diagnostics belong to its own settings, not separate visible layers.
+    for(const option of select.options){if(option.value==='biomes'||option.value.startsWith('snr-')||option.value.startsWith('render-v2-')){option.hidden=true;continue;}options.set(option.value,option);}
     const assigned=new Set(sections.flatMap(([,modes])=>modes)),remaining=[...options.keys()].filter(mode=>!assigned.has(mode));
     if(remaining.length)sections.push(['Other layers',remaining]);
     for(const [name,modes]of sections){
@@ -74,7 +74,7 @@ window.TerrainToolbar=(()=>{
     const generatorButtons=[];
     for(const [value,icon,name] of [['natural','▧','noise'],['orogen','⛰','Orogen'],['custom','⚙','Custom']]){const button=document.createElement('button');button.type='button';button.textContent=icon;button.title=name;button.setAttribute('aria-label',name);button.onclick=()=>{$('worldGenerator').value=value;$('worldGenerator').dispatchEvent(new Event('change',{bubbles:true}));sync();};generators.append(button);generatorButtons.push([button,value]);}
     $('worldGenerator').closest('label').after(generators);
-    sync=()=>{pedologyLegend.hidden=select.value!=='pedology';for(const [button,option] of buttons){button.disabled=option.disabled;button.setAttribute('aria-pressed',String(select.value===option.value));}for(const [button,value] of generatorButtons)button.setAttribute('aria-pressed',String($('worldGenerator').value===value));const selected=labels.get(select.value)||select.selectedOptions[0]?.textContent||'Relief';panel.querySelector('.selectedLayer').textContent=selected;panel.querySelector('summary').title='Layer visible · '+selected;panel.querySelector('summary').setAttribute('aria-label','Layer visible · '+selected);};
+    sync=()=>{pedologyLegend.hidden=select.value!=='pedology';const v2=select.value.startsWith('render-v2-');for(const [button,option] of buttons){button.disabled=option.disabled;button.setAttribute('aria-pressed',String(select.value===option.value||(v2&&option.value==='render-v2')));}for(const [button,value] of generatorButtons)button.setAttribute('aria-pressed',String($('worldGenerator').value===value));const selected=v2?'Render v2':labels.get(select.value)||select.selectedOptions[0]?.textContent||'Relief';panel.querySelector('.selectedLayer').textContent=selected;panel.querySelector('summary').title='Layer visible · '+selected;panel.querySelector('summary').setAttribute('aria-label','Layer visible · '+selected);};
     select.addEventListener('change',sync);new MutationObserver(sync).observe(select,{subtree:true,attributes:true});sync();installAtlasTheme();
   }
   return {install,sync:()=>sync()};

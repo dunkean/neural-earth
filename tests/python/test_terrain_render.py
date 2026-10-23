@@ -41,7 +41,7 @@ def material_case(height=1000,slope=0,resolution=30,settings=None,origin=(-5000,
     return atlas,xs,ys,dem,colorize_surface(atlas,xs,ys,dem,resolution,{},settings)
 
 
-def direct(height,seasons,*,grade=0.,tpi=0.,footprint=30.,point=None,settings=None,bare=False,shape=(1,1)):
+def direct(height,seasons,*,grade=0.,tpi=0.,footprint=30.,point=None,settings=None,bare=False,shape=(1,1),capture=None):
     """Material for uniform inputs, isolating one physical parameter."""
     h=np.broadcast_to(np.asarray(height,np.float32),shape).astype(np.float32)
     p=np.zeros((*shape,3),np.float32) if point is None else np.broadcast_to(point,(*shape,3)).astype(np.float32)
@@ -51,13 +51,30 @@ def direct(height,seasons,*,grade=0.,tpi=0.,footprint=30.,point=None,settings=No
     soil=np.broadcast_to(SOIL.reshape(9,*([1]*len(shape))),(9,*shape))
     north=np.broadcast_to(np.array([0,-1],np.float32),(*shape,2))
     return surface_material(h,g,np.broadcast_to(np.float32(tpi),shape),p,north,footprint,soil,seasons,
-                            seed_value(42),settings,bare)
+                            seed_value(42),settings,bare,capture=capture)
 
 
 TEMPERATE=[22,500,.0065,2,500,.0065]
 
 
 class SurfaceTests(unittest.TestCase):
+    def test_v2_capture_is_leaf_on_before_legacy_season_and_keeps_raw_flats(self):
+        captures = []
+        for season in (0., .5, .75):
+            capture = {}
+            direct(1., [25, 700, .0065, -10, 700, .0065],
+                   settings={'season': season}, capture=capture)
+            captures.append(capture)
+        for capture in captures[1:]:
+            np.testing.assert_array_equal(capture['canopy_leaf_on'], captures[0]['canopy_leaf_on'])
+        np.testing.assert_array_equal(captures[0]['flats'], 1)
+        self.assertLess(float(captures[0]['canopy_leaf_on'].max()), .4)
+        tinted = {}
+        direct(1., [25, 700, .0065, -10, 700, .0065],
+               settings={'vegetation_tint': [.8, 1., .6]}, capture=tinted)
+        np.testing.assert_allclose(tinted['canopy_leaf_on'],
+                                   captures[0]['canopy_leaf_on']*np.array([.8, 1., .6]), atol=1e-7)
+
     def test_generated_composition_is_bounded_deterministic_and_climate_driven(self):
         atlas=world();a=generate_soil(atlas.height_m,atlas.layers,42,atlas.bounds)
         b=generate_soil(atlas.height_m,atlas.layers,42,atlas.bounds)
@@ -327,13 +344,21 @@ class SurfaceTests(unittest.TestCase):
         import tempfile
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
-            for name in ('terrain_render.py','terrain_render_torch.py','terrain_renderer.js','terrain_render_controls.js','terrain_soil.py','terrain_pedology.py'):
+            for name in ('terrain_render.py','terrain_render_torch.py','terrain_renderer.js','terrain_render_controls.js',
+                         'terrain_soil.py','terrain_pedology.py','terrain_render_v2.py','terrain_render_v2.js',
+                         'terrain_glacier.py','terrain_surface_modes.py'):
                 (source_path(name, root=root)).write_text('original',encoding='utf-8')
             a=appearance_identity(root)
             (source_path('terrain_render.py', root=root)).write_text('new CPU material',encoding='utf-8')
             b=appearance_identity(root);self.assertNotEqual(a,b)
             (source_path('terrain_renderer.js', root=root)).write_text('new GPU material',encoding='utf-8')
-            self.assertNotEqual(b,appearance_identity(root))
+            previous=appearance_identity(root)
+            self.assertNotEqual(b,previous)
+            for name in ('terrain_render_v2.py','terrain_render_v2.js','terrain_glacier.py','terrain_surface_modes.py'):
+                (source_path(name, root=root)).write_text('changed '+name,encoding='utf-8')
+                current=appearance_identity(root)
+                self.assertNotEqual(previous,current,name)
+                previous=current
 
     def test_snowline_has_no_jump_when_altitude_crosses_a_koppen_boundary(self):
         atlas=world();shape=(32,32)

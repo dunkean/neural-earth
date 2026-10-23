@@ -27,7 +27,7 @@ def appearance_identity(root=None):
     """Display revision, separate from the immutable neural terrain identity."""
     root=Path(root) if root is not None else REPO_ROOT
     digest=hashlib.sha256()
-    for name in ('terrain_render.py','terrain_render_torch.py','terrain_renderer.js','terrain_render_controls.js','terrain_soil.py','terrain_pedology.py'):
+    for name in ('terrain_render.py','terrain_render_torch.py','terrain_renderer.js','terrain_render_controls.js','terrain_soil.py','terrain_pedology.py','terrain_render_v2.py','terrain_render_v2.js','terrain_glacier.py','terrain_surface_modes.py'):
         digest.update(name.encode());digest.update((source_path(name, root=root)).read_bytes())
     return digest.hexdigest()[:16]
 
@@ -162,7 +162,7 @@ def coast_band(shore, width, fp):
 
 
 def surface_material(height, gradient, tpi, point, north, footprint, soil, seasons,
-                     salt, settings=None, bare=False, pedology=None, shore=None, openness=None):
+                     salt, settings=None, bare=False, pedology=None, shore=None, openness=None, capture=None, detail_point=None):
     """Satellite-like albedo. ``seasons`` are sea-level ts, ps, lapse_s, tw, pw, lapse_w.
 
     ``bare`` returns the substrate (soil + exposed bedrock) used by the Soil layer.
@@ -178,9 +178,10 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
     h = np.maximum(height,0).astype(F)
     macro = fbm(point,64000.,4,fp,salt+1)
     macro2 = fbm(point+np.array([5101.,-2297.,3313.],F),48000.,4,fp,salt+2)
-    patch = fbm(point,4800.,4,fp,salt+3)
-    crag = fbm(point,700.,4,fp,salt+4)
-    fine = fbm(point,240.,4,fp,salt+5)
+    detail_point = point if detail_point is None else detail_point
+    patch = fbm(detail_point,4800.,4,fp,salt+3)
+    crag = fbm(detail_point,700.,4,fp,salt+4)
+    fine = fbm(detail_point,240.,4,fp,salt+5)
     province = fbm(point,900000.,3,fp,salt+6)
     m1 = macro[0]*np.sqrt(macro[1]); m2 = macro2[0]*np.sqrt(macro2[1])
     pv = province[0]*np.sqrt(province[1])
@@ -251,6 +252,9 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
     canopy = mix([.20,.28,.14],[.16,.255,.13],w_trop)
     canopy = mix(canopy,[.15,.22,.16],w_boreal)
     canopy = mix(canopy,[.27,.29,.17],dry_forest*F(.75))
+    # V2 retains this leaf-on material and applies its own calendar. Capture
+    # before legacy autumn/leaf loss, but keep the same tint/highland detail.
+    base_canopy = canopy if capture is not None else None
     deciduous = (1-w_trop)*(1-F(.7)*w_boreal)*(1-F(.5)*dry_forest)
     local = (F(s['season'])+np.where(ts>=tw,F(0),F(.5)))%1
     autumn = smooth(.66,.76,local)*(1-smooth(.84,.92,local))
@@ -262,11 +266,15 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
     canopy_detail = np.clip(F(.12)*highland*crag[0]*np.sqrt(crag[1])
                            +F(.025)*fine[0]*np.sqrt(fine[1]),-.18,.18)
     canopy = canopy*tint*((1-F(.18)*highland)*(1+var*canopy_detail))[...,None]
+    if capture is not None:
+        capture['canopy_leaf_on'] = base_canopy*tint*((1-F(.18)*highland)*(1+var*canopy_detail))[...,None]
     trees = (smooth(.65,2.1,humid)*smooth(5.5,13.5,t_hot+F(.8)*valley)*forest_amount*
              (1-smooth(rock_tan*.9,rock_tan*1.6,grade))*(1-outcrop))
     # Terrain carries valley stands; noise only adds gentle local clearings.
     trees = trees*(1-F(.22)*ridge)+F(.14)*valley*smooth(2,10,t_hot)*smooth(.4,1.2,humid)*(1-outcrop)*forest_amount
     woods = cover(np.clip(trees,0,1),patch,.65*float(var))
+    if capture is not None:
+        capture['open'] = color
     color = mix(color,canopy,woods)
     flats = (1-smooth(1.5,6,height))*(1-smooth(.05,.2,grade))
     # Beaches: an intermittent strip along open water, up to ~190 m wide by
@@ -292,6 +300,9 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
     sediment = mix(sediment,[.27,.26,.25],smooth(1.25,1.75,m1+F(.35)*shingle)*F(.9))
     color = mix(color,sediment*F(.9),flats*F(1-float(smooth(240,960,fp)))*F(.8))
     color = mix(color,sediment,beach*F(.8))
+    if capture is not None:
+        capture.update(woody=woods, grass=herbs*(1-outcrop), rock=outcrop, hot=t_hot,
+                       beach=beach*F(.8), flats=flats, sediment=sediment)
 
     # Snow: seasonal and perennial, exposure-aware, sheds from steep ridges.
     gnorm = np.linalg.norm(gradient,axis=-1)
@@ -303,6 +314,8 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
     # Snow needs supply: cold deserts stay mostly bare, wet ranges glaciate.
     supply = smooth(60,400,np.maximum(ps+pw,0)*wet_shift*(1+F(.5)*valley-F(.25)*ridge))
     perennial = smooth(2.5,-2.5,np.maximum(ts,tw)+F(1.5)*sun+F(.35)*m1*var*locality)*supply
+    if capture is not None:
+        capture['perennial'] = perennial
     seasonal = smooth(1,-4,t_snow)*smooth(.15,.5,humid)*supply
     snow = np.clip(np.maximum(seasonal,perennial)*F(s['snow']),0,1)
     # Physical slope, NOT LOD-amplified grade: a coarse ridge is not a cliff.
@@ -334,7 +347,10 @@ def terrain_derivatives(elevation, resolution):
     return np.stack((dx,dy),axis=-1).astype(F),tpi
 
 
-def colorize_surface(world,xs,ys,elevation,resolution,generation_settings,settings=None,*,polar=False,mode='render'):
+def colorize_surface(world,xs,ys,elevation,resolution,generation_settings,settings=None,*,polar=False,mode='render',hydrology=None,lighting=None):
+    if mode.startswith('render-v2') or mode == 'Render_v2':
+        from terrain_render_v2 import colorize_surface as colorize_v2
+        return colorize_v2(world,xs,ys,elevation,resolution,generation_settings,settings,polar=polar,mode=mode,hydrology=hydrology,lighting=lighting)
     from terrain_pedology import sample_pedology, colorize_pedology
     if mode=='pedology':
         return colorize_pedology(world,xs,ys,generation_settings,polar=polar)

@@ -82,14 +82,19 @@
     fn r3CellLocal(e:i32,cell:vec2<i32>)->vec2<f32>{return (vec2<f32>(cell-r3.cells[e].xy)-r3.fracs[e].xy)*r3.fracs[e].z;}
   `;
 
-  // Forest field, evaluated in the tile bake after surfaceMaterial has
-  // captured its terms. Seeded 2D gradient noise in exact world lattices.
-  const bake=`
-    const R3_GRAD=array<vec2<f32>,16>(${Array.from({length:16},(_,i)=>`vec2<f32>(${f(Math.cos(i*Math.PI/8+.2))},${f(Math.sin(i*Math.PI/8+.2))})`).join(',')});
+  const captureState=`
     var<private> r3GuideOpen:vec3<f32>;var<private> r3GuideClosed:vec3<f32>;var<private> r3Woods:f32;
     var<private> r3Humid:f32;var<private> r3Valley:f32;var<private> r3Ridge:f32;var<private> r3THot:f32;
     var<private> r3TS:f32;var<private> r3TW:f32;var<private> r3Outcrop:f32;var<private> r3Perennial:f32;
     var<private> r3Grade:f32;var<private> r3WTrop:f32;var<private> r3RockTan:f32;var<private> r3M1:f32;
+    var<private> r3Herbs:f32;var<private> r3Beach:f32;var<private> r3Flats:f32;var<private> r3Sediment:vec3<f32>;var<private> r3BaseOpen:vec3<f32>;
+    var<private> r3BaseClosed:vec3<f32>;
+  `;
+  // Forest field, evaluated in the tile bake after surfaceMaterial has
+  // captured its terms. Seeded 2D gradient noise in exact world lattices.
+  const bake=`
+    const R3_GRAD=array<vec2<f32>,16>(${Array.from({length:16},(_,i)=>`vec2<f32>(${f(Math.cos(i*Math.PI/8+.2))},${f(Math.sin(i*Math.PI/8+.2))})`).join(',')});
+    ${captureState}
     fn r3GradientNoise(c:vec2<i32>,q:vec2<f32>,salt:u32)->f32{
       let u=q*q*q*(q*(q*6.-15.)+10.);
       let a=dot(R3_GRAD[groundHash(vec3<i32>(c,0),salt)&15u],q);
@@ -150,10 +155,47 @@
       return vec4<f32>(cover,h*sstep(0.,.4,eligible)/50.,needle,tone);
     }
   `;
+  // A distant proxy of the same population. All lattice residuals have mean
+  // zero; clearings are integrated as an opened fraction, not sampled as a
+  // point of the threshold profile. Actual fine fields remain authoritative.
+  const forestExpected=`
+    fn r3ForestExpected(height:f32,slope:f32)->vec4<f32>{
+      let valley=r3Valley;let ridge=r3Ridge;let trop=r3WTrop;
+      let grow=max(r3TS,r3TW);let humid=r3Humid;
+      let treeline=grow+.7*valley-.5*ridge;
+      let moisture=sstep(.38,1.25,humid);let thermal=sstep(5.,8.5,treeline);
+      let coverMax=.6+.38*sstep(.8,2.2,humid);
+      let bog=valley*(1.-sstep(.02,.08,slope))*sstep(1.6,3.,humid)*(1.-sstep(11.,17.,grow))*(1.-trop);
+      var cover=clamp(thermal*moisture*coverMax*(1.-.6*bog)*(1.-.2*ridge*(1.-moisture)),0.,1.);
+      let gentle=1.-sstep(.05,.25,slope);let rugged=sstep(.35,.8,slope);
+      let bias=.45*(ridge-valley)+.3*(gentle-.5)-.6*rugged;
+      let cleared=.4*params.render2.w*(1.-.85*trop);
+      if(cleared>0.){
+        let c=clamp(cleared,1e-4,.999);
+        // Expected thinning, not a thresholded clearing. Centered symmetric
+        // scores preserve c before the cap; fine residual covariance is absent.
+        let opened=min(.55,c);
+        cover*=1.-opened;
+      }
+      let density=params.render1.w*params.render0.z;
+      if(density!=1.){cover=1.-pow(1.-min(cover,.999),density);}
+      let thermalHeight=.5*sstep(5.5,9.5,grow)+.5*sstep(9.,22.,grow);
+      var h=3.+31.*pow(sstep(.4,2.8,humid),.8)*thermalHeight;
+      h*=(1.+.15*valley-.12*ridge)*(.35+.65*sstep(5.,9.,treeline));
+      let needle=clamp(1.-sstep(10.,19.,grow)+.35*(1.-sstep(.7,1.4,humid))*(1.-trop)-trop,0.,1.);
+      let rock=sstep(.3,.85,1.-r3Outcrop)*(1.-sstep(r3RockTan*.9,r3RockTan*1.6,r3Grade));
+      let eligible=rock*(1.-r3Perennial)*sstep(5.5,13.5,r3THot+.8*valley);
+      cover*=eligible;if(height<=0.||params.render1.z<.5){cover=0.;}
+      return vec4<f32>(cover,h*sstep(0.,.4,eligible)/50.,needle,clamp(.5-.05*valley,0.,1.));
+    }
+  `;
   // Captures inserted into surfaceMaterial for the Render guide and the field.
   const captures={
-    '/*R3:open*/':'r3GuideOpen=color;',
-    '/*R3:beach*/':'r3GuideOpen=surfaceMix(surfaceMix(r3GuideOpen,sediment*.9,flats*(1.-sstep(240.,960.,fp))*.8),sediment,beach*.8);',
+    '/*R3:base-canopy*/':'r3BaseClosed=canopy;',
+    '/*R3:canopy-detail*/':'r3BaseClosed=r3BaseClosed*tint*(1.-.18*highland)*(1.+variation*canopyDetail);',
+    '/*R3:open*/':'r3GuideOpen=color;r3BaseOpen=color;',
+    '/*R3:herbs*/':'r3Herbs=herbs*(1.-outcrop);',
+    '/*R3:beach*/':'r3GuideOpen=surfaceMix(surfaceMix(r3GuideOpen,sediment*.9,flats*(1.-sstep(240.,960.,fp))*.8),sediment,beach*.8);r3Beach=beach*.8;r3Flats=flats;r3Sediment=sediment;',
     '/*R3:end*/':`let r3Snow=surfaceCover(snow,crag,.35*variation);
       r3GuideOpen=clamp(surfaceMix(r3GuideOpen,params.render4.xyz,r3Snow)*(1.-.06*valley),vec3<f32>(0.),vec3<f32>(1.));
       r3GuideClosed=clamp(surfaceMix(canopy,params.render4.xyz,r3Snow)*(1.-.06*valley),vec3<f32>(0.),vec3<f32>(1.));
@@ -303,6 +345,12 @@
       return groundToDisplay(mix(m.albedo,ambient,amount)+direct*max(strength,0.));
     }
   `;
+
+  // Share the exact BRDF with distant material means without pulling in
+  // world lattices, texture bindings or the resolved ground-detail functions.
+  const lighting=ground.slice(ground.indexOf('    fn groundToLinear'),ground.indexOf('    fn groundNoise'))+
+    'struct GroundMaterial {albedo:vec3<f32>,normal:vec3<f32>,roughness:f32,occlusion:f32}\n'+
+    ground.slice(ground.indexOf('    fn groundBrdf'));
 
   const forest=`
     var<private> forestResolvedCover:f32=0.;
@@ -592,6 +640,12 @@
     }
   `;
 
+  // Pure population/material helpers also serve the coarse V2 expectation.
+  // Reuse their exact definitions without world lattices or texture bindings.
+  const forestMaterial=forest.slice(forest.indexOf('    struct ForestClimate'),forest.indexOf('    // Tile-local metres'))+
+    forest.slice(forest.indexOf('    struct ForestStand'),forest.indexOf('    fn forestShrubShare'))+
+    forest.slice(forest.indexOf('    fn forestPalette'),forest.indexOf('    // Shadowed fraction'));
+
   // Render3D quads: Render's baked albedo/light, then per-pixel ground and
   // forest from the exact world position as the footprint shrinks.
   const draw=`
@@ -752,8 +806,8 @@
     return atlasPromise;
   }
 
-  const api=Object.freeze({MODES,SPLIT,BAKE_SCALES,BANDS,isStyle,number:mode=>MODES[mode],tileUniform,withCaptures,
-    shaders:{common,bake,ground,forest,draw,auxMip},
+  const api=Object.freeze({MODES,SPLIT,BAKE_SCALES,BANDS,isStyle,number:mode=>MODES[mode],tileUniform,withCaptures,captureState,
+    shaders:{common,bake,ground,forest,draw,auxMip,lighting,forestMaterial,forestExpected},
     defaults:()=>({...defaults}),get:()=>({...settings}),set(value){settings=normalize(value);sync();},
     normalize,fromParams,writeParams,mount,loadBrushes,
     vectors:()=>[settings.enabled?1:0,settings.density,settings.clearings]});

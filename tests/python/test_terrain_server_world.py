@@ -47,6 +47,7 @@ from terrain_geometry import profile_bounds
 from terrain_climate import MODES
 from terrain_orogen_layers import MODES as OROGEN_MODES
 from terrain_snr_layer import MODES as SNR_MODES
+from terrain_surface_modes import RENDER_V2_MODES
 
 
 class NoForwardModel(torch.nn.Module):
@@ -101,7 +102,8 @@ class ServerWorldConstructionTests(unittest.TestCase):
             all_gpu_locks=lambda:nullcontext([]), generation_gpu_locks=lambda:nullcontext([]), synchronize_gpus=Mock(),
             share_windows=lambda world, kind: world,
             app=self.app, jsonify=jsonify, Response=Response, request=request,
-            MODES=MODES+OROGEN_MODES+SNR_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=OROGEN_MODES,
+            MODES=MODES+OROGEN_MODES+SNR_MODES+RENDER_V2_MODES,
+            RENDER_V2_MODES=RENDER_V2_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=OROGEN_MODES,
             has_request_context=has_request_context, subprocess=subprocess,
             GenerationCancelled=GenerationCancelled, jobs=SimpleNamespace(paused=False), finish_generation=lambda token:None,
             pin_cache_io=lambda key:lambda function:function, TILE=256, NATIVE=30, MIN_LOD=-2,

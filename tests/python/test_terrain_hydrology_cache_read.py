@@ -113,6 +113,30 @@ class CachedBaseTests(unittest.TestCase):
         self.assertTrue(report['hydro_vector_preview'])
         service.physical.assert_not_called()
 
+    def test_v2_fast_water_reaches_the_shader_without_conditioning_the_dem(self):
+        source = Path('backend/terrain_server.py').read_text(encoding='utf-8')
+        function = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef)
+                        and n.name == 'hydrology_display')
+        raw = np.full((4, 4),100,np.float32)
+        water = np.zeros((4,4,4),np.float32)
+        water[:,1:3] = [102,1,3,1]
+        service = SimpleNamespace(ensure=Mock(return_value={'status':'ready','key':'fixture'}),
+            physical=Mock(return_value=(raw-2,water,{'hydro_state':'ready','hydro_max_cut_m':2.})))
+        namespace = dict(request=SimpleNamespace(endpoint='height_tile',args={
+            'hydro':'1','mode':'render-v2','hydro_month':'7'}),
+            hydrology_options=lambda:dict(detail=False,cosmetics=()),hydrology_service=lambda:service,
+            world_manifest=lambda *a:{},world_identity=lambda _:'world',_hydrology_base_revision=0,
+            TILE=256,NATIVE=30,HALO=24,selected_neural_chart=lambda:None)
+        exec(compile(ast.Module(body=[function],type_ignores=[]),'<v2 fast water>','exec'),namespace)
+        height,received,report=namespace['hydrology_display'](
+            42,'fixture',2,0,0,raw,{'resolution':120,'halo':24})
+        self.assertIs(height,raw)
+        self.assertIs(received,water)
+        self.assertTrue(report['hydro_vector_preview'])
+        self.assertEqual(report['hydro_max_cut_m'],0.)
+        self.assertFalse(service.physical.call_args.kwargs['detail'])
+        self.assertEqual(service.physical.call_args.kwargs['month'],7)
+
 
 if __name__ == '__main__':
     unittest.main()
