@@ -231,75 +231,112 @@ class ResourceTests(unittest.TestCase):
         self.assertTrue(-1 <= float(np.ravel(a)[0]) <= 1)
 
 
-class ResourceDetailTests(unittest.TestCase):
-    """Descent to displayed LODs: exact parent means, determinism, order, seams."""
+class ResourceGpuMirrorTests(unittest.TestCase):
+    """NumPy mirror of the WGSL evaluator: fixture, addressing, realized geology, display tolerance.
+
+    Seed of the reference world's GPU key, synthetic 32 x 20 LOD-10 lattice at
+    (-16, -10); rock shares come from terrain_resources.realize_rocks and are
+    compared with the display at finer LODs (a display tolerance; the canonical
+    budgets stay in terrain_resources and are tested exactly above).
+    """
 
     @classmethod
     def setUpClass(cls):
-        import terrain_resource_detail as D
-        cls.D = D
-        layers, height = atlas()
-        cls.grid, cls.f, cls.deposits = R.compile_world(layers, height, 42, lod=14, balance=False)
-        cls.fields = {k: v for k, v in cls.f.items() if isinstance(v, np.ndarray)}
-        auth = dict(npp=cls.fields['npp_g_m2'], suit=cls.fields['cereal_suitability'].astype(np.float64),
-                    rock=np.stack([cls.fields['rock_' + r] for r in R.ROCKS]).astype(np.float64))
-        cls.auth = {'orogen-resources-bio-npp': auth['npp'], 'orogen-resources-agri-cereal-suitability': auth['suit'],
-                    'orogen-resources-geo-rock': auth['rock']}
+        import terrain_resource_gpu as G
+        cls.G = G
+        rng = np.random.default_rng(5)
+        cls.i0, cls.j0, cls.W, cls.H, cls.K = -16, -10, 32, 20, len(R.ROCKS)
+        base = rng.dirichlet(np.ones(cls.K) * 2, (cls.H // 8 + 2, cls.W // 8 + 2)).transpose(2, 0, 1)
+        y, x = np.mgrid[:cls.H, :cls.W] // 8
+        expected = base[:, y, x]
+        cls.expected = expected / expected.sum(axis=0)
+        cls.strike = .5 + np.linspace(0, 1.5, cls.W)[None] + np.zeros((cls.H, 1))
+        cls.seed32 = 0x1234abcd
+        cls.bias = np.zeros(cls.K)
+        cls.rocks = dict(seed32=cls.seed32, layer=R.ROCK_LAYER, classes=cls.K, aligned=R.ROCK_ALIGNED,
+                         groups=R.ROCK_GROUPS, group_aligned=R.ROCK_GROUP_ALIGNED,
+                         field=G.Field(R.realized_rock_field(cls.expected, cls.strike, cls.bias), cls.i0, cls.j0))
 
-        def dem(lod, tx, ty):
-            xs, ys, _, _ = D.tile_axes(lod, tx, ty)
-            X, Y = np.meshgrid(xs, ys)
-            # Canonical analytic relief: a function of map coordinates only.
-            e = 800 + 600 * np.sin(X / 9.1e4) * np.cos(Y / 7.3e4) + 150 * np.sin(X / 4.1e3 + Y / 6.7e3)
-            return dict(elevation=e, river=None)
-        cls.dem = staticmethod(dem)
+    def cell(self, i, j, lod):
+        n = 2 ** (10 - lod)
+        gi, gj = np.meshgrid((self.i0 + i) * n + np.arange(n), (self.j0 + j) * n + np.arange(n))
+        return gi, gj
 
-    def engine(self):
-        return self.D.Detail(42, self.grid, self.fields, self.deposits, lambda mode: self.auth[mode])
-
-    def test_displayed_lod_conserves_parent_means(self):
-        D, det = self.D, self.engine()
-        tx, ty = -2, -3     # LOD 8 tile on land of the synthetic world
-        # Tile interiors are cached as float32: exact up to float32 rounding.
-        for mode, kind, bounded, tol in [('orogen-resources-bio-npp', 'ramp', None, 1e-6),
-                                         ('orogen-resources-agri-cereal-suitability', 'ramp', (0., 1.), 1e-6),
-                                         ('orogen-resources-geo-rock', 'mix', None, 1e-2)]:
-            for lod in (11, 8):
-                tile = (tx >> (8 - lod), ty >> (8 - lod)) if lod < 8 else (tx >> (lod - 8), ty >> (lod - 8))
-                v = det.values(mode, lod, *tile, self.dem, kind, bounded)
-                plod = D.parent_lod_of(lod, det.lod)
-                d = plod - lod
-                par = det.values(mode, plod, tile[0] >> d, tile[1] >> d, self.dem, kind, bounded)
-                k = 1 << d
-                oi = (tile[0] * 256) // k - (tile[0] >> d) * 256 + D.HALO
-                oj = (tile[1] * 256) // k - (tile[1] >> d) * 256 + D.HALO
-                pv = par[..., oj:oj + 256 // k, oi:oi + 256 // k]
-                means = D.block_means(v, lod, *tile, plod)
-                np.testing.assert_allclose(means, pv, rtol=tol, atol=tol * max(1., float(np.abs(pv).max())), err_msg=f'{mode} lod {lod}')
-
-    def test_descent_is_deterministic_and_order_independent(self):
-        a, b = self.engine(), self.engine()
-        tiles = [(8, -2, -3), (8, -1, -3), (5, -16, -24)]
-        first = {t: a.values('orogen-resources-bio-npp', *t, self.dem, 'ramp', None) for t in tiles}
-        second = {t: b.values('orogen-resources-bio-npp', *t, self.dem, 'ramp', None) for t in reversed(tiles)}
-        for t in tiles:
-            np.testing.assert_array_equal(first[t], second[t])
-
-    def test_adjacent_tiles_have_no_seam(self):
-        D, det = self.D, self.engine()
-        left = det.values('orogen-resources-bio-npp', 8, -2, -3, self.dem, 'ramp', None)
-        right = det.values('orogen-resources-bio-npp', 8, -1, -3, self.dem, 'ramp', None)
-        h, t = D.HALO, D.TILE
-        jump = np.abs(right[h:h + t, h] - left[h:h + t, h + t - 1])
-        inside = np.abs(left[h:h + t, h + t - 1] - left[h:h + t, h + t - 2])
-        self.assertLess(float(np.median(jump)), 3 * float(np.median(inside)) + 1e-9)
+    def test_parity_fixture_matches_mirror(self):
+        import importlib.util
+        path = _REPO_ROOT / 'tools/verification/build_resources_gpu_fixture.py'
+        spec = importlib.util.spec_from_file_location('build_resources_gpu_fixture', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        stored = json.loads((_REPO_ROOT / 'tests/fixtures/resources_gpu_parity.json').read_text(encoding='utf-8'))
+        rebuilt = json.loads(json.dumps(module.build()))
+        self.assertEqual(stored, rebuilt, 'tests/fixtures/resources_gpu_parity.json is stale: rerun the builder')
 
     def test_noise_is_keyed_by_position_not_tile(self):
-        D = self.D
-        xs, ys, _, _ = D.tile_axes(6, 3, -2)
-        full = D.octave_noise(42, 'x', 4, xs, ys)
-        part = D.octave_noise(42, 'x', 4, xs[100:140], ys[50:90])
-        np.testing.assert_array_equal(full[50:90, 100:140], part)
+        G = self.G
+        gi, gj = np.meshgrid(np.arange(-300, -100), np.arange(40, 160))
+        full = G.fbm(gi, gj, 3, 0x5eed, 9, 4, 10, .8)
+        part = G.fbm(gi[30:70, 50:90], gj[30:70, 50:90], 3, 0x5eed, 9, 4, 10, .8)
+        np.testing.assert_array_equal(full[30:70, 50:90], part)
+        a = G.realized_class(self.rocks, gi[::7, ::7], gj[::7, ::7], 3)
+        b = G.realized_class(self.rocks, gi[::7, ::7][::-1], gj[::7, ::7][::-1], 3)[::-1]
+        np.testing.assert_array_equal(a, b)
+
+    def shares(self, i, j, lod):
+        c = self.G.realized_class(self.rocks, *self.cell(i, j, lod), lod).ravel()
+        return np.bincount(c, minlength=self.K) / c.size
+
+    def test_display_geology_matches_cell_shares_at_every_lod(self):
+        # Cell shares as terrain_resources.realize_rocks computes them (LOD 8,
+        # 4 x 4), against the display at LOD 6 and 3; measured TV 0.008 mean
+        # on the reference world.
+        tv = {6: [], 3: []}
+        for j in range(2, self.H - 2, 3):
+            for i in range(2, self.W - 2, 3):
+                ref = self.shares(i, j, 8)
+                for lod in tv:
+                    tv[lod].append(.5 * np.abs(self.shares(i, j, lod) - ref).sum())
+        for lod, values in tv.items():
+            self.assertLess(float(np.mean(values)), .05, lod)
+
+    def test_geology_forms_provinces_not_confetti(self):
+        # LOD 3 (240 m) over 12 x 8 cells (370 km x 245 km): few class changes,
+        # and each present class is a few large connected units.
+        from scipy.ndimage import label
+        n = 2 ** 7
+        gi, gj = np.meshgrid(np.arange((self.i0 + 10) * n, (self.i0 + 22) * n, 4),
+                             np.arange((self.j0 + 6) * n, (self.j0 + 14) * n, 4))
+        c = self.G.realized_class(self.rocks, gi, gj, 3)
+        changes = (c[1:] != c[:-1]).mean() + (c[:, 1:] != c[:, :-1]).mean()
+        self.assertLess(float(changes), .02)
+        for k in np.unique(c):
+            labels, count = label(c == k)
+            sizes = np.bincount(labels.ravel())[1:]
+            self.assertGreater(float(sizes.max() / sizes.sum()), .5, f'class {k} is scattered')
+
+    def test_realized_rock_shares_are_partitions_and_deterministic(self):
+        # World shares are calibrated by a per-class bias; on this 1 000 km
+        # domain one province noise (123-983 km) dominates, so only validity
+        # and determinism are checked here (world shares: docs §5.1).
+        import terrain_resources as RR
+        land = np.ones((self.H, self.W), bool)
+        grid = type('Grid', (), dict(lod=10, i=np.arange(self.W) + self.i0, j=np.arange(self.H) + self.j0,
+                                     area_m2=np.ones((self.H, self.W))))()
+        shares, bias = RR.realize_rocks(self.expected, self.strike, land, grid, 42)
+        np.testing.assert_allclose(shares.sum(axis=0), 1, atol=1e-9)
+        self.assertTrue(((shares >= 0) & (shares <= 1)).all())
+        again, bias2 = RR.realize_rocks(self.expected, self.strike, land, grid, 42)
+        np.testing.assert_array_equal(shares, again)
+        np.testing.assert_array_equal(bias, bias2)
+
+    def test_continuous_display_keeps_parent_means(self):
+        G = self.G
+        pkg = dict(seed32=0x1234abcd, layer=5, field=G.Field(np.full((1, self.H, self.W), 100., np.float32), self.i0, self.j0),
+                   seasonal=False, profile='arable', range=(0., 1000.), bounded=False)
+        ratio = np.array([G.evaluate_continuous(pkg, *self.cell(i, j, 4), 4, None).mean() / 100.
+                          for j in range(2, self.H - 2) for i in range(2, self.W - 2)])
+        self.assertAlmostEqual(float(ratio.mean()), 1., delta=.03)
+        self.assertLess(float(np.percentile(np.abs(ratio - 1), 90)), .2)
 
 
 if __name__ == '__main__':

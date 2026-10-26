@@ -61,7 +61,7 @@ window.TerrainToolbar=(()=>{
       // Informative resource layers (terrain_resource_layers.py), grouped by prefix.
       ...[['geo','Ressources · géologie'],['dep','Ressources · gisements'],['agri','Ressources · agriculture et élevage'],
           ['bio','Ressources · forêt, faune, pêche, eau'],['mat','Ressources · matériaux, sel, tourbe'],['season','Ressources · saisons']]
-        .map(([group,name])=>[name,[...select.options].map(option=>option.value).filter(value=>value.startsWith('orogen-resources-'+group+'-'))])
+        .map(([group,name])=>[name,[...select.options].map(option=>option.value).filter(value=>value.startsWith('resources-'+group+'-'))])
     ];
     const options=new Map();
     // V2 diagnostics belong to its own settings, not separate visible layers.

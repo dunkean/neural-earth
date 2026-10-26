@@ -1,11 +1,12 @@
 """Informative resource layers for the viewer, served like Orogen diagnostics.
 
-Modes are named ``orogen-resources-<group>-<name>`` so that the existing
-source-diagnostic path (PNG tiles, map and globe, menu enabling) serves them
-unchanged. The world authority (terrain_resources.compile_world at LOD 10) is
-computed once per Orogen atlas on first request, kept in memory and on disk.
-Displayed values are bilinear between LOD-10 cell centres; the canonical value
-is the cell's. Legends name the unit, the status (derived / synthetic) and
+Modes are named ``resources-<group>-<name>``. The browser evaluates them in
+WGSL inside the renderer's shade pass (web/terrain_resources_gpu.js) from the
+physical tiles already on the GPU plus a per-mode package served once per
+world (LOD-10 fields as half floats, zone thresholds, deposits, buckets). The
+NumPy mirror (terrain_resource_gpu.py) is the reference and the PNG fallback.
+The world authority (terrain_resources.compile_world at LOD 10) is computed
+once per Orogen atlas, kept in memory and on disk. Legends name the unit, the status (derived / synthetic) and
 "proxy" when a value comes from a Render v2 appearance field.
 """
 import hashlib
@@ -19,8 +20,8 @@ from pathlib import Path
 
 import numpy as np
 
-PREFIX = 'orogen-resources-'
-VERSION = 'resource-layers-v1'
+PREFIX = 'resources-'
+VERSION = 'resource-layers-v2'
 SEASONS = (('djf', 'déc.–fév.', (11, 0, 1)), ('mam', 'mars–mai', (2, 3, 4)),
            ('jja', 'juin–août', (5, 6, 7)), ('son', 'sept.–nov.', (8, 9, 10)))
 SEQ = ['10141f', '2c3e6b', '2f7f86', '6fbf73', 'e8e36a']          # dark -> light, sequential
@@ -47,6 +48,8 @@ FAMILY_LABELS = {
 METAL_LABELS = dict(iron='fer', copper='cuivre', tin='étain', lead='plomb', zinc='zinc', silver='argent', gold='or',
                     salt='sel', gypsum='gypse', coal='charbon', tungsten='tungstène', star_metal='métal stellaire')
 _LOCK = threading.RLock()
+import terrain_resources as _compiler  # noqa: E402  (world authority; its source names the cache)
+_COMPILER_CODE = hashlib.sha256(Path(_compiler.__file__).read_bytes()).hexdigest()
 
 
 def fantasy_enabled():
@@ -58,9 +61,10 @@ def _specs():
     import terrain_resources as R
     out = []
 
-    def add(group, name, label, unit, lo, hi, colors, value, status='derived', proxy=False, log=False, kind='ramp', classes=None):
+    def add(group, name, label, unit, lo, hi, colors, value, status='derived', proxy=False, log=False, kind='ramp', classes=None,
+            seasonal=False):
         out.append((PREFIX + group + '-' + name, dict(group=group, label=label, unit=unit, range=[lo, hi], colors=colors,
-                   status=status, proxy=proxy, log=log, kind=kind, classes=classes, value=value)))
+                   status=status, proxy=proxy, log=log, kind=kind, classes=classes, value=value, seasonal=seasonal)))
 
     per_km2 = lambda key, scale=1.: (lambda f, g: np.asarray(f[key], np.float64) / np.maximum(g.area_m2, 1) * 1e6 * scale)
     field = lambda key: (lambda f, g: np.asarray(f[key], np.float64))
@@ -133,24 +137,22 @@ def _specs():
     add('mat', 'peat-share', 'Tourbe · part de la cellule', 'fraction', 0, .3, WARM, lambda f, g: np.asarray(f['peat_area_m2']) / np.maximum(g.area_m2, 1))
     add('mat', 'peat-stock', 'Tourbe · volume', 'm³/km²', 0, 4e5, WARM, per_km2('peat_stock_m3'))
     add('mat', 'bog-iron', 'Fer des marais · renouvellement', 't Fe/km²/an', 0, .4, WARM, per_km2('bog_iron_t_year'))
-    # Seasons (Orogen's northern calendar months; southern seasons are inverted)
-    for key, label, months in SEASONS:
-        m = list(months)
-        add('season', 'npp-' + key, f'Production primaire · {label}', 'g MS/m²/mois', 0, 250, GREEN,
-            (lambda m: lambda f, g: np.asarray(f['npp_month_g_m2'])[m].mean(axis=0))(m))
-        add('season', 'forage-' + key, f'Pâture · capacité {label}', 'UGB/km²', 0, 150, GREEN,
-            (lambda m: lambda f, g: np.asarray(f['lsu_month_km2'])[m].mean(axis=0))(m), proxy=True)
-        add('season', 'snow-' + key, f'Neige au sol · {label} (Render v2)', 'fraction', 0, 1, ICE,
-            (lambda m: lambda f, g: np.asarray(f['v2_snow_month'])[m].mean(axis=0) * f['land'])(m), proxy=True)
-        add('season', 'fish-' + key, f'Pêche · {label}', 'kg/km²/mois', 0, 100, BLUE,
-            (lambda m: lambda f, g: (np.asarray(f['fish_inland_month_t'])[m].mean(axis=0)
-                                     + np.asarray(f['fish_marine_month_t'])[m].mean(axis=0)) / np.maximum(g.area_m2, 1) * 1e9)(m))
-        add('season', 'salt-' + key, f'Sel marin · {label}', 't/km²/mois', 0, 10, ICE,
-            (lambda m: lambda f, g: np.asarray(f['sea_salt_month_t'])[m].mean(axis=0) / np.maximum(g.area_m2, 1) * 1e6)(m))
-        add('season', 'felling-' + key, f'Abattage et débardage · {label}', 'part des mois', 0, 1, WARM,
-            (lambda m: lambda f, g: (np.asarray(f['felling_months'])[m].mean(axis=0) + np.asarray(f['sledge_months'])[m].mean(axis=0)) / 2)(m), proxy=True)
-        add('season', 'runoff-' + key, f'Écoulement · {label}', 'mm/mois', 0, 150, BLUE,
-            (lambda m: lambda f, g: np.asarray(f['runoff_mm'])[m].mean(axis=0))(m))
+    # Seasonal layers: 12 monthly fields, continuous season slider (Orogen's
+    # calendar months; southern seasons follow their own climate).
+    month = lambda key, scale=1., area=False: (lambda f, g: np.asarray(f[key], np.float64) * scale /
+                                                (np.maximum(g.area_m2, 1)[None] if area else 1))
+    add('season', 'npp', 'Production primaire mensuelle', 'g MS/m²/mois', 0, 250, GREEN, month('npp_month_g_m2'), seasonal=True)
+    add('season', 'forage', 'Pâture · capacité du mois', 'UGB/km²', 0, 150, GREEN, month('lsu_month_km2'), proxy=True, seasonal=True)
+    add('season', 'snow', 'Neige au sol (Render v2)', 'fraction', 0, 1, ICE,
+        lambda f, g: np.asarray(f['v2_snow_month'], np.float64) * f['land'][None], proxy=True, seasonal=True)
+    add('season', 'fish', 'Pêche du mois', 'kg/km²/mois', 0, 100, BLUE,
+        lambda f, g: (np.asarray(f['fish_inland_month_t'], np.float64) + np.asarray(f['fish_marine_month_t'], np.float64))
+        / np.maximum(g.area_m2, 1)[None] * 1e9, seasonal=True)
+    add('season', 'salt', 'Sel marin du mois', 't/km²/mois', 0, 10, ICE, month('sea_salt_month_t', 1e6, True), seasonal=True)
+    add('season', 'felling', 'Abattage et débardage possibles', 'indice 0–1', 0, 1, WARM,
+        lambda f, g: (np.asarray(f['felling_months'], np.float64) + np.asarray(f['sledge_months'], np.float64)) / 2,
+        proxy=True, seasonal=True)
+    add('season', 'runoff', 'Écoulement du mois', 'mm/mois', 0, 150, BLUE, month('runoff_mm'), seasonal=True)
     return out
 
 
@@ -193,7 +195,8 @@ def _identity(atlas):
     source = getattr(atlas, 'source', atlas)
     meta = getattr(source, 'metadata', {}) or {}
     # Only the compiler defines the world authority; display code may change freely.
-    code = hashlib.sha256(Path(R.__file__).read_bytes()).hexdigest()
+    # Hashed at import, with the module: the code that runs, not a later edit on disk.
+    code = _COMPILER_CODE
     world = meta.get('cache_key') or hashlib.sha256(np.ascontiguousarray(source.height_m).tobytes()).hexdigest()
     return hashlib.sha256(json.dumps(dict(world=world, code=code, fantasy=fantasy_enabled(),
                                           seed=str(getattr(source, 'seed', 0))), sort_keys=True).encode()).hexdigest()
@@ -309,6 +312,8 @@ def render(atlas, mode, xs, ys):
     if spec['kind'] == 'points':
         return draw_deposits(grid, deposits, xs, ys, base)
     value = np.asarray(spec['value'](fields, grid), np.float64)
+    if spec.get('seasonal'):
+        value = value.mean(axis=0)          # overview: annual mean of the monthly fields
     if spec['kind'] == 'mix':
         mix = _sample(grid, value, xs, ys)
         rgb = np.einsum('kyx,kc->yxc', mix, _hex(spec['colors']))
@@ -388,7 +393,8 @@ def inspect(atlas, x, y, radius_m=60000.):
     for mode, spec in specs().items():
         if spec['kind'] in ('points', 'mix'):
             continue
-        v = float(np.asarray(spec['value'](fields, grid), np.float64)[j, i])
+        arr = np.asarray(spec['value'](fields, grid), np.float64)
+        v = float(arr[:, j, i].mean() if arr.ndim == 3 else arr[j, i])     # seasonal: annual mean
         values[mode] = dict(label=spec['label'], value=None if not math.isfinite(v) else round(v, 4), unit=spec['unit'],
                             status=spec['status'], proxy=spec['proxy'])
     dominant = dict(context=R.CONTEXT_LABELS[int(np.argmax([fields['context_' + c][j, i] for c in R.CONTEXTS]))],
@@ -408,55 +414,78 @@ def inspect(atlas, x, y, radius_m=60000.):
 
 
 # ---------------------------------------------------------------------------
-# Multi-scale tiles: descent with noise and conservation (terrain_resource_detail)
+# GPU packages (served once per world and mode) and the CPU fallback tile
 
 VEIN = ('polymetallic_vein', 'epithermal_au_ag', 'sn_w_granite', 'orogenic_au')
 STRATA = dict(bif_iron=50., ironstone=8., mvt_pb_zn=15., sediment_cu=4., evaporite_salt=30., coal=2.)
 AMAS = dict(porphyry_cu=300., vms=40., skarn_fe_cu=60., laterite_fe=8., fantasy_star_metal=50.)
 PLACER = ('placer_au', 'placer_sn')
 PROSPECT_ALL = PREFIX + 'dep-prospect-all'
-R_WORLD = 4e7
+CRYSTALLINE = ('ultramafic', 'basalt', 'metamorphic', 'granite')
+SEDIMENTARY = ('evaporite', 'marl', 'limestone', 'sandstone')
+CONTEXT_ORDER = ('oceanic', 'passive', 'platform', 'craton', 'backarc', 'rift', 'hotspot', 'arc', 'ophiolite', 'collision')
 _AUTH_LOCK = threading.RLock()
 
 
-class _World:
-    """Per-world state shared by tiles: authority arrays, deposits as arrays, descent engine."""
+def profile_of(mode):
+    m = mode.split(PREFIX, 1)[-1]
+    rules = [(('cereal', 'arable'), 'arable'), (('lsu', 'forage', 'transhumance'), 'pasture'),
+             (('tree', 'canopy', 'conifer', 'timber', 'wood', 'felling'), 'forest'),
+             (('peat', 'bog-iron', 'fish-inland'), 'wet'), (('fish-marine',), 'marine'), (('season-fish',), 'wet'),
+             (('stone', 'slate', 'lime'), 'rock'), (('clay', 'sand', 'salt'), 'lowflat'), (('snow', 'fur'), 'cold'),
+             (('growing',), 'season'), (('water-yield', 'runoff'), 'runoff'), (('prospect', 'dep-points'), 'mineral')]
+    for keys, name in rules:
+        if any(k in m for k in keys):
+            return name
+    return 'neutral'
 
-    def __init__(self, grid, fields, deposits, seed):
+
+class _World:
+    """Per-world state: authority arrays (LRU), structure, deposits as arrays, packages."""
+
+    def __init__(self, grid, fields, deposits, seed, identity):
         import terrain_resources as R
-        from terrain_resource_detail import Detail
-        from scipy.ndimage import distance_transform_edt
-        self.grid, self.fields, self.deposits, self.seed = grid, fields, deposits, seed
-        self.cache = OrderedDict()
+        from scipy.ndimage import distance_transform_edt, gaussian_filter
+        self.grid, self.fields, self.deposits, self.seed, self.identity = grid, fields, deposits, seed, identity
+        self.cache, self.packages = OrderedDict(), OrderedDict()
         land = np.asarray(fields['land'], bool)
         # Coastal extrapolation: nearest land (or sea) cell value, so a fine coast
-        # inside an authority sea cell still has a parent value (doc §16).
+        # inside an authority sea cell still has a parent value.
         self.nearest_land = distance_transform_edt(~land, return_distances=False, return_indices=True) if (~land).any() else None
         self.nearest_sea = distance_transform_edt(land, return_distances=False, return_indices=True) if land.any() else None
-        self.detail = Detail(seed, grid, fields, deposits, self.authority)
-        self.png = OrderedDict()
+        # Parallel to orogenic belts (stored by the compiler; recomputed for older caches).
+        self.strike = (np.asarray(fields['structural_strike'], np.float64) if 'structural_strike' in fields
+                       else R.structural_strike(fields))
+        self.seed32 = R.key(seed, ['resources', 'gpu']) & 0xffffffff
         n = len(deposits)
         self.dep_family = np.array([d['family'] for d in deposits]) if n else np.array([], str)
         offs = [R.key(seed, ['resources', 'deposit-lod0', d['id']]) for d in deposits]
-        span = np.array([float(1 << d['position_lod']) for d in deposits]) if n else np.zeros(0)
-        pi = np.array([d['position_i'] for d in deposits], np.float64) * span if n else np.zeros(0)
-        pj = np.array([d['position_j'] for d in deposits], np.float64) * span if n else np.zeros(0)
-        oi = np.array([(k % 997) / 997 for k in offs]) if n else np.zeros(0)
-        oj = np.array([((k >> 20) % 991) / 991 for k in offs]) if n else np.zeros(0)
-        # LOD-0 cell centre inside the deposit's LOD-3 cell (keyed, never re-drawn).
-        self.dep_x = (pi + np.floor(oi * span) + .5) * 30.
-        self.dep_y = (pj + np.floor(oj * span) + .5) * 30.
+        span = np.array([1 << d['position_lod'] for d in deposits], np.int64) if n else np.zeros(0, np.int64)
+        pi = np.array([d['position_i'] for d in deposits], np.int64) * span if n else np.zeros(0, np.int64)
+        pj = np.array([d['position_j'] for d in deposits], np.int64) * span if n else np.zeros(0, np.int64)
+        # LOD-0 cell inside the deposit's LOD-3 cell (keyed, never re-drawn).
+        self.dep_di = pi + np.array([k % 997 for k in offs], np.int64) * span // 997 if n else pi
+        self.dep_dj = pj + np.array([(k >> 20) % 991 for k in offs], np.int64) * span // 991 if n else pj
         self.dep_ore = np.array([d['ore_t'] for d in deposits], np.float64) if n else np.zeros(0)
         self.dep_access = np.array([d['medieval_accessible_share'] for d in deposits]) if n else np.zeros(0)
         self.dep_gossan = np.array([d['gossan'] for d in deposits], bool) if n else np.zeros(0, bool)
         jit = np.array([((k >> 40) % 1000) / 1000 - .5 for k in offs]) if n else np.zeros(0)
-        strike = self.detail.strike()
-        if n:
-            ci = (np.floor(self.dep_x / grid.size).astype(int) - grid.i[0]) % len(grid.i)
-            cj = np.clip(np.floor(self.dep_y / grid.size).astype(int) - grid.j[0], 0, len(grid.j) - 1)
-            self.dep_theta = strike[cj, ci] + .5 * jit
-        else:
-            self.dep_theta = np.zeros(0)
+        ci = (self.dep_di >> 10) - grid.i[0]
+        cj = np.clip((self.dep_dj >> 10) - grid.j[0], 0, len(grid.j) - 1)
+        self.dep_theta = self.strike[cj, ci % len(grid.i)] + .5 * jit if n else np.zeros(0)
+        fam = self.dep_family
+        thick = np.array([AMAS.get(f, STRATA.get(f, 30.)) for f in fam]) if n else np.zeros(0)
+        strata = np.isin(fam, list(STRATA))
+        aspect = np.where(strata, 5., 1.6)
+        a = np.sqrt(self.dep_ore / 2.7 / np.maximum(thick, 1) * aspect / np.pi)
+        b = a / aspect
+        vein, placer = np.isin(fam, VEIN), np.isin(fam, PLACER)
+        self.dep_a = np.where(placer, np.clip(400 * (self.dep_ore / 1e5) ** .5, 200, 4000) / 2,
+                              np.where(vein, np.clip(120 * (self.dep_ore / 1e4) ** .45, 60, 5000) / 2, a))
+        self.dep_b = np.where(placer, 60., np.where(vein, np.clip(1.5 * (self.dep_ore / 1e4) ** .25, 1, 15) / 2, b))
+        self.dep_shape = np.where(vein, 0, np.where(placer, 3, np.where(strata, 2, 1)))
+        names = list(FAMILY_LABELS)
+        self.dep_color = np.array([names.index(f) if f in names else 0 for f in fam], np.int32)
         self.dep_mass = {}
         for kind in ('contained', 'medieval_recoverable'):
             for d_idx, d in enumerate(deposits):
@@ -474,11 +503,11 @@ class _World:
             v = np.asarray(specs()[mode]['value'](self.fields, self.grid), np.float64)
         v = np.nan_to_num(v)
         idx = self.nearest_sea if 'fish-marine' in mode else self.nearest_land
-        if idx is not None and not mode.startswith(PREFIX + 'geo-'):
+        if idx is not None and not mode.startswith(PREFIX + 'geo-') and 'harvest' not in mode:
             v = v[..., idx[0], idx[1]]
         with _AUTH_LOCK:
             self.cache[mode] = v
-            while len(self.cache) > 24:
+            while len(self.cache) > 16:
                 self.cache.popitem(last=False)
         return v
 
@@ -489,7 +518,7 @@ def world_state(atlas):
     with _LOCK:
         state = getattr(source, '_terrain_resources_state', None)
         if state is None or state.fields is not fields:
-            state = _World(grid, fields, deposits, int(getattr(source, 'seed', 0)))
+            state = _World(grid, fields, deposits, int(getattr(source, 'seed', 0)), _identity(atlas))
             source._terrain_resources_state = state
         return state
 
@@ -502,190 +531,150 @@ def _bounds_of(spec):
     return None
 
 
-def _shade(feat, lod):
-    if feat is None:
-        return None
-    e = np.maximum(feat['elevation'], 0)
-    gy, gx = np.gradient(e, 30. * 2 ** lod)
-    light = (-gx * .6 - gy * .8 + 1) / np.sqrt(1 + gx * gx + gy * gy)
-    return np.clip(.78 + 1.2 * (light - 1), .55, 1.1)
-
-
-def render_tile(atlas, mode, lod, tx, ty, inputs):
-    """RGB (256, 256) of a resource layer at any LOD; cached per (mode, lod, tile)."""
-    from terrain_resource_detail import HALO, TILE, tile_axes, multi_noise
-    state = world_state(atlas)
-    key = (mode, lod, tx, ty)
-    with _LOCK:
-        if key in state.png:
-            state.png.move_to_end(key)
-            return state.png[key]
-    spec = specs()[mode]
-    if lod < -6:
-        raise ValueError('Resource layers stop at LOD -6')
-    det = state.detail
-    xs, ys, _, _ = tile_axes(lod, tx, ty)
-    inner = (slice(HALO, HALO + TILE), slice(HALO, HALO + TILE))
-    fine = lod < det.lod
-    feat = det.features(lod, tx, ty, inputs) if fine else None
-    if feat is not None:
-        land = feat['land'][inner].astype(np.float64)
-    else:
-        land = np.asarray(_sample(state.grid, np.asarray(state.fields['land'], np.float64), xs, ys))[inner]
-    base = land[..., None] * np.array([.16, .16, .15]) + (1 - land[..., None]) * np.array([.04, .07, .12])
-    values = lambda m, b: (det.values(m, lod, tx, ty, inputs, 'ramp', b) if fine else det.authority_tile(m, lod, tx, ty))[inner]
-    kind = spec['kind']
-    if kind == 'points':
-        # Background only: smooth bilinear prospectivity (the conserved fields are
-        # the per-family layers); exact zeros of 30 km cells would draw rectangles.
-        prospect = np.clip(_sample(state.grid, state.authority(PROSPECT_ALL), xs, ys)[inner], 0, 1)
-        rgb = base * (1 - .55 * prospect[..., None]) + _hex(['5a3b1c'])[0] * .55 * (prospect * land)[..., None]
-        rgb = draw_shapes(state, xs[HALO:HALO + TILE], ys[HALO:HALO + TILE], rgb, lod, feat)
-    elif mode.startswith(PREFIX + 'dep-stock-') or mode.startswith(PREFIX + 'dep-recoverable-'):
-        rgb = _colorize(spec, mode, stock_density(state, mode, lod, xs, ys)[inner], base, land)
-    elif kind == 'mix':
-        frac = (det.values(mode, lod, tx, ty, inputs, 'mix', None) if fine else det.authority_tile(mode, lod, tx, ty))[(slice(None),) + inner]
-        q = np.maximum(frac, 0) ** 2.5 if fine else frac
-        q = q / np.maximum(q.sum(axis=0), 1e-12)
-        rgb = np.einsum('kyx,kc->yxc', q, _hex(spec['colors'])) * np.maximum(land, .35)[..., None]
-    elif kind == 'classes':
-        suit = values(PREFIX + 'agri-cereal-suitability', (0., 1.))
-        cls = np.select([suit >= .8, suit >= .6, suit >= .4, suit >= .2, suit > 0], [5, 4, 3, 2, 1], 0)
-        rgb = np.where((land > .5)[..., None], _hex(spec['colors'])[cls], base)
-    elif kind == 'cyclic':
-        value = det.authority_value(mode)
-        g = state.grid
-        warp = g.size * .45 * np.stack([multi_noise(state.seed, 'harvest-warp-' + a, max(lod, -6), min(g.lod, max(lod, -6) + 3), xs, ys) for a in 'xy'])
-        X, Y = np.meshgrid(xs, ys)
-        ii = (np.floor((X + warp[0]) / g.size).astype(int) - g.i[0]) % len(g.i)
-        jj = np.clip(np.floor((Y + warp[1]) / g.size).astype(int) - g.j[0], 0, len(g.j) - 1)
-        cat = value[jj, ii][inner]
-        rgb = .5 + .5 * np.cos(2 * np.pi * (np.nan_to_num(cat / 12)[..., None] + np.array([0, 1 / 3, 2 / 3])))
-        rgb = np.where((np.isfinite(cat) & (land > .5))[..., None], rgb * .9, base)
-    else:
-        rgb = _colorize(spec, mode, values(mode, _bounds_of(spec)), base, land)
-    shade = _shade(feat, lod)
-    if shade is not None:
-        rgb = rgb * shade[inner][..., None]
-    rgb = (np.clip(rgb, 0, 1) * 255).astype(np.uint8)
-    with _LOCK:
-        state.png[key] = rgb
-        while len(state.png) > 256:
-            state.png.popitem(last=False)
-    return rgb
-
-
-def _colorize(spec, mode, v, base, land):
-    lo, hi = spec['range']
-    if spec['log']:
-        t = (np.log10(np.maximum(v, lo)) - math.log10(lo)) / (math.log10(hi) - math.log10(lo))
-        shown = v > lo
-    else:
-        t = (v - lo) / (hi - lo)
-        shown = v > lo + 1e-9 * (hi - lo)
-    rgb = _ramp(t, spec['colors'])
-    marine = 'fish-marine' in mode or mode.endswith(tuple('fish-' + k for k, _, _ in SEASONS))
-    mask = shown if marine else shown & (land > .5)
-    return np.where(mask[..., None], rgb, base)
-
-
-def stock_density(state, mode, lod, xs, ys):
-    """Contained (or recoverable) mass per km2 as a sum of deposit kernels.
-
-    Each deposit spreads its exact mass with a normalised Gaussian of width
-    max(physical footprint, 0.75 sample): integrated over space it equals the
-    deposit, so coarser aggregates equal the stock layers (doc §16).
-    """
-    metal = (mode.split('-stock-')[-1] if '-stock-' in mode else mode.split('-recoverable-')[-1]).replace('-', '_')
-    kind = 'contained' if '-stock-' in mode else 'medieval_recoverable'
-    mass = state.dep_mass.get((kind, metal))
-    out = np.zeros((len(ys), len(xs)))
-    if mass is None or not len(mass):
-        return out
-    r = 30. * 2 ** lod
-    sigma = np.maximum(np.sqrt(state.dep_ore / 2.7 / 30.) / 2, .75 * r)
-    x0, x1, y0, y1 = xs[0], xs[-1], ys[0], ys[-1]
-    px = state.dep_x + np.round(((x0 + x1) / 2 - state.dep_x) / R_WORLD) * R_WORLD
-    keep = (mass > 0) & (px > x0 - 4 * sigma) & (px < x1 + 4 * sigma) & \
-           (state.dep_y > y0 - 4 * sigma) & (state.dep_y < y1 + 4 * sigma)
-    for k in np.flatnonzero(keep):
-        s = sigma[k]
-        cx = slice(max(0, int(np.searchsorted(xs, px[k] - 4 * s))), int(np.searchsorted(xs, px[k] + 4 * s)) + 1)
-        cy = slice(max(0, int(np.searchsorted(ys, state.dep_y[k] - 4 * s))), int(np.searchsorted(ys, state.dep_y[k] + 4 * s)) + 1)
-        gx = np.exp(-((xs[cx] - px[k]) ** 2) / (2 * s * s))
-        gy = np.exp(-((ys[cy] - state.dep_y[k]) ** 2) / (2 * s * s))
-        out[cy, cx] += mass[k] * 1e6 / (2 * np.pi * s * s) * gy[:, None] * gx[None, :]
+def _mean_preserving(v, bounded=None):
+    """One pycnophylactic iteration: bilinear cell means of the result ~ v (wrap in longitude)."""
+    q = np.concatenate((v[..., -1:], v, v[..., :1]), axis=-1)
+    q = np.concatenate((q[..., :1, :], q, q[..., -1:, :]), axis=-2)
+    rows = (q[..., :-2, :] + 6 * q[..., 1:-1, :] + q[..., 2:, :]) / 8
+    s = (rows[..., :, :-2] + 6 * rows[..., :, 1:-1] + rows[..., :, 2:]) / 8
+    out = np.maximum(2 * v - s, 0)
+    if bounded is not None:
+        out = np.clip(out, bounded[0], bounded[1])
     return out
 
 
-def smooth01(x, a, b):
-    t = np.clip((x - a) / (b - a), 0, 1)
-    return t * t * (3 - 2 * t)
+def _kind_of(mode, spec):
+    if '-stock-' in mode or '-recoverable-' in mode:
+        return 'stock'
+    if spec['kind'] in ('mix', 'classes', 'cyclic', 'points'):
+        return spec['kind']
+    return 'log' if spec['log'] else 'ramp'
 
 
-def draw_shapes(state, xs, ys, rgb, lod, feat):
-    """Deposit footprints: oriented veins, ellipsoidal bodies, strata lenses,
-    placers on valley floors and canonical rivers, prospectivity halo and
-    gossan rim. Below 1.5 px a footprint becomes a map symbol."""
-    from terrain_resource_detail import HALO, TILE
-    if not len(state.dep_x):
-        return rgb
-    r = 30. * 2 ** lod
-    x0, x1, y0, y1 = xs[0], xs[-1], ys[0], ys[-1]
-    px = state.dep_x + np.round(((x0 + x1) / 2 - state.dep_x) / R_WORLD) * R_WORLD
-    ore, fam = state.dep_ore, state.dep_family
-    vein, placer, strata = np.isin(fam, VEIN), np.isin(fam, PLACER), np.isin(fam, list(STRATA))
-    thick = np.array([AMAS.get(f, STRATA.get(f, 30.)) for f in fam])
-    aspect = np.where(strata, 5., 1.6)
-    a = np.sqrt(ore / 2.7 / thick * aspect / np.pi)
-    b = a / aspect
-    a = np.where(vein, np.clip(120 * (ore / 1e4) ** .45, 60, 5000) / 2, a)
-    b = np.where(vein, np.clip(1.5 * (ore / 1e4) ** .25, 1, 15) / 2, b)
-    a = np.where(placer, np.clip(400 * (ore / 1e5) ** .5, 200, 4000) / 2, a)
-    b = np.where(placer, 60., b)
-    halo_r = np.minimum(np.maximum(a, 2 * r), 4000.)
-    reach = np.maximum(halo_r * 2.5, a + 2 * r)
-    keep = (px > x0 - reach) & (px < x1 + reach) & (state.dep_y > y0 - reach) & (state.dep_y < y1 + reach)
-    # Placer trap: canonical rivers, else flat valley floors (slope < 4 degrees).
-    valley = (np.maximum(feat['river'] > .3, smooth01(feat['valley'], .7, .95) * (feat['slope'] < 4))
-              [HALO:HALO + TILE, HALO:HALO + TILE]) if feat is not None else None
-    for k in np.flatnonzero(keep)[np.argsort(-ore[keep])]:
-        color = _hex([FAMILY_COLORS.get(fam[k], 'ffffff')])[0] * (.45 + .55 * state.dep_access[k])
-        ia = slice(max(0, int(np.searchsorted(xs, px[k] - reach[k]))), int(np.searchsorted(xs, px[k] + reach[k])) + 1)
-        ja = slice(max(0, int(np.searchsorted(ys, state.dep_y[k] - reach[k]))), int(np.searchsorted(ys, state.dep_y[k] + reach[k])) + 1)
-        if ia.start >= ia.stop or ja.start >= ja.stop:
-            continue
-        dx = xs[ia][None, :] - px[k]
-        dy = ys[ja][:, None] - state.dep_y[k]
-        patch = rgb[ja, ia]
-        if 2 * b[k] / r < 1.5 and not placer[k] or 2 * a[k] / r < 1.5:
-            # Map symbol of constant screen size (veins thinner than a sample, far views).
-            rpx = (1.2 + .8 * max(0, math.log10(max(ore[k], 1)) - 4)) * min(1., max(.4, 4000. / r)) + .3
-            if vein[k] and 2 * a[k] / r >= 3:
-                c, s = math.cos(state.dep_theta[k]), math.sin(state.dep_theta[k])
-                u, v = dx * c + dy * s, -dx * s + dy * c
-                body = np.clip(1.2 - np.abs(v) / r, 0, 1) * np.clip((a[k] - np.abs(u)) / r, 0, 1)
-                patch[:] = patch * (1 - body[..., None]) + color * body[..., None]
-                continue
-            dist = np.hypot(dx, dy) / r
-            disc = np.clip(rpx + .5 - dist, 0, 1)[..., None]
-            ring = (np.clip(rpx + 1.5 - dist, 0, 1) - np.clip(rpx + .5 - dist, 0, 1))[..., None]
-            patch[:] = patch * (1 - disc) + color * disc
-            patch[:] = patch * (1 - ring)
-            continue
-        c, s = math.cos(state.dep_theta[k]), math.sin(state.dep_theta[k])
-        u, v = dx * c + dy * s, -dx * s + dy * c
-        q = np.sqrt((u / a[k]) ** 2 + (v / b[k]) ** 2)
-        if vein[k]:
-            body = np.clip((b[k] + .5 * r - np.abs(v)) / r, 0, 1) * np.clip((a[k] - np.abs(u)) / (r + .05 * a[k]), 0, 1)
-        elif placer[k] and valley is not None:
-            body = .8 * np.clip(1.2 - np.hypot(dx, dy) / a[k], 0, 1) * valley[ja, ia]
-        else:
-            body = np.clip((1 - q) * b[k] / r, 0, 1)
-        halo = .2 * np.exp(-(np.hypot(dx, dy) / halo_r[k]) ** 2)
-        patch[:] = patch * (1 - halo[..., None]) + _hex(['c9a64a'])[0] * halo[..., None]
-        if state.dep_gossan[k]:
-            rim = np.clip((1.6 - q) / .6, 0, 1) * (1 - body)
-            patch[:] = patch * (1 - .7 * rim[..., None]) + _hex(['b5532a'])[0] * .7 * rim[..., None]
-        patch[:] = patch * (1 - body[..., None]) + color * body[..., None]
-    return rgb
+def gpu_package(atlas, mode):
+    """(header dict, binary payload) for the browser evaluator; cached per world and mode."""
+    import terrain_resources as R
+    import terrain_resource_gpu as G
+    state = world_state(atlas)
+    with _LOCK:
+        if mode in state.packages:
+            state.packages.move_to_end(mode)
+            return state.packages[mode]
+    spec = specs()[mode]
+    kind = _kind_of(mode, spec)
+    grid = state.grid
+    land = np.asarray(state.fields['land'], bool)
+    bounded = _bounds_of(spec)
+    groups, classes = [], 0
+    if kind == 'mix' and mode.endswith('geo-rock'):
+        # Realized geology: the canonical shares come from the same function (§5.1, §16.3).
+        names = R.ROCKS
+        expected = np.stack([np.asarray(state.fields['rock_expected_' + n], np.float64) for n in names])
+        field = R.realized_rock_field(expected, state.strike, state.fields['rock_bias'])
+        classes = len(names)
+    elif kind == 'mix':
+        names = R.CONTEXTS
+        frac = np.asarray(state.authority(mode), np.float64)
+        # Display only: the oceanic context keeps a 2 % floor on land in the
+        # authority (soft membership); land cells show the other contexts.
+        ocean = names.index('oceanic')
+        rest = frac.sum(axis=0) - frac[ocean]
+        frac[ocean] = np.where(land & (rest > 0), 0., frac[ocean])
+        frac = frac / np.maximum(frac.sum(axis=0), 1e-12)
+        field = np.concatenate((frac, np.cos(2 * state.strike)[None], np.sin(2 * state.strike)[None])).astype(np.float32)
+        # Context fractions are soft memberships (distance kernels to plate
+        # boundaries), not area shares: shown as the dominant context.
+        classes = len(names)
+    elif kind == 'stock':
+        field = np.zeros((1, 2, 2), np.float32)
+    elif kind == 'points':
+        field = _mean_preserving(state.authority(PROSPECT_ALL)[None], (0., 1.)).astype(np.float32)
+        bounded = (0., 1.)
+    elif kind == 'classes':
+        field = _mean_preserving(state.authority(PREFIX + 'agri-cereal-suitability')[None], (0., 1.)).astype(np.float32)
+        bounded = (0., 1.)
+    elif kind == 'cyclic':
+        v = np.asarray(state.authority(mode), np.float64)
+        field = np.where(land, np.where(v >= 255, -1, v), -1)[None].astype(np.float32)
+    else:
+        v = np.asarray(state.authority(mode), np.float64)
+        v = v if v.ndim == 3 else v[None]
+        field = _mean_preserving(v, bounded).astype(np.float32)
+    names_all = list(specs())
+    realized = kind == 'mix' and mode.endswith('geo-rock')
+    layer = R.ROCK_LAYER if realized else names_all.index(mode) + 1
+    coef, sigma = G.PROFILES[profile_of(mode)]
+    pkg = dict(seed32=state.seed32, layer=layer, field=G.Field(field, grid.i[0], grid.j[0]), classes=classes,
+               groups=groups, seasonal=bool(spec.get('seasonal')), season=.5, profile=profile_of(mode),
+               range=tuple(spec['range']), bounded=bounded is not None, bounds=tuple(bounded or spec['range']))
+    if realized:
+        pkg.update(aligned=R.ROCK_ALIGNED, groups=R.ROCK_GROUPS, group_aligned=R.ROCK_GROUP_ALIGNED, beta=G.REALIZED_BETA)
+    deposits = buckets = None
+    if kind in ('points', 'stock'):
+        deposits, buckets = _deposit_buffers(state, mode, kind)
+    palette = [tuple(bytes.fromhex(c)) for c in spec['colors']]
+    if kind == 'points':
+        palette = [tuple(bytes.fromhex(FAMILY_COLORS[k])) for k in FAMILY_LABELS]
+    # Realized geology, in `order`: per class (belt flag << 4 | group), then per group belt flag.
+    order = ([int(a) << 4 | g for a, g in zip(R.ROCK_ALIGNED, R.ROCK_GROUPS)] + [int(a) for a in R.ROCK_GROUP_ALIGNED]
+             if realized else [])
+    header = dict(mode=mode, kind=G.KINDS[kind], lattice=[int(grid.i[0]), int(grid.j[0]), int(grid.shape[1]), int(grid.shape[0])],
+                  layers=int(field.shape[0]), classes=classes, seasonal=pkg['seasonal'], range=list(spec['range']),
+                  bounded=pkg['bounded'], bounds=list(pkg['bounds']), log=bool(spec['log']), profile=G.PROFILE_NAMES.index(profile_of(mode)),
+                  coef=list(coef), sigma=sigma, seed32=int(state.seed32), layer=layer,
+                  groups=[], realized=realized, beta=list(G.REALIZED_BETA) if realized else [0, 0], order=order, thresholds=0,
+                  palette=[[c / 255 for c in rgb] for rgb in palette], deposits=0 if deposits is None else int(len(deposits)),
+                  field_shape=list(field.shape))
+    parts = [field.astype(np.float16).tobytes()]
+    if deposits is not None:
+        size = sum(len(x) for x in parts)
+        parts.append(bytes(-size % 4))            # 32-bit alignment of the deposit words
+        parts.extend([deposits.tobytes(), buckets.tobytes()])
+    result = (header, pkg, b''.join(parts))
+    with _LOCK:
+        state.packages[mode] = result
+        while len(state.packages) > 6:
+            state.packages.popitem(last=False)
+    return result
+
+
+def _deposit_buffers(state, mode, kind):
+    """Deposits sorted by LOD-10 bucket: (N, 12) 32-bit words and (H, W, 2) start/count."""
+    grid = state.grid
+    if kind == 'stock':
+        metal = (mode.split('-stock-')[-1] if '-stock-' in mode else mode.split('-recoverable-')[-1]).replace('-', '_')
+        mass = state.dep_mass.get(('contained' if '-stock-' in mode else 'medieval_recoverable', metal), np.zeros(len(state.dep_ore)))
+        keep = mass > 0
+    else:
+        mass = np.zeros(len(state.dep_ore))
+        keep = np.ones(len(state.dep_ore), bool)
+    idx = np.flatnonzero(keep)
+    ci = ((state.dep_di[idx] >> 10) - grid.i[0]) % len(grid.i)
+    cj = np.clip((state.dep_dj[idx] >> 10) - grid.j[0], 0, len(grid.j) - 1)
+    cell = cj * len(grid.i) + ci
+    order = np.argsort(cell, kind='stable')
+    idx, cell = idx[order], cell[order]
+    words = np.zeros((len(idx), 12), np.float32)
+    ints = words.view(np.int32)
+    ints[:, 0], ints[:, 1] = state.dep_di[idx], state.dep_dj[idx]
+    ints[:, 2], ints[:, 3] = state.dep_shape[idx], state.dep_color[idx]
+    words[:, 4], words[:, 5], words[:, 6] = state.dep_a[idx], state.dep_b[idx], state.dep_theta[idx]
+    words[:, 7] = state.dep_access[idx]
+    words[:, 8] = state.dep_gossan[idx]
+    words[:, 9] = 1.2 + .8 * np.maximum(0, np.log10(np.maximum(state.dep_ore[idx], 1)) - 4)
+    words[:, 10] = np.sqrt(state.dep_ore[idx] / 2.7 / 30.) / 2
+    words[:, 11] = mass[idx]
+    buckets = np.zeros((len(grid.j), len(grid.i), 2), np.uint32)
+    if len(idx):
+        uniq, start, count = np.unique(cell, return_index=True, return_counts=True)
+        buckets.reshape(-1, 2)[uniq, 0] = start
+        buckets.reshape(-1, 2)[uniq, 1] = count
+    return words, buckets
+
+
+def package_deposits(pkg_bytes_header, words):
+    """Deposit records as dicts for the NumPy mirror."""
+    ints = words.view(np.int32)
+    return [dict(di=int(ints[k, 0]), dj=int(ints[k, 1]), shape=int(ints[k, 2]), color=int(ints[k, 3]), a=float(words[k, 4]),
+                 b=float(words[k, 5]), theta=float(words[k, 6]), access=float(words[k, 7]), gossan=float(words[k, 8]),
+                 symbol=float(words[k, 9]), sigma=float(words[k, 10]), mass=float(words[k, 11])) for k in range(len(words))]

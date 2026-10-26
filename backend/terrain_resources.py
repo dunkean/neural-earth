@@ -55,6 +55,13 @@ LITHOLOGY = np.array([
     [.00, .10, .05, .15, .70, .00, .00, .00],   # oceanic floor
 ], np.float64)
 assert np.allclose(LITHOLOGY.sum(axis=1), 1)
+# Realized geology (see realize_rocks): fixed noise layer of the rock classes
+# and the classes that form belts along the structural trend.
+ROCK_LAYER = 4001
+ROCK_ALIGNED = (False, True, True, True, False, True, True, True)   # granite, basalt isotropic
+# Province groups: plutonic, volcanic, metamorphic (+ ultramafic sutures), sedimentary.
+ROCK_GROUPS = (0, 3, 3, 3, 1, 2, 2, 3)
+ROCK_GROUP_ALIGNED = (False, False, True, False)                   # metamorphic belts
 
 # Medieval-relevant deposit families. contexts: weight per CONTEXTS entry;
 # hosts: weight per ROCKS entry; metals: contained mass fraction of ore (t/t);
@@ -347,7 +354,8 @@ def _atlas_xy(shape):
 
 
 def lithology(contexts, aridity, lowland, seed, xs, ys):
-    """Rock-class fractions: context table, aridity-dependent evaporites, province noise."""
+    """Expected rock-class shares: context table and aridity-dependent evaporites.
+    The canonical shares are realized from them by realize_rocks."""
     rock = np.einsum('kyx,kr->ryx', contexts, LITHOLOGY)
     basin = contexts[CONTEXTS.index('rift')] + contexts[CONTEXTS.index('backarc')] + \
         contexts[CONTEXTS.index('passive')] + contexts[CONTEXTS.index('platform')]
@@ -356,9 +364,64 @@ def lithology(contexts, aridity, lowland, seed, xs, ys):
     # province field supplies "paleo-arid" basins independent of today's climate.
     paleo = np.clip(value_noise(seed, 'paleo-evaporite', 13, X, Y), 0, 1)
     rock[ROCKS.index('evaporite')] += .10 * basin * lowland * np.maximum(aridity, .6 * paleo)
-    for k, name in enumerate(ROCKS):
-        rock[k] *= np.exp(.35 * value_noise(seed, 'lithology-' + name, 13, X, Y))
     return rock / rock.sum(axis=0)
+
+
+def structural_strike(f):
+    """Structural azimuth (radians, grid frame) parallel to orogenic belts:
+    normal to the gradient of the smoothed collision, arc, rift and back-arc contexts."""
+    belt = sum(np.asarray(f.get('context_' + c, 0), np.float64) for c in ('collision', 'arc', 'rift', 'backarc'))
+    belt = gaussian_filter(belt, 1.5, mode=('nearest', 'wrap'))
+    gy, gx = np.gradient(belt)
+    return np.arctan2(gy, gx) + np.pi / 2
+
+
+def realized_rock_field(expected, strike, bias):
+    """(K + 2, H, W) field of realized_class: biased log expected shares, cos 2θ, sin 2θ."""
+    logs = np.log(np.maximum(expected, 1e-4)) + np.asarray(bias, np.float64)[:, None, None]
+    return np.concatenate((logs, np.cos(2 * strike)[None], np.sin(2 * strike)[None])).astype(np.float32)
+
+
+def realize_rocks(expected, strike, land, grid, seed, side=4):
+    """Canonical rock shares of each land cell: area shares of the realized
+    geology (terrain_resource_gpu.realized_class) on side x side samples per
+    LOD-10 cell (LOD 8 for side 4: 7.7 km, below the shortest noise wavelength
+    of 31 km). A per-class bias is first calibrated (on one sample per cell)
+    so that the world shares match the expected ones. The display evaluates
+    the same function at every LOD, so it agrees with these shares by construction.
+    Returns (shares (K, H, W), bias (K,))."""
+    import terrain_resource_gpu as G
+    kcls = len(ROCKS)
+    if grid.lod != G.AUTH_LOD:          # the realization is defined on the LOD-10 authority
+        return expected.copy(), np.zeros(kcls)
+    seed32 = key(seed, ['resources', 'gpu']) & 0xffffffff
+    cells = np.argwhere(land)
+    area = grid.area_m2[cells[:, 0], cells[:, 1]]
+    target = (expected[:, cells[:, 0], cells[:, 1]] * area).sum(axis=1) / area.sum()
+    bias = np.zeros(kcls)
+
+    def classes(bias, sub, lod, chunk=1 << 16):
+        pkg = dict(seed32=seed32, layer=ROCK_LAYER, classes=kcls, aligned=ROCK_ALIGNED, groups=ROCK_GROUPS,
+                   group_aligned=ROCK_GROUP_ALIGNED,
+                   field=G.Field(realized_rock_field(expected, strike, bias), grid.i[0], grid.j[0]))
+        n, step = len(cells), len(sub) ** 2
+        out = np.empty((n, step), np.int32)
+        for a in range(0, n, chunk):
+            c = cells[a:a + chunk]
+            gi = (grid.i[0] + c[:, 1])[:, None, None] * len(sub) + sub[None, None, :] + np.zeros((1, len(sub), 1), np.int64)
+            gj = (grid.j[0] + c[:, 0])[:, None, None] * len(sub) + sub[None, :, None] + np.zeros((1, 1, len(sub)), np.int64)
+            out[a:a + chunk] = G.realized_class(pkg, gi, gj, lod).reshape(len(c), step)
+        return out
+
+    for _ in range(6):
+        got = np.bincount(classes(bias, np.array([0]), 10)[:, 0], weights=area, minlength=kcls) / area.sum()
+        bias += np.log(np.maximum(target, 1e-6) / np.maximum(got, 1e-6)) * (target > 0)
+    lod = 10 - int(round(math.log2(side)))
+    cls = classes(bias, np.arange(side), lod)
+    shares = expected.copy()
+    for k in range(kcls):
+        shares[k][cells[:, 0], cells[:, 1]] = (cls == k).mean(axis=1)
+    return shares, bias
 
 
 def _months(temp_summer, temp_winter, precip_summer, precip_winter, lat):
@@ -431,8 +494,13 @@ def compile_world(layers, height, seed, *, lod=WORLD_LOD, fantasy=False, params=
     f['sea_km'] = S(sea_km)
     for k, name in enumerate(CONTEXTS):
         f['context_' + name] = S(contexts_atlas[k])
+    expected = np.stack([S(rocks_atlas[k]) for k in range(len(ROCKS))])
+    expected /= np.maximum(expected.sum(axis=0), 1e-12)
+    f['structural_strike'] = structural_strike(f)
+    realized, f['rock_bias'] = realize_rocks(expected, f['structural_strike'], land, grid, seed)
     for k, name in enumerate(ROCKS):
-        f['rock_' + name] = S(rocks_atlas[k])
+        f['rock_' + name] = realized[k]
+        f['rock_expected_' + name] = expected[k]
     for name in ('sandy', 'calcareous', 'clayey', 'ferrallitic', 'organic', 'podzolic', 'mineral'):
         f['pedology_' + name] = S(layers['pedology_' + name]) if 'pedology_' + name in layers else np.full(grid.shape, 1 / 7)
     T, P = _months(S(ts), S(tw), S(ps), S(pw), f['latitude'])

@@ -70,7 +70,7 @@ class BiomeTileRenderingTests(unittest.TestCase):
             TILE=256, HALO=24, NATIVE=30, MIN_LOD=-3, CLIMATE_SIZE=33,
             WORLD_BOUNDS=(-20e6, -10e6, 20e6, 10e6), PROFILE='fixture',
             MODES=CLIMATE_MODES+STYLE_MODES+MODES+SNR_MODES+RENDER_V2_MODES,
-            RENDER_V2_MODES=RENDER_V2_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=MODES, CACHE=Path(temporary.name),
+            RENDER_V2_MODES=RENDER_V2_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=MODES, RESOURCE_MODES=(), RESOURCE_LEGENDS={}, CACHE=Path(temporary.name),
             resolve_generation=lambda wp: SimpleNamespace(bootstrap_generator='orogen',
                 settings={'climate_source':'orogen'}),
             generation_profile=lambda: 'orogen',
