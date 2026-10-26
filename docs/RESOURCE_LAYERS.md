@@ -83,7 +83,7 @@ Une cellule `(LOD, i, j)` couvre `[i, i+1) × [j, j+1) × 30·2^LOD` mètres de 
 | LOD (pas) | Faits décidés | Origine de l'information | Calcul | Statut |
 |---|---|---|---|---|
 | Atlas Orogen (≈ 19,5 km) | Distances aux frontières, contextes tectoniques, lithologie à la résolution de l'atlas | `crust`, `boundaries`, `convergence`, `hotspot`, `backArc`, `uplift`, climat sur deux saisons | à la compilation monde | implémenté |
-| **10 (30,72 km)** | **Autorité** : fractions de contexte et de roche, prospectivités, climat mensuel, bilan hydrique, NPP, céréales, pâture, bois, gibier, pêche, sel, tourbe, matériaux ; **nombre, tonnage et teneur des gisements** ; budgets entiers par cellule | atlas échantillonné, bilan hydrique partagé, évaluateur Render v2 | une fois par monde, environ 200 s, puis cache disque (§15) | implémenté |
+| **10 (30,72 km)** | **Autorité** : fractions de contexte et de roche, prospectivités, climat mensuel, bilan hydrique, NPP, céréales, pâture, bois, gibier, pêche, sel, tourbe, matériaux ; **nombre, tonnage et teneur des gisements** ; budgets entiers par cellule | atlas échantillonné, bilan hydrique partagé, évaluateur Render v2 | une fois par monde, dans un processus séparé, 27 à 41 s publiés par étapes, puis cache disque (§15.1) | implémenté |
 | 11 et plus (≥ 61 km), régions Chronos | Sommes exactes des cellules du LOD 10 ; une région est une union de cellules du LOD 10 | agrégation | à la demande | implémenté (`aggregate`, `region_summary`) |
 | 9 à 4 (15,36 km – 480 m) | Budgets entiers : sommes des enfants au LOD 3. **Champs affichés : évaluateur GPU par pixel, bruit adressé, zones, conservation des moyennes du parent à une tolérance mesurée (§16)** | agrégation ; relief des blocs natifs grossiers (LOD 4 à 7) ou des tuiles physiques | GPU, par pixel | implémenté |
 | **3 (240 m)** | **Position des gisements** ; budgets aréaux répartis exactement depuis le LOD 10 | intensités interpolées du LOD 10, aire exacte des enfants, facteur canonique optionnel (relief latent à 240 m, proposé) | à la demande, par cellule parente | implémenté (`descend_budget`, `_place_in_cell`) |
@@ -462,13 +462,104 @@ Elles sont calculées **sur le GPU**, comme Render v2, sur la carte et le globe 
 
 Machine locale de Gregory, Windows 11, RTX 3090. L'autorité, la réalisation des roches et les budgets sont calculés sur le CPU (NumPy) ; l'affichage dans le navigateur (WebGPU).
 
+### 15.1 Calcul de l'autorité sans bloquer le viewer (implémenté)
+
+**Problème corrigé (mesuré par le coordinateur).** La première requête `/api/resources/<seed>/gpu` attendait 221 s, synchrone dans la requête HTTP : `compile_world` tournait dans le thread de la requête, et le navigateur n'affichait rien. Le cache disque (767 Mo) était invalidé par toute modification du compilateur, car sa clé était le hachage du texte source.
+
+**Ce qui est fait.**
+
+- **Processus de compilation dédié** (`backend/terrain_resource_compile.py`). Il est lancé dès que le viewer ouvre un monde Orogen (`/api/resources/<seed>/status`), hors du GIL du serveur. Le serveur lui écrit les couches d'atlas utiles, puis suit son fichier d'état. Un plantage natif de la compilation ne tue plus le serveur.
+- **Étapes publiées.** Après chaque étape, le processus réécrit un instantané des champs déjà calculés. Une couche est servie dès que les champs qu'elle lit existent ; sinon `/gpu` répond `202` avec l'étape, l'avancement et une estimation.
+
+  | Étape | Contenu | Couches disponibles ensuite |
+  |---|---|---|
+  | `tectonics` | contextes, roches attendues, azimut structural, biais de la géologie réalisée, climat mensuel, bilan hydrique | roches, contextes, eau, écoulement |
+  | `environment` | environnement Render v2, biologie | NPP, céréales, pâture, bois, faune, pêche, saisons |
+  | `geology` | parts canoniques des roches, matériaux, fer des marais | fractions de roches, matériaux |
+  | `deposits` | prospectivités, gisements, stocks | gisements, stocks |
+
+- **Parallélisme déterministe** (`backend/terrain_resource_workers.py`). L'environnement Render v2 (6 tâches de 2 mois) et le placement des gisements tournent dans des processus de travail. Le résultat est identique au calcul en série (empreinte des champs égale, testé).
+- **Calculs allégés, résultats inchangés** :
+  - hachage du bruit en 6 appels au lieu de 8 par maille ;
+  - orientations du bruit aligné évaluées seulement là où leur poids est positif ;
+  - Render v2 évalué seulement sur les terres et le plateau (> −200 m), car les valeurs de mer profonde ne sont jamais lues ;
+  - tirage de Poisson limité aux cellules d'intensité non nulle ;
+  - préfixes de clés mémorisés.
+- **Calculs allégés, résultats changés** (d'où `COMPILER_VERSION = resources-compiler-3`) :
+  - parts canoniques des roches sur 2 × 2 échantillons (LOD 9) au lieu de 4 × 4 ;
+  - biais calibré sur une cellule terrestre sur huit.
+- **Cache** (`<runtime>/resources/resource-layers-v3`) :
+  - npz compressé, sans les 18 champs de stocks, recalculés au chargement comme sommes exactes des gisements : 150 Mo, plus 3,4 Mo de gisements et 22 Mo d'environnement Render v2, au lieu de 767 Mo ;
+  - chargement : environ 1,4 s ;
+  - écriture : environ 10 s, après que le monde est servi.
+- **Clé du cache** :
+  - monde : `cache_key` de l'atlas, ou hachage du relief ;
+  - graine et option fantasy ;
+  - `terrain_resources.COMPILER_VERSION` ;
+  - hachage de `terrain_render_v2.py`, une entrée externe.
+
+  L'environnement Render v2 a son propre cache (`V2_INPUTS_VERSION`, même hachage). Après une modification du compilateur, il est réutilisé.
+- **Règle de version.** Incrémenter `COMPILER_VERSION` dès qu'une sortie canonique de `compile_world` change (valeurs, champs, gisements, clés). Incrémenter `V2_INPUTS_VERSION` si les entrées données à Render v2 changent. Une modification d'affichage (couches, WGSL, miroir, couleurs) ne touche ni l'une ni l'autre.
+- **Affichage pendant le calcul** (`web/terrain_resources.js`). La légende montre une barre, l'étape et une estimation, par exemple « Calcul des ressources du monde : environnement Render v2 et biologie (étape 2/4, ~12 s) ». La carte garde le relief sous la couche, et non un fond vide. Une erreur s'affiche (« Couche indisponible : … »). L'inspecteur indique le calcul en cours.
+
+### 15.2 Temps jusqu'au premier pixel (mesuré)
+
+Commande : `node tools/benchmarks/benchmark_resources_first_pixel.cjs [--spawn PYTHON] [--seed S] [--clear-cache DIR]`.
+
+Le script démarre un serveur froid, ouvre le viewer sur le monde Orogen, puis choisit les 10 couches l'une après l'autre dans le menu. Il chronomètre le temps jusqu'à ce que le paquet soit lié au GPU et qu'une image soit dessinée. Dans tous les cas, le monde s'ouvre en 11,4 à 12,6 s.
+
+| Couche (ordre du clic) | Monde neuf, graine 1234 | Même monde après modification du compilateur (environnement Render v2 en cache) | Monde en cache disque, serveur redémarré | Monde déjà chargé |
+|---|---|---|---|---|
+| NPP (premier clic, juste après l'ouverture) | 25,3 s | 12,3 s | 1,2 s | 0,5 s |
+| Roches | 1,3 s | 1,0 s | 0,9 s | 0,8 s |
+| Contextes | 1,1 s | 3,9 s | 1,0 s | 0,7 s |
+| Aptitude céréalière | 0,4 s | 0,6 s | 0,5 s | 0,6 s |
+| Pierre de taille | 7,0 s | 0,5 s | 0,7 s | 0,7 s |
+| Neige | 1,5 s | 1,5 s | 1,4 s | 1,3 s |
+| Stock de bois | 0,8 s | 0,4 s | 0,6 s | 0,3 s |
+| Mois de récolte | 0,3 s | 0,3 s | 0,8 s | 0,2 s |
+| Gisements | 10,8 s | 10,2 s | 0,9 s | 0,3 s |
+| Stock de cuivre | 0,3 s | 0,5 s | 1,1 s | 0,3 s |
+
+Étapes du processus de compilation pendant l'ouverture du monde (secondes depuis son lancement) :
+
+| Cas | tectonique | environnement | géologie | gisements |
+|---|---|---|---|---|
+| Monde neuf | 12,1 | 23,2 | 31,1 | 41,1 |
+| Après modification du compilateur | 11,1 | 14,3 | 21,7 | 31,0 |
+
+Hors du serveur, sans le viewer, la compilation complète prend 27 s (tectonique 7 s, environnement 8 s, géologie 5,5 s, gisements 6,5 s), contre 206 s avant.
+
+**Objectifs.**
+
+- **Monde déjà chargé, moins de 2 s** : tenu pour les 10 couches (0,2 à 1,4 s).
+- **Monde neuf après une modification de code, moins de 10 s** : **non tenu** au premier clic.
+  - Les roches, les contextes et l'eau arrivent environ 12 s après l'ouverture du monde.
+  - Les couches de l'environnement arrivent vers 23 s (12 s quand l'environnement Render v2 est en cache).
+  - Les gisements arrivent vers 41 s.
+  - Pendant l'attente, la légende montre l'étape et l'estimation, et la carte reste visible.
+  - Le reste à gagner est surtout l'environnement Render v2 (environ 8 s hors charge, 11 s pendant la génération des tuiles) et le placement des gisements. Pistes : un portage GPU de l'évaluateur, ou une autorité plus grossière d'abord (proposé).
+
+### 15.3 Plantage du serveur (exit 139)
+
+- **Cause : non établie.** Le serveur précédent, sur le port 8775, est mort d'une violation d'accès sans trace Python. À ce moment, il exécutait :
+  - le solveur de seuils PyTorch (CUDA) dans un thread du serveur, depuis supprimé ;
+  - des calculs NumPy concurrents ;
+  - la génération des tuiles neuronales.
+
+  La mémoire validée de la machine était presque épuisée (serveur de Gregory, 19 Go, et le mien, 14 Go).
+- **Ce qui est fait** :
+  - plus aucun code ressources n'utilise PyTorch ni de thread de calcul dans le serveur ;
+  - la compilation tourne dans un processus séparé, une par monde, et un plantage y reste confiné ;
+  - `faulthandler` est activé, pour qu'un prochain plantage laisse une pile Python dans le journal du serveur.
+- **Pas de nouveau plantage** pendant les mesures du §15.2 (5 serveurs froids, plus le serveur laissé sur 8775).
+
+### 15.4 Autres mesures
+
 | Mesure | Valeur | Commande |
 |---|---|---|
-| Compilation monde LOD 10 (652 × 1 304 cellules), monde de référence, dans le serveur | 197 s, dont environ 34 s pour les 12 évaluations Render v2 et environ 100 s pour la réalisation des roches (§16.3) | première requête `/api/resources/<seed>/gpu` |
-| Rechargement depuis le cache disque | environ 1 s | `world_resources` |
 | Paquets GPU | 1,7 Mo (continu), 20 Mo (saisonnier), 6,8 à 8,8 Mo (gisements, stocks), 17 à 20 Mo (roches, contextes) | `output/resources-gpu/packages/` |
-| Mémoire du serveur ajoutée par les ressources (monde, 4 paquets) | environ 1,8 Go (mesuré avec l'ancien solveur de seuils) | `PM` du processus |
-| Tests Python des ressources | 20 tests OK en environ 70 s | `python -m unittest tests/python/test_terrain_resources.py` |
+| Tests Python des ressources | 22 tests OK en environ 70 s | `python -m unittest tests/python/test_terrain_resources.py` |
 
 Ce que vérifient les tests Python :
 
@@ -481,6 +572,7 @@ Ce que vérifient les tests Python :
 - gisements cohérents avec la lithologie et le contexte, positions descendantes de la cellule propriétaire ;
 - stocks égaux à la somme des gisements ;
 - descente des budgets exacte et indépendante de l'ordre ;
+- compilation parallèle (processus de travail) identique à la compilation en série, étapes publiées dans l'ordre, environnement Render v2 en cache donnant le même monde ;
 - agrégats régionaux exacts ;
 - isolation de la fantasy ;
 - delta historique monotone et exact ;
@@ -503,6 +595,7 @@ Les budgets canoniques ne changent pas : stocks, tonnages, budgets entiers et to
 | Évaluateur WGSL | `web/terrain_resources_gpu.js` | cœur (hachage, bruit, champs, géologie réalisée, contexte dominant, gisements), puis deux entrées : la passe *shade* des tuiles physiques (LOD ≤ 3, et 8 à 10) et le fragment des blocs natifs grossiers (LOD 4 à 7, comme Render v2) |
 | Miroir NumPy | `backend/terrain_resource_gpu.py` | mêmes opérations, float32 et hachages uint32 ; référence des tests de parité et de la réalisation canonique des roches |
 | Géologie réalisée | `terrain_resources.realize_rocks` (canon) et `terrain_resource_gpu.realized_class` (même fonction) | parts canoniques des roches mesurées sur la fonction que le GPU affiche (§16.3) |
+| Compilation | `terrain_resource_compile.py` (processus), `terrain_resource_workers.py` (tâches parallèles) | autorité calculée hors du serveur, publiée par étapes ; `/gpu` répond 202 tant qu'une couche attend (§15.1) |
 | Renderer | `web/terrain_renderer.js` | liaisons 11 à 15 (champ, réservée, paramètres, gisements, seaux) dans la passe *shade* et dans le pipeline grossier ; un changement de paquet re-shade les tuiles physiques et relie les blocs grossiers |
 | Légende, curseur de saison, inspecteur | `web/terrain_resources.js` | charge le paquet de la couche choisie ; le curseur réécrit seulement 496 octets de paramètres |
 | Repli sans WebGPU | `terrain_server.py` | tuiles PNG bilinéaires du LOD 10, sans détail (ancien chemin) |
@@ -551,20 +644,20 @@ classe(x) = argmax_k [ log E_k(x + w) + b_k + β₁·N_g(k)(x + w) + β₂·N_k(
 - **`N_k`** : bruit de la roche dans son groupe, octaves 11 à 14 (61 à 491 km), β₂ = 0,7.
 - **Azimut structural** : les groupes et roches qui forment des ceintures (métamorphique, ultrabasique, roches sédimentaires) utilisent un bruit étiré ×2 le long de l'azimut structural θ (parallèle aux ceintures orogéniques : normale au gradient lissé des contextes collision, arc, rift, arrière-arc), par mélange de quatre orientations entières du réseau. Granite et basalte sont isotropes.
 - **`w`** : warp d'octaves `L + 2` à 11 (0,15 λ) : les contacts deviennent organiques quand on zoome, l'intérieur d'une unité reste d'une seule roche.
-- **`b_k`** : biais par roche, calibré (6 itérations sur un échantillon par cellule) pour que les parts mondiales réalisées suivent les parts attendues.
+- **`b_k`** : biais par roche, calibré (6 itérations sur un échantillon par cellule, une cellule terrestre sur huit) pour que les parts mondiales réalisées suivent les parts attendues.
 
-**Canon et affichage, une seule fonction.** `terrain_resources.realize_rocks` évalue cette fonction (miroir NumPy) sur 4 × 4 échantillons du LOD 8 par cellule terrestre ; les parts obtenues sont les fractions `rock_*` canoniques, que les prospectivités et les gisements utilisent. Le GPU évalue la même fonction à chaque pixel, à tout LOD : l'affichage concorde avec le canon par construction, aux échantillons et aux warps fins près. Il n'y a plus de seuils à résoudre. Les parts attendues restent disponibles (`rock_expected_*`).
+**Canon et affichage, une seule fonction.** `terrain_resources.realize_rocks` évalue cette fonction (miroir NumPy) sur 2 × 2 échantillons du LOD 9 par cellule terrestre (4 × 4 au LOD 8 jusqu'à `resources-compiler-2` ; réduit pour le temps de calcul, §15.1) ; les parts obtenues sont les fractions `rock_*` canoniques, que les prospectivités et les gisements utilisent. Le GPU évalue la même fonction à chaque pixel, à tout LOD : l'affichage concorde avec le canon par construction, aux échantillons et aux warps fins près. Il n'y a plus de seuils à résoudre. Les parts attendues restent disponibles (`rock_expected_*`).
 
 **Mesuré** (monde de référence ; script local `real_measure2.py`, 240 cellules terrestres tirées au hasard) :
 
 | Contrôle | Résultat |
 |---|---|
-| Cellules terrestres d'une seule roche | 77 % ; part dominante p10 0,75 |
-| Parts mondiales réalisées / attendues | granite 21,2/21,3 %, grès 20,2/18,4, métamorphique 17,8/18,1, marnes 16,2/14,9, basalte 12,8/12,9, calcaire 10,7/12,6, ultrabasique 0,9/1,0, évaporites 0,1/0,7 |
-| Affichage au LOD 6 contre parts canoniques (TV par cellule) | moyenne 0,008, p90 0,032, max 0,11 |
-| Affichage au LOD 4 | moyenne 0,008, p90 0,035, max 0,12 |
+| Cellules terrestres d'une seule roche (2 × 2 échantillons) | 85 % ; part dominante p10 0,75 |
+| Parts mondiales réalisées / attendues | granite 21,3/21,3 %, grès 19,7/18,4, métamorphique 17,8/18,1, marnes 16,8/14,9, basalte 12,8/12,9, calcaire 10,6/12,6, ultrabasique 0,9/1,0, évaporites 0,1/0,7 |
+| Affichage au LOD 6 contre parts canoniques (TV par cellule) | moyenne 0,019, p90 0,067, max 0,41 (avec 4 × 4 échantillons : 0,008, 0,032, 0,11) |
+| Affichage au LOD 4 | moyenne 0,020, p90 0,068, max 0,42 |
 | Paires d'échantillons voisins de roches différentes, LOD 4 (480 m) | 0,37 % (5,2 % avec les seuils de quantiles) |
-| Compilation de l'autorité | 197 s au lieu de 90 s (réalisation : 12 bruits par échantillon) |
+| Réalisation dans la compilation | 5,5 s (parts, en processus de travail) + 1,8 s (biais), §15.1 |
 
 **Contextes tectoniques.** Leurs fractions sont des appartenances floues (noyaux de distance aux frontières de plaques, plancher océanique de 2 %), pas des parts d'aire. Rendues en zones, trois appartenances de 30 % donnaient un semis de taches de 10 km (essai mesuré et vu sur capture, écarté). Ils sont affichés comme **contexte dominant** de l'interpolation déformée, à tout LOD : ceintures continues, contacts organiques, aucune part revendiquée. Le contexte océanique est retiré des cellules terrestres pour cet affichage.
 
@@ -638,7 +731,8 @@ Erreurs du viewer pendant les captures : délais d'attente de Render v2 (chargem
 10. **Affichage GPU** (§16) :
     - les termes de relief déplacent la moyenne d'une cellule (une cellule de vallées est relevée) ; ce biais n'est ni corrigé ni mesuré sur le DEM réel ;
     - profils de relief et σ du bruit proposés, réglés à l'œil sur un seul monde ;
-    - roches : la réalisation est un bruit structuré par les contextes, pas une carte géologique ; les évaporites sont sous-représentées (0,1 % au lieu de 0,7 %), la calibration des biais ne converge pas pour une classe aussi rare ; β et octaves réglés à l'œil sur un seul monde ; la compilation passe de 90 à 197 s ;
+    - roches : la réalisation est un bruit structuré par les contextes, pas une carte géologique ; les évaporites sont sous-représentées (0,1 % au lieu de 0,7 %), la calibration des biais ne converge pas pour une classe aussi rare ; β et octaves réglés à l'œil sur un seul monde ;
+    - temps : un monde neuf n'affiche ses premières couches qu'après 12 s (roches, contextes), 23 s (environnement) et 41 s (gisements) ; objectif de 10 s non tenu (§15.2) ;
     - contextes : unité dominante, pas de parts ;
     - les blocs natifs grossiers (LOD 4 à 7) n'ont pas de texture de rivières : le terme « eau » y est nul ;
     - paquets de 2 à 20 Mo, chargés à chaque changement de couche (cache de 6) ;
