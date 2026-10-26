@@ -6,7 +6,7 @@ Date : 26 octobre 2026. Branche locale `resources-layers` de Neural Earth, rebas
 
 Ce document distingue trois statuts :
 
-- **Implémenté** : code présent dans `backend/terrain_resources.py`, `backend/terrain_resource_layers.py`, `web/terrain_resources.js` et les tests de `tests/python/test_terrain_resources.py`.
+- **Implémenté** : code présent dans `backend/terrain_resources.py` (autorité), `backend/terrain_resource_layers.py` (couches, paquets GPU), `backend/terrain_resource_gpu.py` (miroir NumPy de l'évaluateur), `web/terrain_resources_gpu.js` (évaluateur WGSL), `web/terrain_resources.js`, et testé par `tests/python/test_terrain_resources.py`, `tests/browser/test_terrain_resources_gpu.cjs` et `tools/verification/verify_resources_gpu_parity.cjs`.
 - **Mesuré** : valeur obtenue sur le monde Orogen en cache (seed `7985403534069300490`, style `continents`), avec la commande indiquée.
 - **Proposé** : conception non encore codée, ou calibration provisoire.
 
@@ -83,13 +83,13 @@ Une cellule `(LOD, i, j)` couvre `[i, i+1) × [j, j+1) × 30·2^LOD` mètres de 
 | LOD (pas) | Faits décidés | Origine de l'information | Calcul | Statut |
 |---|---|---|---|---|
 | Atlas Orogen (≈ 19,5 km) | Distances aux frontières, contextes tectoniques, lithologie à la résolution de l'atlas | `crust`, `boundaries`, `convergence`, `hotspot`, `backArc`, `uplift`, climat sur deux saisons | à la compilation monde | implémenté |
-| **10 (30,72 km)** | **Autorité** : fractions de contexte et de roche, prospectivités, climat mensuel, bilan hydrique, NPP, céréales, pâture, bois, gibier, pêche, sel, tourbe, matériaux ; **nombre, tonnage et teneur des gisements** ; budgets entiers par cellule | atlas échantillonné, bilan hydrique partagé, évaluateur Render v2 | une fois par monde, environ 65 s, puis cache disque (§15) | implémenté |
+| **10 (30,72 km)** | **Autorité** : fractions de contexte et de roche, prospectivités, climat mensuel, bilan hydrique, NPP, céréales, pâture, bois, gibier, pêche, sel, tourbe, matériaux ; **nombre, tonnage et teneur des gisements** ; budgets entiers par cellule | atlas échantillonné, bilan hydrique partagé, évaluateur Render v2 | une fois par monde, environ 200 s, puis cache disque (§15) | implémenté |
 | 11 et plus (≥ 61 km), régions Chronos | Sommes exactes des cellules du LOD 10 ; une région est une union de cellules du LOD 10 | agrégation | à la demande | implémenté (`aggregate`, `region_summary`) |
-| 9 à 4 (15,36 km – 480 m) | Budgets entiers : sommes des enfants au LOD 3. **Champs affichés : descente avec bruit adressé et conservation exacte des moyennes du parent (§16)** | agrégation ; relief neuronal du LOD | à la demande, par tuile | implémenté |
+| 9 à 4 (15,36 km – 480 m) | Budgets entiers : sommes des enfants au LOD 3. **Champs affichés : évaluateur GPU par pixel, bruit adressé, zones, conservation des moyennes du parent à une tolérance mesurée (§16)** | agrégation ; relief des blocs natifs grossiers (LOD 4 à 7) ou des tuiles physiques | GPU, par pixel | implémenté |
 | **3 (240 m)** | **Position des gisements** ; budgets aréaux répartis exactement depuis le LOD 10 | intensités interpolées du LOD 10, aire exacte des enfants, facteur canonique optionnel (relief latent à 240 m, proposé) | à la demande, par cellule parente | implémenté (`descend_budget`, `_place_in_cell`) |
-| 2 à 0 (120–30 m) | Champs affichés descendus jusqu'au décodeur à 30 m, modulés par le DEM neuronal et les rivières sources (§16) ; emprises de gisements (filons, amas, lentilles, placers, halo, chapeau de fer) ; mélanges continus de roches à strates et intrusions | DEM neuronal, hydrologie source | à la demande, par tuile | implémenté (viewer) |
+| 2 à 0 (120–30 m) | Champs affichés modulés par le DEM neuronal et l'eau de la tuile (§16) ; emprises de gisements (filons, amas, lentilles, placers, halo, chapeau de fer) ; zones de roches à contacts organiques, strates le long de l'azimut structural | DEM neuronal, hydrologie | GPU, par pixel | implémenté (viewer) |
 | 0 (30 m), tuile 40 km | Répartition exacte de chaque bloc de 240 m entre ses 64 cellules ; carrières, glaisières et tourbières locales ; géologie fine de `surface_context.py` conditionnée | champs de tuile (`surface_context.py`) | à la demande par tuile | proposé (note Magna Urbis) |
-| −1 à −6 (15 m – 47 cm) | Champs affichés : bruit adressé seulement, conservé sur le LOD 0 ; aucun relief amplifié n'est lu. Apparence : textures, teintes d'oxyde, croûtes de sel, tourbe visible | même chaîne ; aucun nouveau stock | à la demande ; rendu | implémenté (champs), proposé (textures, §12) |
+| −1 à −6 (15 m – 47 cm) | Champs affichés : même évaluateur ; contacts de zones et emprises de gisements continuent de s'affiner par le warp ; le relief amplifié de la tuile module les champs. Apparence : textures, teintes d'oxyde, croûtes de sel, tourbe visible | même chaîne ; aucun nouveau stock | GPU ; rendu | implémenté (champs), proposé (textures, §12) |
 
 La règle de l'hydrologie s'applique ici aussi : **pas de hiérarchie supplémentaire sur une grille interpolée qui n'apporte pas d'information**. Les LOD 9 à 4 sont des agrégats, pas des niveaux de décision.
 
@@ -163,9 +163,9 @@ Huit classes : granite, calcaire, grès, argilo-marneux, basalte, métamorphique
 Les fractions sont le produit des fractions de contexte par une table contexte × roche (`LITHOLOGY`, proposée, non calibrée). Deux modulations s'y ajoutent :
 
 - **Évaporites** : `+0,10 · bassin · basse terre · max(aridité actuelle, 0,6 · paléo-aridité)`. La paléo-aridité est un champ adressé au LOD 13. Les évaporites enregistrent un climat passé : l'aridité actuelle n'est qu'un indice parmi d'autres.
-- **Variation de province** : `× exp(0,35 · bruit adressé)` par classe, au LOD 13.
+- **Réalisation (géologie réalisée, §16.3)** : la table et les évaporites donnent des parts *attendues* `E_k`. La géologie est réalisée par `classe(x) = argmax_k [log E_k + b_k + 1,6·N_groupe + 0,7·N_k]`, avec un bruit de province par groupe (plutonique, volcanique, métamorphique, sédimentaire ; 123 à 983 km) et un bruit par roche (61 à 491 km), allongés le long de l'azimut structural pour les ceintures. Les parts **canoniques** de chaque cellule du LOD 10 sont les parts d'aire de cette réalisation sur 4 × 4 échantillons ; les prospectivités et les gisements les utilisent, et l'affichage évalue la même fonction. Les biais `b_k` font suivre aux parts mondiales les parts attendues. Constantes proposées.
 
-**Mesuré**, en part des terres : granite 21 %, grès 18 %, métamorphique 18 %, argilo-marneux 15 %, basalte 13 %, calcaire 13 %, ultrabasique 1 %, évaporites 0,7 %.
+**Mesuré**, en part des terres (réalisé / attendu) : granite 21,2/21,3 %, grès 20,2/18,4, métamorphique 17,8/18,1, argilo-marneux 16,2/14,9, basalte 12,8/12,9, calcaire 10,7/12,6, ultrabasique 0,9/1,0, évaporites 0,1/0,7. 77 % des cellules terrestres portent une seule roche (avant la réalisation, la part dominante médiane était de 0,27, avec 5,3 classes effectives).
 
 ### 5.2 Familles de gisements (implémenté, calibration en partie vérifiée)
 
@@ -448,41 +448,29 @@ Doctrine de `GROUND_MATERIAL_MAPPING.md` : « les règles fixent le possible, le
 
 ## 14. Layers informatives du viewer (implémenté)
 
-121 vues `orogen-resources-*`, plus 4 vues fantasy si elle est activée, en six groupes du menu : géologie, gisements, agriculture et élevage, forêt-faune-pêche-eau, matériaux-sel-tourbe, saisons.
+100 vues `resources-*`, plus 3 vues fantasy si elle est activée, en six groupes du menu : géologie (20), gisements (39), agriculture et élevage (11), forêt-faune-pêche-eau (14), matériaux-sel-tourbe (9), saisons (7). 16 vues sont des proxys Render v2, 7 sont saisonnières.
 
-Elles empruntent le chemin des diagnostics Orogen : tuiles PNG, carte et globe, activation par `orogen_layers`.
+Elles sont calculées **sur le GPU**, comme Render v2, sur la carte et le globe (§16). Le serveur ne sert qu'un paquet par monde et par couche ; les tuiles PNG Python ne restent qu'en repli sans WebGPU et pour l'aperçu monde (bilinéaire, 2 048 × 1 024).
 
-- **Légende** (`web/terrain_resources.js`) : rampe ou classes, unité, échelle logarithmique éventuelle, statut, mention « proxy ».
+- **Légende** (`web/terrain_resources.js`) : rampe ou classes, unité, échelle logarithmique éventuelle, statut, mention « proxy », « détail calculé sur GPU » ; pour les mélanges, rappel de la tolérance de parts.
+- **Saison** : curseur continu pour les 7 vues saisonnières ; le mois affiché suit le calendrier nord ; seul un tampon de paramètres est réécrit, sans nouveau paquet.
 - **Inspecteur** : un clic affiche les valeurs de la cellule du LOD 10 et les gisements à moins de 60 km, via `/api/resources/<seed>/inspect`.
-- **Affichage** : aux LOD ≥ 10, valeur des cellules d'autorité. Plus fin, jusqu'au LOD −6 : descente avec bruit et conservation (§16). La vue monde (aperçu 2 048 × 1 024) reste bilinéaire entre centres du LOD 10.
 
-`terrain_orogen_layers.py` n'est pas modifié, car il fait partie de l'identité de l'atlas Orogen. L'enregistrement se fait dans `terrain_server.py`. **Ce fichier, `index.html` et `terrain_toolbar.js` font partie de l'identité d'implémentation de `terrain_manifest.py` : leur modification invalide les caches de tuiles neuronales**, comme toute modification de ces fichiers. Voir `docs/layers.md`.
+`terrain_orogen_layers.py` n'est pas modifié, car il fait partie de l'identité de l'atlas Orogen. L'enregistrement se fait dans `terrain_server.py`. **Ce fichier, `index.html` et `terrain_toolbar.js` font partie de l’identité d’implémentation de `terrain_manifest.py` : leur modification invalide les caches de tuiles neuronales** (`terrain_renderer.js` et les modules ressources n’en font pas partie). Voir `docs/layers.md`.
 
 ## 15. Mesures et validation
 
-Machine locale de Gregory, Windows 11, RTX 3090. Les ressources n'utilisent que le CPU.
+Machine locale de Gregory, Windows 11, RTX 3090. L'autorité, la réalisation des roches et les budgets sont calculés sur le CPU (NumPy) ; l'affichage dans le navigateur (WebGPU).
 
 | Mesure | Valeur | Commande |
 |---|---|---|
-| Compilation monde LOD 10 (652 × 1 304 cellules), monde de référence | 63–65 s, dont environ 34 s pour les 12 évaluations Render v2 | script de mesure local avec `compile_world`, et premier affichage viewer |
-| Rechargement depuis le cache disque | 1,0 s | `world_resources` |
-| Rendu d'une vue monde 1 024 × 512 | médiane 0,17 s, maximum 0,74 s sur 121 vues | idem |
-| Tuile de gisements (304² échantillons) | 0,03 s | idem |
-| Inspecteur | 0,7 s | idem |
-| Tests | 18 tests OK en environ 57 s (dont 4 pour la descente) | `python -m unittest tests/python/test_terrain_resources.py` |
-| Viewer, première compilation dans le serveur (requêtes de tuiles concurrentes) | 157 s | serveur local, port 8775, `TERRAIN_PRELOAD_MODELS=0` |
-| Viewer, premier affichage depuis le cache disque | 11 s jusqu'aux 24 tuiles prêtes | Edge headless via Playwright |
-| Viewer, changement de vue (24 tuiles, 1 280 × 760, carte) | médiane 2,4 s, maximum 6,5 s (gisements) | idem, avec captures d'écran |
+| Compilation monde LOD 10 (652 × 1 304 cellules), monde de référence, dans le serveur | 197 s, dont environ 34 s pour les 12 évaluations Render v2 et environ 100 s pour la réalisation des roches (§16.3) | première requête `/api/resources/<seed>/gpu` |
+| Rechargement depuis le cache disque | environ 1 s | `world_resources` |
+| Paquets GPU | 1,7 Mo (continu), 20 Mo (saisonnier), 6,8 à 8,8 Mo (gisements, stocks), 17 à 20 Mo (roches, contextes) | `output/resources-gpu/packages/` |
+| Mémoire du serveur ajoutée par les ressources (monde, 4 paquets) | environ 1,8 Go (mesuré avec l'ancien solveur de seuils) | `PM` du processus |
+| Tests Python des ressources | 20 tests OK en environ 70 s | `python -m unittest tests/python/test_terrain_resources.py` |
 
-**Vérification du viewer (mesurée).**
-
-- Les 121 vues ont été parcourues dans Edge headless. Chacune a ses tuiles servies sans erreur et affiche sa légende.
-- Menu : six groupes de 20, 39, 11, 14, 9 et 28 boutons.
-- La carte, le globe (contexte tectonique, gisements) et l'inspecteur au clic ont été vérifiés.
-- Captures : `docs/images/resources-forage-jja.png` (pâture juin–août, avec légende) et `docs/images/resources-deposits-lod6.png` (gisements au LOD 6).
-- L'appréciation visuelle de la lisibilité reste à faire par Gregory.
-
-Ce que vérifient les tests :
+Ce que vérifient les tests Python :
 
 - vecteurs de clés identiques à Chronos ;
 - aires sphériques fermées et emboîtées ;
@@ -492,121 +480,149 @@ Ce que vérifient les tests :
 - bornes et partitions ;
 - gisements cohérents avec la lithologie et le contexte, positions descendantes de la cellule propriétaire ;
 - stocks égaux à la somme des gisements ;
-- descente exacte et indépendante de l'ordre ;
+- descente des budgets exacte et indépendante de l'ordre ;
 - agrégats régionaux exacts ;
 - isolation de la fantasy ;
 - delta historique monotone et exact ;
 - champs Render v2 consommés sans recalcul ;
-- descente : moyennes des enfants égales au parent entre LOD affichés (continu, borné, mélange), déterminisme et indépendance à l'ordre, absence de saut entre tuiles voisines, bruit indexé par la position et non par la tuile.
+- miroir GPU (§16.5) : fixture de parité égale au miroir, bruit indexé par la position et non par la tuile, géologie affichée égale aux parts canoniques à tout LOD, roches en unités connexes, parts réalisées valides et déterministes, moyennes des champs continus.
 
-Les tests utilisent un atlas synthétique de 64 × 128 au LOD 14, où la descente est bornée à 2^7 enfants par axe (`placement_lod`).
+Les tests de l'autorité utilisent un atlas synthétique de 64 × 128 ; ceux du miroir, un réseau synthétique de 32 × 20 cellules du LOD 10.
 
-## 16. Descente d'échelle avec bruit et conservation (implémenté)
+## 16. Affichage multi-échelle sur GPU (implémenté)
 
-**Problème corrigé.** La première version affichait à tout zoom une interpolation bilinéaire de la grille du LOD 10 (30,72 km) : de gros pixels, aucun détail. C'était contraire au principe de Neural Earth, qui produit des bruits et des détails procéduraux à toutes les échelles. Désormais, chaque champ est une fonction évaluable à tout LOD affiché et cohérente entre LOD (`backend/terrain_resource_detail.py`).
+**Problème corrigé.** La version précédente (`terrain_resource_detail.py`, supprimé) descendait chaque champ sur le CPU et servait une tuile PNG Python par vue : 0,03 à 1,5 s par tuile, un grain uniforme et des mélanges de roches en confettis. L'affichage suit désormais l'architecture de Render v2 : un évaluateur WGSL calcule chaque pixel dans le navigateur, à partir du DEM, de ses Gaussiennes et de l'hydrologie déjà présents sur le GPU, et d'un **paquet** servi une fois par monde et par couche. Aucune tuile n'est calculée en Python pour une vue.
 
-**Définition.** La valeur est calculée sur la grille canonique des tuiles d'affichage : 256 échantillons, un halo de 24, pas de `30·2^L` m. Au LOD `L`, elle dérive de la valeur au LOD parent `P = min(10, L+3)`. Chaque cellule parente couvre 8 × 8 enfants.
+Les budgets canoniques ne changent pas : stocks, tonnages, budgets entiers et tout ce que Chronos consomme restent calculés exactement en NumPy (`terrain_resources.py`, §3.4, §10). L'affichage conserve les moyennes du parent **à une tolérance mesurée** (§16.3, §16.4).
+
+### 16.1 Architecture
+
+| Élément | Fichier | Rôle |
+|---|---|---|
+| Paquet | `terrain_resource_layers.py:gpu_package`, route `/api/resources/<seed>/gpu?mode=` | en-tête JSON, puis champs du LOD 10 en demi-flottants (1 couche ; 12 pour une couche saisonnière ; K + 2 pour les roches et les contextes : log-parts attendues biaisées ou fractions, puis cos 2θ et sin 2θ de l'azimut structural), gisements (12 mots chacun) triés par cellule du LOD 10, avec la table `(début, nombre)` de chaque cellule. Cache serveur de 6 paquets par monde, cache navigateur de 6 |
+| Évaluateur WGSL | `web/terrain_resources_gpu.js` | cœur (hachage, bruit, champs, géologie réalisée, contexte dominant, gisements), puis deux entrées : la passe *shade* des tuiles physiques (LOD ≤ 3, et 8 à 10) et le fragment des blocs natifs grossiers (LOD 4 à 7, comme Render v2) |
+| Miroir NumPy | `backend/terrain_resource_gpu.py` | mêmes opérations, float32 et hachages uint32 ; référence des tests de parité et de la réalisation canonique des roches |
+| Géologie réalisée | `terrain_resources.realize_rocks` (canon) et `terrain_resource_gpu.realized_class` (même fonction) | parts canoniques des roches mesurées sur la fonction que le GPU affiche (§16.3) |
+| Renderer | `web/terrain_renderer.js` | liaisons 11 à 15 (champ, réservée, paramètres, gisements, seaux) dans la passe *shade* et dans le pipeline grossier ; un changement de paquet re-shade les tuiles physiques et relie les blocs grossiers |
+| Légende, curseur de saison, inspecteur | `web/terrain_resources.js` | charge le paquet de la couche choisie ; le curseur réécrit seulement 496 octets de paramètres |
+| Repli sans WebGPU | `terrain_server.py` | tuiles PNG bilinéaires du LOD 10, sans détail (ancien chemin) |
+
+**Adressage.** Chaque pixel est un échantillon d'indice entier global `(gi, gj)` sur le réseau `30·2^L` m du LOD affiché, origine au centre de la carte. Sur une tuile physique, `L` est celui de la tuile ; sur un bloc grossier, `L` est un cran plus fin que l'empreinte du pixel à l'écran (`dpdx`) : le détail suit le zoom entre deux LOD de blocs, sans marches d'un pixel d'échantillon.
+
+**Hasard adressé.** Bruit de valeur quintique sur le réseau de l'octave `o` (pas `30·2^o` m) : nœud `(i, j)` haché par `lowbias32(i·0x9e3779b1 ⊕ lowbias32(j + 0x85ebca77) ⊕ sel)`, sel = `lowbias32(seed32 + couche·0x632be5ab + (o + 64)·0x27d4eb2d + composante·0x165667b1)`, `seed32 = key(seed, ['resources', 'gpu']) mod 2^32` (clé de Chronos). La valeur ne dépend que de la position : identique dans toute tuile, tout ordre de requête et à tout LOD qui affiche cette octave. **Plancher d'octave** : un LOD n'affiche que les octaves de longueur d'onde ≥ 4 échantillons (`o ≥ L + 2`) ; l'octave de 2 échantillons créait un grain de pixel.
+
+### 16.2 Champs continus
 
 ```text
-brut(x)   = P̃(x) · exp( m(x) + σ · Σ_o a_o · n_o(x) )
-valeur(x) = brut(x) · (1 + ε_b · φ_b(x))      # par bloc b = cellule parente
+v(x) = P*(x + w) · exp( t(x) + σ·n(x) − σ²/2 )        (champs positifs)
+v(x) = borne(logit⁻¹( logit(P*) + t(x) + σ·n(x) ))     (fractions, indices, mois : décalage en logit entre les bornes physiques)
 ```
 
-- **`P̃` (surface parente).** C'est l'interpolation bilinéaire du réseau parent, après une itération pycnophylactique `P* = P + (P − S·P)`. Ici S est la moyenne de cellule de la surface bilinéaire, soit le noyau [1, 6, 1]/8 par axe. La surface obtenue a déjà des moyennes de cellule proches du parent (Tobler 1979).
-- **`m(x)` (modulation locale).** Elle ne lit que des entrées canoniques du LOD L :
-  - le DEM neuronal de la tuile et ses dérivées : pente, position en fond de vallée ou sur crête, anomalie d'altitude, exposition nord ;
-  - la proximité des rivières sources, lue dans le service hydrologique avec des options fixes (mois annuel, sans détail ni cosmétique).
+- **`P*`** : interpolation bilinéaire du LOD 10 après une itération pycnophylactique (`P* = 2P − S·P`, S = [1, 6, 1]/8 par axe, Tobler 1979), lue à une position déformée `x + w`. Le warp `w` a des octaves 8 à 10 (7,7 à 31 km), d'amplitude 0,25 longueur d'onde : les contours du LOD 10 deviennent organiques sans déplacer la masse de plus d'une demi-cellule.
+- **`n`** : bruit fbm d'octaves 7 à 9 (3,8 à 15 km), normalisé, σ par profil (0,08 à 0,45). Il n'y a **pas de bruit plus fin** : sous 4 km, le détail vient du relief et de l'eau.
+- **`t`** : termes de relief du DEM de la tuile, atténués jusqu'à 75 % entre les LOD 1 et 5 (la rugosité d'un texel grossier n'est pas un modelé et donnait un grain), mêmes définitions que Render v2 : pente passe-haut (pente fine − pente des Gaussiennes larges), fond de vallée et crête (TPI = (Gaussienne petite − grande)/(6 r), seuils ±0,10), exposition nord, anomalie d'altitude, eau (couverture fluviale de l'hydrologie, mip 2). Coefficients par profil (`PROFILES`, proposés) : arable, pâture, forêt, humide, rocheux, bas-fond, froid, saison, écoulement, minéral, neutre, marin. Exemple, arable : pente −1/6 par degré, vallée +1, crête −0,8, eau +0,3.
+- **Couches saisonnières** : 12 couches mensuelles dans le paquet ; le GPU interpole linéairement entre les deux mois qui encadrent la date du curseur. Le curseur est continu ; seul le tampon de paramètres change.
+- **Mois de récolte** (cyclique) : chaque échantillon prend le mois d'une des quatre cellules qui l'entourent, choisie avec la probabilité de son poids bilinéaire en comparant un bruit lisse uniformisé (octaves 8 à 10, quantiles tabulés) aux poids cumulés. Chaque cellule règne en moyenne sur une aire de cellule, en taches organiques, sans mélange de mois ni marche d'escalier de 30 km (la version « cellule la plus proche après warp » en dessinait).
+- **Bas de l'échelle** : la couleur se fond dans le fond neutre sur les premiers 6 % de la plage, pour qu'un champ qui atteint 0 n'ait pas de bord net.
 
-  Les coefficients sont fixés par profil (`PROFILES`, calibration proposée) : arable, pâture, forêt, humide, rocheux, bas-fond, froid, saison, écoulement, minéral, neutre, marin. La variation à l'échelle du parent appartient au parent : un passe-haut (σ = 2,5 échantillons) la retire.
-- **Bruit.**
-  - Octaves `o = L+1 … P` de bruit de valeur quintique, adressé par `(seed, couche, LOD de l'octave, cellule du réseau)` avec la clé de Chronos.
-  - La longitude boucle. Amplitude `2^{0,6(o−P)}`, octave de Nyquist amortie à 0,25.
-  - Les octaves plus grossières vivent dans les parents : chaque LOD est le passe-bas des LOD plus fins.
-- **Conservation.**
-  - Première correction multiplicative par bloc, lissée entre centres de blocs (bilinéaire).
-  - Correction finale **exacte et continue aux bords de blocs** : `1 + ε_b·φ_b`, où φ est une bosse nulle au bord et de moyenne 1, `(π/2)² sin(πu) sin(πv)`. Si `ε_b < −0,4`, on revient au rapport simple, qui reste exact.
-  - Indices bornés (fractions, aptitudes, prospectivités, mois) : même schéma, par décalage en logit résolu par bisection.
-  - Mélanges (roches, contextes) : ajustement proportionnel itératif par classe, avec la même bosse.
-  - Résultat :
-    - la moyenne des 64 enfants, pondérée par l'aire (cos φ), égale la valeur du parent ;
-    - pour les champs continus et bornés, l'égalité est exacte à l'arrondi float32 du stockage près ;
-    - pour les mélanges, l'écart est d'environ 10⁻³, et la somme des fractions reste à 10⁻³ de 1.
-- **Absence de couture entre tuiles.**
-  - Les valeurs parentes sont toujours lues dans l'intérieur de la tuile qui les possède, jamais dans un halo.
-  - Tous les noyaux tiennent dans le halo de 24 échantillons, avec une couronne de blocs de 8 : gradient, Gaussiennes de rayon 3 et 7,5, rivières jusqu'à 8 échantillons, passe-haut.
-  - Les données de chaque bloc sont donc identiques dans toutes les tuiles qui le voient.
-- **Zéros canoniques.** Un parent nul impose des enfants nuls, par non-négativité et conservation. Une limite nette subsiste donc là où le LOD 10 vaut exactement 0. Pour cette raison, le fond de la vue « gisements » est une prospectivité bilinéaire non conservée, signalée comme telle.
-- **Extrapolation côtière.** Dans les cellules marines du LOD 10, les couches terrestres prennent la valeur de la cellule terrestre la plus proche ; la pêche côtière fait l'inverse. Une côte fine située dans une cellule d'autorité marine a ainsi une valeur parente. La moyenne de bloc porte sur les échantillons terrestres du DEM fin.
+**Tolérance mesurée** (monde de référence, 240 cellules terrestres tirées au hasard, LOD 5 = 32 × 32 échantillons par cellule, sans termes de relief, script local `real_measure_cont.py`) :
 
-**Couches particulières.**
+| Couche | Σ affiché / Σ autorité | Rapport par cellule p10 – p90 | Écart absolu moyen / plage |
+|---|---|---|---|
+| NPP | 0,996 | 0,88 – 1,11 | 1,9 % |
+| Aptitude céréalière | 0,998 | 0,93 – 1,06 | 1,1 % |
+| Rendement céréalier | 0,986 | 0,90 – 1,09 | 3,1 % |
+| Stock de bois | 1,004 | 0,88 – 1,20 | 1,5 % |
+| Densité de gibier | 1,002 | 0,90 – 1,12 | 1,5 % |
+| Part de tourbe | 1,004 | 0,94 – (cellules quasi nulles) | 2,6 % |
 
-| Couche | Traitement |
-|---|---|
-| Roches | Mélanges continus avec : contacts déformés par un warp multi-octave ; strates (calcaire, grès, marnes, évaporites, métamorphique) en bandes parallèles à l'azimut structural, lui-même parallèle aux ceintures orogéniques (gradient des contextes collision, arc, rift et arrière-arc) ; intrusions et coulées en taches ; roches dures sur crêtes et pentes, roches tendres en fonds |
-| Stocks contenus et récupérables | Somme de noyaux gaussiens normalisés, un par gisement, de largeur max(emprise, 0,75 échantillon) : l'intégrale égale la masse du gisement à tout LOD |
-| Gisements | Position au LOD 0 tirée par clé dans la cellule du LOD 3 ; formes par famille (ci-dessous) ; halo de prospectivité ; anneau de chapeau de fer pour un sulfuré affleurant ; sous 1,5 pixel, symbole de taille écran constante |
-| Mois de récolte (cyclique) | Cellule la plus proche après une déformation de domaine adressée, pour éviter la grille de 30 km ; pas de conservation revendiquée |
+Les termes de relief s'ajoutent à cette tolérance : leur moyenne par cellule n'est pas nulle (une cellule de vallées est relevée). Ce biais n'est pas corrigé ni mesuré sur le DEM réel (limite, §17).
 
-Formes des gisements par famille :
-- **filons** orientés selon la structure, longueur ∝ minerai^0,45 ;
-- **amas** ellipsoïdaux de 40 à 300 m d'épaisseur ;
-- **lentilles stratiformes** d'allongement 5:1 ;
-- **placers** sur les rivières sources ou, à défaut, sur les fonds de vallée plats (pente < 4°), sur 0,1 à 2 km.
+### 16.3 Roches : géologie réalisée ; contextes tectoniques
 
-**Réalisme mesuré.** Monde de référence, DEM neuronal réel, point (−1 900 km, −3 800 km), script local `realism.py`.
+**Des provinces, pas des confettis.** Les essais successifs (seuils de quantiles par cellule sur des champs de zone, avec ou sans parts parentes « durcies ») donnaient des confettis : l'autorité mettait cinq à huit roches dans chaque cellule de 30 km, et des seuils qui imposent ces parts à l'intérieur de chaque cellule fabriquent des taches de quelques kilomètres. La solution retenue inverse l'ordre : **la géométrie des roches est définie d'abord, à toutes les échelles, et les parts canoniques du LOD 10 en sont mesurées.**
+
+```text
+classe(x) = argmax_k [ log E_k(x + w) + b_k + β₁·N_g(k)(x + w) + β₂·N_k(x + w) ]
+```
+
+- **`E_k`** : part *attendue* de la roche k, issue des champs Orogen (contextes tectoniques × table `LITHOLOGY`, évaporites selon l'aridité et la paléo-aridité, §5.1), au LOD 10, interpolée et lue à une position déformée.
+- **`N_g`** : bruit de **province**, partagé par les roches d'un groupe : plutonique (granite), volcanique (basalte), métamorphique (métamorphique, ultrabasique), sédimentaire (calcaire, grès, marnes, évaporites). Octaves 12 à 15 (123 à 983 km), décroissance 1 : les grandes provinces dominent. β₁ = 1,6.
+- **`N_k`** : bruit de la roche dans son groupe, octaves 11 à 14 (61 à 491 km), β₂ = 0,7.
+- **Azimut structural** : les groupes et roches qui forment des ceintures (métamorphique, ultrabasique, roches sédimentaires) utilisent un bruit étiré ×2 le long de l'azimut structural θ (parallèle aux ceintures orogéniques : normale au gradient lissé des contextes collision, arc, rift, arrière-arc), par mélange de quatre orientations entières du réseau. Granite et basalte sont isotropes.
+- **`w`** : warp d'octaves `L + 2` à 11 (0,15 λ) : les contacts deviennent organiques quand on zoome, l'intérieur d'une unité reste d'une seule roche.
+- **`b_k`** : biais par roche, calibré (6 itérations sur un échantillon par cellule) pour que les parts mondiales réalisées suivent les parts attendues.
+
+**Canon et affichage, une seule fonction.** `terrain_resources.realize_rocks` évalue cette fonction (miroir NumPy) sur 4 × 4 échantillons du LOD 8 par cellule terrestre ; les parts obtenues sont les fractions `rock_*` canoniques, que les prospectivités et les gisements utilisent. Le GPU évalue la même fonction à chaque pixel, à tout LOD : l'affichage concorde avec le canon par construction, aux échantillons et aux warps fins près. Il n'y a plus de seuils à résoudre. Les parts attendues restent disponibles (`rock_expected_*`).
+
+**Mesuré** (monde de référence ; script local `real_measure2.py`, 240 cellules terrestres tirées au hasard) :
 
 | Contrôle | Résultat |
 |---|---|
-| Conservation parent / moyenne des enfants (écart relatif max, avant stockage float32) | NPP : 2·10⁻¹⁵ (LOD 0 → 3 et 5 → 8) ; aptitude céréalière : 0 ; mélanges de roches : 5·10⁻⁴ à 3·10⁻³ |
-| Ordres de grandeur (conservés par construction) | Au LOD 0 : NPP 319–611 g/m²/an (p5–p95) autour d'une moyenne héritée de 452 ; pierre de taille 0,46–0,69 |
-| Couplage local au relief : corrélation de Spearman des variations à moins de 5 échantillons | pierre/pente : +0,46 au LOD 2, +0,41 au LOD 0 ; neige/anomalie d'altitude : +0,30 au LOD 2 |
-| Corrélation brute sur toute la tuile | faible (\|ρ\| ≤ 0,2), car la variance vient surtout des LOD parents |
-| Fractalité : pente spectrale β du log-champ, P(k) ∝ k^−β | 2,3 à 3,2 à tous les LOD testés (7, 4, 2, 0) : comportement auto-similaire de type mouvement brownien fractionnaire |
+| Cellules terrestres d'une seule roche | 77 % ; part dominante p10 0,75 |
+| Parts mondiales réalisées / attendues | granite 21,2/21,3 %, grès 20,2/18,4, métamorphique 17,8/18,1, marnes 16,2/14,9, basalte 12,8/12,9, calcaire 10,7/12,6, ultrabasique 0,9/1,0, évaporites 0,1/0,7 |
+| Affichage au LOD 6 contre parts canoniques (TV par cellule) | moyenne 0,008, p90 0,032, max 0,11 |
+| Affichage au LOD 4 | moyenne 0,008, p90 0,035, max 0,12 |
+| Paires d'échantillons voisins de roches différentes, LOD 4 (480 m) | 0,37 % (5,2 % avec les seuils de quantiles) |
+| Compilation de l'autorité | 197 s au lieu de 90 s (réalisation : 12 bruits par échantillon) |
 
-Contrôle de grille : rapport du gradient médian sur les bords des blocs de 8 au gradient médian ailleurs. Un rapport de 1 signifie qu'aucun bord de bloc ne ressort.
+**Contextes tectoniques.** Leurs fractions sont des appartenances floues (noyaux de distance aux frontières de plaques, plancher océanique de 2 %), pas des parts d'aire. Rendues en zones, trois appartenances de 30 % donnaient un semis de taches de 10 km (essai mesuré et vu sur capture, écarté). Ils sont affichés comme **contexte dominant** de l'interpolation déformée, à tout LOD : ceintures continues, contacts organiques, aucune part revendiquée. Le contexte océanique est retiré des cellules terrestres pour cet affichage.
 
-| LOD | Après la bosse continue | Avant |
-|---|---|---|
-| 7 | 1,5 | 1,8–1,9 |
-| 4 | 0,43–0,49 | 1,1–1,2 |
-| 2 | 0,49–0,61 | — |
-| 0 | 0,47–0,82 | — |
+### 16.4 Gisements et stocks
 
-Un rapport inférieur à 1 traduit un léger « coussin » au centre des blocs. Il ne se voit pas sur les captures, mais la mesure est donnée. Au LOD 7, le grain résiduel vient du DEM de 3,84 km et de l'octave de Nyquist.
+- **Gisements** : position au LOD 0 tirée par clé dans la cellule du LOD 3 (inchangé). Forme par famille : filon orienté selon la structure (longueur ∝ minerai^0,45), amas ellipsoïdal, lentille stratiforme 5:1, placer dans les fonds de vallée. Halo de prospectivité, anneau de chapeau de fer pour un sulfuré affleurant ; sous 1,5 pixel, symbole de taille écran constante. Le GPU parcourt les seaux des cellules du LOD 10 à ±1 à ±3 cellules selon le zoom.
+- **Stocks** contenus et récupérables : somme de noyaux gaussiens normalisés, un par gisement ; l'intégrale égale la masse du gisement à tout LOD.
 
-**Captures avant/après.** `docs/images/resources-avant-apres-geo-rock.png`, `-mat-stone.png` et `-season-snow-djf.png`. En haut l'ancien affichage bilinéaire, en bas la descente, sur les mêmes tuiles aux LOD 7, 4, 2 et 0.
+### 16.5 Parité CPU/WGSL et tests
 
-`docs/images/resources-gisements-zoom.png` montre les emprises d'un porphyre, d'un filon, d'un fer oolithique et d'un placer aux LOD 3, 1 et 0. Dans ce relief montagneux, le placer n'a que quelques pièges plats.
+- `tools/verification/build_resources_gpu_fixture.py` écrit `tests/fixtures/resources_gpu_parity.json` depuis le miroir : paquets synthétiques (continu positif, borné, saisonnier, géologie réalisée et contexte dominant, cyclique, gisements, stocks) et termes de relief.
+- `tools/verification/verify_resources_gpu_parity.cjs` compile le cœur WGSL réel et compare (adaptateur WebGPU réel).
+- `tests/browser/test_terrain_resources_gpu.cjs` charge le renderer réel, une tuile synthétique et quatre paquets.
+- `tests/python/test_terrain_resources.py`, classe `ResourceGpuMirrorTests`.
 
-**Performance (mesurée, serveur local, une tuile de 256², en secondes).**
+**Mesuré** (RTX 3090, Chrome) :
 
-Avant : chaque tuile recalculait le champ sur le monde entier et reconstruisait les gisements en Python, soit 0,05 à 0,26 s par tuile, sans cache.
-
-Après :
-
-| Cas | Temps par tuile |
+| Contrôle | Résultat |
 |---|---|
-| Tuile en cache (PNG en mémoire, plus cache navigateur d'un an) | 0,015–0,03 s |
-| Tuile fine d'un champ continu, entrées déjà présentes | 0,03–0,5 s |
-| Mélange de roches | 0,3–1,5 s |
-| Gisements | 0,05–0,6 s |
-| Première tuile d'un emplacement | jusqu'à 10 s, dominées par la génération neuronale des tuiles physiques et la construction du réseau hydrologique, comme pour Render |
+| Parité, 8 configurations, 114 cas | 0 désaccord ; erreur relative max 6·10⁻⁷ (continus, stocks), classes de la géologie réalisée et du contexte dominant et mois (sélection de cellule) identiques |
+| Navigateur | mêmes pixels pour un même paquet ; la saison change l'image (écart moyen 8,3/255) ; zones cohérentes (0,7 % de paires de pixels voisins de couleurs différentes) ; quatre paquets distincts |
+| Miroir | fixture = miroir ; bruit indexé par la position ; géologie affichée = parts canoniques à tout LOD (TV moyenne < 0,05) ; roches en unités connexes, pas en confettis ; parts réalisées valides et déterministes ; moyennes continues |
 
-**Changement de vue dans le viewer** (Edge headless, 1 280 × 760, cinq couches à chacun des LOD 10, 7, 4, 2 et 0, temps jusqu'à la fin du chargement) :
+### 16.6 Performance comparée à Render v2
 
-| Mesure | Médiane | Étendue |
+Même machine, même page, même renderer, horodatages GPU injectés autour du renderer non modifié (`tools/benchmarks/benchmark_resources_gpu.cjs`, paquets réels du monde de référence, 32 tuiles de 256² par mesure, médiane de 5).
+
+| Mesure (RTX 3090, Chrome, médianes) | Render v2 | Ressources |
 |---|---|---|
-| Première visite (tuiles neuronales du disque, ressources à calculer) | 4,5 s | 1,0 à 44 s ; la valeur la plus haute correspond au premier passage au LOD 2, avec génération des tuiles physiques |
-| Revisite (caches chauds) | 2,4 s | 1,0 à 8,7 s |
-| Ancien affichage bilinéaire, vue monde seulement | 2,4 s | — |
+| Cuisson d'une tuile physique de 256² (passes flou + *shade*), temps GPU, à 30, 120 et 1 920 m | 0,86 – 0,97 ms | 0,11 – 0,14 ms (continus, saisons, mois, gisements, stocks) ; 0,15 – 0,16 ms (contextes) ; 0,20 – 0,26 ms (roches) |
+| Même cuisson, temps mural par tuile (soumission + fin du travail) | 1,8 – 2,6 ms | 0,57 – 0,68 ms |
+| Bloc natif grossier en plein écran 1 920 × 1 080, temps GPU | 0,72 ms | 0,76 – 1,02 ms ; 1,48 ms (contextes) ; 3,0 ms (roches) |
+| Changement de couche (envoi du paquet au GPU) | — | 0,8 – 1 ms (continus) ; 4,6 – 5,6 ms (gisements) ; 10 – 10,5 ms (roches, contextes, saisons) |
+| Taille du paquet (une fois par monde et couche) | — | 1,7 Mo (continus) ; 6,8 – 8,8 Mo (gisements) ; 17 Mo (roches) ; 20 Mo (contextes, saisons) |
 
-Les annulations 409 lors des changements rapides sont celles du viewer, voulues.
+Les ressources cuisent une tuile 3 à 8 fois plus vite que Render v2 : l'évaluateur ne fait qu'un champ par pixel, sans matériaux. Les roches coûtent le plus (8 bruits de roche et 4 bruits de province par pixel, dont certains orientés) : 3 ms par image plein écran sur bloc grossier, soit 4 fois Render v2, encore dans le budget d'une image à 60 Hz.
 
-Ce qui a changé :
-- les champs d'autorité sont précalculés par couche (LRU de 24) ;
-- les gisements sont des tableaux, filtrés vectoriellement par emprise ;
-- l'intérieur des tuiles est stocké en float32, dans un budget de 768 Mo ;
-- les tableaux mensuels intermédiaires sont retirés après compilation : le monde en mémoire passe de 1,27 Go à environ 0,3 Go.
+**Changement de vue dans le viewer** (même script de capture, 1 280 × 760, carte ; la durée inclut une attente fixe de 0,8 s) : sur une vue déjà chargée, changer de couche de ressources prend une médiane de 0,9 à 1,4 s selon le LOD, soit l'attente fixe plus le premier paquet ; le premier passage sur une couche de roches attend la compilation de l'autorité. Ces temps ne se comparent pas directement à Render v2 : le script atteint d'abord la vue en Render v2, ce qui inclut la génération des tuiles neuronales (7 à 120 s selon le LOD).
+
+### 16.7 Captures et auto-évaluation
+
+Captures : `docs/images/resources-gpu-<couche>.jpg`, Render v2 en haut, la couche en bas, sur les mêmes vues aux LOD 10, 7, 4, 2, 0 et −2 (monde de référence, point fixe de la carte, juillet sauf la neige en janvier). `resources-gpu-gisements.jpg` : une autre vue, centrée sur un porphyre cuprifère affleurant (−2 199 km, 8 662 km), aux LOD 9, 6, 3, 1, −1 et −3, avec les gisements, le stock de cuivre et les roches.
+
+Auto-évaluation, capture par capture (zones lisibles ? artefacts ? lien au relief ?) :
+
+| Couche | Ce qui fonctionne | Ce qui reste faible |
+|---|---|---|
+| Roches (`geo-rock`) | provinces de 100 à 400 km aux LOD 10 et 7, deux grandes unités et des rubans le long de la structure au LOD 4, contact organique au LOD 2, une seule unité aux LOD 0 et −2 : la taille des unités est cohérente entre les échelles ; aucun bord de cellule | au LOD 10, la carte du monde reste chargée (provinces de 3 à 10 pixels) ; la teinte ne suit pas le relief (pas de roche dure sur les crêtes) |
+| Contextes (`geo-context`) | ceintures continues le long des marges et des sutures, contacts organiques, aucune tache | contexte dominant seulement ; la ceinture d'arc reste large et uniforme |
+| NPP (`bio-npp`) | gradient régional lisible, relief bien intégré aux LOD 2 à −2 | au LOD 4, la capture montre un grain en petits blocs de 2 à 3 pixels qu'un rendu isolé du même bloc ne reproduit pas (cause non isolée, probablement l'échelle de présentation du viewer) ; marbrure du bruit de 4 à 15 km aux LOD 7 et 4 |
+| Aptitude céréalière | masques nets mais sans marches de 30 km (fondu en bas d'échelle) ; vallées favorisées au LOD 2 | grandes plages neutres (montagnes), sans information à ces zooms |
+| Pierre de taille | fort couplage au relief (crêtes claires, fonds sombres), lisible à tous les LOD fins | plages grises nettes au LOD 7 là où la roche n'a pas de pierre |
+| Neige (janvier) | suit l'altitude et l'exposition, crêtes blanches, fonds gris | aux LOD 10 et 7, gros aplats ; limite pluie-neige un peu floue au LOD 4 |
+| Stock de bois | massifs forestiers continus, lisière fondue | intérieur sombre et peu contrasté ; rampe trop foncée |
+| Mois de récolte | taches organiques sans escalier de 30 km, mois non mélangés | couleurs cycliques criardes ; contacts courbes mais arbitraires (pas liés au relief) |
+| Gisements, stock de cuivre | symbole visible au LOD 3, ellipse du corps à −3, halo du stock qui grossit avec le zoom | au LOD 1 et −1, symbole très petit ; le disque du stock a un bord net aux LOD −1 et −3 (troncature du noyau) |
+
+Erreurs du viewer pendant les captures : délais d'attente de Render v2 (chargement neuronal), annulations 409 voulues, et quelques erreurs 500 du serveur sur l'aperçu monde quand la mémoire validée de la machine était presque épuisée (serveur de Gregory et le mien ensemble). Aucune erreur WebGPU ni de compilation de shader.
 
 ## 17. Limites et décisions ouvertes
 
@@ -614,12 +630,20 @@ Ce qui a changé :
 2. **Résolution de l'autorité.** Le LOD 10 (30,72 km) est plus grossier que l'atlas (19,5 km). Le LOD 9 (15,36 km) suivrait mieux la source, pour environ 4 fois le coût (la limite de `monthly_water_balance` est d'environ 1 M cellules terrestres).
 3. **Métrique** plane dans l'atlas pour les distances tectoniques ; monde de diamètre par défaut seulement.
 4. **Hydrologie** : les placers et la pêche continentale devraient suivre les unités de propriété des tronçons (`multiscale-hydrology.md` §2), plutôt qu'un lissage et un proxy de plaine inondable.
-5. **LOD 3** : les budgets entiers (export Chronos) sont répartis avec des intensités interpolées ; le relief latent à 240 m n'est branché que dans la descente d'affichage (§16), pas encore dans `descend_budget`.
-10. **Descente** : coefficients des profils et σ du bruit proposés ; ils sont calibrés sur un seul point du monde de référence. Couplage local mesuré pour la pierre et la neige seulement. Le couplage aux rivières dépend du réseau source (pas des affluents de 240 m). Les LOD négatifs n'ajoutent que du bruit.
+5. **LOD 3** : les budgets entiers (export Chronos) sont répartis avec des intensités interpolées ; le relief latent à 240 m ne module que l'affichage (§16), pas encore `descend_budget`.
 6. **Paléoclimat** du charbon et des évaporites : un champ adressé existe pour les évaporites seulement.
 7. **Chronos** : la sérialisation des deltas et l'entrée de l'empreinte des ressources dans le `canon_id` restent à faire.
 8. **Textures** : toutes les entrées O1, O3 et O5 sont proposées, sans implémentation dans les shaders.
 9. **Viewer** : les modifications de `index.html`, `terrain_toolbar.js` et `terrain_server.py` changent l'identité d'implémentation des tuiles neuronales. Il faut décider si les layers ressources doivent passer par un module chargé sans entrer dans cette identité.
+10. **Affichage GPU** (§16) :
+    - les termes de relief déplacent la moyenne d'une cellule (une cellule de vallées est relevée) ; ce biais n'est ni corrigé ni mesuré sur le DEM réel ;
+    - profils de relief et σ du bruit proposés, réglés à l'œil sur un seul monde ;
+    - roches : la réalisation est un bruit structuré par les contextes, pas une carte géologique ; les évaporites sont sous-représentées (0,1 % au lieu de 0,7 %), la calibration des biais ne converge pas pour une classe aussi rare ; β et octaves réglés à l'œil sur un seul monde ; la compilation passe de 90 à 197 s ;
+    - contextes : unité dominante, pas de parts ;
+    - les blocs natifs grossiers (LOD 4 à 7) n'ont pas de texture de rivières : le terme « eau » y est nul ;
+    - paquets de 2 à 20 Mo, chargés à chaque changement de couche (cache de 6) ;
+    - sans WebGPU, repli PNG bilinéaire sans détail.
+11. **Tests** : dans `tests/python`, `test_terrain_navigation` a un échec (`fully_warmed`, préchauffage des graphes CUDA) sans lien établi avec les ressources, non vérifié sur une copie propre ; la suite complète (672 tests) n'a pas été menée à terme (plus d'une heure, interrompue).
 
 ## 18. Références
 
