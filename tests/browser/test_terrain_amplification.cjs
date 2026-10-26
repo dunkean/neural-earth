@@ -123,6 +123,25 @@ test('a forced Render LOD excludes finer cached history',()=>{
   const min=c.minimumDisplayLod(-4);assert.equal(min,-4);const plan=c.planTerrainRegion(c.drawableTerrainTiles(min),-4,[0,0,120,120],{minLod:min});assert.equal(plan.length,1);assert.equal(plan[0].tile.key,target.key);
   Object.assign(c,{forcedView:null,MIN_LOD:-6,MAX_LOD:11,continuousRefinement:()=>false,cacheLodGap:()=>3});assert.equal(c.minimumDisplayLod(-4),-6,'camera-driven views still retain configured finer history');
 });
+
+test('camera views at/below each relief floor ignore finer history and retain ready parents',()=>{
+  for(const mode of ['off','hybrid','phasor','mse'])for(const gap of [0,3,4])for(const automatic of [false,true]){
+    const c=viewer(),a=c.window.TerrainAmplification;
+    Object.assign(c,{forcedView:null,MIN_LOD:-12,MAX_LOD:11,continuousRefinement:()=>automatic,refinementPolicy:()=>({target:-12}),cacheLodGap:()=>gap});
+    c.world.relief_floors={classic:-6,hybrid:-4,phasor:-5,mse:-6};a.set({mode,intensity:1});
+    const floor=c.world.relief_floors[mode==='off'?'classic':mode];
+    assert.equal(c.minimumDisplayLod(floor),floor);assert.equal(c.minimumDisplayLod(-8),-8);
+    const tile=(lod,tx=-1)=>({...c.taskFor(lod,tx,-1,0),gpu:true,heights:new Float32Array(1)});
+    const parent=tile(-4),target=tile(-8),history=[-9,-10,-11,-12].map(lod=>tile(lod));
+    for(const t of [parent,target,...history])c.tiles.set(t.key,t);
+    const region=[-30,-30,0,0],min=c.minimumDisplayLod(-8),plan=()=>c.planTerrainRegion(c.drawableTerrainTiles(min),-8,region,{minLod:min});
+    assert.deepEqual(Array.from(plan(),p=>p.tile.key),[target.key]);
+    c.tiles.delete(target.key);assert.deepEqual(Array.from(plan(),p=>p.tile.key),[parent.key]);
+    assert.equal(c.tiles.size,5,'finer tiles stay cached for the next zoom-in');
+    a.set({mode:'hybrid',intensity:0});assert.equal(c.minimumDisplayLod(-5),automatic?-12:Math.max(-12,-5-gap),'zero intensity follows the classic floor');
+    c.forcedView={lod:-3};assert.equal(c.minimumDisplayLod(-3),-3,'forced LOD remains exact above the floor');
+  }
+});
 test('controls keyboard, badge and amplified Render/Render3D shaders',async t=>{
   const html='<meta charset="utf-8"><div id="controls"><div id="pane"></div></div><canvas id="map" width="256" height="256" style="width:256px;height:256px"></canvas>'+['terrain_render_controls.js','terrain_forest_brushes.js','terrain_render3d.js','terrain_renderer.js'].map(n=>`<script src="/${n}"></script>`).join('');
   const server=http.createServer((req,res)=>{const name=new URL(req.url,'http://x').pathname.slice(1);res.setHeader('Content-Type',name.endsWith('.js')?'application/javascript':'text/html');res.end(name.endsWith('.js')?read(name):html);});

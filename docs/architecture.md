@@ -48,6 +48,8 @@ The Flask server returns FP32 heights and compact climate/appearance planes. `we
 
 Biomes sample source Köppen classes and recompute altitude/slope appearance on the visible DEM. Climate diagnostic layers keep a stable coarse view. Render materials combine climate, slope, terrain position and filtered deterministic noise; pedology remains a regional source-world diagnostic.
 
+At and below the selected mode's relief floor, the coverage planner excludes finer cached history from the current display LOD. Those tiles add no geometry, but their baked Gaussian/TPI scales, finite-difference gradients and colour mips differ with sample spacing; clipping them into a target tile produced patches of different apparent sharpness after zooming back out. They remain cached for zooming in again. Ready coarser parents and the existing mode-switch fallbacks still supply progressive coverage. Above the floor, the configured cache LOD gap continues to apply; forced LOD selection remains exact. This rule applies to PNG and WebGPU coverage, including the shared Render3D paths.
+
 ## Identity and persistence
 
 World identities include seeds, settings, stage references, generator source hashes, native binary/source fingerprints, model revision and calibration rules. Heightmaps are persisted, verified and read-only. Neural tile storage and image/appearance caches have different identities. Appearance-only edits avoid neural regeneration; changes to generator/server transport sources can still produce a new world identity.

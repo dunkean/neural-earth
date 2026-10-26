@@ -208,12 +208,14 @@ function evict(){
   if(!victim)break;dropTile(victim);
  }
 }
-function minimumDisplayLod(lod){return forcedView?lod:Math.min(coarseGpuEnabled()?7:MAX_LOD,continuousRefinement()?refinementPolicy().target:Math.max(MIN_LOD,lod-cacheLodGap()))}
+function minimumDisplayLod(lod){const amp=window.TerrainAmplification,floor=world?.relief_floors?.[amp?.effective()?amp.effectiveMode():'classic']??-6;return forcedView||lod<=floor?lod:Math.min(coarseGpuEnabled()?7:MAX_LOD,continuousRefinement()?refinementPolicy().target:Math.max(MIN_LOD,lod-cacheLodGap()))}
 function draw(){if(raf===null)raf=requestAnimationFrame(()=>{raf=null;drawFrame()})}
 function drawFrame(){const ink=viewMode==='fantasy-ink';document.getElementById('fantasySettings').hidden=!fantasy.isStyle(viewMode);$('gpuMap').style.filter=ink?'grayscale(1)':'';canvas.style.filter=ink?'grayscale(1)':'';syncGlobeCamera();terrainPins?.draw();if(gpuEnabled()){renderer?.setRenderSettings?.(renderMaterials.get());renderer?.setMode?.(rendererMode());}if(styleRendering.get().automatic){const interval=window.TerrainStyleRendering?.autoInterval(mpp,styleRendering.get().density)||200;if(interval!==styleRendering.get().interval){styleRendering.set({interval});if(styleRendering.get().enabled){overviewFlight?.controller.abort();overviewFlight=null;restoreOverview();schedule();}}$('contourInterval').value=interval;}const frameStarted=window.TerrainTiming?.enabled?performance.now():0;counters.draws++;ac.clearRect(0,0,W,H);ctx.fillStyle='#09284d';ctx.fillRect(0,0,W,H);if(!world){updateActivity();visiblePlan=[];window.TerrainAmplification?.displayed([]);if(sceneView==='globe'){globe?.setImage(null);globe?.setTiles([],null,null);globe?.draw(W,H);}if(!window.neuralIllustrationCaptureActive)mapTools?.draw(ac);renderer?.draw([],{width:W,height:H,dpr:devicePixelRatio||1});return}const b=bounds();currentLod=displayLod();ctx.imageSmoothingEnabled=Object.hasOwn(mapStyles,viewMode)||mpp>30;if(sceneView==='map'){if(overview)rect(overview,world.overview_bounds);if(initialImage&&viewMode==='relief'&&currentLod===0)rect(initialImage,world.initial_bounds);}
  const minDisplayLod=minimumDisplayLod(currentLod);
  // Ready parents are progressive fallbacks, including newly received stages.
- // The cache gap limits finer history; it must not hide intermediate relief.
+ // At/below the relief floor, finer history adds no geometry but its baked
+ // filtering/material scales differ. Keep it cached, without patching it over
+ // the target. Above the floor the configured cache gap still applies.
  // A tile of another water identity (detailed carving toggled or its month
  // changed) stays a fallback until its current replacement arrives.
  const drawable=drawableTerrainTiles(minDisplayLod);

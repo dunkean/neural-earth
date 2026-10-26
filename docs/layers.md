@@ -24,6 +24,8 @@ Some diagnostics describe the source atlas rather than every fine neural pixel. 
 
 Rendering settings apply immediately: global or per-LOD lighting, sun direction, contours, materials, Render3D forest density and clearings, and styles. Every fifth contour is major; automatic spacing follows zoom, while manual spacing uses meters. These controls reuse physical heights without neural generation.
 
+At and below a mode's relief floor, zooming out displays the requested LOD without finer cached tiles superimposed on parts of it. The finer tiles remain cached for zooming back in. This avoids changes in material/hillshade sharpness caused by mixing differently baked interpolation levels. Ready parent tiles still provide coverage while requested tiles load; forced LOD selection is unchanged.
+
 ### Experimental terrain amplification
 
 Overview, generation path and usage: [Terrain amplification](terrain-amplification.md). This section is the reference.
