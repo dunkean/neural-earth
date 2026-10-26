@@ -85,10 +85,11 @@ Une cellule `(LOD, i, j)` couvre `[i, i+1) × [j, j+1) × 30·2^LOD` mètres de 
 | Atlas Orogen (≈ 19,5 km) | Distances aux frontières, contextes tectoniques, lithologie à la résolution de l'atlas | `crust`, `boundaries`, `convergence`, `hotspot`, `backArc`, `uplift`, climat sur deux saisons | à la compilation monde | implémenté |
 | **10 (30,72 km)** | **Autorité** : fractions de contexte et de roche, prospectivités, climat mensuel, bilan hydrique, NPP, céréales, pâture, bois, gibier, pêche, sel, tourbe, matériaux ; **nombre, tonnage et teneur des gisements** ; budgets entiers par cellule | atlas échantillonné, bilan hydrique partagé, évaluateur Render v2 | une fois par monde, environ 65 s, puis cache disque (§15) | implémenté |
 | 11 et plus (≥ 61 km), régions Chronos | Sommes exactes des cellules du LOD 10 ; une région est une union de cellules du LOD 10 | agrégation | à la demande | implémenté (`aggregate`, `region_summary`) |
-| 9 à 4 (15,36 km – 480 m) | Sommes des enfants au LOD 3 : aucune décision propre | agrégation | à la demande | implémenté pour la somme ; pas d'export dédié |
+| 9 à 4 (15,36 km – 480 m) | Budgets entiers : sommes des enfants au LOD 3. **Champs affichés : descente avec bruit adressé et conservation exacte des moyennes du parent (§16)** | agrégation ; relief neuronal du LOD | à la demande, par tuile | implémenté |
 | **3 (240 m)** | **Position des gisements** ; budgets aréaux répartis exactement depuis le LOD 10 | intensités interpolées du LOD 10, aire exacte des enfants, facteur canonique optionnel (relief latent à 240 m, proposé) | à la demande, par cellule parente | implémenté (`descend_budget`, `_place_in_cell`) |
-| 0 (30 m), tuile 40 km | Répartition exacte de chaque bloc de 240 m entre ses 64 cellules ; emprises de gisement ; affleurements et chapeaux de fer ; carrières, glaisières et tourbières locales ; géologie fine conditionnée | champs de tuile (`surface_context.py`) | à la demande par tuile | proposé (note Magna Urbis) |
-| −1 et moins (≤ 15 m) | Apparence : textures, teintes d'oxyde, croûtes de sel, tourbe visible | même chaîne ; aucun nouveau stock | rendu | proposé (§12) |
+| 2 à 0 (120–30 m) | Champs affichés descendus jusqu'au décodeur à 30 m, modulés par le DEM neuronal et les rivières sources (§16) ; emprises de gisements (filons, amas, lentilles, placers, halo, chapeau de fer) ; mélanges continus de roches à strates et intrusions | DEM neuronal, hydrologie source | à la demande, par tuile | implémenté (viewer) |
+| 0 (30 m), tuile 40 km | Répartition exacte de chaque bloc de 240 m entre ses 64 cellules ; carrières, glaisières et tourbières locales ; géologie fine de `surface_context.py` conditionnée | champs de tuile (`surface_context.py`) | à la demande par tuile | proposé (note Magna Urbis) |
+| −1 à −6 (15 m – 47 cm) | Champs affichés : bruit adressé seulement, conservé sur le LOD 0 ; aucun relief amplifié n'est lu. Apparence : textures, teintes d'oxyde, croûtes de sel, tourbe visible | même chaîne ; aucun nouveau stock | à la demande ; rendu | implémenté (champs), proposé (textures, §12) |
 
 La règle de l'hydrologie s'applique ici aussi : **pas de hiérarchie supplémentaire sur une grille interpolée qui n'apporte pas d'information**. Les LOD 9 à 4 sont des agrégats, pas des niveaux de décision.
 
@@ -453,7 +454,7 @@ Elles empruntent le chemin des diagnostics Orogen : tuiles PNG, carte et globe, 
 
 - **Légende** (`web/terrain_resources.js`) : rampe ou classes, unité, échelle logarithmique éventuelle, statut, mention « proxy ».
 - **Inspecteur** : un clic affiche les valeurs de la cellule du LOD 10 et les gisements à moins de 60 km, via `/api/resources/<seed>/inspect`.
-- **Affichage** : bilinéaire entre centres de cellules ; les classes s'affichent au plus proche voisin.
+- **Affichage** : aux LOD ≥ 10, valeur des cellules d'autorité. Plus fin, jusqu'au LOD −6 : descente avec bruit et conservation (§16). La vue monde (aperçu 2 048 × 1 024) reste bilinéaire entre centres du LOD 10.
 
 `terrain_orogen_layers.py` n'est pas modifié, car il fait partie de l'identité de l'atlas Orogen. L'enregistrement se fait dans `terrain_server.py`. **Ce fichier, `index.html` et `terrain_toolbar.js` font partie de l'identité d'implémentation de `terrain_manifest.py` : leur modification invalide les caches de tuiles neuronales**, comme toute modification de ces fichiers. Voir `docs/layers.md`.
 
@@ -468,7 +469,7 @@ Machine locale de Gregory, Windows 11, RTX 3090. Les ressources n'utilisent que 
 | Rendu d'une vue monde 1 024 × 512 | médiane 0,17 s, maximum 0,74 s sur 121 vues | idem |
 | Tuile de gisements (304² échantillons) | 0,03 s | idem |
 | Inspecteur | 0,7 s | idem |
-| Tests | 14 tests OK en environ 45 s | `python -m unittest tests/python/test_terrain_resources.py` |
+| Tests | 18 tests OK en environ 57 s (dont 4 pour la descente) | `python -m unittest tests/python/test_terrain_resources.py` |
 | Viewer, première compilation dans le serveur (requêtes de tuiles concurrentes) | 157 s | serveur local, port 8775, `TERRAIN_PRELOAD_MODELS=0` |
 | Viewer, premier affichage depuis le cache disque | 11 s jusqu'aux 24 tuiles prêtes | Edge headless via Playwright |
 | Viewer, changement de vue (24 tuiles, 1 280 × 760, carte) | médiane 2,4 s, maximum 6,5 s (gisements) | idem, avec captures d'écran |
@@ -495,23 +496,132 @@ Ce que vérifient les tests :
 - agrégats régionaux exacts ;
 - isolation de la fantasy ;
 - delta historique monotone et exact ;
-- champs Render v2 consommés sans recalcul.
+- champs Render v2 consommés sans recalcul ;
+- descente : moyennes des enfants égales au parent entre LOD affichés (continu, borné, mélange), déterminisme et indépendance à l'ordre, absence de saut entre tuiles voisines, bruit indexé par la position et non par la tuile.
 
 Les tests utilisent un atlas synthétique de 64 × 128 au LOD 14, où la descente est bornée à 2^7 enfants par axe (`placement_lod`).
 
-## 16. Limites et décisions ouvertes
+## 16. Descente d'échelle avec bruit et conservation (implémenté)
+
+**Problème corrigé.** La première version affichait à tout zoom une interpolation bilinéaire de la grille du LOD 10 (30,72 km) : de gros pixels, aucun détail. C'était contraire au principe de Neural Earth, qui produit des bruits et des détails procéduraux à toutes les échelles. Désormais, chaque champ est une fonction évaluable à tout LOD affiché et cohérente entre LOD (`backend/terrain_resource_detail.py`).
+
+**Définition.** La valeur est calculée sur la grille canonique des tuiles d'affichage : 256 échantillons, un halo de 24, pas de `30·2^L` m. Au LOD `L`, elle dérive de la valeur au LOD parent `P = min(10, L+3)`. Chaque cellule parente couvre 8 × 8 enfants.
+
+```text
+brut(x)   = P̃(x) · exp( m(x) + σ · Σ_o a_o · n_o(x) )
+valeur(x) = brut(x) · (1 + ε_b · φ_b(x))      # par bloc b = cellule parente
+```
+
+- **`P̃` (surface parente).** C'est l'interpolation bilinéaire du réseau parent, après une itération pycnophylactique `P* = P + (P − S·P)`. Ici S est la moyenne de cellule de la surface bilinéaire, soit le noyau [1, 6, 1]/8 par axe. La surface obtenue a déjà des moyennes de cellule proches du parent (Tobler 1979).
+- **`m(x)` (modulation locale).** Elle ne lit que des entrées canoniques du LOD L :
+  - le DEM neuronal de la tuile et ses dérivées : pente, position en fond de vallée ou sur crête, anomalie d'altitude, exposition nord ;
+  - la proximité des rivières sources, lue dans le service hydrologique avec des options fixes (mois annuel, sans détail ni cosmétique).
+
+  Les coefficients sont fixés par profil (`PROFILES`, calibration proposée) : arable, pâture, forêt, humide, rocheux, bas-fond, froid, saison, écoulement, minéral, neutre, marin. La variation à l'échelle du parent appartient au parent : un passe-haut (σ = 2,5 échantillons) la retire.
+- **Bruit.**
+  - Octaves `o = L+1 … P` de bruit de valeur quintique, adressé par `(seed, couche, LOD de l'octave, cellule du réseau)` avec la clé de Chronos.
+  - La longitude boucle. Amplitude `2^{0,6(o−P)}`, octave de Nyquist amortie à 0,25.
+  - Les octaves plus grossières vivent dans les parents : chaque LOD est le passe-bas des LOD plus fins.
+- **Conservation.**
+  - Première correction multiplicative par bloc, lissée entre centres de blocs (bilinéaire).
+  - Correction finale **exacte et continue aux bords de blocs** : `1 + ε_b·φ_b`, où φ est une bosse nulle au bord et de moyenne 1, `(π/2)² sin(πu) sin(πv)`. Si `ε_b < −0,4`, on revient au rapport simple, qui reste exact.
+  - Indices bornés (fractions, aptitudes, prospectivités, mois) : même schéma, par décalage en logit résolu par bisection.
+  - Mélanges (roches, contextes) : ajustement proportionnel itératif par classe, avec la même bosse.
+  - Résultat :
+    - la moyenne des 64 enfants, pondérée par l'aire (cos φ), égale la valeur du parent ;
+    - pour les champs continus et bornés, l'égalité est exacte à l'arrondi float32 du stockage près ;
+    - pour les mélanges, l'écart est d'environ 10⁻³, et la somme des fractions reste à 10⁻³ de 1.
+- **Absence de couture entre tuiles.**
+  - Les valeurs parentes sont toujours lues dans l'intérieur de la tuile qui les possède, jamais dans un halo.
+  - Tous les noyaux tiennent dans le halo de 24 échantillons, avec une couronne de blocs de 8 : gradient, Gaussiennes de rayon 3 et 7,5, rivières jusqu'à 8 échantillons, passe-haut.
+  - Les données de chaque bloc sont donc identiques dans toutes les tuiles qui le voient.
+- **Zéros canoniques.** Un parent nul impose des enfants nuls, par non-négativité et conservation. Une limite nette subsiste donc là où le LOD 10 vaut exactement 0. Pour cette raison, le fond de la vue « gisements » est une prospectivité bilinéaire non conservée, signalée comme telle.
+- **Extrapolation côtière.** Dans les cellules marines du LOD 10, les couches terrestres prennent la valeur de la cellule terrestre la plus proche ; la pêche côtière fait l'inverse. Une côte fine située dans une cellule d'autorité marine a ainsi une valeur parente. La moyenne de bloc porte sur les échantillons terrestres du DEM fin.
+
+**Couches particulières.**
+
+| Couche | Traitement |
+|---|---|
+| Roches | Mélanges continus avec : contacts déformés par un warp multi-octave ; strates (calcaire, grès, marnes, évaporites, métamorphique) en bandes parallèles à l'azimut structural, lui-même parallèle aux ceintures orogéniques (gradient des contextes collision, arc, rift et arrière-arc) ; intrusions et coulées en taches ; roches dures sur crêtes et pentes, roches tendres en fonds |
+| Stocks contenus et récupérables | Somme de noyaux gaussiens normalisés, un par gisement, de largeur max(emprise, 0,75 échantillon) : l'intégrale égale la masse du gisement à tout LOD |
+| Gisements | Position au LOD 0 tirée par clé dans la cellule du LOD 3 ; formes par famille (ci-dessous) ; halo de prospectivité ; anneau de chapeau de fer pour un sulfuré affleurant ; sous 1,5 pixel, symbole de taille écran constante |
+| Mois de récolte (cyclique) | Cellule la plus proche après une déformation de domaine adressée, pour éviter la grille de 30 km ; pas de conservation revendiquée |
+
+Formes des gisements par famille :
+- **filons** orientés selon la structure, longueur ∝ minerai^0,45 ;
+- **amas** ellipsoïdaux de 40 à 300 m d'épaisseur ;
+- **lentilles stratiformes** d'allongement 5:1 ;
+- **placers** sur les rivières sources ou, à défaut, sur les fonds de vallée plats (pente < 4°), sur 0,1 à 2 km.
+
+**Réalisme mesuré.** Monde de référence, DEM neuronal réel, point (−1 900 km, −3 800 km), script local `realism.py`.
+
+| Contrôle | Résultat |
+|---|---|
+| Conservation parent / moyenne des enfants (écart relatif max, avant stockage float32) | NPP : 2·10⁻¹⁵ (LOD 0 → 3 et 5 → 8) ; aptitude céréalière : 0 ; mélanges de roches : 5·10⁻⁴ à 3·10⁻³ |
+| Ordres de grandeur (conservés par construction) | Au LOD 0 : NPP 319–611 g/m²/an (p5–p95) autour d'une moyenne héritée de 452 ; pierre de taille 0,46–0,69 |
+| Couplage local au relief : corrélation de Spearman des variations à moins de 5 échantillons | pierre/pente : +0,46 au LOD 2, +0,41 au LOD 0 ; neige/anomalie d'altitude : +0,30 au LOD 2 |
+| Corrélation brute sur toute la tuile | faible (\|ρ\| ≤ 0,2), car la variance vient surtout des LOD parents |
+| Fractalité : pente spectrale β du log-champ, P(k) ∝ k^−β | 2,3 à 3,2 à tous les LOD testés (7, 4, 2, 0) : comportement auto-similaire de type mouvement brownien fractionnaire |
+
+Contrôle de grille : rapport du gradient médian sur les bords des blocs de 8 au gradient médian ailleurs. Un rapport de 1 signifie qu'aucun bord de bloc ne ressort.
+
+| LOD | Après la bosse continue | Avant |
+|---|---|---|
+| 7 | 1,5 | 1,8–1,9 |
+| 4 | 0,43–0,49 | 1,1–1,2 |
+| 2 | 0,49–0,61 | — |
+| 0 | 0,47–0,82 | — |
+
+Un rapport inférieur à 1 traduit un léger « coussin » au centre des blocs. Il ne se voit pas sur les captures, mais la mesure est donnée. Au LOD 7, le grain résiduel vient du DEM de 3,84 km et de l'octave de Nyquist.
+
+**Captures avant/après.** `docs/images/resources-avant-apres-geo-rock.png`, `-mat-stone.png` et `-season-snow-djf.png`. En haut l'ancien affichage bilinéaire, en bas la descente, sur les mêmes tuiles aux LOD 7, 4, 2 et 0.
+
+`docs/images/resources-gisements-zoom.png` montre les emprises d'un porphyre, d'un filon, d'un fer oolithique et d'un placer aux LOD 3, 1 et 0. Dans ce relief montagneux, le placer n'a que quelques pièges plats.
+
+**Performance (mesurée, serveur local, une tuile de 256², en secondes).**
+
+Avant : chaque tuile recalculait le champ sur le monde entier et reconstruisait les gisements en Python, soit 0,05 à 0,26 s par tuile, sans cache.
+
+Après :
+
+| Cas | Temps par tuile |
+|---|---|
+| Tuile en cache (PNG en mémoire, plus cache navigateur d'un an) | 0,015–0,03 s |
+| Tuile fine d'un champ continu, entrées déjà présentes | 0,03–0,5 s |
+| Mélange de roches | 0,3–1,5 s |
+| Gisements | 0,05–0,6 s |
+| Première tuile d'un emplacement | jusqu'à 10 s, dominées par la génération neuronale des tuiles physiques et la construction du réseau hydrologique, comme pour Render |
+
+**Changement de vue dans le viewer** (Edge headless, 1 280 × 760, cinq couches à chacun des LOD 10, 7, 4, 2 et 0, temps jusqu'à la fin du chargement) :
+
+| Mesure | Médiane | Étendue |
+|---|---|---|
+| Première visite (tuiles neuronales du disque, ressources à calculer) | 4,5 s | 1,0 à 44 s ; la valeur la plus haute correspond au premier passage au LOD 2, avec génération des tuiles physiques |
+| Revisite (caches chauds) | 2,4 s | 1,0 à 8,7 s |
+| Ancien affichage bilinéaire, vue monde seulement | 2,4 s | — |
+
+Les annulations 409 lors des changements rapides sont celles du viewer, voulues.
+
+Ce qui a changé :
+- les champs d'autorité sont précalculés par couche (LRU de 24) ;
+- les gisements sont des tableaux, filtrés vectoriellement par emprise ;
+- l'intérieur des tuiles est stocké en float32, dans un budget de 768 Mo ;
+- les tableaux mensuels intermédiaires sont retirés après compilation : le monde en mémoire passe de 1,27 Go à environ 0,3 Go.
+
+## 17. Limites et décisions ouvertes
 
 1. **Calibration.** Densités de gisements, σ des log-normales, semence, part assolée, pêche côtière, sel solaire, épaisseur de tourbe : provisoires. Les médianes USGS marquées « vérifiées » restent à relire sur le PDF.
 2. **Résolution de l'autorité.** Le LOD 10 (30,72 km) est plus grossier que l'atlas (19,5 km). Le LOD 9 (15,36 km) suivrait mieux la source, pour environ 4 fois le coût (la limite de `monthly_water_balance` est d'environ 1 M cellules terrestres).
 3. **Métrique** plane dans l'atlas pour les distances tectoniques ; monde de diamètre par défaut seulement.
 4. **Hydrologie** : les placers et la pêche continentale devraient suivre les unités de propriété des tronçons (`multiscale-hydrology.md` §2), plutôt qu'un lissage et un proxy de plaine inondable.
-5. **LOD 3** : les budgets sont répartis avec des intensités interpolées ; le relief latent à 240 m n'est pas encore branché.
+5. **LOD 3** : les budgets entiers (export Chronos) sont répartis avec des intensités interpolées ; le relief latent à 240 m n'est branché que dans la descente d'affichage (§16), pas encore dans `descend_budget`.
+10. **Descente** : coefficients des profils et σ du bruit proposés ; ils sont calibrés sur un seul point du monde de référence. Couplage local mesuré pour la pierre et la neige seulement. Le couplage aux rivières dépend du réseau source (pas des affluents de 240 m). Les LOD négatifs n'ajoutent que du bruit.
 6. **Paléoclimat** du charbon et des évaporites : un champ adressé existe pour les évaporites seulement.
 7. **Chronos** : la sérialisation des deltas et l'entrée de l'empreinte des ressources dans le `canon_id` restent à faire.
 8. **Textures** : toutes les entrées O1, O3 et O5 sont proposées, sans implémentation dans les shaders.
 9. **Viewer** : les modifications de `index.html`, `terrain_toolbar.js` et `terrain_server.py` changent l'identité d'implémentation des tuiles neuronales. Il faut décider si les layers ressources doivent passer par un module chargé sans entrer dans cette identité.
 
-## 17. Références
+## 18. Références
 
 Seules les références relues pendant cette étude sont listées. Les valeurs non relues sont signalées dans le texte.
 
@@ -528,5 +638,6 @@ Seules les références relues pendant cette étude sont listées. Les valeurs n
 - Welcomme, R.L., 1985. *River fisheries*. FAO Fish. Tech. Pap. 262. Crul, 1992, CIFA Occ. Pap. 16. Pauly, D. & Christensen, V., 1995. *Nature* 374:255–257.
 - Loisel, J. et al., 2014. *The Holocene* 24(9):1028–1042. doi:10.1177/0959683614538073. Bricker, Newell & Simon, 2003, USGS OFR 2003-346 (fer des marais).
 - UNESCO, liste du patrimoine mondial n° 32, mines de sel de Wieliczka et Bochnia.
+- Tobler, W.R., 1979. Smooth pycnophylactic interpolation for geographical regions. *Journal of the American Statistical Association* 74(367):519–530. Principe de conservation des moyennes par région ; notre variante est discrète, en une itération.
 - Dwarf Fortress wiki, « Stone layers », « Vein », « Ore » : couches et hôtes de minerais, à titre de comparaison ludique. Azgaar's Fantasy Map Generator, v1.124.0, « Goods » : placement non déterministe par biome et hauteur ; nous retenons l'adressage par clés.
 - Projet : `docs/design/multiscale-hydrology.md`, `docs/design/render-v2*.fr.md`, `docs/methods/render-v2-glacier-provenance.md`, Chronos `conception_generateur_histoire_multiechelle_v3.md` §5.4, §10, §15, `docs/reviews/vision-entites-sociales.md`, Magna Urbis `docs/GROUND_MATERIAL_MAPPING.md` et `docs/GROUND_TEXTURE_MAPPING_V1.md`.
