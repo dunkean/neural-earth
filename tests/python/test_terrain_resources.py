@@ -231,5 +231,76 @@ class ResourceTests(unittest.TestCase):
         self.assertTrue(-1 <= float(np.ravel(a)[0]) <= 1)
 
 
+class ResourceDetailTests(unittest.TestCase):
+    """Descent to displayed LODs: exact parent means, determinism, order, seams."""
+
+    @classmethod
+    def setUpClass(cls):
+        import terrain_resource_detail as D
+        cls.D = D
+        layers, height = atlas()
+        cls.grid, cls.f, cls.deposits = R.compile_world(layers, height, 42, lod=14, balance=False)
+        cls.fields = {k: v for k, v in cls.f.items() if isinstance(v, np.ndarray)}
+        auth = dict(npp=cls.fields['npp_g_m2'], suit=cls.fields['cereal_suitability'].astype(np.float64),
+                    rock=np.stack([cls.fields['rock_' + r] for r in R.ROCKS]).astype(np.float64))
+        cls.auth = {'orogen-resources-bio-npp': auth['npp'], 'orogen-resources-agri-cereal-suitability': auth['suit'],
+                    'orogen-resources-geo-rock': auth['rock']}
+
+        def dem(lod, tx, ty):
+            xs, ys, _, _ = D.tile_axes(lod, tx, ty)
+            X, Y = np.meshgrid(xs, ys)
+            # Canonical analytic relief: a function of map coordinates only.
+            e = 800 + 600 * np.sin(X / 9.1e4) * np.cos(Y / 7.3e4) + 150 * np.sin(X / 4.1e3 + Y / 6.7e3)
+            return dict(elevation=e, river=None)
+        cls.dem = staticmethod(dem)
+
+    def engine(self):
+        return self.D.Detail(42, self.grid, self.fields, self.deposits, lambda mode: self.auth[mode])
+
+    def test_displayed_lod_conserves_parent_means(self):
+        D, det = self.D, self.engine()
+        tx, ty = -2, -3     # LOD 8 tile on land of the synthetic world
+        # Tile interiors are cached as float32: exact up to float32 rounding.
+        for mode, kind, bounded, tol in [('orogen-resources-bio-npp', 'ramp', None, 1e-6),
+                                         ('orogen-resources-agri-cereal-suitability', 'ramp', (0., 1.), 1e-6),
+                                         ('orogen-resources-geo-rock', 'mix', None, 1e-2)]:
+            for lod in (11, 8):
+                tile = (tx >> (8 - lod), ty >> (8 - lod)) if lod < 8 else (tx >> (lod - 8), ty >> (lod - 8))
+                v = det.values(mode, lod, *tile, self.dem, kind, bounded)
+                plod = D.parent_lod_of(lod, det.lod)
+                d = plod - lod
+                par = det.values(mode, plod, tile[0] >> d, tile[1] >> d, self.dem, kind, bounded)
+                k = 1 << d
+                oi = (tile[0] * 256) // k - (tile[0] >> d) * 256 + D.HALO
+                oj = (tile[1] * 256) // k - (tile[1] >> d) * 256 + D.HALO
+                pv = par[..., oj:oj + 256 // k, oi:oi + 256 // k]
+                means = D.block_means(v, lod, *tile, plod)
+                np.testing.assert_allclose(means, pv, rtol=tol, atol=tol * max(1., float(np.abs(pv).max())), err_msg=f'{mode} lod {lod}')
+
+    def test_descent_is_deterministic_and_order_independent(self):
+        a, b = self.engine(), self.engine()
+        tiles = [(8, -2, -3), (8, -1, -3), (5, -16, -24)]
+        first = {t: a.values('orogen-resources-bio-npp', *t, self.dem, 'ramp', None) for t in tiles}
+        second = {t: b.values('orogen-resources-bio-npp', *t, self.dem, 'ramp', None) for t in reversed(tiles)}
+        for t in tiles:
+            np.testing.assert_array_equal(first[t], second[t])
+
+    def test_adjacent_tiles_have_no_seam(self):
+        D, det = self.D, self.engine()
+        left = det.values('orogen-resources-bio-npp', 8, -2, -3, self.dem, 'ramp', None)
+        right = det.values('orogen-resources-bio-npp', 8, -1, -3, self.dem, 'ramp', None)
+        h, t = D.HALO, D.TILE
+        jump = np.abs(right[h:h + t, h] - left[h:h + t, h + t - 1])
+        inside = np.abs(left[h:h + t, h + t - 1] - left[h:h + t, h + t - 2])
+        self.assertLess(float(np.median(jump)), 3 * float(np.median(inside)) + 1e-9)
+
+    def test_noise_is_keyed_by_position_not_tile(self):
+        D = self.D
+        xs, ys, _, _ = D.tile_axes(6, 3, -2)
+        full = D.octave_noise(42, 'x', 4, xs, ys)
+        part = D.octave_noise(42, 'x', 4, xs[100:140], ys[50:90])
+        np.testing.assert_array_equal(full[50:90, 100:140], part)
+
+
 if __name__ == '__main__':
     unittest.main()

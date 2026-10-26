@@ -2524,6 +2524,82 @@ def snr_diagnostic_tile(seed, lod, tx, ty, wp, mode):
         seconds=round(time.perf_counter()-started, 4), geometry_lod=lod), False)
 
 
+_RESOURCE_PNG = OrderedDict()
+_RESOURCE_PNG_LOCK = threading.Lock()
+
+
+def resource_inputs(seed, wp, identity):
+    """Canonical fine inputs of a resource tile: neural DEM and source rivers.
+
+    Rivers come from the hydrology service with fixed options (annual month,
+    no detail, no cosmetics) and wait for the network, so display toggles
+    never change a resource value. Negative LODs read no relief.
+    """
+    def inputs(lod, tx, ty):
+        if lod < 0:
+            return None
+        path, report, _, arrays = physical_tile(seed, lod, tx, ty, return_arrays=True)
+        elevation = arrays[0] if arrays is not None else np.load(path, allow_pickle=False)
+        if elevation.shape != (TILE + 2*HALO, TILE + 2*HALO):
+            raise ValueError('Unexpected physical tile shape for resources')
+        service = hydrology_service()
+        entry = service.ensure(seed, wp, identity)
+        if entry['status'] == 'building':
+            entry['future'].result(timeout=600)
+        if entry['status'] != 'ready':
+            raise RuntimeError('Resource layers need the hydrology network: ' + str(entry.get('error')))
+        resolution = NATIVE*2**lod
+        x0, y0 = tx*TILE*resolution-HALO*resolution, ty*TILE*resolution-HALO*resolution
+        extent = (x0, y0, x0+elevation.shape[1]*resolution, y0+elevation.shape[0]*resolution)
+        try:
+            _, water, _ = service.physical(entry, elevation, extent, lod=lod, month=0, chart=None, detail=False)
+        except (TypeError, ValueError) as exc:
+            # A deterministic failure of the water rasteriser for this tile: the
+            # tile then has no river term (same result on every request).
+            app.logger.warning('Resource rivers unavailable for %s/%s/%s: %s', lod, tx, ty, exc)
+            water = None
+        river = None if water is None else ((water[..., 2] > 2.5) & (water[..., 3] > .5) & (water[..., 1] > .05))
+        return dict(elevation=np.asarray(elevation, np.float64), river=river)
+    return inputs
+
+
+def resource_tile(seed, lod, tx, ty, wp, mode):
+    """Resource layer at any LOD: descent with keyed noise and exact conservation."""
+    if request.args.get('profile', PROFILE) != PROFILE:
+        raise ValueError('Outdated cache profile: reload the page')
+    identity = world_identity(world_manifest(seed, wp))
+    if request.args.get('world_identity') and request.args['world_identity'] != identity:
+        raise ValueError('Outdated world identity: reload the page')
+    key = (identity, mode, lod, tx, ty)
+    started = time.perf_counter()
+    with _RESOURCE_PNG_LOCK:
+        payload = _RESOURCE_PNG.get(key)
+        if payload is not None:
+            _RESOURCE_PNG.move_to_end(key)
+    cached = payload is not None
+    if payload is None:
+        from terrain_orogen import get_heightmap
+        from terrain_resource_layers import render_tile
+        descriptor = resolve_generation(wp)
+        atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options),
+                                   descriptor.settings)
+        rgb = render_tile(atlas, mode, lod, tx, ty, resource_inputs(seed, wp, identity))
+        buffer = io.BytesIO()
+        Image.fromarray(rgb).save(buffer, format='PNG')
+        payload = buffer.getvalue()
+        with _RESOURCE_PNG_LOCK:
+            _RESOURCE_PNG[key] = payload
+            while len(_RESOURCE_PNG) > 4096:
+                _RESOURCE_PNG.popitem(last=False)
+    response = Response(payload, mimetype='image/png')
+    seconds = round(time.perf_counter()-started, 4)
+    response.headers['X-Terrain-Resource-Seconds'] = str(seconds)
+    response.headers['X-Terrain-Resource-Cache'] = 'memory' if cached else 'computed'
+    response.cache_control.max_age = 31536000
+    report = dict(stage='resource-layer', resolution=NATIVE*2**lod, world_identity=identity, seconds=seconds, geometry_lod=lod)
+    return _tile_headers(response, report, cached)
+
+
 def orogen_diagnostic_tile(seed, lod, tx, ty, wp, mode, *, binary=False):
     if request.args.get('profile', PROFILE) != PROFILE:
         raise ValueError('Outdated cache profile: reload the page')
@@ -2749,6 +2825,8 @@ def tile(seed, lod, tx, ty):
         render_settings = parse_render_settings(request.args.get('render_settings')) if mode=='render' or mode in RENDER_V2_MODES else None
         if mode in SNR_MODES:
             return snr_diagnostic_tile(seed, lod, tx, ty, wp, mode)
+        if mode in RESOURCE_LEGENDS:
+            return resource_tile(seed, lod, tx, ty, wp, mode)
         if mode in OROGEN_MODES and mode not in ('orogen-biomes','orogen-koppen','render','soil'):
             return orogen_diagnostic_tile(seed, lod, tx, ty, wp, mode)
         if request.args.get('profile', PROFILE) != PROFILE:
@@ -3046,7 +3124,7 @@ def overview(seed):
         if mode not in OROGEN_MODES+SNR_MODES or mode in ('orogen-biomes','orogen-koppen','render','soil')+RENDER_V2_MODES:
             rgb=apply_contours(rgb,elevation,contours,mode)
         buffer = io.BytesIO()
-        Image.fromarray((np.clip(rgb, 0, 1)*255).astype(np.uint8)).save(buffer, format='PNG')
+        Image.fromarray(rgb).save(buffer, format='PNG')
         if display_variant:
             _remember_overview(memory_key,buffer.getvalue())
             # The last few display variants also persist, so reopening the
