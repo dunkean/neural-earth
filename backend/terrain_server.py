@@ -42,8 +42,9 @@ from terrain_biomes import colorize_biomes, sample_biome_fields, sample_biome_tr
 from terrain_koppen import COLORS as KOPPEN_COLORS, sample_classes
 from terrain_soil import sample_soil_transport
 from terrain_render import colorize_surface, parse_settings as parse_render_settings, appearance_identity
+from terrain_surface_modes import RENDER_V2_MODES, RENDER_V2_LEGENDS
 APPEARANCE_IDENTITY=appearance_identity()
-MODES = MODES + STYLE_MODES + OROGEN_MODES + SNR_MODES
+MODES = MODES + STYLE_MODES + OROGEN_MODES + SNR_MODES + RENDER_V2_MODES
 from terrain_conditioning import sample_conditioning_preview, WORLD_PROFILES
 from terrain_generation import resolve_generation, register_generation, generator_schema
 from terrain_bootstrap import RASTER_WIDTH, RASTER_HEIGHT
@@ -348,7 +349,7 @@ def display_mode():
     mode=request.args.get('mode','biomes')
     if mode not in MODES:
         raise ValueError('Invalid map mode')
-    if mode in OROGEN_MODES and resolve_generation(generation_profile()).bootstrap_generator != 'orogen':
+    if mode in OROGEN_MODES + RENDER_V2_MODES and resolve_generation(generation_profile()).bootstrap_generator != 'orogen':
         raise ValueError('Orogen diagnostic layers require an Orogen pipeline')
     return mode
 
@@ -1116,23 +1117,27 @@ def response_report(report,seed,profile,lod,tx,ty,source):
     return dict(report,cache_source=source,provisional=provisional)
 
 
-def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief', lighting=None, contours=None, origin=(0, 0), seed=None, world_profile=None, render_settings=None, surface=None):
+def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief', lighting=None, contours=None, origin=(0, 0), seed=None, world_profile=None, render_settings=None, surface=None, hydrology=None):
     from terrain_styles import MODES as STYLE_MODES, render_style, apply_contours
     if mode in STYLE_MODES:
         rgb=render_style(elevation,NATIVE*2**lod,mode,lighting,origin)
     else:
         rgb = (get_relief_map(elevation, None, None, None, resolution=NATIVE*2**lod, vmin=0, vmax=4500)
                if lighting is None else render_relief(elevation, NATIVE*2**lod, lighting))
-    if mode in ('orogen-biomes','orogen-koppen','render','soil','pedology'):
+    if mode in ('orogen-biomes','orogen-koppen','render','soil','pedology') + RENDER_V2_MODES:
         resolution = NATIVE*2**lod
         xs = origin[0]+(np.arange(elevation.shape[1])+.5)*resolution
         ys = origin[1]+(np.arange(elevation.shape[0])+.5)*resolution
         if mode == 'orogen-koppen':
             rgb = physical_koppen_colors(seed,world_profile,xs,ys,elevation)
-        elif mode in ('render','soil','pedology'):
+        elif mode in ('render','soil','pedology') + RENDER_V2_MODES:
             atlas,settings = biome_atlas(seed,world_profile)
+            # V2 owns land lighting followed by its contextual water/ice pass.
+            # Applying the legacy water compositor afterward would erase it.
+            water_options = dict(hydrology=hydrology, lighting=lighting) if mode in RENDER_V2_MODES else {}
             rgb = colorize_surface(atlas,xs,ys,elevation,resolution,settings,render_settings,
-                                   polar=selected_neural_chart()=='polar',mode=mode,**({'surface':surface} if surface is not None else {}))
+                                   polar=selected_neural_chart()=='polar',mode=mode,**water_options,
+                                   **({'surface':surface} if surface is not None else {}))
             if mode in ('render','soil'):
                 from terrain_lighting import relief_intensity
                 rgb *= np.where(elevation<0,1,relief_intensity(elevation,resolution,lighting))[...,None]
@@ -1242,7 +1247,7 @@ def metadata(seed, world_profile=None):
             'world_profile':descriptor.base_profile,'generation_settings':descriptor.settings,
             'generation_schema':generator_schema(),
             'conditioning_noise':manifest['conditioning']['cond_snr'],
-            'orogen_layers': dict(OROGEN_LEGENDS) if descriptor.bootstrap_generator == 'orogen' else {},
+            'orogen_layers': {**OROGEN_LEGENDS, **RENDER_V2_LEGENDS} if descriptor.bootstrap_generator == 'orogen' else {},
             'world_identity':world_identity(manifest),'world_manifest':manifest,
             'generation_stages':manifest.get('bootstrap',{}).get('stage_state',{}) if manifest.get('bootstrap') else {},
             'scheduling_land_mask':scheduling_land_mask(seed,world_profile),
@@ -1507,6 +1512,7 @@ def hydrology_options():
 
 
 def hydrology_display(seed, profile, lod, tx, ty, elevation, report):
+    from terrain_surface_modes import RENDER_V2_MODES
     if request.args.get('hydro') != '1':
         return elevation, None, report
     options = hydrology_options()
@@ -1528,7 +1534,10 @@ def hydrology_display(seed, profile, lod, tx, ty, elevation, report):
     # courses cannot condition a neural bed, so rasterising them again in every
     # binary height tile adds cost without a trustworthy physical water surface.
     # PNG consumers still use physical() to composite their image on the CPU.
-    if not options['detail'] and request.endpoint == 'height_tile':
+    v2 = request.args.get('mode') in RENDER_V2_MODES
+    render_lakes = v2 and not options['detail'] and request.args.get('v2_lakes') == '1'
+    min_lake_area_m2 = float(request.args.get('v2_lake_min_area_m2', 1e6)) if render_lakes else 1e6
+    if not options['detail'] and request.endpoint == 'height_tile' and not v2:
         return elevation, None, dict(report, hydro_state=entry['status'], hydro_id=entry['key'],
             hydro_month=month, hydro_vector_preview=True, hydro_detail=False, hydro_seconds=0.,
             hydro_base_revision=_hydrology_base_revision)
@@ -1537,9 +1546,16 @@ def hydrology_display(seed, profile, lod, tx, ty, elevation, report):
     y0 = ty*TILE*NATIVE*2**lod-halo*resolution
     extent = (x0, y0, x0+elevation.shape[1]*resolution, y0+elevation.shape[0]*resolution)
     height, water, details = service.physical(entry, elevation, extent, lod=lod, month=month,
-                                            chart=selected_neural_chart(), **options)
+                                            chart=selected_neural_chart(), render_lakes=render_lakes,
+                                            min_lake_area_m2=min_lake_area_m2, **options)
     if not options['detail']:
         details = dict(details, hydro_vector_preview=True)
+        if v2:
+            # Give the satellite shader the same seasonal water coverage as
+            # PNG consumers. Source courses remain a labelled approximation;
+            # never carve or replace its retained neural height for this view.
+            height = elevation
+            details = dict(details, hydro_max_cut_m=0.)
     details = dict(details, hydro_base_revision=_hydrology_base_revision)
     return height, water, dict(report, **details)
 
@@ -1584,6 +1600,11 @@ def hydrology_method_note(name):
     return send_from_directory(ROOT / 'docs' / 'methods', name)
 
 
+@app.get('/docs/design/<path:name>')
+def rendering_design_note(name):
+    return send_from_directory(ROOT / 'docs' / 'design', name)
+
+
 @app.get('/terrain_transport.js')
 def transport_script():
     return send_from_directory(WEB_ROOT, 'terrain_transport.js')
@@ -1620,6 +1641,7 @@ def renderer_script():
 
 
 @app.get('/terrain_render3d.js')
+@app.get('/terrain_render_v2.js')
 @app.get('/terrain_forest_brushes.js')
 @app.get('/forest-brushes.bin')
 def render3d_assets():
@@ -2175,9 +2197,10 @@ def update_view():
             light=parse_lighting(json.dumps(data['overview_lighting'])) if data.get('overview_lighting') is not None else None
             contours=parse_contours(json.dumps(data['overview_contours'])) if data.get('overview_contours') is not None else None
             for mode in MODES:
-                render_options=parse_render_settings(data.get('overview_render_settings')) if mode=='render' else None
-                suffix=(lighting_suffix(light) if mode in ('relief','biomes','orogen-biomes','render')+STYLE_MODES else '')+lighting_suffix(contours)+(lighting_suffix(render_options) if mode=='render' else '')
-                if mode in ('render','soil','pedology'):suffix+='.appearance-'+APPEARANCE_IDENTITY
+                material_mode=mode=='render' or mode in RENDER_V2_MODES
+                render_options=parse_render_settings(data.get('overview_render_settings')) if material_mode else None
+                suffix=(lighting_suffix(light) if mode in ('relief','biomes','orogen-biomes','render')+STYLE_MODES+RENDER_V2_MODES else '')+lighting_suffix(contours)+(lighting_suffix(render_options) if material_mode else '')
+                if mode in ('render','soil','pedology')+RENDER_V2_MODES:suffix+='.appearance-'+APPEARANCE_IDENTITY
                 wants[f'{VERSION}/{world_profile}/{seed}/overview/{mode}{suffix}'] = 0
         focus = data.get('bounds')
         if focus is not None:
@@ -2683,7 +2706,7 @@ def tile(seed, lod, tx, ty):
     try:
         seed, lod, tx, ty = _tile_coordinates(seed, lod, tx, ty)
         wp,mode=generation_profile(),display_mode()
-        render_settings = parse_render_settings(request.args.get('render_settings')) if mode=='render' else None
+        render_settings = parse_render_settings(request.args.get('render_settings')) if mode=='render' or mode in RENDER_V2_MODES else None
         if mode in SNR_MODES:
             return snr_diagnostic_tile(seed, lod, tx, ty, wp, mode)
         if mode in OROGEN_MODES and mode not in ('orogen-biomes','orogen-koppen','render','soil'):
@@ -2694,7 +2717,7 @@ def tile(seed, lod, tx, ty):
         lighting = parse_lighting(request.args.get('lighting'))
         from terrain_styles import parse_contours
         contours = parse_contours(request.args.get('contours'))
-        if request.args.get('hydro')=='1' or lighting is not None or contours is not None or mode in ('orogen-biomes','orogen-koppen','render','soil'):
+        if request.args.get('hydro')=='1' or lighting is not None or contours is not None or mode in ('orogen-biomes','orogen-koppen','render','soil')+RENDER_V2_MODES:
             # Reuse physical caches, without accumulating PNGs for slider values.
             physical_path, report, cached, arrays = physical_tile(seed,lod,tx,ty,return_arrays=True)
             with image_slots:
@@ -2703,8 +2726,10 @@ def tile(seed, lod, tx, ty):
                 climate=arrays[1] if arrays is not None else np.load(physical_path.with_suffix('.climate.npy'),allow_pickle=False)
                 elevation, hydrology, report = hydrology_display(seed,wp,lod,tx,ty,elevation,report)
                 from terrain_hydrology_render import ground_for_shading, composite_water
-                rgb=render_elevation(ground_for_shading(elevation,hydrology),latent_preview_source(lod) or lod,climate=climate,mode=mode,seed=seed,world_profile=wp,lighting=lighting,contours=contours,render_settings=render_settings,surface=arrays[2] if arrays is not None and len(arrays)>2 else None,origin=(tx*256*NATIVE*2**lod-HALO*report['resolution'],ty*256*NATIVE*2**lod-HALO*report['resolution']))
-                rgb=composite_water(rgb,elevation,hydrology,crop=HALO)
+                v2=mode in RENDER_V2_MODES
+                rgb=render_elevation(elevation if v2 else ground_for_shading(elevation,hydrology),latent_preview_source(lod) or lod,climate=climate,mode=mode,seed=seed,world_profile=wp,lighting=lighting,contours=contours,render_settings=render_settings,surface=arrays[2] if arrays is not None and len(arrays)>2 else None,hydrology=hydrology if v2 else None,origin=(tx*256*NATIVE*2**lod-HALO*report['resolution'],ty*256*NATIVE*2**lod-HALO*report['resolution']))
+                if not v2:
+                    rgb=composite_water(rgb,elevation,hydrology,crop=HALO)
                 buffer=io.BytesIO();Image.fromarray(rgb).save(buffer,format='PNG')
                 report=dict(report,**tile_relief_stats(elevation,HALO),render_seconds=round(time.perf_counter()-started,4))
             return _tile_headers(Response(buffer.getvalue(),mimetype='image/png'),report,cached)
@@ -2883,9 +2908,10 @@ def overview(seed):
         wp,mode=generation_profile(),display_mode()
         lighting=parse_lighting(request.args.get("lighting"))
         contours=parse_contours(request.args.get("contours"))
-        render_settings=parse_render_settings(request.args.get('render_settings')) if mode=='render' else None
-        suffix=lighting_suffix(lighting)+lighting_suffix(contours)+(lighting_suffix(render_settings) if mode=='render' else '')
-        if mode in ('render','soil','pedology'):suffix+='.appearance-'+APPEARANCE_IDENTITY
+        material_mode=mode=='render' or mode in RENDER_V2_MODES
+        render_settings=parse_render_settings(request.args.get('render_settings')) if material_mode else None
+        suffix=lighting_suffix(lighting)+lighting_suffix(contours)+(lighting_suffix(render_settings) if material_mode else '')
+        if mode in ('render','soil','pedology')+RENDER_V2_MODES:suffix+='.appearance-'+APPEARANCE_IDENTITY
     except ValueError as exc:
         return jsonify(error=str(exc)),400
     directory = CACHE/wp/str(seed)
@@ -2941,12 +2967,20 @@ def overview(seed):
         elevation, climate,resolution = value
         if mode in OROGEN_MODES + SNR_MODES and mode not in ('orogen-biomes','orogen-koppen','render','soil'):
             rgb=elevation
-        elif mode in ('orogen-biomes','orogen-koppen','render','soil'):
+        elif mode in ('orogen-biomes','orogen-koppen','render','soil')+RENDER_V2_MODES:
             x0,y0,x1,y1=metadata_snapshot['overview_bounds']
             xs=x0+(np.arange(2048)+.5)*(x1-x0)/2048
             ys=y0+(np.arange(1024)+.5)*(y1-y0)/1024
             if mode == 'orogen-koppen':
                 rgb=physical_koppen_colors(seed,wp,xs,ys,elevation)
+            elif mode in RENDER_V2_MODES:
+                atlas,settings=biome_atlas(seed,wp)
+                # V2 includes lighting and water in its result; cache the final
+                # colour with the light in the key rather than relighting it.
+                rgb=overview_albedo((identity,APPEARANCE_IDENTITY,wp,seed,mode,
+                    json.dumps(render_settings,sort_keys=True),json.dumps(lighting,sort_keys=True)),
+                    lambda:colorize_surface(atlas,xs,ys,elevation,((x1-x0)/2048,(y1-y0)/1024),
+                        settings,render_settings,mode=mode,lighting=lighting))
             elif mode in ('render','soil'):
                 atlas,settings=biome_atlas(seed,wp)
                 albedo=overview_albedo((identity,APPEARANCE_IDENTITY,wp,seed,mode,json.dumps(render_settings,sort_keys=True)),
@@ -2969,7 +3003,7 @@ def overview(seed):
         else:
             x0,y0,x1,y1=metadata_snapshot['overview_bounds']
             rgb=render_relief(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting)
-        if mode not in OROGEN_MODES+SNR_MODES or mode in ('orogen-biomes','orogen-koppen','render','soil'):
+        if mode not in OROGEN_MODES+SNR_MODES or mode in ('orogen-biomes','orogen-koppen','render','soil')+RENDER_V2_MODES:
             rgb=apply_contours(rgb,elevation,contours,mode)
         buffer = io.BytesIO()
         Image.fromarray((np.clip(rgb, 0, 1)*255).astype(np.uint8)).save(buffer, format='PNG')

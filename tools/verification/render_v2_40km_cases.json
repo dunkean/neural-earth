@@ -1,0 +1,650 @@
+{
+  "version": 1,
+  "extentMetres": 40000,
+  "altitudes": [
+    100,
+    500,
+    1500,
+    3000,
+    4500
+  ],
+  "units": {
+    "ts": "sea-level reference-season temperature, Celsius",
+    "tw": "sea-level opposite-reference-season temperature, Celsius",
+    "ps": "reference half-year precipitation, mm",
+    "pw": "opposite half-year precipitation, mm",
+    "ls": "reference-season positive lapse, Celsius/metre",
+    "lw": "opposite-season positive lapse, Celsius/metre",
+    "altitudes": "mean physical land altitude, metres",
+    "sand": "unit fraction; fixed across all climates to isolate the climate axis"
+  },
+  "notes": [
+    "The repository has 30 terrestrial Koppen classes plus ocean ID 0, grouped here into 15 review families. Render v2 evaluates continuous climate and legacy ecology rather than selecting a class palette.",
+    "expectedCode is the production Koppen classification at elevation zero with default thresholds, before the altitude lapse. Reclassify at every actual altitude instead of relabelling an alpine EF patch Af.",
+    "All ts/tw pairs designate northern warm/cold reference seasons. Render v2 date 0.5 uses ts, date 0 uses tw. Swapping both seasons and precipitation together is the separate southern-hemisphere control.",
+    "The default physical lapse is (4.5 + 4.8*(1-clamp(halfYearRain/1000,0,1)))/1000 Celsius/metre, independently for each reference season. Do not substitute an arbitrary fixed 0.0065.",
+    "A visible plate must span exactly 40000 metres in both physical axes. Overview metres/pixel is 40000/renderedPlatePixels; close insets must state their own smaller extent.",
+    "At overview footprints above 6m/pixel, Render v2 inherits the legacy open ground; at above 32m/pixel explicit crown detail is unresolved. Inspect ecology buffers or clearly labelled close insets to validate tree exclusion.",
+    "Altitude-only rows keep sea-level temperatures and precipitation fixed. Effective displayed climate and tree/snow gates must use ts-ls*max(height,0), tw-lw*max(height,0)."
+  ],
+  "expectedGates": {
+    "warmGrowth": "Legacy macro woods begin at local hottest-season 5.5C, reach their thermal range by 13.5C; explicit crown thermal range is 5..8.5C and is further gated by the legacy eligibility and perennial snow. Topographic jitter slightly moves the transition.",
+    "grass": "Legacy herbs need warm-season 0..7C and humidity 0.2..0.85; current green tone depends on current temperature 3..12C and current humidity 0.5..1.4. Cold/dry grass is not necessarily green.",
+    "aridity": "Koppen aridity uses max(0,20*meanTemperature + seasonalAddition), with additions 280/140/0mm for warm-rain fractions >=0.7 / intermediate / <=0.3. Desert is below half the aridity threshold, steppe below the full threshold. Render material humidity uses its separate continuous max(120,20*meanTemperature+280) denominator.",
+    "snow": "Render v2 continuous cold retention spans current temperature +2..-5C, humidity potential 0.12..0.7 and slope shedding 0.45..1.25. Cold wet flat ground may reach full snow; steep slopes expose rock. EF with rain and a frozen river must have no woody candidates.",
+    "polar": "ET is hottest season 0<=T<10C, EF is hottest season T<0C; both override aridity classification. An ET case with hottest season 6C can sit near the implemented sparse woody threshold, so do not assert zero trees for all ET.",
+    "water": "Ocean is a separate hydrology/elevation state, not a forced terrestrial Koppen case. Complement these rows with open sea/pack/icebergs, warm/frozen lakes and rivers, plus authoritative dry below-sea-level basins.",
+    "visual": "Use the same 40km terrain, seed, camera, lighting, sand and seasonal dates across climate rows. Require readable lit/shadowed relief under snow and vegetation, no synthetic red contour halos, no land texture crossing authoritative water, and broad color/coverage continuity between DEM resolutions and latitudes."
+  },
+  "cases": [
+    {
+      "id": "af",
+      "label": "Forêt tropicale humide",
+      "group": "Af · Forêt tropicale humide",
+      "ts": 28,
+      "tw": 25,
+      "ps": 1000,
+      "pw": 900,
+      "ls": 0.0045,
+      "lw": 0.00498,
+      "sand": 0.3,
+      "expectedCode": "af",
+      "expectedCodesAtAltitudes": {
+        "100": "af",
+        "500": "af",
+        "1500": "cfb",
+        "3000": "cfb",
+        "4500": "et"
+      }
+    },
+    {
+      "id": "am",
+      "label": "Mousson tropicale",
+      "group": "Am · Mousson tropicale",
+      "ts": 29,
+      "tw": 23,
+      "ps": 1800,
+      "pw": 240,
+      "ls": 0.0045,
+      "lw": 0.008148,
+      "sand": 0.3,
+      "expectedCode": "am",
+      "expectedCodesAtAltitudes": {
+        "100": "am",
+        "500": "am",
+        "1500": "cfa",
+        "3000": "dfc",
+        "4500": "et"
+      }
+    },
+    {
+      "id": "aw",
+      "label": "Savane à hiver sec",
+      "group": "Aw · Savane tropicale",
+      "ts": 30,
+      "tw": 22,
+      "ps": 900,
+      "pw": 120,
+      "ls": 0.00498,
+      "lw": 0.008724,
+      "sand": 0.3,
+      "expectedCode": "aw",
+      "expectedCodesAtAltitudes": {
+        "100": "aw",
+        "500": "cfa",
+        "1500": "cfa",
+        "3000": "dfc",
+        "4500": "et"
+      }
+    },
+    {
+      "id": "bwh",
+      "label": "Désert chaud",
+      "group": "BWh · Désert chaud",
+      "ts": 38,
+      "tw": 22,
+      "ps": 20,
+      "pw": 20,
+      "ls": 0.009204,
+      "lw": 0.009204,
+      "sand": 0.3,
+      "expectedCode": "bwh",
+      "expectedCodesAtAltitudes": {
+        "100": "bwh",
+        "500": "bwh",
+        "1500": "bwk",
+        "3000": "bwk",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "bwk",
+      "label": "Désert froid",
+      "group": "BWk · Désert froid",
+      "ts": 20,
+      "tw": -8,
+      "ps": 20,
+      "pw": 20,
+      "ls": 0.009204,
+      "lw": 0.009204,
+      "sand": 0.3,
+      "expectedCode": "bwk",
+      "expectedCodesAtAltitudes": {
+        "100": "bwk",
+        "500": "bwk",
+        "1500": "et",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "bsh",
+      "label": "Steppe chaude",
+      "group": "BSh · Steppe chaude",
+      "ts": 34,
+      "tw": 20,
+      "ps": 250,
+      "pw": 250,
+      "ls": 0.0081,
+      "lw": 0.0081,
+      "sand": 0.3,
+      "expectedCode": "bsh",
+      "expectedCodesAtAltitudes": {
+        "100": "bsh",
+        "500": "bsh",
+        "1500": "cfb",
+        "3000": "et",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "bsk",
+      "label": "Steppe froide",
+      "group": "BSk · Steppe froide",
+      "ts": 24,
+      "tw": -6,
+      "ps": 140,
+      "pw": 140,
+      "ls": 0.008628,
+      "lw": 0.008628,
+      "sand": 0.3,
+      "expectedCode": "bsk",
+      "expectedCodesAtAltitudes": {
+        "100": "bsk",
+        "500": "dfc",
+        "1500": "dfc",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "cfa",
+      "label": "Tempéré sans saison sèche, été chaud",
+      "group": "CF · Tempéré sans saison sèche",
+      "ts": 26,
+      "tw": 8,
+      "ps": 600,
+      "pw": 500,
+      "ls": 0.00642,
+      "lw": 0.0069,
+      "sand": 0.3,
+      "expectedCode": "cfa",
+      "expectedCodesAtAltitudes": {
+        "100": "cfa",
+        "500": "cfa",
+        "1500": "dfb",
+        "3000": "et",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "cfb",
+      "label": "Tempéré sans saison sèche, été doux",
+      "group": "CF · Tempéré sans saison sèche",
+      "ts": 18,
+      "tw": 6,
+      "ps": 600,
+      "pw": 500,
+      "ls": 0.00642,
+      "lw": 0.0069,
+      "sand": 0.3,
+      "expectedCode": "cfb",
+      "expectedCodesAtAltitudes": {
+        "100": "cfb",
+        "500": "cfb",
+        "1500": "et",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "cfc",
+      "label": "Tempéré sans saison sèche, été frais",
+      "group": "CF · Tempéré sans saison sèche",
+      "ts": 12,
+      "tw": 1,
+      "ps": 600,
+      "pw": 500,
+      "ls": 0.00642,
+      "lw": 0.0069,
+      "sand": 0.3,
+      "expectedCode": "cfc",
+      "expectedCodesAtAltitudes": {
+        "100": "cfc",
+        "500": "et",
+        "1500": "et",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "csa",
+      "label": "Tempéré à été sec, été chaud",
+      "group": "CS · Tempéré à été sec",
+      "ts": 26,
+      "tw": 8,
+      "ps": 40,
+      "pw": 700,
+      "ls": 0.009108,
+      "lw": 0.00594,
+      "sand": 0.3,
+      "expectedCode": "csa",
+      "expectedCodesAtAltitudes": {
+        "100": "csa",
+        "500": "csb",
+        "1500": "dsc",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "csb",
+      "label": "Tempéré à été sec, été doux",
+      "group": "CS · Tempéré à été sec",
+      "ts": 18,
+      "tw": 6,
+      "ps": 40,
+      "pw": 700,
+      "ls": 0.009108,
+      "lw": 0.00594,
+      "sand": 0.3,
+      "expectedCode": "csb",
+      "expectedCodesAtAltitudes": {
+        "100": "csb",
+        "500": "csc",
+        "1500": "et",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "csc",
+      "label": "Tempéré à été sec, été frais",
+      "group": "CS · Tempéré à été sec",
+      "ts": 12,
+      "tw": 1,
+      "ps": 40,
+      "pw": 700,
+      "ls": 0.009108,
+      "lw": 0.00594,
+      "sand": 0.3,
+      "expectedCode": "csc",
+      "expectedCodesAtAltitudes": {
+        "100": "csc",
+        "500": "et",
+        "1500": "ef",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "cwa",
+      "label": "Tempéré à hiver sec, été chaud",
+      "group": "CW · Tempéré à hiver sec",
+      "ts": 26,
+      "tw": 8,
+      "ps": 1200,
+      "pw": 40,
+      "ls": 0.0045,
+      "lw": 0.009108,
+      "sand": 0.3,
+      "expectedCode": "cwa",
+      "expectedCodesAtAltitudes": {
+        "100": "cwa",
+        "500": "cwa",
+        "1500": "dwb",
+        "3000": "dwc",
+        "4500": "et"
+      }
+    },
+    {
+      "id": "cwb",
+      "label": "Tempéré à hiver sec, été doux",
+      "group": "CW · Tempéré à hiver sec",
+      "ts": 18,
+      "tw": 6,
+      "ps": 1200,
+      "pw": 40,
+      "ls": 0.0045,
+      "lw": 0.009108,
+      "sand": 0.3,
+      "expectedCode": "cwb",
+      "expectedCodesAtAltitudes": {
+        "100": "cwb",
+        "500": "cwb",
+        "1500": "dwc",
+        "3000": "et",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "cwc",
+      "label": "Tempéré à hiver sec, été frais",
+      "group": "CW · Tempéré à hiver sec",
+      "ts": 12,
+      "tw": 1,
+      "ps": 1200,
+      "pw": 40,
+      "ls": 0.0045,
+      "lw": 0.009108,
+      "sand": 0.3,
+      "expectedCode": "cwc",
+      "expectedCodesAtAltitudes": {
+        "100": "cwc",
+        "500": "et",
+        "1500": "et",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "dfa",
+      "label": "Continental sans saison sèche, été chaud",
+      "group": "DF · Continental sans saison sèche",
+      "ts": 26,
+      "tw": -8,
+      "ps": 600,
+      "pw": 500,
+      "ls": 0.00642,
+      "lw": 0.0069,
+      "sand": 0.3,
+      "expectedCode": "dfa",
+      "expectedCodesAtAltitudes": {
+        "100": "dfa",
+        "500": "dfa",
+        "1500": "dfc",
+        "3000": "et",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "dfb",
+      "label": "Continental sans saison sèche, été doux",
+      "group": "DF · Continental sans saison sèche",
+      "ts": 20,
+      "tw": -6,
+      "ps": 600,
+      "pw": 500,
+      "ls": 0.00642,
+      "lw": 0.0069,
+      "sand": 0.3,
+      "expectedCode": "dfb",
+      "expectedCodesAtAltitudes": {
+        "100": "dfb",
+        "500": "dfc",
+        "1500": "dfc",
+        "3000": "et",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "dfc",
+      "label": "Continental sans saison sèche, subarctique",
+      "group": "DF · Continental sans saison sèche",
+      "ts": 16,
+      "tw": -18,
+      "ps": 600,
+      "pw": 500,
+      "ls": 0.00642,
+      "lw": 0.0069,
+      "sand": 0.3,
+      "expectedCode": "dfc",
+      "expectedCodesAtAltitudes": {
+        "100": "dfc",
+        "500": "dfc",
+        "1500": "et",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "dfd",
+      "label": "Continental sans saison sèche, hiver extrême",
+      "group": "DF · Continental sans saison sèche",
+      "ts": 14,
+      "tw": -42,
+      "ps": 600,
+      "pw": 500,
+      "ls": 0.00642,
+      "lw": 0.0069,
+      "sand": 0.3,
+      "expectedCode": "dfd",
+      "expectedCodesAtAltitudes": {
+        "100": "dfd",
+        "500": "dfd",
+        "1500": "et",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "dsa",
+      "label": "Continental à été sec, été chaud",
+      "group": "DS · Continental à été sec",
+      "ts": 26,
+      "tw": -8,
+      "ps": 40,
+      "pw": 700,
+      "ls": 0.009108,
+      "lw": 0.00594,
+      "sand": 0.3,
+      "expectedCode": "dsa",
+      "expectedCodesAtAltitudes": {
+        "100": "dsa",
+        "500": "dsb",
+        "1500": "dsc",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "dsb",
+      "label": "Continental à été sec, été doux",
+      "group": "DS · Continental à été sec",
+      "ts": 20,
+      "tw": -6,
+      "ps": 40,
+      "pw": 700,
+      "ls": 0.009108,
+      "lw": 0.00594,
+      "sand": 0.3,
+      "expectedCode": "dsb",
+      "expectedCodesAtAltitudes": {
+        "100": "dsb",
+        "500": "dsc",
+        "1500": "et",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "dsc",
+      "label": "Continental à été sec, subarctique",
+      "group": "DS · Continental à été sec",
+      "ts": 16,
+      "tw": -18,
+      "ps": 40,
+      "pw": 700,
+      "ls": 0.009108,
+      "lw": 0.00594,
+      "sand": 0.3,
+      "expectedCode": "dsc",
+      "expectedCodesAtAltitudes": {
+        "100": "dsc",
+        "500": "dsc",
+        "1500": "et",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "dsd",
+      "label": "Continental à été sec, hiver extrême",
+      "group": "DS · Continental à été sec",
+      "ts": 14,
+      "tw": -42,
+      "ps": 40,
+      "pw": 700,
+      "ls": 0.009108,
+      "lw": 0.00594,
+      "sand": 0.3,
+      "expectedCode": "dsd",
+      "expectedCodesAtAltitudes": {
+        "100": "dsd",
+        "500": "et",
+        "1500": "et",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "dwa",
+      "label": "Continental à hiver sec, été chaud",
+      "group": "DW · Continental à hiver sec",
+      "ts": 26,
+      "tw": -8,
+      "ps": 1200,
+      "pw": 40,
+      "ls": 0.0045,
+      "lw": 0.009108,
+      "sand": 0.3,
+      "expectedCode": "dwa",
+      "expectedCodesAtAltitudes": {
+        "100": "dwa",
+        "500": "dwa",
+        "1500": "dwc",
+        "3000": "dwc",
+        "4500": "et"
+      }
+    },
+    {
+      "id": "dwb",
+      "label": "Continental à hiver sec, été doux",
+      "group": "DW · Continental à hiver sec",
+      "ts": 20,
+      "tw": -6,
+      "ps": 1200,
+      "pw": 40,
+      "ls": 0.0045,
+      "lw": 0.009108,
+      "sand": 0.3,
+      "expectedCode": "dwb",
+      "expectedCodesAtAltitudes": {
+        "100": "dwb",
+        "500": "dwc",
+        "1500": "dwc",
+        "3000": "et",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "dwc",
+      "label": "Continental à hiver sec, subarctique",
+      "group": "DW · Continental à hiver sec",
+      "ts": 16,
+      "tw": -18,
+      "ps": 1200,
+      "pw": 40,
+      "ls": 0.0045,
+      "lw": 0.009108,
+      "sand": 0.3,
+      "expectedCode": "dwc",
+      "expectedCodesAtAltitudes": {
+        "100": "dwc",
+        "500": "dwc",
+        "1500": "et",
+        "3000": "et",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "dwd",
+      "label": "Continental à hiver sec, hiver extrême",
+      "group": "DW · Continental à hiver sec",
+      "ts": 14,
+      "tw": -42,
+      "ps": 1200,
+      "pw": 40,
+      "ls": 0.0045,
+      "lw": 0.009108,
+      "sand": 0.3,
+      "expectedCode": "dwd",
+      "expectedCodesAtAltitudes": {
+        "100": "dwd",
+        "500": "dwd",
+        "1500": "et",
+        "3000": "et",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "et",
+      "label": "Toundra",
+      "group": "ET · Toundra",
+      "ts": 6,
+      "tw": -15,
+      "ps": 150,
+      "pw": 150,
+      "ls": 0.00858,
+      "lw": 0.00858,
+      "sand": 0.3,
+      "expectedCode": "et",
+      "expectedCodesAtAltitudes": {
+        "100": "et",
+        "500": "et",
+        "1500": "ef",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    },
+    {
+      "id": "ef",
+      "label": "Calotte glaciaire",
+      "group": "EF · Calotte glaciaire",
+      "ts": -8,
+      "tw": -30,
+      "ps": 100,
+      "pw": 100,
+      "ls": 0.00882,
+      "lw": 0.00882,
+      "sand": 0.3,
+      "expectedCode": "ef",
+      "expectedCodesAtAltitudes": {
+        "100": "ef",
+        "500": "ef",
+        "1500": "ef",
+        "3000": "ef",
+        "4500": "ef"
+      }
+    }
+  ],
+  "certification": {
+    "classifier": "backend/terrain_koppen.py:classify",
+    "parameters": "native/orogen/climate-parameters.json defaults",
+    "seaLevelCases": 30,
+    "uniqueSeaLevelClasses": 30,
+    "altitudeEvaluations": 150,
+    "inferenceUsed": false,
+    "gpuUsed": false
+  }
+}

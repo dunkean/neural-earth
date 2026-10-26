@@ -457,6 +457,35 @@ class ProtocolTests(unittest.TestCase):
                 self.assertEqual(response.status_code,200);response.close()
             self.assertEqual(material.call_count,1)
 
+    def test_v2_overview_caches_season_and_light_without_regenerating_terrain(self):
+        self.server.physical_overview.cache_clear()
+        self.addCleanup(self.server.physical_overview.cache_clear)
+        self.server._OVERVIEW_ALBEDO.clear()
+        values={'elev':np.ones((2,2),np.float32),'climate':np.zeros((5,2,2),np.float32)}
+        with patch.object(self.server,'metadata',return_value={
+                'overview_bounds':[-20e6,-10e6,20e6,10e6],'world_identity':'v2-season-world'}),\
+             patch.object(self.server,'conditioning_preview',return_value=values) as physical,\
+             patch.object(self.server,'biome_atlas',return_value=(object(),{})),\
+             patch.object(self.server,'colorize_surface',return_value=np.full((2,2,3),.5,np.float32)) as material:
+            for season,ambient in ((0.,.2),(.5,.2),(0.,.6),(0.,.2)):
+                response=self.client.get('/api/overview/natural-v1/9396.png',query_string={
+                    'mode':'render-v2','world_profile':'orogen',
+                    'render_settings':json.dumps({'season':season}),
+                    'lighting':json.dumps({'ambient':ambient})})
+                self.assertEqual(response.status_code,200)
+                response.close()
+            self.assertEqual(physical.call_count,1)
+            self.assertEqual(material.call_count,3)
+            self.assertEqual([call.args[6]['season'] for call in material.call_args_list],[0.,.5,0.])
+            self.assertEqual([call.kwargs['lighting']['ambient'] for call in material.call_args_list],[.2,.2,.6])
+
+    def test_invalid_v2_overview_settings_do_not_request_world_generation(self):
+        with patch.object(self.server,'metadata') as metadata:
+            response=self.client.get('/api/overview/natural-v1/9396.png',query_string={
+                'mode':'render-v2-snow','world_profile':'orogen','render_settings':'{"season":2}'})
+        self.assertEqual(response.status_code,400)
+        metadata.assert_not_called()
+
     def test_overview_identity_receipts_are_per_display_mode(self):
         self.server.physical_overview.cache_clear()
         self.addCleanup(self.server.physical_overview.cache_clear)

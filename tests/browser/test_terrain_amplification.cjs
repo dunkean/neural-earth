@@ -69,7 +69,7 @@ test('server viewer supports -12 while WASM keeps its own floor and parent cover
   const c=viewer();c.world.relief_floors={hybrid:-3};c.window.TerrainAmplification.set({mode:'hybrid',intensity:1});assert.match(c.taskFor(-12,-1,-1,0).key,/amp-hybrid-same-v1-1.00\/interp-from-3-v1/);
 });
 function viewer(){
-  const c=controls();Object.assign(c,{nnEngine:'exact',cacheIdentity:()=> 'world',world:{seed:'42',amplification:capability},coarseGpuEnabled:()=>false,neuralChart:()=>null,coarseInterpolation:'monotone',hydroTileIdentity:()=>'',generationProfile:()=> 'orogen',hydrology:null,gpuEnabled:()=>true,fantasy:{isStyle:()=>false},viewMode:'render',requestMode:()=> 'render',fixedClimateLod:()=>false,epoch:1,amplificationFallbacks:new Set(),tiles:new Map()});
+  const c=controls();Object.assign(c,{nnEngine:'exact',cacheIdentity:()=> 'world',world:{seed:'42',amplification:capability},coarseGpuEnabled:()=>false,neuralChart:()=>null,coarseInterpolation:'monotone',hydroTileIdentity:()=>'',generationProfile:()=> 'orogen',hydrology:null,renderV2:{isStyle:()=>false},gpuEnabled:()=>true,fantasy:{isStyle:()=>false},viewMode:'render',requestMode:()=> 'render',fixedClimateLod:()=>false,epoch:1,amplificationFallbacks:new Set(),tiles:new Map()});
   const source=read('index.html');vm.runInContext(['taskFor','isCompatibleTile','isCurrentTile','terrainTiles','drawableTerrainTiles','minimumDisplayLod'].map(name=>source.match(new RegExp('^function '+name+'\\(.*$','m'))[0]).join('\n'),c);
   c.TerrainLOD=require('../../web/terrain_lod.js');const start=source.indexOf('function planTerrainRegion('),end=source.indexOf('\nfunction ',start+10);vm.runInContext(source.slice(start,end),c);
   c.window.TerrainAmplification.setSupport(capability);return c;

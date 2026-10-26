@@ -14,7 +14,7 @@ Deterministic CPU/WGSL noise uses shared geographic coordinates and seed. Octave
 
 The annual-cycle control runs from northern winter to summer and back; southern appearance follows its own climate. Forest cover, variation, moisture, rock slope, snow amount and color controls apply immediately and persist in the URL. Reset restores exact RGB defaults.
 
-Coarse material colors are baked per block, mode and settings; frames reuse filtered albedo with terrain lighting. Fine tiles also cache GPU colors. Appearance sources have a separate identity from neural heights, so material-only edits do not rerun the networks. The full appearance transport contains 50 planes, including physical climate/biomes, substrate, metadata and pedology; older 46-plane transport remains readable.
+Coarse material colors are baked per block, mode and settings; frames reuse filtered albedo with terrain lighting. Fine tiles also cache GPU colors. Appearance sources have a separate identity from neural heights, so material-only edits do not rerun the networks. The full appearance transport contains 51 planes, including physical climate/biomes, substrate, metadata, pedology and Render v2's [coastal glacier provenance](methods/render-v2-glacier-provenance.md); older 46/50-plane transport remains readable. Legacy material channels retain their indices and meaning.
 
 Shore distances use an exact separable search: a row pass stores each sample's nearest sea column within the beach reach, and the shading pass reads one value per row instead of every ring sample. Output is unchanged; on low coastal 3.75 m tiles, GPU shading time fell from 0.31 to 0.17 ms per tile (RTX 3090).
 

@@ -9,6 +9,12 @@
   // Optional server work, all off by default: terrainDetail is the slow regional
   // terrain fit; the two cosmetics reshape the drawn course on the server.
   // Generated meanders were removed: old URLs and recipes asking for them are ignored.
+  // One live viewer controller owns display geometry; reset/dispose never leave
+  // a previous world's network available to the GPU renderer.
+  let displayController=null;
+  const riverDisplay=()=>displayController?.read()||null;
+  const regionalRiverDisplayEnabled=()=>!!displayController?.enabled();
+  const acknowledgeRiverDisplay=(key,rects,surfaceKey=key)=>displayController?.ack(key,rects,surfaceKey);
   const COSMETICS = Object.freeze(['valleyFit','smoothBanks']);
   const COSMETIC_LABELS = {valleyFit:'Fit course to valley floor (slower)', smoothBanks:'Limit bend radius to 1.5 widths (slower)'};
   // Display-only settings: [min, max, default]. They filter and style the
@@ -97,6 +103,22 @@
     if(!fields) return false;
     for(let i=0;i<fields.length;i+=4) if(fields[i+2]>2.5&&fields[i+1]>0&&fields[i+3]>.5) return true;
     return false;
+  }
+  // V2 lake-only tiles also own their water appearance (including ice).
+  // Keep hasRiver for existing consumers with its narrower meaning.
+  function hasInlandWater(fields) {
+    if(!fields) return false;
+    for(let i=0;i<fields.length;i+=4) if(fields[i+2]>=1.5&&fields[i+1]>0&&fields[i+3]>.5) return true;
+    return false;
+  }
+  function v2DisplayIdentity(value,month) {
+    const s=normalize(value);if(!s.enabled)return '';
+    return `/v2water-v2-month-${month}/lakes-${Number(s.lakes)}/minArea-${s.minLakeArea*1e6}`;
+  }
+  function v2TileParams(value,month) {
+    const s=normalize(value);if(!s.enabled)return null;
+    return {hydro:'1',hydro_month:String(month),v2_lakes:s.lakes?'1':'0',
+      v2_lake_min_area_m2:String(s.minLakeArea*1e6),...requestParams(s)};
   }
   function contains(a,b) {return a&&b&&a[0]<=b[0]&&a[1]<=b[1]&&a[2]>=b[2]&&a[3]>=b[3];}
   function segmentDistance(p,a,b) {
@@ -242,6 +264,7 @@
     // `identity` is the world of the stored network; `networkOptions` and
     // `networkMonth` are the server options and month it was requested with.
     let network=null, index=null, identity=null, networkOptions=null, networkMonth=null, queryBounds=null, queryLod=Infinity, queryRevision=null, refreshAt=0, controller=null, timer=null, fetching=false, nextAttempt=0;
+    let networkRevision=0,displayAck=null,displayCache=null;
     let status='idle', failure=null, panel=null, statusLabel=null, inspector=null, selected=null, selection=null, catchment=null, inspection=0, shownCount=0;
     const projected=[], lakeShapes=[];
     const fetcher=fetchJSON||((url,options)=>fetch(url,options));
@@ -251,7 +274,7 @@
     }
     function reset() {
       cancel(); network=null; index=null; identity=null; networkOptions=null; networkMonth=null; queryBounds=null; queryLod=Infinity; queryRevision=null; refreshAt=0; selected=null; selection=null;
-      status='idle'; catchment=null;inspection++;projected.length=0;lakeShapes.length=0;shownCount=0;
+      status='idle';displayAck=null;displayCache=null;networkRevision++; catchment=null;inspection++;projected.length=0;lakeShapes.length=0;shownCount=0;
       if(inspector)inspector.textContent='Click a river or lake to inspect it.';
     }
     function showSelection() {if(inspector&&selection)inspector.textContent=describe(selection.entry)+selection.suffix;}
@@ -345,7 +368,7 @@
           if(data.reaches?.length){network=data;networkOptions=options;networkMonth=month;queryBounds=extent;queryLod=Infinity;queryRevision=revision;}nextAttempt=Date.now()+1200;
           timer=setTimeout(()=>{timer=null;requestFrame();},1250);
         } else {network=data;networkOptions=options;networkMonth=month;queryBounds=extent;queryLod=state.lod??4;queryRevision=revision;nextAttempt=0;refreshAt=Date.now()+REVISION_INTERVAL_MS;}
-        syncControls(); requestFrame();
+        networkRevision++;displayAck=null;displayCache=null;syncControls(); requestFrame();
       } catch(error) {
         if(error.name!=='AbortError'&&identity===id) {failure=error.message;status='error';nextAttempt=Date.now()+10000;syncControls();timer=setTimeout(()=>{timer=null;requestFrame();},10100);}
       } finally {if(controller===active){controller=null;fetching=false;}}
@@ -353,8 +376,8 @@
     function stroke(ctx,segments) {
       for(const points of segments){ctx.beginPath();ctx.moveTo(...points[0]);for(let i=1;i<points.length;i++)ctx.lineTo(...points[i]);ctx.stroke();}
     }
-    function draw(ctx,state) {
-      ensure(state); projected.length=0; lakeShapes.length=0;
+    function projectRivers(state) {
+      projected.length=0;
       if(!settings.enabled||!network||identity!==key(state)||typeof state.project!=='function') return;
       if(index?.network!==network) index=prepare(network);
       const s=settings,water=s.diagnostic==='water',mpp=Math.max(.01,Number(state.mpp)||30),continuous=stepper(state,mpp);
@@ -363,13 +386,13 @@
         if(!shown[e.group]) continue;
         const reach=e.reach,dry=s.month?e.dry.includes(s.month):e.regime==='ephemeral',seasonal=!s.month&&e.regime==='seasonal';
         if((dry||seasonal)&&!s.intermittent) continue;
-        const segments=[];let run=[];
+        const segments=[],levels=[];let run=[],runLevels=[];
         for(let i=0;i<e.xy.length;i++) {
           const p=e.xy[i],q=state.project(p[0],p[1]);
-          if(!q||run.length&&!continuous(e.xy[i-1],p,run[run.length-1],q)) {if(run.length>1)segments.push(run);run=[];}
-          if(q)run.push(q);
+          if(!q||run.length&&!continuous(e.xy[i-1],p,run[run.length-1],q)) {if(run.length>1){segments.push(run);levels.push(runLevels);}run=[];runLevels=[];}
+          if(q){run.push(q);runLevels.push(Number.isFinite(Number(reach.water_m?.[i]))?Number(reach.water_m[i]):0);}
         }
-        if(run.length>1)segments.push(run);
+        if(run.length>1){segments.push(run);levels.push(runLevels);}
         if(!segments.length) continue;
         const annual=Math.max(1e-9,e.annual),q=monthlyFlow(reach,s.month);
         const fraction=Math.min(1.8,Math.pow(q/annual,.26));
@@ -384,21 +407,63 @@
         const thin=pixelWidth<width,alpha=dry?.55:water?Math.min(1,.6+.13*decades):q>0?1:.5;
         const dash=water?(dry?[3,3]:seasonal?[Math.max(4,3*width),Math.max(3,2*width)]:[]):q>0?[]:[3,4];
         const colour=water?(dry?DRY:thin?THIN:SHORE):color(reach,s.diagnostic,s.month,networkMonth);
-        projected.push({reach,entry:e,segments,q,pixelWidth,width,alpha,dash,colour});
+        projected.push({reach,entry:e,segments,levels,dry,q,pixelWidth,width,alpha,dash,colour});
       }
+    }
+    function displayKey(state) {
+      return JSON.stringify([key(state),networkRevision,settings.month,optionsIdentity(settings),settings.enabled,
+        settings.diagnostic,settings.density,settings.minArea,settings.intermittent,state.bounds,state.mpp,state.width,state.height,state.lod]);
+    }
+    function readDisplay() {
+      const state=getState();
+      if(!state||!settings.enabled||!state.renderV2||state.view!=='map'||settings.terrainDetail||settings.diagnostic!=='water'||(state.lod??4)>3)return null;
+      const id=displayKey(state),ready=!!(network&&identity===key(state)&&status==='ready'&&
+        networkOptions===optionsIdentity(settings)&&(networkMonth===settings.month||servesMonth(network,settings.month))&&
+        contains(queryBounds,state.bounds)&&queryLod<=(state.lod??4)&&queryRevision===(state.terrainRevision??0));
+      if(displayCache?.key===id&&displayCache.ready===ready)return displayCache;
+      const values=[];
+      if(ready){
+        projectRivers(state);
+        for(const item of projected){
+          if(item.dry||item.q<=0||!(item.pixelWidth>0))continue;
+          for(let j=0;j<item.segments.length;j++){
+            const points=item.segments[j],levels=item.levels[j];
+            for(let i=1;i<points.length;i++){
+              const a=points[i-1],b=points[i],half=item.pixelWidth*.5;
+              if(Math.max(a[0],b[0])+half+1<0||Math.min(a[0],b[0])-half-1>state.width||
+                 Math.max(a[1],b[1])+half+1<0||Math.min(a[1],b[1])-half-1>state.height)continue;
+              values.push(a[0],a[1],b[0],b[1],half,levels[i-1],levels[i],0);
+            }
+          }
+        }
+      }
+      return displayCache={key:id,ready,month:settings.month,networkRevision,hydroId:network?.hydro_id||null,
+        width:state.width,height:state.height,segments:new Float32Array(values),authority:'same-selected-regional-vector-as-Render3D',
+        terrainDetail:false};
+    }
+    const displayOwner={read:readDisplay,enabled:()=>{const s=getState();return !!(settings.enabled&&s?.renderV2&&s.view==='map'&&!settings.terrainDetail&&settings.diagnostic==='water');},ack:(key,rects,surfaceKey)=>{displayAck=surfaceKey?{key,rects,surfaceKey}:null;}};
+    displayController=displayOwner;
+    function draw(ctx,state) {
+      ensure(state);lakeShapes.length=0;projectRivers(state);
+      if(!settings.enabled||!network||identity!==key(state)||typeof state.project!=='function')return;
+      const s=settings,water=s.diagnostic==='water',mpp=Math.max(.01,Number(state.mpp)||30),continuous=stepper(state,mpp);
+      const fastDisplay=!!(state.renderV2&&state.view==='map'&&!s.terrainDetail&&water&&(state.lod??4)<=3&&displayAck?.surfaceKey===displayKey(state));
+      const displayActive=fastDisplay&&displayAck?.key===displayKey(state);
       if(shownCount!==projected.length){shownCount=projected.length;syncStatus();}
       // One contract for every layer and the globe. Ready physical patches
       // already show resolved water, so vectors there only draw narrow
       // channels; elsewhere (previews, native coarse, fantasy) the vector is
       // the river. Same geometry on both sides of a patch edge.
       const paint=(physical)=>{
+        if(physical&&state.renderV2&&!fastDisplay)return;
         for(const item of projected) {
-          if(physical&&item.pixelWidth>=PHYSICAL_WIDTH) continue;
+          if(physical&&fastDisplay&&!item.dry)continue;
+          if(physical&&!fastDisplay&&item.pixelWidth>=PHYSICAL_WIDTH) continue;
           ctx.strokeStyle=item.colour;ctx.lineWidth=item.width;ctx.globalAlpha=item.alpha;ctx.setLineDash(item.dash);
           stroke(ctx,item.segments);
         }
       };
-      const rects=water&&state.view==='map'?state.physicalRects||[]:[];
+      const rects=water&&state.view==='map'?(fastDisplay?(displayActive?displayAck.rects:[]):state.physicalRects||[]):[];
       ctx.save(); ctx.lineCap='round';ctx.lineJoin='round';
       if(water&&state.view!=='map') paint(!!state.physicalWater);
       else if(!rects.length) paint(false);
@@ -408,7 +473,8 @@
       }
       // Lakes are filled after rivers: the opaque surface hides inflow ends
       // and connector courses through the lake. Display filters only.
-      if(s.lakes) for(const lake of network.lakes||[]) {
+      if(state.renderV2&&water&&rects.length){ctx.beginPath();ctx.rect(0,0,state.width,state.height);for(const r of rects)ctx.rect(r.x,r.y,r.width,r.height);ctx.clip('evenodd');}
+      if(s.lakes&&!(state.renderV2&&state.physicalWater)) for(const lake of network.lakes||[]) {
         if(Number(lake.area_m2)<s.minLakeArea*1e6||Number(lake.max_depth_m)<s.minLakeDepth) continue;
         const rings=[];for(const ring of lake.rings||[]){const p=projectRing(ring,state,continuous);if(p)rings.push(p);}
         if(!rings.length) continue;
@@ -472,7 +538,8 @@
       showSelection();
       if(panel)panel.open=true;loadCatchment(best.reach);return true;
     }
-    function snapshot() {return {settings:{...settings},status,error:failure,hydroId:network?.hydro_id||null,reaches:network?.reaches?.length||0,lakes:network?.lakes?.length||0,
+    function snapshot() {const state=getState();return {queryRevision,currentTerrainRevision:state?.terrainRevision??0,geometryCurrent:!!(state&&network&&identity===key(state)&&contains(queryBounds,state.bounds)&&queryLod<=(state.lod??4)&&queryRevision===(state.terrainRevision??0)),settings:{...settings},status,error:failure,hydroId:network?.hydro_id||null,reaches:network?.reaches?.length||0,lakes:network?.lakes?.length||0,
+      riverDisplay:{networkRevision,active:!!displayAck?.key,gpuSurface:!!displayAck?.surfaceKey,frameKey:displayAck?.key||null,surfaceKey:displayAck?.surfaceKey||null,authority:'regional-vector'},
       shownReaches:shownCount,shownLakes:lakeShapes.length,selected,catchmentArea:catchment?.area_m2||null,fetching};}
     // Tile request parameters, snapshotted into each task with its cache key
     // (tileIdentity). Fast height tiles only request hydrology headers (state,
@@ -484,8 +551,8 @@
       return physical?{hydro:'1'}:null;
     }
     return {get:()=>({...settings}),set,reset,mount,draw,inspect,snapshot,writeParams:params=>writeParams(params,settings),tileParams,
-      optionsIdentity:()=>optionsIdentity(settings),tileIdentity:()=>tileIdentity(settings),dispose:reset};
+      optionsIdentity:()=>optionsIdentity(settings),tileIdentity:()=>tileIdentity(settings),dispose:()=>{reset();if(displayController===displayOwner)displayController=null;}};
   }
-  return {defaults:()=>({...DEFAULTS}),normalize,fromParams,writeParams,requestParams,optionsIdentity,tileIdentity,hasRiver,contains,segmentDistance,monthlyFlow,
-    regime,navigation,servesMonth,thresholdArea,riverClass,create};
+  return {defaults:()=>({...DEFAULTS}),normalize,fromParams,writeParams,requestParams,optionsIdentity,tileIdentity,hasRiver,hasInlandWater,v2DisplayIdentity,v2TileParams,contains,segmentDistance,monthlyFlow,
+    regime,navigation,servesMonth,thresholdArea,riverClass,riverDisplay,regionalRiverDisplayEnabled,acknowledgeRiverDisplay,create};
 });

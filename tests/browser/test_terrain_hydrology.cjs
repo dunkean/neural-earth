@@ -183,16 +183,18 @@ const settle=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const fields=new Float32Array(16);fields.set([0,1,1,1],0);assert.equal(hydro.hasRiver(fields),false);
   fields.set([5,.4,3,1],4);assert.equal(hydro.hasRiver(fields),true);
 
-  const html='<canvas id="map"></canvas><script src="/terrain_renderer.js"></script>';
-  const server=http.createServer((req,res)=>{res.setHeader('Content-Type',req.url.endsWith('.js')?'application/javascript':'text/html');res.end(req.url==='/terrain_renderer.js'?fs.readFileSync(path.join(root,'web/terrain_renderer.js')):html);});
+  const scripts=['terrain_render_controls.js','terrain_forest_brushes.js','terrain_render3d.js','terrain_render_v2.js','terrain_renderer.js'];
+  const html='<canvas id="map"></canvas>'+scripts.map(s=>`<script src="/${s}"></script>`).join('');
+  const server=http.createServer((req,res)=>{const name=new URL(req.url,'http://local').pathname.slice(1);res.setHeader('Content-Type',scripts.includes(name)?'application/javascript':'text/html');res.end(scripts.includes(name)?fs.readFileSync(path.join(root,'web',name)):html);});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   const browser=await loadPlaywright().chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu']});
   try{
     const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
     await page.goto(`http://127.0.0.1:${server.address().port}/`);
     const report=await page.evaluate(async()=>{
+      if(!navigator.gpu||!await navigator.gpu.requestAdapter())return {skipped:true};
       let failure=null;const r=await createTerrainRenderer(document.getElementById('map'),{onStatus:(s,e)=>{if(s==='fallback')failure=e;}});
-      if(!r)return {skipped:true};
+      if(!r)throw Error('Renderer fallback: '+failure);
       r.context.configure({device:r.device,format:r.format,alphaMode:'premultiplied',usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC});
       const N=80,h=new Float32Array(N*N).fill(10),water=new Float32Array(N*N*4);
       for(let i=0;i<N*N;i++)water.set([20,1,2,1],i*4);

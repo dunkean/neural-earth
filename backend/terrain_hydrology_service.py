@@ -1420,7 +1420,8 @@ class HydrologyService:
         result['flow_m3s'] = q
         return result
 
-    def physical(self, entry, elevation, bounds, *, lod=0, month=0, chart=None, detail=False, cosmetics=()):
+    def physical(self, entry, elevation, bounds, *, lod=0, month=0, chart=None, detail=False, cosmetics=(),
+                 render_lakes=False, min_lake_area_m2=1e6):
         """Condition a display copy, never the raw neural store. Same world curve
         and still-water ownership feed CPU, WebGPU and terrain geometry.
 
@@ -1430,6 +1431,10 @@ class HydrologyService:
         if entry['status'] != 'ready':
             return elevation, None, dict(hydro_state=entry['status'])
         cosmetics = self.parse_cosmetics(cosmetics)
+        render_lakes = bool(render_lakes) and not detail
+        min_lake_area_m2 = float(min_lake_area_m2)
+        if not np.isfinite(min_lake_area_m2) or min_lake_area_m2 < 0:
+            raise ValueError('Invalid displayed lake minimum area')
         from terrain_hydrology_geometry import (prepare_water_grid, rasterize_water, condition_surface,
                                                 cell_centres, sample_bilinear, surface_envelopes)
         world = entry['world']
@@ -1474,6 +1479,13 @@ class HydrologyService:
                 entry['water_grid'] = prepare_water_grid(world.height_m, world.bounds,
                     lakes=world.lakes if DISPLAY_LAKES else (), lake_ids=world.lake_ids, ocean=world.ocean,
                     wrap_x=world.topology == 'sphere')
+            # Separate display-only authority. Never change the historical
+            # grid or enable the deferred small Base depression raster.
+            if render_lakes and entry.get('v2_lake_water_grid') is None:
+                entry['v2_lake_water_grid'] = prepare_water_grid(world.height_m, world.bounds,
+                    lakes=world.lakes, lake_ids=world.lake_ids, ocean=world.ocean,
+                    wrap_x=world.topology == 'sphere')
+            water_grid = entry['v2_lake_water_grid'] if render_lakes else entry['water_grid']
         # While the first base package is building, the viewer already draws
         # the connected source-vector preview. Do not rasterize those same
         # long curves independently in every fine display tile as well.
@@ -1490,7 +1502,26 @@ class HydrologyService:
                 water_grid=grid, terrain=elevation, sphere_radius_m=self.radius(world),
                 wrap_period_m=world.bounds[2]-world.bounds[0] if self.radius(world) else None,
                 still_coordinates=source_coordinates)
-        fields = raster(reaches, entry['water_grid'], world.lakes)
+        fields = raster(reaches, water_grid, world.lakes)
+        if render_lakes:
+            lake = fields['class'] == 2
+            index = fields['lake_index']
+            areas = np.asarray([max(0., float(l.get('area_m2', 0.))) for l in world.lakes])
+            allowed = np.zeros(elevation.shape, bool)
+            known = (index >= 0) & (index < len(areas))
+            allowed[known] = areas[index[known]] >= min_lake_area_m2
+            # Source ownership may identify a lake under a fine neural ridge.
+            # Do not flood that ridge, even by a zero-depth blue overlay.
+            allowed &= np.isfinite(fields['water_level_m']) & (elevation < fields['water_level_m'])
+            rejected = lake & ~allowed
+            fields['still_coverage'][rejected] = 0.
+            fields['still_level_m'][rejected] = np.nan
+            fields['lake_index'][rejected] = -1
+            river = (fields['river_coverage'] > fields['still_coverage']) & (fields['river_coverage'] > 1e-4)
+            fields['class'] = np.where(river, 3, np.where(rejected, 0, fields['class'])).astype(np.uint8)
+            fields['coverage'] = np.where(fields['class'] > 0, np.maximum(fields['river_coverage'], fields['still_coverage']), 0.)
+            fields['water_level_m'] = np.where(river, fields['river_level_m'],
+                np.where(rejected, np.nan, fields['water_level_m']))
         # The source network is an overview/coverage authority, not permission
         # to excavate a 30 m decoder down to a 19.5 km source-cell elevation.
         fields['resolved'].fill(0.)
@@ -1575,14 +1606,21 @@ class HydrologyService:
         # blocker; antialiased edge pixels on the prescribed bank are not.
         bed = ((fields['class'] == 3) & (fields['resolved'] > .5) &
                (fields['distance_m'] < fields['width_m']*.5))
-        conditioned, fields, info = condition_surface(elevation, fields,
-            max_cut_m=cut_budget, max_still_cut_m=2.)
+        if render_lakes:
+            # Pure appearance: a lake may occupy existing low terrain only.
+            # Both budgets and the desired extra bed depth are exactly zero.
+            conditioned, fields, info = condition_surface(elevation, fields,
+                max_cut_m=0., max_still_cut_m=0., lake_depth_m=0., max_bank_fill_m=0.)
+        else:
+            conditioned, fields, info = condition_surface(elevation, fields,
+                max_cut_m=cut_budget, max_still_cut_m=2.)
         channel['blocked_bed_cells'] = int(np.count_nonzero(bed & (fields['class'] != 3)))
         rgba = np.empty((*elevation.shape, 4), np.float32)
         rgba[..., 0] = np.nan_to_num(fields['water_level_m'], nan=0.)
         rgba[..., 1], rgba[..., 2], rgba[..., 3] = fields['coverage'], fields['class'], 1.
         report = dict(hydro_state='regional-pending' if pending else 'ready', hydro_id=entry['key'], hydro_month=month,
                       hydro_detail=bool(detail), hydro_cosmetics=','.join(sorted(cosmetics)),
+                      hydro_render_lakes=render_lakes, hydro_min_lake_area_m2=min_lake_area_m2 if render_lakes else None,
                       hydro_max_cut_m=round(info['max_cut_m'], 3),
                       hydro_unresolved_river_cells=info['unresolved_river_cells'],
                       # Source courses are an overview: never carved, so the

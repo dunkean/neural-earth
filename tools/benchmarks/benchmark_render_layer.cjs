@@ -6,6 +6,7 @@ const {readRepositoryFile} = require(NEURAL_EARTH_ROOT + '/tools/repository-file
 const fs=require('node:fs'),http=require('node:http'),path=require('node:path');
 const {chromium}=loadPlaywright();
 const jsonArg=process.argv.indexOf('--json'),jsonOut=jsonArg>0?process.argv[jsonArg+1]:null;
+const includeV2=process.argv.includes('--render-v2');
 // Compare a saved shader revision without changing the working renderer.
 const rendererArg=process.argv.indexOf('--renderer');
 const rendererSource=rendererArg>0?fs.readFileSync(path.resolve(process.argv[rendererArg+1]),'utf8'):null;
@@ -13,7 +14,7 @@ const rendererSource=rendererArg>0?fs.readFileSync(path.resolve(process.argv[ren
   const server=http.createServer((req,res)=>{
     if(req.url==='/forest-brushes.bin'){res.setHeader('Content-Type','application/octet-stream');return res.end(fs.readFileSync(path.join(NEURAL_EARTH_ROOT,'web/forest-brushes.bin')));}
     res.setHeader('Content-Type',req.url.endsWith('.js')?'application/javascript':'text/html');
-    res.end(req.url==='/terrain_renderer.js'&&rendererSource!==null?rendererSource:req.url.endsWith('.js')?readRepositoryFile(path.join(NEURAL_EARTH_ROOT,req.url)):'<meta charset="utf-8"><div id="controls"></div><canvas id="map"></canvas><script>window.TerrainLighting={vectors:()=>[1,.35,1,1,-.5,-.5,.70710678,0]};</script><script src="/terrain_render_controls.js"></script><script src="/terrain_forest_brushes.js"></script><script src="/terrain_render3d.js"></script><script src="/terrain_renderer.js"></script>');
+    res.end(req.url==='/terrain_renderer.js'&&rendererSource!==null?rendererSource:req.url.endsWith('.js')?readRepositoryFile(path.join(NEURAL_EARTH_ROOT,req.url)):'<meta charset="utf-8"><div id="controls"></div><canvas id="map"></canvas><script>window.TerrainLighting={vectors:()=>[1,.35,1,1,-.5,-.5,.70710678,0]};</script><script src="/terrain_render_controls.js"></script><script src="/terrain_forest_brushes.js"></script><script src="/terrain_render3d.js"></script>'+(includeV2?'<script src="/terrain_render_v2.js"></script>':'')+'<script src="/terrain_renderer.js"></script>');
   });
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let browser;
   try{
@@ -101,7 +102,7 @@ const rendererSource=rendererArg>0?fs.readFileSync(path.resolve(process.argv[ren
         }
         // Batched full-screen draws of one 30 m tile at several footprints (median of 20 per wait).
         const fullscreen={width:1920,height:1080,dpr:1};
-        for(const mode of ['render','render3d','render3d-brush']){
+        for(const mode of ['render','render3d','render3d-brush',...(window.TerrainRenderV2?['render-v2']:[])]){
           renderer.clear();renderer.setMode(mode);renderer.uploadTile('d',tiles[0],{climate,climateWidth:N,climateHeight:N,metresPerSample:30,origin:[0,0]});
           if(mode==='render3d-brush'){const s=performance.now();while(!renderer.getStats().render3d.brushes&&!renderer.getStats().render3d.brushError&&performance.now()-s<30000)await new Promise(r=>setTimeout(r,20));}
           for(const fp of [16,4,1,.25,.02]){
@@ -109,6 +110,15 @@ const rendererSource=rendererArg>0?fs.readFileSync(path.resolve(process.argv[ren
             renderer.draw(rect,fullscreen);await done();
             out.render3d.draw[mode+'/'+fp+'m']={wallPerDrawMs:r3(await bench(5,1,()=>time(()=>{for(let i=0;i<20;i++)renderer.draw(rect,fullscreen);}))/20),gpuMs:await gpuBench(7,()=>renderer.draw(rect,fullscreen))};
           }
+        }
+        if(window.TerrainRenderV2){
+          renderer.clear();renderer.setMode('render-v2');await done();
+          const total=await bench(5,1,async()=>{renderer.clear();await done();return time(()=>upload(30));});
+          const bake=await gpuBench(5,async()=>{renderer.clear();upload(30);});
+          renderer.clear();upload(30);await done();
+          const v2rect=[{key:'t0',lod:0,x:0,y:0,width:1920,height:1080,uv:[.3,.3,.25,.14]}];
+          out.renderV2={uploadPerTileMs:r3(total/32),gpuBakePerTileMs:bake===null?null:r3(bake/32),
+            seasonDrawGpuMs:await gpuBench(7,j=>{TerrainRenderV2.set({season:(j%12)/12});renderer.draw(v2rect,fullscreen);})};
         }
       }
       // Reshade: 32 render-mode 30 m tiles drawn on a grid.

@@ -10,7 +10,7 @@ import numpy as np
 NAMES = ('soil_red', 'soil_green', 'soil_blue', 'rock_red', 'rock_green',
          'rock_blue', 'soil_sand', 'soil_clay', 'soil_humus')
 VERSION = 'substrate-v2-pedology'
-TRANSPORT_LAYERS = 50
+TRANSPORT_LAYERS = 51
 
 
 def seed_value(seed):
@@ -91,4 +91,6 @@ def sample_soil_transport(world, xs, ys, settings, *, polar=False):
     meta[0,0,:7] = [*world.bounds,settings.get('world_topology','sphere')!='plane',
                      polar,seed_value(getattr(getattr(world,'source',world),'seed',0))]
     from terrain_pedology import sample_pedology
-    return np.concatenate((fields,meta,sample_pedology(world,xs,ys,settings,polar=polar)))
+    from terrain_glacier import sample_glacier_proximity
+    glacier = sample_glacier_proximity(world,xs,ys,settings,polar=polar)[None]
+    return np.concatenate((fields,meta,sample_pedology(world,xs,ys,settings,polar=polar),glacier))
