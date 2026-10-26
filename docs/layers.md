@@ -18,7 +18,12 @@ Choose a layer from the menu next to the map controls. Map and globe share the s
 | Ocean layers | Seasonal surface current direction and speed |
 | Orogen layers | Plates, superplates, crust, boundaries and convergence |
 | Relief formation | Initial relief, uplift, orogeny, hotspots, back arcs, folded ridges and erosion changes |
+| Resources (informative, French labels) | 121 views in six groups: geology (tectonic context and 8 rock classes), deposits (16 family prospectivities, discrete deposits, contained and medieval-recoverable stocks per metal), agriculture and herding, forest/wildlife/fisheries/water, materials/salt/peat, and four seasons. Each legend states unit, status (derived/synthetic) and *proxy* when a value comes from a Render v2 appearance field; a click inspects the 30.72 km LOD-10 cell ([method](RESOURCE_LAYERS.md)) |
 | Map styles | Parchment, Atlas, Classic, Engraving, Cadastral, Blueprint, Illuminated, Topographic, Night and Copernicus DEM |
+
+Resource layers are computed once per Orogen world at LOD 10 (30.72 km cells; about one minute on first use, then read from a disk cache under the runtime root in about one second) and drawn like the other source diagnostics. Displayed values are interpolated between cell centres; the canonical value is the cell's. Seasonal resource views use calendar months (northern seasons); southern values follow their own climate. They require the default planet size. Set `TERRAIN_RESOURCES_FANTASY=1` before starting the server to add the optional fantasy family.
+
+![Resources · summer pasture capacity with legend](images/resources-forage-jja.png)
 
 Some diagnostics describe the source atlas rather than every fine neural pixel. Imported Custom/Noise sources have diagnostic land/water regions rather than simulated moving tectonic plates. The visible Biomes layer follows the current DEM; source climate classes do not get recomputed for every neural tile.
 

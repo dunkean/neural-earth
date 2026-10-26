@@ -57,7 +57,11 @@ window.TerrainToolbar=(()=>{
       ['Atmosphere',['orogen-pressure-summer','orogen-pressure-winter','orogen-wind-summer','orogen-wind-winter','orogen-rain-shadow','orogen-continentality']],
       ['Oceans',['orogen-currents-summer','orogen-currents-winter']],
       ['Orogen plates',['orogen-plates','orogen-superplates','orogen-crust','orogen-boundaries','orogen-convergence']],
-      ['Relief formation',['orogen-height','orogen-uplift','orogen-orogeny','orogen-back-arc','orogen-fold-ridges','orogen-hotspots','orogen-erosion']]
+      ['Relief formation',['orogen-height','orogen-uplift','orogen-orogeny','orogen-back-arc','orogen-fold-ridges','orogen-hotspots','orogen-erosion']],
+      // Informative resource layers (terrain_resource_layers.py), grouped by prefix.
+      ...[['geo','Ressources · géologie'],['dep','Ressources · gisements'],['agri','Ressources · agriculture et élevage'],
+          ['bio','Ressources · forêt, faune, pêche, eau'],['mat','Ressources · matériaux, sel, tourbe'],['season','Ressources · saisons']]
+        .map(([group,name])=>[name,[...select.options].map(option=>option.value).filter(value=>value.startsWith('orogen-resources-'+group+'-'))])
     ];
     const options=new Map();
     // V2 diagnostics belong to its own settings, not separate visible layers.

@@ -36,6 +36,19 @@ from terrain_priority import land_mask, tile_relief_stats
 from terrain_disk_cache import TerrainDiskCache
 from terrain_climate import CLIMATE_SIZE, MODES, sample_coarse_climate, colorize
 from terrain_orogen_layers import MODES as OROGEN_MODES, LEGENDS as OROGEN_LEGENDS, render as render_orogen_layer
+from terrain_resource_layers import legends as resource_legends, legend_specs as resource_legend_specs
+# Informative resource layers reuse the source-diagnostic path without
+# changing terrain_orogen_layers (part of the Orogen atlas identity).
+RESOURCE_LEGENDS = resource_legends()
+OROGEN_MODES = OROGEN_MODES + tuple(RESOURCE_LEGENDS)
+OROGEN_LEGENDS = {**OROGEN_LEGENDS, **RESOURCE_LEGENDS}
+
+
+def render_orogen_layer(atlas, mode, xs, ys, _source_layer=render_orogen_layer):
+    if mode in RESOURCE_LEGENDS:
+        from terrain_resource_layers import render as render_resource_layer
+        return render_resource_layer(atlas, mode, xs, ys)
+    return _source_layer(atlas, mode, xs, ys)
 from terrain_snr_layer import MODES as SNR_MODES, render as render_snr_layer
 from terrain_styles import STYLES, MODES as STYLE_MODES, render_style, apply_contours, parse_contours
 from terrain_biomes import colorize_biomes, sample_biome_fields, sample_biome_transport, parse_rock_slope
@@ -1248,6 +1261,7 @@ def metadata(seed, world_profile=None):
             'generation_schema':generator_schema(),
             'conditioning_noise':manifest['conditioning']['cond_snr'],
             'orogen_layers': {**OROGEN_LEGENDS, **RENDER_V2_LEGENDS} if descriptor.bootstrap_generator == 'orogen' else {},
+            'resource_layers': resource_legend_specs() if descriptor.bootstrap_generator == 'orogen' else {},
             'world_identity':world_identity(manifest),'world_manifest':manifest,
             'generation_stages':manifest.get('bootstrap',{}).get('stage_state',{}) if manifest.get('bootstrap') else {},
             'scheduling_land_mask':scheduling_land_mask(seed,world_profile),
@@ -1605,6 +1619,11 @@ def rendering_design_note(name):
     return send_from_directory(ROOT / 'docs' / 'design', name)
 
 
+@app.get('/docs/RESOURCE_LAYERS.md')
+def resource_design_note():
+    return send_from_directory(ROOT / 'docs', 'RESOURCE_LAYERS.md')
+
+
 @app.get('/terrain_transport.js')
 def transport_script():
     return send_from_directory(WEB_ROOT, 'terrain_transport.js')
@@ -1686,6 +1705,27 @@ def share_script():
 @app.get('/terrain_pins.js')
 def pins_script():
     return send_from_directory(WEB_ROOT, 'terrain_pins.js')
+
+
+@app.get('/terrain_resources.js')
+def resources_script():
+    return send_from_directory(WEB_ROOT, 'terrain_resources.js')
+
+
+@app.get('/api/resources/<int:seed>/inspect')
+def resources_inspect(seed):
+    """Resource values of the LOD-10 cell under a map point, and nearby deposits."""
+    try:
+        descriptor = resolve_generation(generation_profile())
+        if descriptor.bootstrap_generator != 'orogen':
+            raise ValueError('Resource layers require an Orogen pipeline')
+        from terrain_orogen import get_heightmap
+        from terrain_resource_layers import inspect as inspect_resources
+        atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options),
+                                   descriptor.settings)
+        return jsonify(inspect_resources(atlas, float(request.args['x']), float(request.args['y'])))
+    except (ValueError, TypeError, KeyError) as exc:
+        return jsonify(error=str(exc)), 400
 
 
 @app.get('/terrain_inference_controls.js')
