@@ -1,0 +1,4 @@
+[lfs]
+	# Archived distilled models are storage only: clones and pulls skip them.
+	# Fetch on demand: git lfs pull --include="distill/archive/**"
+	fetchexclude = distill/archive/**
