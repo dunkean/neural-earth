@@ -106,6 +106,20 @@ class ResourceTests(unittest.TestCase):
         # Seed only drives keyed parts: climate-derived layers do not move.
         np.testing.assert_array_equal(f2['npp_g_m2'], self.f['npp_g_m2'])
 
+    def test_parallel_compile_matches_serial_and_reports_stages(self):
+        # Worker processes (Render v2 months, deposit placement) change nothing.
+        import terrain_resource_workers as W
+        stages = []
+        g, f, d = R.compile_world(self.layers, self.height, 42, lod=14, balance=False, parallel=W.parallel_map,
+                                  progress=lambda stage, fields: stages.append((stage, 'land' in fields)))
+        self.assertEqual(digest(f, d), digest(self.f, self.deposits))
+        self.assertEqual(stages, [('tectonics', True), ('environment', True), ('geology', True), ('deposits', True)])
+
+    def test_cached_render_v2_environment_gives_the_same_world(self):
+        v2 = {k: self.f[k] for k in R.V2_FIELDS}
+        g, f, d = R.compile_world(self.layers, self.height, 42, lod=14, balance=False, v2_fields=v2)
+        self.assertEqual(digest(f, d), digest(self.f, self.deposits))
+
     def test_bounds_and_partitions(self):
         f, land = self.f, self.f['land']
         ctx = sum(f['context_' + c] for c in R.CONTEXTS)

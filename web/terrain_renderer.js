@@ -514,7 +514,7 @@
         climateClass=koppen(clamp(clim(p,21)-clim(p,23)*max(height,0.),-45.,45.),clamp(clim(p,24)-clim(p,26)*max(height,0.),-45.,45.),max(clim(p,22),0.),max(clim(p,25),0.));
         if(height<0.){climateClass=0;}
       }
-      ${rg?`/*resources*/if(params.mode<=-100.){if(height>=0.||res.zones2.z>1.5){rgb=resourceColor(p,height,reliefLight);}} else /*end-resources*/`:''}${v2?`if(params.mode<=-8. && textureNumLayers(climate)>=46u){
+      ${rg?`/*resources*/if(params.mode<=-100.){if(res.zones2.z>.5&&(height>=0.||res.zones2.z>1.5)){rgb=resourceColor(p,height,reliefLight);}} else /*end-resources*/`:''}${v2?`if(params.mode<=-8. && textureNumLayers(climate)>=46u){
         var g=vec2<f32>(textureLoad(elevation,p+vec2<i32>(1,0),0).r-textureLoad(elevation,p-vec2<i32>(1,0),0).r,textureLoad(elevation,p+vec2<i32>(0,1),0).r-textureLoad(elevation,p-vec2<i32>(0,1),0).r)*.5/params.resolution;
         /*fine-gradient*/if(params.pad1>0.){g=textureLoad(fineGradient,p,0).rg;}/*end-fine-gradient*/
         let b=textureLoad(blurred,p,0).rg;
@@ -738,7 +738,7 @@
       textureStore(dest,vec2<i32>(id.xy),vec4<f32>(sign(h)*sqrt(abs(h)),0,0,0));
     }`;
   const coarsePalette=shadeShader.slice(shadeShader.indexOf('    fn shade('),shadeShader.indexOf('    @compute'));
-  const coarseColor=shadeShader.slice(shadeShader.indexOf('      let temp='),shadeShader.indexOf('      textureStore(color')).replace(/\/\*resources\*\/[\s\S]*?\/\*end-resources\*\//g,rg?'if(params.mode<=-100.){if(height>=0.||res.zones2.z>1.5){rgb=resourceCoarseColor(p,height,reliefLight,footprint);}} else ':'').replace(/\/\*fine-gradient\*\/[\s\S]*?\/\*end-fine-gradient\*\//g,'')
+  const coarseColor=shadeShader.slice(shadeShader.indexOf('      let temp='),shadeShader.indexOf('      textureStore(color')).replace(/\/\*resources\*\/[\s\S]*?\/\*end-resources\*\//g,rg?'if(params.mode<=-100.){if(res.zones2.z>.5&&(height>=0.||res.zones2.z>1.5)){rgb=resourceCoarseColor(p,height,reliefLight,footprint);}} else ':'').replace(/\/\*fine-gradient\*\/[\s\S]*?\/\*end-fine-gradient\*\//g,'')
     .replaceAll('params.mode','params.field.z')
     .replace('var g=vec2<f32>(textureLoad(elevation,p+vec2<i32>(1,0),0).r-textureLoad(elevation,p-vec2<i32>(1,0),0).r,textureLoad(elevation,p+vec2<i32>(0,1),0).r-textureLoad(elevation,p-vec2<i32>(0,1),0).r)*.5/params.resolution;', 'let g=vec2<f32>(heightAt(p+vec2<f32>(1,0),0.)-heightAt(p-vec2<f32>(1,0),0.),heightAt(p+vec2<f32>(0,1),0.)-heightAt(p-vec2<f32>(0,1),0.))*.5/params.viewport.w;')
     .replace('let b=textureLoad(blurred,p,0).rg;', 'let b=vec2<f32>(heightAt(p,3.),height);')

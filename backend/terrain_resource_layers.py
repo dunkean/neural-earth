@@ -3,10 +3,12 @@
 Modes are named ``resources-<group>-<name>``. The browser evaluates them in
 WGSL inside the renderer's shade pass (web/terrain_resources_gpu.js) from the
 physical tiles already on the GPU plus a per-mode package served once per
-world (LOD-10 fields as half floats, zone thresholds, deposits, buckets). The
-NumPy mirror (terrain_resource_gpu.py) is the reference and the PNG fallback.
-The world authority (terrain_resources.compile_world at LOD 10) is computed
-once per Orogen atlas, kept in memory and on disk. Legends name the unit, the status (derived / synthetic) and
+world (LOD-10 fields as half floats, deposits, buckets). The NumPy mirror
+(terrain_resource_gpu.py) is the reference. The world authority
+(terrain_resources.compile_world at LOD 10) is computed once per Orogen
+atlas in its own process (terrain_resource_compile.py), published stage by
+stage, kept in memory and on disk; requests never wait for it (202 with
+progress). Legends name the unit, the status (derived / synthetic) and
 "proxy" when a value comes from a Render v2 appearance field.
 """
 import hashlib
@@ -21,7 +23,7 @@ from pathlib import Path
 import numpy as np
 
 PREFIX = 'resources-'
-VERSION = 'resource-layers-v2'
+VERSION = 'resource-layers-v3'
 SEASONS = (('djf', 'déc.–fév.', (11, 0, 1)), ('mam', 'mars–mai', (2, 3, 4)),
            ('jja', 'juin–août', (5, 6, 7)), ('son', 'sept.–nov.', (8, 9, 10)))
 SEQ = ['10141f', '2c3e6b', '2f7f86', '6fbf73', 'e8e36a']          # dark -> light, sequential
@@ -48,8 +50,11 @@ FAMILY_LABELS = {
 METAL_LABELS = dict(iron='fer', copper='cuivre', tin='étain', lead='plomb', zinc='zinc', silver='argent', gold='or',
                     salt='sel', gypsum='gypse', coal='charbon', tungsten='tungstène', star_metal='métal stellaire')
 _LOCK = threading.RLock()
-import terrain_resources as _compiler  # noqa: E402  (world authority; its source names the cache)
-_COMPILER_CODE = hashlib.sha256(Path(_compiler.__file__).read_bytes()).hexdigest()
+try:                                   # segfaults leave a Python traceback in the server log
+    import faulthandler
+    faulthandler.enable()
+except (ImportError, RuntimeError, ValueError):
+    pass
 
 
 def fantasy_enabled():
@@ -190,29 +195,48 @@ def _cache_root():
     return configured_path('TERRAIN_RESOURCES_CACHE', RUNTIME_ROOT / 'resources') / VERSION
 
 
-def _identity(atlas):
-    import terrain_resources as R
+def _render_v2_code():
+    """The Render v2 evaluator is an external input of the authority: its source names the cache."""
+    import terrain_render_v2
+    return hashlib.sha256(Path(terrain_render_v2.__file__).read_bytes()).hexdigest()[:16]
+
+
+def _world_key(atlas):
     source = getattr(atlas, 'source', atlas)
     meta = getattr(source, 'metadata', {}) or {}
-    # Only the compiler defines the world authority; display code may change freely.
-    # Hashed at import, with the module: the code that runs, not a later edit on disk.
-    code = _COMPILER_CODE
-    world = meta.get('cache_key') or hashlib.sha256(np.ascontiguousarray(source.height_m).tobytes()).hexdigest()
-    return hashlib.sha256(json.dumps(dict(world=world, code=code, fantasy=fantasy_enabled(),
+    return meta.get('cache_key') or hashlib.sha256(np.ascontiguousarray(source.height_m).tobytes()).hexdigest()
+
+
+def _identity(atlas):
+    """Cache key of the compiled authority: world inputs, seed, options and
+    COMPILER_VERSION (bumped by hand when canonical outputs change; display
+    edits never invalidate it), plus the Render v2 evaluator it consumes."""
+    import terrain_resources as R
+    source = getattr(atlas, 'source', atlas)
+    return hashlib.sha256(json.dumps(dict(world=_world_key(atlas), compiler=R.COMPILER_VERSION, v2=_render_v2_code(),
+                                          fantasy=fantasy_enabled(), seed=str(getattr(source, 'seed', 0))),
+                                     sort_keys=True).encode()).hexdigest()
+
+
+def _v2_identity(atlas):
+    import terrain_resources as R
+    source = getattr(atlas, 'source', atlas)
+    return hashlib.sha256(json.dumps(dict(world=_world_key(atlas), inputs=R.V2_INPUTS_VERSION, v2=_render_v2_code(),
                                           seed=str(getattr(source, 'seed', 0))), sort_keys=True).encode()).hexdigest()
 
 
 # Intermediate monthly arrays not served by any view nor export; dropped after
-# compilation to keep a world near 0.3 GB in memory and on disk.
+# compilation. Stocks are recomputed from the deposits on load (exact sums).
 _TRANSIENT = ('pet_mm', 'aet_mm', 'precipitation_mm', 'temperature_c', 'snow_mm', 'v2_moisture_month',
               'v2_leaf_month', 'v2_grass_month', 'v2_ice_month', 'forage_month_kg_ha')
+_DERIVED = ('stock_', 'recoverable_')
 
 
 def _slim(fields):
     import terrain_resources as R
     out = {}
     for k, v in fields.items():
-        if k in _TRANSIENT:
+        if k in _TRANSIENT or not isinstance(v, np.ndarray):
             continue
         v = np.asarray(v)
         if v.dtype == np.float64 and k not in R.EXTENSIVE and k != 'area_m2':
@@ -221,46 +245,179 @@ def _slim(fields):
     return out
 
 
-def world_resources(atlas):
-    """(grid, fields, deposits, seconds, origin) for an Orogen atlas, cached."""
+class ResourcesPending(Exception):
+    """The world authority (or the stage a layer needs) is still being compiled."""
+
+    def __init__(self, status):
+        super().__init__(status.get('message', 'compiling'))
+        self.status = status
+
+
+# Stage durations measured in the compile process while the viewer opens the
+# world (RESOURCE_LAYERS.md §15), for the ETA shown in the legend.
+STAGES = (('tectonics', 'tectonique, roches attendues, climat, eau', 11.),
+          ('environment', 'environnement Render v2 et biologie', 11.),
+          ('geology', 'géologie réalisée et matériaux', 8.),
+          ('deposits', 'gisements et stocks', 10.))
+_COMPILES = {}          # world key -> _Compile (one compile process per world)
+
+
+ATLAS_LAYERS = ('crust', 'boundaries', 'convergence', 'hotspot', 'backArc', 'uplift', 'temperature_summer',
+                'temperature_winter', 'precip_summer', 'precip_winter', 'soil_sand')
+
+
+class _Compile:
+    """Compile of one world in its own process (terrain_resource_compile.py),
+    followed through its status file; stage snapshots are read on demand."""
+
+    def __init__(self, key, atlas):
+        import subprocess
+        import sys
+        self.key, self.root = key, _cache_root()
+        self.root.mkdir(parents=True, exist_ok=True)
+        source = getattr(atlas, 'source', atlas)
+        layers = {'layer_' + k: np.asarray(v) for k, v in source.layers.items()
+                  if k in ATLAS_LAYERS or k.startswith('pedology_')}
+        for name in ('status.json', 'stage.npz', 'deposits.json'):
+            (self.root / f'{key}-{name}').unlink(missing_ok=True)
+        np.savez(self.root / f'{key}-atlas.npz', height_m=np.asarray(source.height_m), seed=np.int64(getattr(source, 'seed', 0)),
+                 **layers)
+        self.started = time.perf_counter()
+        self._fields, self._fields_stages, self._result, self._lock = None, 0, None, threading.Lock()
+        script = Path(__file__).with_name('terrain_resource_compile.py')
+        self.proc = subprocess.Popen([sys.executable, str(script), key, _v2_identity(atlas), str(self.root),
+                                      '1' if fantasy_enabled() else '0'])
+
+    def _status_file(self):
+        try:
+            return json.loads((self.root / f'{self.key}-status.json').read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            return dict(state='compiling', stages=[])
+
+    @property
+    def error(self):
+        st = self._status_file()
+        if st.get('state') == 'error':
+            return st.get('error')
+        code = self.proc.poll()
+        if code is not None and st.get('state') != 'ready':
+            return f'compile process exited with code {code}'
+        return None
+
+    @property
+    def result(self):
+        with self._lock:
+            if self._result is None and self._status_file().get('state') == 'ready':
+                self._result = _from_disk(self.key, stage=True)
+            return self._result
+
+    @property
+    def fields(self):
+        st = self._status_file()
+        with self._lock:
+            if len(st.get('stages', [])) > self._fields_stages:
+                loaded = _load_npz(self.root / f'{self.key}-stage.npz')
+                if loaded is not None:
+                    self._fields, self._fields_stages = loaded, len(st['stages'])
+            return self._fields
+
+    def status(self):
+        st = self._status_file()
+        elapsed = time.perf_counter() - self.started
+        names = [n for n, _, _ in STAGES]
+        done = [n for n, _ in st.get('stages', [])]
+        remaining = sum(sec for n, _, sec in STAGES if n not in done and not (n == 'environment' and st.get('v2_cached')))
+        last = st['stages'][-1][1] if st.get('stages') else 0.
+        current = next((n for n in names if n not in done), None)
+        label = dict((n, l) for n, l, _ in STAGES).get(current, '')
+        eta = max(0., remaining + 2 - (elapsed - last))
+        error = self.error
+        state = 'error' if error else 'ready' if st.get('state') == 'ready' else 'compiling'
+        return dict(state=state, stage=current if state == 'compiling' else state, stages_done=done, stage_label=label,
+                    elapsed_s=round(elapsed, 1), eta_s=round(eta, 1), progress=round(len(done) / len(STAGES), 2), error=error,
+                    message=error or (f'Calcul des ressources du monde : {label} (étape {len(done) + 1}/{len(STAGES)}, '
+                                      f'~{eta:.0f} s)' if state == 'compiling' else 'prêt'))
+
+
+def _load_npz(path):
+    try:
+        with np.load(path, allow_pickle=False) as data:
+            return {k: data[k] for k in data.files}
+    except (OSError, ValueError, KeyError, EOFError):
+        return None
+
+
+def _from_disk(key, stage=False):
+    """The compiled world from its cache, or (stage=True) from the final stage
+    snapshot while the compressed cache is still being written."""
     import terrain_resources as R
-    source = getattr(atlas, 'source', atlas)
+    root = _cache_root()
+    started = time.perf_counter()
+    candidates = [(root / f'{key}.npz', root / f'{key}.json')]
+    if stage:
+        candidates.insert(0, (root / f'{key}-stage.npz', root / f'{key}-deposits.json'))
+    for npz, deps in candidates:
+        if not npz.is_file() or not deps.is_file():
+            continue
+        fields = _load_npz(npz)
+        try:
+            deposits = json.loads(deps.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            continue
+        if fields is None:
+            continue
+        grid = R.Lattice(R.WORLD_LOD)
+        R.stock_layers(grid, fields, deposits)
+        return grid, _slim(fields), deposits, time.perf_counter() - started, 'disk'
+    return None
+
+
+def _check_bounds(atlas):
+    import terrain_resources as R
     bounds = tuple(float(b) for b in getattr(atlas, 'bounds', R.BOUNDS))
     if any(abs(a - b) > 1 for a, b in zip(bounds, R.BOUNDS)):
         raise ValueError('Resource layers currently require the default planet bounds')
+
+
+def compile_status(atlas):
+    """Start (or report) the world's resources: never waits for the compile."""
+    _check_bounds(atlas)
+    source = getattr(atlas, 'source', atlas)
     key = _identity(atlas)
     with _LOCK:
         cached = getattr(source, '_terrain_resources', None)
         if cached is not None and cached[0] == key:
-            return cached[1]
-        started = time.perf_counter()
-        path = _cache_root() / (key + '.npz')
-        grid = R.Lattice(R.WORLD_LOD)
-        result = None
-        if path.is_file() and path.with_suffix('.json').is_file():
-            try:
-                with np.load(path, allow_pickle=False) as data:
-                    fields = _slim({k: data[k] for k in data.files if k not in _TRANSIENT})
-                deposits = json.loads(path.with_suffix('.json').read_text(encoding='utf-8'))
-                result = (grid, fields, deposits, time.perf_counter() - started, 'disk')
-            except (OSError, ValueError, KeyError):
-                result = None
-        if result is None:
-            grid, fields, deposits = R.compile_world(source.layers, source.height_m, int(getattr(source, 'seed', 0)),
-                                                     fantasy=fantasy_enabled())
-            arrays = _slim({k: np.asarray(v) for k, v in fields.items() if isinstance(v, np.ndarray)})
-            try:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                temp = path.with_name(path.stem + '.tmp.npz')
-                np.savez(temp, **arrays)
-                temp.replace(path)
-                path.with_suffix('.json').write_text(json.dumps(deposits), encoding='utf-8')
-            except OSError:
-                pass
-            fields = arrays
-            result = (grid, fields, deposits, time.perf_counter() - started, 'compiled')
-        source._terrain_resources = (key, result)
-        return result
+            return dict(state='ready', stage='ready', progress=1., eta_s=0., message='prêt', origin=cached[1][4])
+        job = _COMPILES.get(key)
+        if job is not None and job.result is not None:
+            source._terrain_resources = (key, job.result)
+            del _COMPILES[key]
+            return dict(state='ready', stage='ready', progress=1., eta_s=0., message='prêt', origin='compiled')
+        if job is None or job.error:
+            result = _from_disk(key)
+            if result is not None:
+                source._terrain_resources = (key, result)
+                return dict(state='ready', stage='ready', progress=1., eta_s=0., message='prêt', origin='disk')
+            if job is None or job.error and time.perf_counter() - job.started > 30:
+                job = _COMPILES[key] = _Compile(key, atlas)
+        return job.status()
+
+
+def world_resources(atlas, partial=False):
+    """(grid, fields, deposits, seconds, origin) for an Orogen atlas, cached.
+
+    Never compiles in the caller's thread: while the background compile runs,
+    raises ResourcesPending, or with ``partial`` returns the fields of the
+    stages done so far (origin 'partial', deposits [] until the last stage)."""
+    import terrain_resources as R
+    status = compile_status(atlas)
+    source = getattr(atlas, 'source', atlas)
+    if status['state'] == 'ready':
+        return source._terrain_resources[1]
+    job = _COMPILES.get(_identity(atlas))
+    if partial and job is not None and job.fields is not None:
+        return R.Lattice(R.WORLD_LOD), job.fields, [], time.perf_counter() - job.started, 'partial'
+    raise ResourcesPending(status)
 
 
 # ---------------------------------------------------------------------------
@@ -307,8 +464,18 @@ def render(atlas, mode, xs, ys):
     spec = specs().get(mode)
     if spec is None:
         raise ValueError(f'Unknown resource layer {mode!r}')
-    grid, fields, deposits, _, _ = world_resources(atlas)
+    try:
+        grid, fields, deposits, _, _ = world_resources(atlas, partial=True)
+    except ResourcesPending:              # nothing compiled yet: neutral grey
+        return np.full((len(ys), len(xs), 3), .16)
     land, base = _base(grid, fields, xs, ys)
+    try:
+        return _render(spec, mode, grid, fields, deposits, land, base, xs, ys)
+    except KeyError:                      # stage not compiled yet: plain land and sea
+        return base
+
+
+def _render(spec, mode, grid, fields, deposits, land, base, xs, ys):
     if spec['kind'] == 'points':
         return draw_deposits(grid, deposits, xs, ys, base)
     value = np.asarray(spec['value'](fields, grid), np.float64)
@@ -498,7 +665,10 @@ class _World:
                 self.cache.move_to_end(mode)
                 return self.cache[mode]
         if mode == PROSPECT_ALL:
-            v = np.clip(sum(np.asarray(self.fields[k], np.float64) for k in self.fields if k.startswith('prospect_')), 0, 1)
+            keys = [k for k in self.fields if k.startswith('prospect_')]
+            if not keys:
+                raise KeyError('prospect_')
+            v = np.clip(sum(np.asarray(self.fields[k], np.float64) for k in keys), 0, 1)
         else:
             v = np.asarray(specs()[mode]['value'](self.fields, self.grid), np.float64)
         v = np.nan_to_num(v)
@@ -514,7 +684,7 @@ class _World:
 
 def world_state(atlas):
     source = getattr(atlas, 'source', atlas)
-    grid, fields, deposits, _, _ = world_resources(atlas)
+    grid, fields, deposits, _, _ = world_resources(atlas, partial=True)
     with _LOCK:
         state = getattr(source, '_terrain_resources_state', None)
         if state is None or state.fields is not fields:
@@ -552,10 +722,21 @@ def _kind_of(mode, spec):
 
 
 def gpu_package(atlas, mode):
-    """(header dict, binary payload) for the browser evaluator; cached per world and mode."""
+    """(header dict, binary payload) for the browser evaluator; cached per world and mode.
+    Raises ResourcesPending while the stage this layer needs is still compiling."""
+    state = world_state(atlas)
+    try:
+        return _gpu_package(state, mode)
+    except KeyError as exc:
+        status = compile_status(atlas)
+        if status['state'] == 'ready':
+            raise
+        raise ResourcesPending(dict(status, waiting_for=str(exc))) from None
+
+
+def _gpu_package(state, mode):
     import terrain_resources as R
     import terrain_resource_gpu as G
-    state = world_state(atlas)
     with _LOCK:
         if mode in state.packages:
             state.packages.move_to_end(mode)

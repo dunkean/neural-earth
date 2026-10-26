@@ -89,6 +89,41 @@ def node_value(i, j, salt):
     return ((rhash(i, j, salt) >> U32(8)).astype(F32) * F32(1 / 16777216.)) * F32(2) - F32(1)
 
 
+def _lowbias_inplace(x):
+    x ^= x >> U32(16)
+    x *= U32(0x7feb352d)
+    x ^= x >> U32(15)
+    x *= U32(0x846ca68b)
+    x ^= x >> U32(16)
+    return x
+
+
+def _unit(h):
+    return ((h >> U32(8)).astype(F32) * F32(1 / 16777216.)) * F32(2) - F32(1)
+
+
+def _quad(ix, iy, ux, uy, salt):
+    """Bilinear blend (weights already faded) of the four lattice nodes around
+    (ix, iy): same values as node_value, with six hashes instead of eight."""
+    ui = (np.asarray(ix, np.int64) & 0xffffffff).astype(U32)
+    uj = (np.asarray(iy, np.int64) & 0xffffffff).astype(U32)
+    s = U32(salt)
+    with np.errstate(over='ignore'):
+        a0 = ui * U32(0x9e3779b1)
+        ui += U32(1)
+        a1 = ui * U32(0x9e3779b1)
+        b0 = _lowbias_inplace(uj + U32(0x85ebca77))
+        uj += U32(1)
+        b1 = _lowbias_inplace(uj + U32(0x85ebca77))
+        n00 = _unit(_lowbias_inplace(a0 ^ b0 ^ s))
+        n10 = _unit(_lowbias_inplace(a1 ^ b0 ^ s))
+        n01 = _unit(_lowbias_inplace(a0 ^ b1 ^ s))
+        n11 = _unit(_lowbias_inplace(a1 ^ b1 ^ s))
+    a = n00 * (F32(1) - ux) + n10 * ux
+    b = n01 * (F32(1) - ux) + n11 * ux
+    return (a * (F32(1) - uy) + b * uy).astype(F32)
+
+
 def fade(t):
     t = t.astype(F32)
     return t * t * t * (t * (t * F32(6) - F32(15)) + F32(10))
@@ -112,10 +147,7 @@ def octave(gi, gj, lod, oct_, salt, wx=None, wy=None):
         fl_x, fl_y = np.floor(qx), np.floor(qy)
         ix, iy = ix + fl_x.astype(np.int64), iy + fl_y.astype(np.int64)
         fx, fy = (qx - fl_x).astype(F32), (qy - fl_y).astype(F32)
-    ux, uy = fade(fx), fade(fy)
-    a = node_value(ix, iy, salt) * (F32(1) - ux) + node_value(ix + 1, iy, salt) * ux
-    b = node_value(ix, iy + 1, salt) * (F32(1) - ux) + node_value(ix + 1, iy + 1, salt) * ux
-    return (a * (F32(1) - uy) + b * uy).astype(F32)
+    return _quad(ix, iy, fade(fx), fade(fy), salt)
 
 
 def lam(o):
@@ -268,28 +300,32 @@ def octave_stretched(a, b, lod, oct_, salt, wa, wb, stretch=STRETCH):
     la, lb = np.floor(qa), np.floor(qb)
     ia, ib = ia + la.astype(np.int64), ib + lb.astype(np.int64)
     fa, fb = (qa - la).astype(F32), (qb - lb).astype(F32)
-    ua, ub = fade(fa), fade(fb)
-    n0 = node_value(ia, ib, salt) * (F32(1) - ua) + node_value(ia + 1, ib, salt) * ua
-    n1 = node_value(ia, ib + 1, salt) * (F32(1) - ua) + node_value(ia + 1, ib + 1, salt) * ua
-    return (n0 * (F32(1) - ub) + n1 * ub).astype(F32)
+    return _quad(ia, ib, fade(fa), fade(fb), salt)
 
 
 def fbm_aligned(gi, gj, lod, seed32, layer, lo, hi, decay, wx, wy, theta):
-    """fbm elongated along the local strike theta: blend of the two nearest orientations."""
-    gi, gj = np.asarray(gi, np.int64), np.asarray(gj, np.int64)
-    total = np.zeros(np.broadcast(gi, gj).shape, F32)
+    """fbm elongated along the local strike theta: blend of the two nearest orientations.
+    Each orientation is evaluated only where its weight is positive (bit-identical
+    to evaluating it everywhere and multiplying by zero)."""
+    gi, gj, wx, wy, theta = np.broadcast_arrays(np.asarray(gi, np.int64), np.asarray(gj, np.int64),
+                                                np.asarray(wx, F32), np.asarray(wy, F32), np.asarray(theta, F32))
+    total = np.zeros(gi.shape, F32)
     weight2 = np.zeros_like(total)
     octaves = range(max(lo, lod + OCTAVE_FLOOR), hi + 1)
     norm = math.sqrt(sum(float(F32(2. ** (decay * (o - hi)))) ** 2 for o in octaves)) if len(octaves) else 0.
     for d, (c0, c1, c2, c3, c4) in enumerate(DIRECTIONS):
         w = np.maximum(np.cos(F32(2) * (theta - F32(PHI[d]))), F32(0)).astype(F32)
-        a, b = c0 * gi + c1 * gj, c2 * gi + c3 * gj + c4
-        wa, wb = (F32(c0) * wx + F32(c1) * wy).astype(F32), (F32(c2) * wx + F32(c3) * wy).astype(F32)
-        n = np.zeros_like(total)
+        m = w > 0
+        if not m.any():
+            continue
+        g, h, u, v, wm = gi[m], gj[m], wx[m], wy[m], w[m]
+        a, b = c0 * g + c1 * h, c2 * g + c3 * h + c4
+        wa, wb = (F32(c0) * u + F32(c1) * v).astype(F32), (F32(c2) * u + F32(c3) * v).astype(F32)
+        n = np.zeros(a.shape, F32)
         for o in octaves:
             n = n + F32(2. ** (decay * (o - hi))) * octave_stretched(a, b, lod, o, salt_of(seed32, layer, o, 3 + d), wa, wb)
-        total = total + w * (n / F32(max(norm, 1e-6) * .45))
-        weight2 = weight2 + w * w
+        total[m] = total[m] + wm * (n / F32(max(norm, 1e-6) * .45))
+        weight2[m] = weight2[m] + wm * wm
     return (total / np.sqrt(np.maximum(weight2, F32(1e-6)))).astype(F32)
 
 

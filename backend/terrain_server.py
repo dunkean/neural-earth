@@ -36,7 +36,7 @@ from terrain_priority import land_mask, tile_relief_stats
 from terrain_disk_cache import TerrainDiskCache
 from terrain_climate import CLIMATE_SIZE, MODES, sample_coarse_climate, colorize
 from terrain_orogen_layers import MODES as OROGEN_MODES, LEGENDS as OROGEN_LEGENDS, render as render_orogen_layer
-from terrain_resource_layers import legends as resource_legends, legend_specs as resource_legend_specs
+from terrain_resource_layers import legends as resource_legends, legend_specs as resource_legend_specs, ResourcesPending
 # Informative resource layers: GPU-evaluated on physical tiles (like Render v2),
 # with the source-diagnostic PNG path only as overview and no-WebGPU fallback.
 # terrain_orogen_layers is untouched (part of the Orogen atlas identity).
@@ -1733,7 +1733,11 @@ def resources_gpu_package(seed):
         atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options),
                                    descriptor.settings)
         started = time.perf_counter()
-        header, _, payload = gpu_package(atlas, mode)
+        try:
+            header, _, payload = gpu_package(atlas, mode)
+        except ResourcesPending as pending:
+            # Compiling in the background: the viewer polls and shows progress.
+            return jsonify(pending.status), 202
         head = json.dumps(header).encode()
         head += b' ' * (-(len(head) + 4) % 4)
         response = Response(len(head).to_bytes(4, 'little') + head + payload, mimetype='application/octet-stream')
@@ -1756,6 +1760,24 @@ def resources_inspect(seed):
         atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options),
                                    descriptor.settings)
         return jsonify(inspect_resources(atlas, float(request.args['x']), float(request.args['y'])))
+    except ResourcesPending as pending:
+        return jsonify(pending.status), 202
+    except (ValueError, TypeError, KeyError) as exc:
+        return jsonify(error=str(exc)), 400
+
+
+@app.get('/api/resources/<int:seed>/status')
+def resources_status(seed):
+    """Start the world's resource compile in the background (once) and report its progress."""
+    try:
+        descriptor = resolve_generation(generation_profile())
+        if descriptor.bootstrap_generator != 'orogen':
+            raise ValueError('Resource layers require an Orogen pipeline')
+        from terrain_orogen import get_heightmap
+        from terrain_resource_layers import compile_status
+        atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options),
+                                   descriptor.settings)
+        return jsonify(compile_status(atlas))
     except (ValueError, TypeError, KeyError) as exc:
         return jsonify(error=str(exc)), 400
 
