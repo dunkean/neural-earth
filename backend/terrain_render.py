@@ -162,7 +162,7 @@ def coast_band(shore, width, fp):
 
 
 def surface_material(height, gradient, tpi, point, north, footprint, soil, seasons,
-                     salt, settings=None, bare=False, pedology=None, shore=None, openness=None):
+                     salt, settings=None, bare=False, pedology=None, shore=None, openness=None, surface=None):
     """Satellite-like albedo. ``seasons`` are sea-level ts, ps, lapse_s, tw, pw, lapse_w.
 
     ``bare`` returns the substrate (soil + exposed bedrock) used by the Soil layer.
@@ -234,6 +234,12 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
     exposure = (smooth(rock_tan_eff*.5,rock_tan_eff*1.3,grade)+F(.45)*alpine*smooth(rock_tan_eff*.15,rock_tan_eff*.7,grade)
                 +F(.35)*ridge*smooth(.35,.9,grade/rock_tan)-F(.3)*valley)
     outcrop = cover(np.clip(exposure,0,1),(F(.75)*crag[0]+F(.25)*patch[0]*np.sqrt(patch[1]),crag[1]))
+    if surface is not None:
+        flow,deposit,scree,exposed = np.clip(np.asarray(surface,F),0,1)
+        outcrop = np.maximum(outcrop,exposed*F(.85))
+        ground = mix(ground,mix(ground,[.48,.40,.29],F(.45)),deposit*F(.65))
+        ground = mix(ground,mix(rock,[.70,.67,.59],F(.3)),scree*F(.65))
+        ground = ground*(1-F(.18)*flow)[...,None]
     color = mix(ground,rock,outcrop)
     if bare:
         return _ocean(height,color,t_now,m1,var,s['snow'],phase)
@@ -244,6 +250,7 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
     grass = mix([.60,.53,.34],[.29,.37,.16],green)
     grass = mix(grass,[.40,.38,.27],1-smooth(7,14,t_hot))*tint
     herbs = smooth(.2,.85,humid)*smooth(0,7,t_hot)*(1-smooth(rock_tan*.8,rock_tan*1.4,grade))
+    if surface is not None:herbs *= (1-F(.65)*flow)*(1-F(.8)*scree)
     # Grasses and shrubs thin out diffusely; only canopy forms crisp stands.
     sward = fine if fine[1]>0 else patch
     color = mix(color,grass,cover(herbs*(1-outcrop),sward,.12*float(var)))
@@ -266,6 +273,7 @@ def surface_material(height, gradient, tpi, point, north, footprint, soil, seaso
              (1-smooth(rock_tan*.9,rock_tan*1.6,grade))*(1-outcrop))
     # Terrain carries valley stands; noise only adds gentle local clearings.
     trees = trees*(1-F(.22)*ridge)+F(.14)*valley*smooth(2,10,t_hot)*smooth(.4,1.2,humid)*(1-outcrop)*forest_amount
+    if surface is not None:trees *= (1-F(.8)*flow)*(1-F(.85)*scree)
     woods = cover(np.clip(trees,0,1),patch,.65*float(var))
     color = mix(color,canopy,woods)
     flats = (1-smooth(1.5,6,height))*(1-smooth(.05,.2,grade))
@@ -334,7 +342,7 @@ def terrain_derivatives(elevation, resolution):
     return np.stack((dx,dy),axis=-1).astype(F),tpi
 
 
-def colorize_surface(world,xs,ys,elevation,resolution,generation_settings,settings=None,*,polar=False,mode='render'):
+def colorize_surface(world,xs,ys,elevation,resolution,generation_settings,settings=None,*,polar=False,mode='render',surface=None):
     from terrain_pedology import sample_pedology, colorize_pedology
     if mode=='pedology':
         return colorize_pedology(world,xs,ys,generation_settings,polar=polar)
@@ -353,7 +361,7 @@ def colorize_surface(world,xs,ys,elevation,resolution,generation_settings,settin
     shore = shore_distance(elevation,resolution)
     return material(elevation,gradient,tpi,point,north,step,soil,seasons,
                     seed_value(getattr(getattr(world,'source',world),'seed',0)),settings,mode=='soil',pedology,
-                    shore,shore_openness(elevation,resolution))
+                    shore,shore_openness(elevation,resolution),*([surface] if surface is not None else []))
 
 
 def material(*args):

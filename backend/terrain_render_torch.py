@@ -169,20 +169,20 @@ def _up(x, shape, dev, dtype=torch.float32):
 
 
 def surface_material(height, gradient, tpi, point, north, footprint, soil, seasons,
-                     salt, settings=None, bare=False, pedology=None, shore=None, openness=None, *, device=None):
+                     salt, settings=None, bare=False, pedology=None, shore=None, openness=None, surface=None, *, device=None):
     dev = torch.device('cuda', current_cuda_index()) if device is None else torch.device(device)
     wide = np.asarray(north).dtype != np.float32
     stream = _stream(dev)
     with torch.inference_mode(), torch.cuda.device(dev), torch.cuda.stream(stream):
         out = _surface_material(height, gradient, tpi, point, north, footprint, soil, seasons,
-                                int(salt), settings, bare, pedology, shore, openness, dev, wide)
+                                int(salt), settings, bare, pedology, shore, openness, dev, wide, surface)
         stream.synchronize()
         res = out.cpu().numpy()
         stream.synchronize()
     return res
 
 
-def _surface_material(height, gradient, tpi, point, north, footprint, soil, seasons, salt, settings, bare, pedology, shore, openness, dev, wide):
+def _surface_material(height, gradient, tpi, point, north, footprint, soil, seasons, salt, settings, bare, pedology, shore, openness, dev, wide, surface):
     s = parse_settings(settings)
     if shore is None:
         shore = shore_distance(height, float(footprint))
@@ -251,6 +251,12 @@ def _surface_material(height, gradient, tpi, point, north, footprint, soil, seas
     exposure = (sm(rock_tan_eff*.5, rock_tan_eff*1.3, grade)+F(.45)*alpine*sm(rock_tan_eff*.15, rock_tan_eff*.7, grade)
                 +F(.35)*ridge*sm(.35, .9, gr)-F(.3)*valley)
     outcrop = cover(exposure.clamp(0, 1), (F(.75)*crag[0]+F(.25)*patch[0]*float(np.sqrt(patch[1])), crag[1]))
+    if surface is not None:
+        flow, deposit, scree, exposed = (up(v).clamp(0, 1) for v in surface)
+        outcrop = torch.maximum(outcrop, exposed*F(.85))
+        ground = mix(ground, mix(ground, [.48, .40, .29], F(.45)), deposit*F(.65))
+        ground = mix(ground, mix(rock, [.70, .67, .59], F(.3)), scree*F(.65))
+        ground = ground*(1-F(.18)*flow).unsqueeze(-1)
     color = mix(ground, rock, outcrop)
     if bare:
         return _ocean(height, color, t_now, m1, var, s['snow'], phase)
@@ -260,6 +266,7 @@ def _surface_material(height, gradient, tpi, point, north, footprint, soil, seas
     grass = mix([.60, .53, .34], [.29, .37, .16], green)
     grass = mix(grass, [.40, .38, .27], 1-sm(7, 14, t_hot))*tint
     herbs = sm(.2, .85, humid)*sm(0, 7, t_hot)*(1-sm(rock_tan*.8, rock_tan*1.4, grade))
+    if surface is not None: herbs = herbs*(1-F(.65)*flow)*(1-F(.8)*scree)
     sward = fine if fine[1] > 0 else patch
     color = mix(color, grass, cover(herbs*(1-outcrop), sward, .12*float(var)))
     dry_forest = 1-sm(1.3, 3, humid)
@@ -278,6 +285,7 @@ def _surface_material(height, gradient, tpi, point, north, footprint, soil, seas
     trees = (sm(.65, 2.1, humid)*sm(5.5, 13.5, t_hot+F(.8)*valley)*forest_amount*
              (1-sm(rock_tan*.9, rock_tan*1.6, grade))*(1-outcrop))
     trees = trees*(1-F(.22)*ridge)+F(.14)*valley*sm(2, 10, t_hot)*sm(.4, 1.2, humid)*(1-outcrop)*forest_amount
+    if surface is not None: trees = trees*(1-F(.8)*flow)*(1-F(.85)*scree)
     woods = cover(trees.clamp(0, 1), patch, .65*float(var))
     color = mix(color, canopy, woods)
     flats = (1-sm(1.5, 6, height))*(1-sm(.05, .2, grade))

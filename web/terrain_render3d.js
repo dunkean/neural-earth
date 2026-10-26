@@ -597,6 +597,7 @@
   const draw=`
     struct Params { rect:vec4<f32>, viewport:vec4<f32>, crop:vec4<f32>, field:vec4<f32>, lighting:vec4<f32>, sunlight:vec4<f32>, style:vec4<f32>, contours:vec4<f32>, render0:vec4<f32>, render1:vec4<f32>, render2:vec4<f32>, render3:vec4<f32>, render4:vec4<f32> }
     struct Vertex { @builtin(position) position:vec4<f32>, @location(0) uv:vec2<f32> }
+    @group(0) @binding(9) var erosionSurface:texture_2d<f32>;
     @group(0) @binding(0) var<uniform> params:Params;
     @group(0) @binding(1) var color:texture_2d<f32>;
     @group(0) @binding(2) var filtering:sampler;
@@ -660,6 +661,11 @@
       let l2=vec3<f32>(fill.x,.63*l.y/.70710678,fill.y);
       let relief=mix(6.*params.lighting.w,2.*params.lighting.w,reveal3d);
       var material=terrainGroundMaterial(vec3<f32>(max(s.x,1e-3),s.yz),p,fp,baked.rgb,ground,r3Seed(),relief);
+      let erosionSize=vec2<i32>(textureDimensions(erosionSurface));
+      let erosion=textureLoad(erosionSurface,clamp(vec2<i32>(texel),vec2<i32>(0),erosionSize-1),0);
+      // Existing ground palette: bedrock .52, soil .83; loose talus is coarser.
+      material.roughness=mix(mix(material.roughness,.83,erosion.y*.3),.52,erosion.w*.85);
+      material.roughness=clamp(mix(material.roughness,.9,erosion.z*.65)-.06*erosion.x,.38,.98);
       if(params.render1.z>.5){applyForest(&material,p,fp,l,RenderGuide(baked.rgb,open.rgb,closed.rgb,open.a),climate,params.field.z< -6.5);}
       let shaded=shadeTerrainGround(material,vec3<f32>(0.,1.,0.),l,l2,params.lighting.x);
       // Resolved crowns overhang the shore; distant means never hide water.

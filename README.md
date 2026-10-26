@@ -20,6 +20,24 @@ Orogen's erosion methods draw on [stream-power incision](https://doi.org/10.1016
 
 ## From planetary scale to local terrain
 
+The **✦ Illustrer** control can turn the current map or globe view into an
+illustration. It shares Magna Urbis's screenshot-to-image connector, styles,
+scene prompts and result history. The prompt includes the visible extent,
+projection, terrain elevation range and a descriptive biome inferred from the
+renderer climate fields when those fields are available.
+
+In a sibling `magna-urbis` checkout, run `npm run illustration:setup` from `web/`
+once. `python launch_terrain.py` then starts its connector automatically if the
+environment exists. Alternatively run `npm run illustration:serve` there.
+`MAGNA_ILLUSTRATION_ROOT` can point at another Magna Urbis checkout, and
+`MAGNA_ILLUSTRATION_PYTHON` selects its Python interpreter. The bundled
+`native/magna-urbis` checkout is also supported when it contains `illustration/`.
+The three modes are local SDXL Lightning, local Z-Image Turbo with ControlNet,
+and an external OpenAI or Gemini image API with a personal key. The connector
+keeps credentials out of saved recipes. See the Magna Urbis README for setup,
+model licenses and GPU requirements. The standard terrain environment is kept
+independent from the illustration dependencies.
+
 Actual application captures follow three locations from **LOD 9 to LOD -2**. Read each two-row sheet left to right: **9, 8, 7, 6, 5, 4** on the first row, then **3, 2, 1, 0, -1, -2** on the second. The first row moves quickly from the planetary overview to regional relief; every fine view is captured only after its requested tiles have finished loading.
 
 LOD 0 reaches the checkpoint's **30 m native terrain resolution**. LOD -1 and -2 show **experimental sub-30 m refinement**, sampled at 15 m and 7.5 m; these are not independently trained higher-resolution terrain. Click a sheet to open its full-size version.

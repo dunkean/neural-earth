@@ -127,7 +127,7 @@
     }
     // Climate: sea-level seasonal temperatures/lapse and seasonal precipitation.
     // bare=true returns the substrate shown by the Soil layer.
-    fn surfaceMaterial(height:f32,gradient:vec2<f32>,tpi:f32,point:vec3<f32>,north:vec2<f32>,footprint:f32,soil:vec3<f32>,pedology:vec3<f32>,substrateRock:vec3<f32>,sandFraction:f32,ts0:f32,ps:f32,ls:f32,tw0:f32,pw:f32,lw:f32,bare:bool,shore:f32,openness:f32)->vec3<f32>{
+    fn surfaceMaterial(height:f32,gradient:vec2<f32>,tpi:f32,point:vec3<f32>,north:vec2<f32>,footprint:f32,soil:vec3<f32>,pedology:vec3<f32>,substrateRock:vec3<f32>,sandFraction:f32,ts0:f32,ps:f32,ls:f32,tw0:f32,pw:f32,lw:f32,bare:bool,shore:f32,openness:f32,erosion:vec4<f32>)->vec3<f32>{
       let season=params.render0.x;let variation=params.render0.y;let forestAmount=params.render0.z;let rockTan=params.render0.w;
       let snowAmount=params.render1.x;let moisture=params.render1.y;
       let salt=u32(surfaceMeta(6));let fp=footprint;let phase=surfaceSeason();let h=max(height,0.);
@@ -180,7 +180,10 @@
       let alpine=1.-sstep(2.,9.,tHot);
       let exposure=sstep(rockTanEff*.5,rockTanEff*1.3,grade)+.45*alpine*sstep(rockTanEff*.15,rockTanEff*.7,grade)
         +.35*ridge*sstep(.35,.9,grade/rockTan)-.3*valley;
-      let outcrop=surfaceCover(clamp(exposure,0.,1.),vec2<f32>(.75*crag.x+.25*grove.x*sqrt(grove.y),crag.y),.35);
+      let outcrop=max(surfaceCover(clamp(exposure,0.,1.),vec2<f32>(.75*crag.x+.25*grove.x*sqrt(grove.y),crag.y),.35),erosion.w*.85);
+      ground=surfaceMix(ground,surfaceMix(ground,vec3<f32>(.48,.40,.29),.45),erosion.y*.65);
+      ground=surfaceMix(ground,surfaceMix(rock,vec3<f32>(.70,.67,.59),.3),erosion.z*.65);
+      ground*=1.-.18*erosion.x;
       var color=surfaceMix(ground,rock,outcrop);
       if(bare){return surfaceOcean(height,color,now,m1,variation);}
       // Vegetation: grasses/shrubs over soil, canopy patches over grasses.
@@ -191,7 +194,7 @@
       let herbs=sstep(.2,.85,humid)*sstep(0.,7.,tHot)*(1.-sstep(rockTan*.8,rockTan*1.4,grade));
       // Grasses and shrubs thin out diffusely; only canopy forms crisp stands.
       let sward=select(grove,fine,fine.y>0.);
-      color=surfaceMix(color,grass,surfaceCover(herbs*(1.-outcrop),sward,.12*variation));
+      color=surfaceMix(color,grass,surfaceCover(herbs*(1.-outcrop)*(1.-.65*erosion.x)*(1.-.8*erosion.z),sward,.12*variation));
       let dryForest=1.-sstep(1.3,3.,humid);
       var canopy=surfaceMix(vec3<f32>(.20,.28,.14),vec3<f32>(.16,.255,.13),wTrop);
       canopy=surfaceMix(canopy,vec3<f32>(.15,.22,.16),wBoreal);
@@ -209,6 +212,7 @@
       var trees=sstep(.65,2.1,humid)*sstep(5.5,13.5,tHot+.8*valley)*forestAmount*(1.-sstep(rockTan*.9,rockTan*1.6,grade))*(1.-outcrop);
       // Valley stands come from relief; noise only adds gentle clearings.
       trees=trees*(1.-.22*ridge)+.14*valley*sstep(2.,10.,tHot)*sstep(.4,1.2,humid)*(1.-outcrop)*forestAmount;
+      trees*=(1.-.8*erosion.x)*(1.-.85*erosion.z);
       let woods=surfaceCover(clamp(trees,0.,1.),grove,.65*variation);
       /*R3:open*/
       color=surfaceMix(color,canopy,woods);
@@ -331,6 +335,9 @@
     @group(0) @binding(3) var<uniform> params:Params;
     @group(0) @binding(4) var climate:texture_2d_array<f32>;
     @group(0) @binding(5) var rows:texture_2d<f32>;
+    @group(0) @binding(10) var fineGradient:texture_2d<f32>;
+    @group(0) @binding(9) var erosionSurface:texture_2d<f32>;
+    fn erosionAt(p:vec2<i32>)->vec4<f32>{return textureLoad(erosionSurface,clamp(p,vec2<i32>(0),vec2<i32>(textureDimensions(erosionSurface))-1),0);}
     fn clim(p:vec2<i32>,layer:i32)->f32 {
       let sourceSize=vec2<f32>(textureDimensions(elevation))-vec2<f32>(1.);
       let size=vec2<i32>(textureDimensions(climate));
@@ -372,12 +379,13 @@
       // Derivatives match terrain_render.terrain_derivatives: central gradient and
       // the difference of the two Gaussian scales already used for hillshade.
       let local=vec2<f32>(p);let r=params.resolution;let blur=textureLoad(blurred,p,0).rg;
-      let gradient=vec2<f32>(textureLoad(elevation,p+vec2<i32>(1,0),0).r-textureLoad(elevation,p-vec2<i32>(1,0),0).r,
+      var gradient=vec2<f32>(textureLoad(elevation,p+vec2<i32>(1,0),0).r-textureLoad(elevation,p-vec2<i32>(1,0),0).r,
         textureLoad(elevation,p+vec2<i32>(0,1),0).r-textureLoad(elevation,p-vec2<i32>(0,1),0).r)*.5/r;
+      if(params.pad0>0.){gradient=textureLoad(fineGradient,p,0).rg;}
       let shore=shoreDistance(p,height,r);
       return surfaceMaterial(height,gradient,(blur.g-blur.r)/(6.*r),surfacePoint(local,params.style.xy,r),surfaceNorth(local,params.style.xy,r),r,
         vec3<f32>(clim(p,36),clim(p,37),clim(p,38)),surfacePedology(p),vec3<f32>(clim(p,39),clim(p,40),clim(p,41)),clim(p,42),
-        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.mode == -4.,shore,shoreOpenness(p,shore,r));
+        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.mode == -4.,shore,shoreOpenness(p,shore,r),erosionAt(p));
     }
     fn shade(d:vec2<f32>) -> f32 {
       // Same directional light/vertical exaggeration as upstream relief_map.py.
@@ -433,9 +441,10 @@
         let depth=pow(clamp(-height/10000.,0.,1.),.7);
         rgb=mix(vec3<f32>(.68,.88,1.),vec3<f32>(0.,.1,.45),depth);
       } else {
-        let dx=(textureLoad(blurred,p+vec2<i32>(1,0),0).rg-textureLoad(blurred,p-vec2<i32>(1,0),0).rg)*3./params.resolution;
-        let dy=(textureLoad(blurred,p+vec2<i32>(0,1),0).rg-textureLoad(blurred,p-vec2<i32>(0,1),0).rg)*3./params.resolution;
-        let hs=pow(clamp(.75*shade(vec2<f32>(dx.r,dy.r))+.25*shade(vec2<f32>(dx.g,dy.g)),0.,1.),.85*params.lighting.z);
+        var dx=(textureLoad(blurred,p+vec2<i32>(1,0),0).rg-textureLoad(blurred,p-vec2<i32>(1,0),0).rg)*3./params.resolution;
+        var dy=(textureLoad(blurred,p+vec2<i32>(0,1),0).rg-textureLoad(blurred,p-vec2<i32>(0,1),0).rg)*3./params.resolution;
+        /*fine-gradient*/if(params.pad0>0.){dx=vec2<f32>(textureLoad(fineGradient,p,0).r*6.);dy=vec2<f32>(textureLoad(fineGradient,p,0).g*6.);}/*end-fine-gradient*/
+      let hs=pow(clamp(.75*shade(vec2<f32>(dx.r,dy.r))+.25*shade(vec2<f32>(dx.g,dy.g)),0.,1.),.85*params.lighting.z);
         reliefLight=mix(1.,params.lighting.y+(1.-params.lighting.y)*hs,params.lighting.x);
         rgb=terrain(.25+.75*pow(clamp(height/4500.,0.,1.),.7))*reliefLight;
       }
@@ -520,18 +529,21 @@
     @compute @workgroup_size(8,8) fn bake(@builtin(global_invocation_id) id:vec3<u32>){
       let p=vec2<i32>(id.xy);if(any(p>=vec2<i32>(textureDimensions(elevation)))){return;}
       let r=params.resolution;let height=hydroGround(textureLoad(elevation,p,0).r,vec2<f32>(p));let blur=textureLoad(blurred,p,0).rg;let local=vec2<f32>(p);
-      let gradient=vec2<f32>(r3Load(p+vec2<i32>(1,0))-r3Load(p-vec2<i32>(1,0)),r3Load(p+vec2<i32>(0,1))-r3Load(p-vec2<i32>(0,1)))*.5/r;
+      var gradient=vec2<f32>(r3Load(p+vec2<i32>(1,0))-r3Load(p-vec2<i32>(1,0)),r3Load(p+vec2<i32>(0,1))-r3Load(p-vec2<i32>(0,1)))*.5/r;
+      if(params.pad0>0.){gradient=textureLoad(fineGradient,p,0).rg;}
       // Submerged samples are evaluated as shore, so filtering never mixes inland colour into beaches.
       let shore=select(shoreDistance(p,height,r),0.,height<0.);let point=surfacePoint(local,params.style.xy,r);
       let land=surfaceMaterial(max(height,.5),gradient,(blur.g-blur.r)/(6.*r),point,surfaceNorth(local,params.style.xy,r),r,
         vec3<f32>(clim(p,36),clim(p,37),clim(p,38)),surfacePedology(p),vec3<f32>(clim(p,39),clim(p,40),clim(p,41)),clim(p,42),
-        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),false,shore,shoreOpenness(p,shore,r));
-      let dx=(r3Blur(p+vec2<i32>(1,0))-r3Blur(p-vec2<i32>(1,0)))*3./r;let dy=(r3Blur(p+vec2<i32>(0,1))-r3Blur(p-vec2<i32>(0,1)))*3./r;
+        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),false,shore,shoreOpenness(p,shore,r),erosionAt(p));
+      var dx=(r3Blur(p+vec2<i32>(1,0))-r3Blur(p-vec2<i32>(1,0)))*3./r;var dy=(r3Blur(p+vec2<i32>(0,1))-r3Blur(p-vec2<i32>(0,1)))*3./r;
+      if(params.pad0>0.){dx=vec2<f32>(textureLoad(fineGradient,p,0).r*6.);dy=vec2<f32>(textureLoad(fineGradient,p,0).g*6.);}
       let hs=pow(clamp(.75*shade(vec2<f32>(dx.r,dy.r))+.25*shade(vec2<f32>(dx.g,dy.g)),0.,1.),.85*params.lighting.z);
       let light=mix(1.,params.lighting.y+(1.-params.lighting.y)*hs,params.lighting.x);
       let inner=p-vec2<i32>(i32(params.halo));
       if(all(inner>=vec2<i32>(0))&&all(inner<vec2<i32>(textureDimensions(color)))){textureStore(color,inner,vec4<f32>(land,light));}
-      let field=r3ForestField(height,length(gradient),(local+.5)*r,r3Seed());
+      var field=r3ForestField(height,length(gradient),(local+.5)*r,r3Seed());
+      let erosion=erosionAt(p);field.x*=(1.-.8*erosion.x)*(1.-.85*erosion.z);field.y*=1.-.6*max(erosion.z,erosion.w);
       textureStore(aux,p,0,vec4<f32>(r3GuideOpen,r3Woods));
       textureStore(aux,p,1,vec4<f32>(r3GuideClosed,clamp((.2+.04*params.render0.y*r3M1)/.4,0.,1.)));
       textureStore(aux,p,2,field);
@@ -614,11 +626,11 @@
       textureStore(dest,vec2<i32>(id.xy),vec4<f32>(sign(h)*sqrt(abs(h)),0,0,0));
     }`;
   const coarsePalette=shadeShader.slice(shadeShader.indexOf('    fn shade('),shadeShader.indexOf('    @compute'));
-  const coarseColor=shadeShader.slice(shadeShader.indexOf('      let temp='),shadeShader.indexOf('      textureStore(color'))
+  const coarseColor=shadeShader.slice(shadeShader.indexOf('      let temp='),shadeShader.indexOf('      textureStore(color')).replace(/\/\*fine-gradient\*\/[\s\S]*?\/\*end-fine-gradient\*\//g,'')
     .replaceAll('params.mode','params.field.z')
-    .replace('let dx=(textureLoad(blurred,p+vec2<i32>(1,0),0).rg-textureLoad(blurred,p-vec2<i32>(1,0),0).rg)*3./params.resolution;',
+    .replace('var dx=(textureLoad(blurred,p+vec2<i32>(1,0),0).rg-textureLoad(blurred,p-vec2<i32>(1,0),0).rg)*3./params.resolution;',
       'let dx=(heightAt(p+vec2<f32>(1,0),level)-heightAt(p-vec2<f32>(1,0),level))*3./params.viewport.w;')
-    .replace('let dy=(textureLoad(blurred,p+vec2<i32>(0,1),0).rg-textureLoad(blurred,p-vec2<i32>(0,1),0).rg)*3./params.resolution;',
+    .replace('var dy=(textureLoad(blurred,p+vec2<i32>(0,1),0).rg-textureLoad(blurred,p-vec2<i32>(0,1),0).rg)*3./params.resolution;',
       'let dy=(heightAt(p+vec2<f32>(0,1),level)-heightAt(p-vec2<f32>(0,1),level))*3./params.viewport.w;')
     .replaceAll('*params.resolution','*params.viewport.w')
     .replace('let deltaX=(textureLoad(blurred,p+vec2<i32>(1,0),0).rg-textureLoad(blurred,p-vec2<i32>(1,0),0).rg)*.5/params.resolution;','let deltaX=vec2<f32>((heightAt(p+vec2<f32>(1,0),level)-heightAt(p-vec2<f32>(1,0),level))*.5/params.viewport.w);')
@@ -730,7 +742,7 @@
       }
       let land=surfaceMaterial(max(height,.5),gradient,tpi,point,surfaceNorth(p,params.style.xy,r),r,
         vec3<f32>(clim(p,36),clim(p,37),clim(p,38)),surfacePedology(p),vec3<f32>(clim(p,39),clim(p,40),clim(p,41)),clim(p,42),
-        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.field.z == -4.,shore,openness);
+        clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.field.z == -4.,shore,openness,vec4<f32>(0.));
       textureStore(albedo,vec2<i32>(id.xy),vec4<f32>(land,surfaceSeaIce(point,clim(p,21),clim(p,24),r)));
     }`;
 
@@ -754,6 +766,7 @@
       this.adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});
       if (!this.adapter) throw Error('Aucun adaptateur WebGPU');
       this.device=await this.adapter.requestDevice(); const device=this.device;
+      this.noGradient=this.makeTexture(1,1,'rg32float',GPUTextureUsage.COPY_DST);device.queue.writeTexture({texture:this.noGradient},new Float32Array(2),{bytesPerRow:8},[1,1]);
       this.noHydrology=this.makeTexture(1,1,'rgba32float',GPUTextureUsage.COPY_DST);
       device.queue.writeTexture({texture:this.noHydrology},new Float32Array(4),{bytesPerRow:16},[1,1]);
       this.context=this.canvas.getContext('webgpu');
@@ -783,6 +796,8 @@
         {binding:2,visibility:GPUShaderStage.COMPUTE,storageTexture:{access:'write-only',format:'rgba8unorm'}},
         {binding:3,visibility:GPUShaderStage.COMPUTE,buffer:{type:'uniform'}},
         {binding:4,visibility:GPUShaderStage.COMPUTE,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},
+        {binding:10,visibility:GPUShaderStage.COMPUTE,texture:{sampleType:'unfilterable-float'}},
+        {binding:9,visibility:GPUShaderStage.COMPUTE,texture:{}},
         {binding:5,visibility:GPUShaderStage.COMPUTE,texture:{sampleType:'unfilterable-float'}},
         {binding:8,visibility:GPUShaderStage.COMPUTE,texture:{sampleType:'unfilterable-float'}},
       ]});
@@ -808,6 +823,8 @@
       ]});
       this.bakePipeline=await device.createComputePipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[this.bakeLayout]}),compute:{module:bake,entryPoint:'main'}});
       this.noAlbedo=this.makeTexture(1,1,'rgba8unorm');
+      this.noSurface=this.makeTexture(1,1,'rgba8unorm',GPUTextureUsage.COPY_DST);
+      device.queue.writeTexture({texture:this.noSurface},new Uint8Array(4),{bytesPerRow:4},[1,1]);
       this.coarsePipeline=await device.createRenderPipelineAsync({layout:device.createPipelineLayout({bindGroupLayouts:[this.coarseLayout]}),vertex:{module:coarse,entryPoint:'vertex'},fragment:{module:coarse,entryPoint:'fragment',targets:[{format:this.format}]},primitive:{topology:'triangle-list'}});
       this.coarseMipPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:mip,entryPoint:'main'}});
       this.colorMipPipeline=await device.createComputePipelineAsync({layout:'auto',compute:{module:colorMip,entryPoint:'main'}});
@@ -841,11 +858,12 @@
       this.verticalGroup=this.device.createBindGroup({layout:this.blurLayout,entries:[{binding:0,resource:this.scratchA.createView()},{binding:1,resource:this.scratchB.createView()}]});
       this.scratchGeneration=(this.scratchGeneration||0)+1;
     }
-    uploadTile(key, heights, {width=304,height=304,halo=24,metresPerSample=30,climate=null,climateWidth=33,climateHeight=33,hydrology=null,mode='relief',lod=0,origin=[0,0]}={}) {
+    uploadTile(key, heights, {width=304,height=304,halo=24,metresPerSample=30,climate=null,climateWidth=33,climateHeight=33,hydrology=null,surface=null,gradient=null,mode='relief',lod=0,origin=[0,0]}={}) {
       if(!this.available)return false;
       if(!(heights instanceof Float32Array)||heights.length!==width*height||![width,height,halo].every(Number.isInteger)||halo<1||width<=2*halo||height<=2*halo||!Number.isFinite(metresPerSample)||metresPerSample<=0)throw Error('Invalid physical tile');
       if(Math.max(width,height)>this.device.limits.maxTextureDimension2D)throw Error('Tile exceeds GPU limits');
       if(hydrology!==null&&(!(hydrology instanceof Float32Array)||hydrology.length!==width*height*4))throw Error('Invalid water tile');
+      if(surface!==null&&(!(surface instanceof Uint8Array)||surface.length!==width*height*4))throw Error('Invalid erosion surface tile');
       this.deleteTile(key); const started=performance.now(); this.scratch(width,height);
       const innerWidth=width-2*halo,innerHeight=height-2*halo;
       const elevation=this.makeTexture(width,height,'r32float',GPUTextureUsage.COPY_DST);
@@ -860,6 +878,10 @@
       const selectedMode=modeNumber(this.mode??mode);
       // Render's own material seed (climate metadata), shared by Render3D lattices.
       const materialSeed=climateLayers>=46?climateValues[45*climateWidth*climateHeight+6]>>>0:0;
+      const gradientTexture=gradient?this.makeTexture(width,height,'rg32float',GPUTextureUsage.COPY_DST):null;
+      if(gradientTexture)this.device.queue.writeTexture({texture:gradientTexture},gradient,{bytesPerRow:width*8,rowsPerImage:height},[width,height]);
+      const erosion=surface?this.makeTexture(width,height,'rgba8unorm',GPUTextureUsage.COPY_DST):null;
+      if(erosion)this.device.queue.writeTexture({texture:erosion},surface,{bytesPerRow:width*4,rowsPerImage:height},[width,height]);
       const waterLevels=hydrology?Math.min(6,Math.floor(Math.log2(Math.min(width,height)))+1):0;
       const water=hydrology?this.device.createTexture({size:[width,height],format:'rgba32float',mipLevelCount:waterLevels,usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST|GPUTextureUsage.STORAGE_BINDING}):null;
       if(water){
@@ -871,9 +893,9 @@
         }
         pass.end();this.device.queue.submit([encoder.finish()]);
       }
-      const tile={elevation,color,climate:climateTexture,hydrology:water,halo,resolution:metresPerSample,params:[width,height,selectedMode,0],origin,lod,heights,materialSeed};
+      const tile={elevation,color,climate:climateTexture,hydrology:water,surface:erosion,gradient:gradientTexture,halo,resolution:metresPerSample,params:[width,height,selectedMode,0],origin,lod,heights,materialSeed};
       this.shadeTile(tile);
-      const bytes=width*height*4+(hydrology?Math.ceil(width*height*16*4/3):0)+Math.ceil(innerWidth*innerHeight*16/3)+climateWidth*climateHeight*climateLayers*4;
+      const bytes=width*height*4+(gradient?gradient.byteLength:0)+(surface?surface.byteLength:0)+(hydrology?Math.ceil(width*height*16*4/3):0)+Math.ceil(innerWidth*innerHeight*16/3)+climateWidth*climateHeight*climateLayers*4;
       // shadeTile already counted any Render3D layers in tile.r3Bytes.
       this.tiles.set(key,Object.assign(tile,{bytes:bytes+(tile.r3Bytes||0),lastUsed:++this.serial}));this.bytes+=bytes;this.uploads++;this.lastUploadSubmitMs=performance.now()-started;
       window.TerrainTiming.record('render.upload_and_shade_submit',started,{key,bytes});
@@ -906,14 +928,14 @@
       }
       // One parameter buffer: each shade writes it, then submits before the next write.
       const params=this.shadeParams??=this.device.createBuffer({size:160,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
-      this.device.queue.writeBuffer(params,0,new Float32Array([metresPerSample,halo,innerWidth,innerHeight,selectedMode,0,0,0,...(window.TerrainLighting?.vectors(lod)||[1,.35,1,1,-.5,-.5,.70710678,0]),...origin,0,0,...this.renderVectors()]));
+      this.device.queue.writeBuffer(params,0,new Float32Array([metresPerSample,halo,innerWidth,innerHeight,selectedMode,tile.gradient?1:0,0,0,...(window.TerrainLighting?.vectors(lod)||[1,.35,1,1,-.5,-.5,.70710678,0]),...origin,0,0,...this.renderVectors()]));
       // Only Render, Soil and Render3D read shore distances.
       const shore=selectedMode===-3||selectedMode===-4||render3d;
       // Bind groups and views persist per tile: reshading after a settings change only records dispatches.
       const key=this.scratchGeneration+'|'+(render3d?'render3d':'shade');
       if(tile.shadeKey!==key){
         const view=(texture,level,dimension)=>texture.createView({baseMipLevel:level,mipLevelCount:1,...(dimension?{dimension}:{})});
-        const entries=[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchB.createView()},{binding:2,resource:view(color,0)},{binding:3,resource:{buffer:params}},{binding:4,resource:climateTexture.createView({dimension:'2d-array'})},{binding:5,resource:this.scratchA.createView()},{binding:8,resource:(tile.hydrology||this.noHydrology).createView()}];
+        const entries=[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchB.createView()},{binding:2,resource:view(color,0)},{binding:3,resource:{buffer:params}},{binding:4,resource:climateTexture.createView({dimension:'2d-array'})},{binding:5,resource:this.scratchA.createView()},{binding:10,resource:(tile.gradient||this.noGradient).createView()},{binding:9,resource:(tile.surface||this.noSurface).createView()},{binding:8,resource:(tile.hydrology||this.noHydrology).createView()}];
         tile.shadeGroups={
           horizontal:this.device.createBindGroup({layout:this.blurLayout,entries:[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchA.createView()}]}),
           // After the vertical blur has consumed scratch A, it holds the shore rows.
@@ -956,6 +978,8 @@
             {binding:2,visibility:compute,storageTexture:{access:'write-only',format:'rgba8unorm'}},
             {binding:3,visibility:compute,buffer:{type:'uniform'}},
             {binding:4,visibility:compute,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},
+            {binding:10,visibility:compute,texture:{sampleType:'unfilterable-float'}},
+            {binding:9,visibility:compute,texture:{}},
             {binding:5,visibility:compute,texture:{sampleType:'unfilterable-float'}},
             {binding:6,visibility:compute,storageTexture:{access:'write-only',format:'rgba8unorm',viewDimension:'2d-array'}},
             {binding:7,visibility:compute,buffer:{type:'uniform'}},
@@ -968,6 +992,7 @@
             {binding:3,visibility:fragment,texture:{sampleType:'unfilterable-float'}},
             {binding:4,visibility:fragment,texture:{viewDimension:'2d-array'}},
             {binding:5,visibility:fragment,buffer:{type:'uniform'}},
+            {binding:9,visibility:fragment,texture:{}},
             {binding:6,visibility:fragment,texture:{viewDimension:'2d-array'}},
             {binding:8,visibility:fragment,texture:{sampleType:'unfilterable-float'}},
           ]});
@@ -1087,7 +1112,7 @@
     hasTile(key) { return this.available&&this.tiles.has(key); }
     deleteTile(key) {
       const tile=this.tiles.get(key); if(!tile)return;
-      tile.elevation.destroy();tile.hydrology?.destroy();tile.color?.destroy();tile.albedo?.destroy();tile.aux?.destroy();tile.r3Buffer?.destroy();tile.climate.destroy();tile.contourBuffer?.destroy();this.bytes-=tile.bytes;this.tiles.delete(key);
+      tile.gradient?.destroy();tile.elevation.destroy();tile.surface?.destroy();tile.hydrology?.destroy();tile.color?.destroy();tile.albedo?.destroy();tile.aux?.destroy();tile.r3Buffer?.destroy();tile.climate.destroy();tile.contourBuffer?.destroy();this.bytes-=tile.bytes;this.tiles.delete(key);
     }
     evict() {
       const overhead=(this.scratchWidth||0)*(this.scratchHeight||0)*16+this.capacity*this.device.limits.minUniformBufferOffsetAlignment;
@@ -1137,7 +1162,7 @@
         const pipeline=kind==='coarse'?this.coarsePipeline:kind==='render3d'?this.r3Pipeline:this.pipeline;
         if(pipeline!==current){pass.setPipeline(pipeline);current=pipeline;}
         tile.group??=this.device.createBindGroup(kind==='coarse'?{layout:this.coarseLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:208}},{binding:1,resource:tile.elevation.createView()},{binding:2,resource:tile.climate.createView({dimension:'2d-array'})},{binding:3,resource:(tile.albedo||this.noAlbedo).createView()},{binding:4,resource:this.sampler}]}
-          :kind==='render3d'?{layout:this.r3DrawLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:208}},{binding:1,resource:tile.color.createView()},{binding:2,resource:this.sampler},{binding:3,resource:tile.elevation.createView()},{binding:4,resource:tile.aux.createView({dimension:'2d-array'})},{binding:5,resource:{buffer:tile.r3Buffer}},{binding:6,resource:this.brushes.createView({dimension:'2d-array'})},{binding:8,resource:(tile.hydrology||this.noHydrology).createView()}]}
+          :kind==='render3d'?{layout:this.r3DrawLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:208}},{binding:1,resource:tile.color.createView()},{binding:2,resource:this.sampler},{binding:3,resource:tile.elevation.createView()},{binding:4,resource:tile.aux.createView({dimension:'2d-array'})},{binding:5,resource:{buffer:tile.r3Buffer}},{binding:9,resource:(tile.surface||this.noSurface).createView()},{binding:6,resource:this.brushes.createView({dimension:'2d-array'})},{binding:8,resource:(tile.hydrology||this.noHydrology).createView()}]}
           :{layout:this.renderLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:208}},{binding:1,resource:tile.color.createView()},{binding:2,resource:this.sampler},{binding:3,resource:tile.elevation.createView()},{binding:8,resource:(tile.hydrology||this.noHydrology).createView()}]});
         pass.setBindGroup(0,tile.group,[i*stride]);pass.draw(6);
         if(contourSettings?.enabled&&tile.contourCount&&tile.params[2]!==-5){
@@ -1151,7 +1176,7 @@
     }
     getStats() { const scratchBytes=(this.scratchWidth||0)*(this.scratchHeight||0)*16,uniformBytes=this.capacity*(this.device?.limits.minUniformBufferOffsetAlignment||0);return {status:this.status,tiles:this.tiles.size,bytes:this.bytes,scratchBytes,uniformBytes,totalBytes:this.bytes+scratchBytes+uniformBytes,maxBytes:this.maxBytes,frames:this.frames,uploads:this.uploads,styleRevision:this.styleRevision,contourSegments:[...this.tiles.values()].reduce((n,t)=>n+(t.contourCount||0),0),lastUploadSubmitMs:this.lastUploadSubmitMs||0,render3d:{ready:!!this.r3Ready,error:this.r3Error||null,compileMs:this.r3CompileMs||0,brushes:!!this.brushesReady,brushError:this.brushError||null,tiles:[...this.tiles.values()].filter(t=>isRender3d(t.shadedMode)).length}}; }
     dispose() {
-      this.available=false;this.clear();this.noHydrology?.destroy();this.noAlbedo?.destroy();this.shadeParams?.destroy();if(this.brushes!==this.noBrushes)this.brushes?.destroy();this.noBrushes?.destroy();this.scratchA?.destroy();this.scratchB?.destroy();this.uniform?.destroy();this.context?.unconfigure();this.notify('disposed');this.device?.destroy();
+      this.available=false;this.clear();this.noGradient?.destroy();this.noHydrology?.destroy();this.noSurface?.destroy();this.noAlbedo?.destroy();this.shadeParams?.destroy();if(this.brushes!==this.noBrushes)this.brushes?.destroy();this.noBrushes?.destroy();this.scratchA?.destroy();this.scratchB?.destroy();this.uniform?.destroy();this.context?.unconfigure();this.notify('disposed');this.device?.destroy();
     }
   }
   window.createTerrainRenderer=async(canvas,options={})=>{

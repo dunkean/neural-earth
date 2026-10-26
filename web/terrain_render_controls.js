@@ -35,3 +35,33 @@ window.TerrainRender=(()=>{
   }
   return {normalize,mount,reset,set(value){settings=normalize(value);sync();},get:()=>clone(settings),defaults:()=>clone(defaults),serialize:()=>JSON.stringify(settings)};
 })();
+
+/* Request-level terrain detail. Before/Hybrid/Phasor/MSE retain separate tile sets. */
+window.TerrainAmplification=(()=>{
+  const key='neural-earth-amplification-v2',legacyKey='neural-earth-amplification-v1',params=new URLSearchParams(location.search);
+  const labels={hybrid:'Hybride (recommandé)',phasor:'Phasor (Grenier 2024)',mse:'MSE (expérimental, Schott 2024)'};
+  const normalize=value=>({mode:['off',...Object.keys(labels)].includes(value?.mode)?value.mode:value?.enabled?'hybrid':'off',intensity:Math.round(Math.min(2,Math.max(0,Number.isFinite(value?.intensity)?value.intensity:1))*100)/100,before:!!value?.before});
+  let saved={};try{saved=JSON.parse(localStorage.getItem(key)||localStorage.getItem(legacyKey))||{};}catch(_){}
+  let state=normalize(saved),available=[],unavailable=[],changed=()=>{},sync=()=>{},badge=null;
+  if(params.has('amplify')){const n=Number(params.get('amplify')),mode=params.get('amplify_mode')||'hybrid',active=mode in labels&&(n>0||n===0&&params.has('amplify_mode'));state=normalize({mode:active?mode:'off',intensity:active?n:1,before:params.get('amplify_before')==='1'});}
+  function save(){try{localStorage.setItem(key,JSON.stringify(state));}catch(_){}}
+  save();
+  const effectiveMode=()=>!state.before&&available.includes(state.mode)?state.mode:'off';
+  const effective=()=>effectiveMode()==='off'?0:state.intensity;
+  function set(value,notify=false){state=normalize(value);save();sync();if(notify)changed();}
+  function compare(){if(available.includes(state.mode))set({...state,before:!state.before},true);}
+  function cycle(){const sequence=['off',...available],current=effectiveMode(),next=sequence[(sequence.indexOf(current)+1)%sequence.length];if(next==='off')set({...state,before:true},true);else set({...state,mode:next,before:false},true);}
+  function writeParams(p){if(state.mode in labels&&window.NeuralEarthRuntime?.kind!=='wasm'){p.set('amplify',String(state.intensity));p.set('amplify_mode',state.mode);if(state.before)p.set('amplify_before','1');else p.delete('amplify_before');}else{for(const k of ['amplify','amplify_mode','amplify_before'])p.delete(k);}}
+  function mount(container,onChange){
+    changed=onChange;const field=document.createElement('fieldset');field.id='amplificationSettings';field.hidden=true;
+    field.innerHTML='<legend>Amplification du terrain (expérimental)</legend><label>Mode <select id="amplificationMode" aria-label="Amplification du terrain"></select></label><small id="amplificationUnavailable" role="status" hidden></small><label>Intensité <input id="amplificationIntensity" type="range" min="0" max="2" step="0.05" value="1"><output></output></label><div class="panelActions"><button id="amplificationCompare" type="button">Avant / après (B)</button><button id="amplificationCycle" type="button">Avant → Hybride → Phasor → MSE (Maj+B)</button></div><small>Détail procédural plausible, pas un terrain mesuré.</small>';
+    container.prepend(field);const selector=field.querySelector('select'),slider=field.querySelector('input'),button=field.querySelector('#amplificationCompare'),cycleButton=field.querySelector('#amplificationCycle');
+    badge=document.createElement('small');badge.id='amplificationBadge';badge.hidden=true;container.closest('#controls')?.append(badge);
+    sync=()=>{field.hidden=!available.length&&!unavailable.length;selector.replaceChildren(...[['off','Classique (raffinement actuel)'],...available.map(mode=>[mode,labels[mode]])].map(([value,text])=>new Option(text,value)));selector.value=available.includes(state.mode)?state.mode:'off';slider.value=state.intensity;slider.disabled=!available.includes(state.mode);field.querySelector('output').textContent=state.intensity.toFixed(2);button.disabled=slider.disabled;button.textContent=(effectiveMode()==='off'?'Avant':'Après')+' · comparer (B)';button.setAttribute('aria-pressed',String(effectiveMode()!=='off'));cycleButton.hidden=available.length<2;const notice=field.querySelector('#amplificationUnavailable');notice.hidden=!unavailable.length;notice.textContent=(state.mode!=='off'&&!available.includes(state.mode)?'Amplification désactivée. ':'')+unavailable.join(' · ');};
+    selector.onchange=()=>set({...state,mode:selector.value,before:false},true);slider.oninput=()=>set({...state,intensity:slider.valueAsNumber},true);button.onclick=compare;cycleButton.onclick=cycle;
+    document.addEventListener('keydown',e=>{if(available.length&&e.key.toLowerCase()==='b'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!e.target.isContentEditable&&!/INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){if(e.shiftKey&&available.length>1){e.preventDefault();cycle();}else if(available.includes(state.mode)){e.preventDefault();compare();}}});sync();
+  }
+  return {normalize,get:()=>({...state}),set,effective,effectiveMode,compare,cycle,writeParams,mount,label:mode=>labels[mode]||'Avant',
+    setSupport(value){const wasm=window.NeuralEarthRuntime?.kind==='wasm';available=wasm?[]:Object.keys(labels).filter(mode=>value?.modes?value.modes[mode]?.available:mode==='mse'&&(value===true||value?.available));unavailable=wasm||!value?.modes?[]:Object.keys(labels).filter(mode=>!value.modes[mode]?.available).map(mode=>labels[mode]+' indisponible : '+(value.modes[mode]?.reason||'module non disponible sur ce serveur'));if(!available.length&&badge)badge.hidden=true;sync();},
+    displayed(modes){if(!badge)return;const list=Array.isArray(modes)?modes:typeof modes==='string'?[modes]:[];badge.hidden=!list.length;badge.textContent=list.map(mode=>labels[mode]||mode).join(' / ')+' · expérimental';}};
+})();

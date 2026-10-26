@@ -6,6 +6,7 @@
 | [Architecture](architecture.md) | Networks, physical conditioning and caches |
 | [Orogen maintenance](orogen-maintenance.md) | Local modifications, upstream review baseline and update procedure |
 | [Layers](layers.md) | Map views, diagnostics and rendering controls |
+| [Terrain amplification](terrain-amplification.md) | Sub-30 m relief modes, generation path down to LOD -12, usage |
 | [Biomes](biomes.md) | Climate classification and terrain appearance |
 | [Materials](materials.md) | Surface rendering, soils and regional pedology |
 | [Render3D](render3d.md) | Multiscale ground, forest and painted crowns over Render |

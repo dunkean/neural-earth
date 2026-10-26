@@ -13,7 +13,7 @@
       + (heights[y1 * width + x0] * (1 - dx) + heights[y1 * width + x1] * dx) * dy;
     return Number.isFinite(value) ? (options.encoding==='signed-sqrt'?Math.sign(value)*value*value:value) : null;
   }
-  const distanceLabel = metres => metres >= 1000 ? `${(metres / 1000).toFixed(2)} km` : `${metres.toFixed(1)} m`;
+  const distanceLabel = metres => metres >= 1000 ? `${(metres / 1000).toFixed(2)} km` : metres>=1?`${metres.toFixed(1)} m`:metres>=.01?`${(metres*100).toFixed(1)} cm`:`${(metres*1000).toFixed(1)} mm`;
   function mount({view, mini, button, altitude, extent, distance, getState, redraw}) {
     let pointer = null, armed = false, segment = null, measuringId = null, frame = null;
     let flight = null, fetchTimer = null, generation = null;
@@ -47,6 +47,7 @@
       try {
         const params = new URLSearchParams({session:s.session, epoch:String(s.publishedEpoch), profile:s.world.cache_profile,
           world_profile:s.generationProfile, mode:s.mode, coarse_revision:String(s.coarseRevision)});
+        if (tile.amplify) {params.set('amplify',String(tile.amplify));params.set('amplify_mode',tile.amplifyMode||'hybrid');}
         if (tile.lod===4) params.set('coarse_interpolation',s.coarseInterpolation||'monotone');
         if (tile.source_lod) params.set('source_lod',String(tile.source_lod));
         if (s.world.world_identity) params.set('world_identity', s.world.world_identity);

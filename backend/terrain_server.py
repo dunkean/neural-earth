@@ -52,12 +52,23 @@ from terrain_coarse import CoarsePreparation
 from terrain_background import CoarseBackground
 from terrain_generation_session import GenerationCoordinator, GenerationCancelled, generation_scope, check_generation
 from terrain_final_mips import plan_mip, read_mip
-from terrain_refinement import MIN_LOD, VERSION as REFINEMENT_VERSION, sample_refined
+from terrain_refinement import VERSION as REFINEMENT_VERSION, sample_refined
+from terrain_lod_interpolation import MIN_LOD, RELIEF_FLOOR, relief_floor, interpolation_suffix
 import terrain_native_coarse as native_coarse
 from terrain_profiling import span, trace, measured_lock, snapshot as profiling_snapshot
 from functools import lru_cache
 
 app = Flask(__name__)
+from terrain_illustration import illustration_root
+
+
+@app.get('/illustration/<name>')
+def illustration_client(name):
+    root = illustration_root(REPO_ROOT)
+    if root is None or name != 'index.mjs':
+        return jsonify(error='Illustration client unavailable. Update the Magna Urbis checkout.'), 404
+    return send_from_directory(root / 'illustration' / 'web', name, mimetype='text/javascript')
+
 from terrain_share import register_share_routes
 register_share_routes(app, OUTPUT / 'share-recipes',
                       restore_generation=lambda generation: restore_shared_generation(generation))
@@ -847,7 +858,7 @@ def _learned_ready(preparation,xs,ys,lod,tx,ty):
 
 @torch.inference_mode()
 def sample_elevation(world, lod, tx, ty, halo=HALO, *, xs=None, ys=None,
-                     coarse_interpolation='monotone'):
+                     coarse_interpolation='monotone', amplify=0., amplify_mode='hybrid', surface_out=None):
     step = 2**lod
     size = TILE + 2*halo
     x0, y0 = tx*TILE*step, ty*TILE*step
@@ -871,9 +882,32 @@ def sample_elevation(world, lod, tx, ty, halo=HALO, *, xs=None, ys=None,
         elevation, stage = sample_field(world, xs, ys, 'latent'), 'latent'
     elif lod < 0:
         i0, j0 = ty*TILE-halo, tx*TILE-halo
-        data = sample_refined(world, -lod, i0, j0, i0+size, j0+size,
-                              check=jobs.check_current_interest)
-        elevation, stage = data.cpu().numpy(), 'decoder-refinement'
+        mode=amplify_mode if amplify else 'classic'
+        if lod < relief_floor(mode):
+            from terrain_lod_interpolation import sample_interpolated
+            def reader(a,b,c,d):
+                if amplify:
+                    return amplification_mode(amplify_mode)['sampler'](world,-relief_floor(mode),a,b,c,d,intensity=amplify,check=jobs.check_current_interest)
+                return sample_refined(world,-relief_floor(mode),a,b,c,d,check=jobs.check_current_interest),None
+            identity=(amplification_mode(amplify_mode)['version'],amplify) if amplify else REFINEMENT_VERSION
+            elevation,surface=sample_interpolated(world,lod,i0,j0,i0+size,j0+size,reader=reader,mode=mode,identity=identity,check=jobs.check_current_interest)
+            if surface_out is not None and surface is not None:surface_out.append(surface)
+        elif amplify:
+            sampler=amplification_mode(amplify_mode)['sampler']
+            data,surface = sampler(world,-lod,i0,j0,i0+size,j0+size,
+                                            intensity=amplify,check=jobs.check_current_interest)
+            elevation = data.cpu().numpy() if hasattr(data,'cpu') else np.asarray(data)
+            if surface_out is not None:
+                surface_out.append(np.ascontiguousarray(surface.cpu().numpy() if hasattr(surface,'cpu') else surface,dtype=np.float32))
+        else:
+            data = sample_refined(world, -lod, i0, j0, i0+size, j0+size,
+                                  check=jobs.check_current_interest)
+            elevation = data.cpu().numpy()
+        stage = 'decoder-refinement'
+        if lod==relief_floor(mode) and world is not None:
+            from terrain_lod_interpolation import remember_floor
+            identity=(amplification_mode(amplify_mode)['version'],amplify) if amplify else REFINEMENT_VERSION
+            remember_floor(world,mode,identity,i0,j0,elevation,surface if amplify else None)
     else:
         i0, j0 = y0-halo*step, x0-halo*step
         from terrain_coastline import read_native
@@ -889,7 +923,7 @@ def sample_elevation(world, lod, tx, ty, halo=HALO, *, xs=None, ys=None,
         stage = 'decoder'
     if not np.isfinite(elevation).all():
         raise RuntimeError('Non-finite terrain values')
-    return np.ascontiguousarray(elevation, dtype=np.float32), stage
+    return np.ascontiguousarray(elevation, dtype=np.float64 if lod<relief_floor(amplify_mode if amplify else 'classic') else np.float32), stage
 
 
 def prepare_preview_view(world,seed,profile,lod,tx,ty,session):
@@ -945,7 +979,7 @@ def sample_latent_preview(world,lod,tx,ty):
 
 
 def sample_physical(world, seed, world_profile, lod, tx, ty, *, preview_only=False,
-                    coarse_interpolation='monotone', polar=False):
+                    coarse_interpolation='monotone', polar=False, amplify=0., amplify_mode='hybrid', surface_out=None):
     step=2**lod
     xs=(tx*TILE*step+(np.arange(-HALO,TILE+HALO)+.5)*step)
     ys=(ty*TILE*step+(np.arange(-HALO,TILE+HALO)+.5)*step)
@@ -969,7 +1003,8 @@ def sample_physical(world, seed, world_profile, lod, tx, ty, *, preview_only=Fal
             elevation,stage=sample_elevation(world,lod,tx,ty,xs=xs,ys=ys,
                                              coarse_interpolation=coarse_interpolation)
         else:
-            elevation,stage=sample_elevation(world,lod,tx,ty,xs=xs,ys=ys)
+            elevation,stage=sample_elevation(world,lod,tx,ty,xs=xs,ys=ys,
+                **({'amplify':amplify,'amplify_mode':amplify_mode,'surface_out':surface_out} if amplify and lod<0 else {}))
     # The physical height, rather than display color, is filtered. The same
     # halo and globally aligned sample centres prevent tile-edge discontinuity.
     if lod>=3:
@@ -1081,7 +1116,7 @@ def response_report(report,seed,profile,lod,tx,ty,source):
     return dict(report,cache_source=source,provisional=provisional)
 
 
-def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief', lighting=None, contours=None, origin=(0, 0), seed=None, world_profile=None, render_settings=None):
+def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief', lighting=None, contours=None, origin=(0, 0), seed=None, world_profile=None, render_settings=None, surface=None):
     from terrain_styles import MODES as STYLE_MODES, render_style, apply_contours
     if mode in STYLE_MODES:
         rgb=render_style(elevation,NATIVE*2**lod,mode,lighting,origin)
@@ -1097,7 +1132,7 @@ def render_elevation(elevation, lod, halo=HALO, climate=None, mode='relief', lig
         elif mode in ('render','soil','pedology'):
             atlas,settings = biome_atlas(seed,world_profile)
             rgb = colorize_surface(atlas,xs,ys,elevation,resolution,settings,render_settings,
-                                   polar=selected_neural_chart()=='polar',mode=mode)
+                                   polar=selected_neural_chart()=='polar',mode=mode,**({'surface':surface} if surface is not None else {}))
             if mode in ('render','soil'):
                 from terrain_lighting import relief_intensity
                 rgb *= np.where(elevation<0,1,relief_intensity(elevation,resolution,lighting))[...,None]
@@ -1162,10 +1197,13 @@ def transport_climate(seed, wp, xs, ys, climate):
                            polar=selected_neural_chart()=='polar')])
 
 
-def sample_tile(world, seed, lod, tx, ty, halo=HALO):
+def sample_tile(world, seed, lod, tx, ty, halo=HALO, *, amplify=0., amplify_mode='hybrid'):
     """Backward-compatible CPU-render helper, used by older verification scripts."""
-    elevation, stage = sample_elevation(world, lod, tx, ty, halo)
-    return render_elevation(elevation, lod, halo), stage
+    intensity=selected_amplification(amplify,amplify_mode) if lod<0 else 0.
+    surfaces=[]
+    elevation, stage = sample_elevation(world, lod, tx, ty, halo,
+        **({'amplify':intensity,'amplify_mode':amplify_mode,'surface_out':surfaces} if intensity else {}))
+    return render_elevation(elevation, lod, halo,**({'surface':surfaces[0]} if surfaces else {})), stage
 
 
 @lru_cache(maxsize=8)
@@ -1212,6 +1250,8 @@ def metadata(seed, world_profile=None):
             'world_version':manifest['world_profile'], 'world_bounds':overview_bounds,'seed':str(seed), 'model':MODEL, 'tile_size':TILE,
             'native_resolution':NATIVE, 'halo':HALO,
             'min_lod':MIN_LOD, 'refinement_resolutions':[NATIVE*2**(-level) for level in range(1,-MIN_LOD+1)],
+            'relief_floors':{mode:relief_floor(mode) for mode in RELIEF_FLOOR}, 'relief_interpolation':'bounded-c2-biquintic-v1',
+            'amplification':amplification_capability(),
             'refinement_experimental':True, 'refinement_disk_cache':False,
             'initial_bounds':bounds, 'initial_image':initial_image,
             'overview_bounds':overview_bounds,
@@ -1423,7 +1463,10 @@ def read_hydrology_cached_base(seed, profile, bounds):
 def capture_hydrology_cached_base(seed, profile, lod, tx, ty):
     """Save ready Base near a completed terrain tile before GPU LRU eviction.
 
-    Called inside the existing GPU job/lock. Reads only completed contributors;
+    Called inside the existing GPU job/lock. Reads only raw 240 m world.latents
+    via read_hydrology_cached_base, never the delivered/amplified DEM. Thus even
+    a negative-LOD trigger cannot contaminate the ordinary hydrology Base.
+    Reads only completed contributors;
     64 ordinary 192² float grids cost about 9 MiB of CPU memory per world.
     """
     if _hydrology_service is None or lod > 3:
@@ -1601,6 +1644,16 @@ def generation_controls_script():
 @app.get('/terrain_toolbar.js')
 def toolbar_script():
     return send_from_directory(WEB_ROOT,'terrain_toolbar.js')
+
+
+@app.get('/terrain_illustration_context.js')
+def illustration_context_script():
+    return send_from_directory(WEB_ROOT, 'terrain_illustration_context.js')
+
+
+@app.get('/terrain_illustration.js')
+def illustration_script():
+    return send_from_directory(WEB_ROOT, 'terrain_illustration.js')
 
 
 @app.get('/terrain_share.js')
@@ -1947,8 +2000,9 @@ def _session(value):
 
 
 def _tile_coordinates(seed, lod, tx, ty, profile=None):
+    if has_request_context() and ('amplify' in request.args or 'amplify_mode' in request.args):request_amplification()
     seed, lod, tx, ty = int(seed), int(lod), int(tx), int(ty)
-    if not 0 <= seed < 2**64 or not MIN_LOD <= lod <= 11 or abs(tx) > 10**7 or abs(ty) > 10**7:
+    if not 0 <= seed < 2**64 or not MIN_LOD <= lod <= 11 or abs(tx) > 10**8 or abs(ty) > 10**8:
         raise ValueError('Invalid coordinates')
     if has_request_context() and request.args.get('world_identity'):
         expected=world_identity(world_manifest(seed,generation_profile()))
@@ -2001,14 +2055,89 @@ def selected_neural_chart():
     return value
 
 
-def request_tile_key(seed,lod,tx,ty,world_profile=None,source_lod=None,coarse_interpolation=None):
+def amplification_mode(mode='hybrid', *, required=True):
+    # Lazy registry: a missing experimental module must not prevent startup.
+    from importlib import import_module
+    registry={'hybrid':('terrain_hybrid','sample_hybrid','hybrid-drainage-erosion','experimental-hybrid-amplification'),
+              'mse':('terrain_amplification','sample_amplified','multiscale-erosion','experimental-erosion-amplification'),
+              'phasor':('terrain_phasor','sample_phasor','phasor-noise','experimental-phasor-amplification')}
+    if mode not in registry:raise ValueError('amplify_mode must be hybrid, phasor or mse')
+    name,sampler,label,source_kind=registry[mode]
+    try:
+        module=import_module(name)
+        sampler=getattr(module,sampler);version=module.VERSION
+    except Exception as error:
+        reason=f'{type(error).__name__}: {error}'
+        if required:raise ValueError(f'{mode} amplification is unavailable on this server ({reason})') from error
+        return dict(available=False,reason=reason)
+    result=dict(available=True,module=module,sampler=sampler,version=version,
+                amplification=label,source_kind=source_kind)
+    if mode=='mse':result['stages']=[7.5,1.875,.47]
+    else:
+        wavelengths=getattr(module,'RAVINE_WAVELENGTHS',getattr(module,'RAVINE_WAVELENGTHS_M',getattr(module,'WAVELENGTHS',None)))
+        if wavelengths is not None:result['stages']=[float(v) for v in wavelengths]
+    return result
+
+
+def selected_amplification_mode(raw=...):
+    if raw is ... and has_request_context():
+        raw=request.args.get('amplify_mode',...)
+        if raw is ... and request.is_json:raw=(request.get_json(silent=True) or {}).get('amplify_mode',...)
+    mode='hybrid' if raw is ... else raw
+    if mode not in ('hybrid','phasor','mse'):raise ValueError('amplify_mode must be hybrid, phasor or mse')
+    if raw is not ...:amplification_mode(mode)
+    return mode
+
+
+def selected_amplification(raw=None, mode=None):
+    if mode is None:mode=selected_amplification_mode()
+    if mode not in ('hybrid','phasor','mse'):raise ValueError('amplify_mode must be hybrid, phasor or mse')
+    if raw is None and has_request_context():
+        raw=request.args.get('amplify')
+        if raw is None and request.is_json:raw=(request.get_json(silent=True) or {}).get('amplify')
+    if raw is None or str(raw).strip().lower() in ('','0','off'):return 0.
+    try:
+        value=float(raw)
+        if not math.isfinite(value):raise ValueError('Invalid amplify intensity')
+    except (TypeError,ValueError,OverflowError):
+        raise ValueError('amplify must be a finite intensity (0..2)')
+    value=round(min(2.,max(0.,value)),2)
+    if not value:return 0.
+    parser=getattr(amplification_mode(mode)['module'],'parse_intensity',None)
+    return parser(raw) if parser else value
+
+
+def request_amplification():
+    mode=selected_amplification_mode()
+    return dict(amplify=selected_amplification(mode=mode),amplify_mode=mode)
+
+
+def amplification_capability():
+    modes={}
+    for mode in ('hybrid','phasor','mse'):
+        spec=amplification_mode(mode,required=False)
+        modes[mode]={key:spec[key] for key in ('available','version','stages','reason') if key in spec}
+    return dict(available=any(s['available'] for s in modes.values()),modes=modes,
+                max_intensity=2.,surface_channels=['flow','deposit','scree','rock'])
+
+
+def request_tile_key(seed,lod,tx,ty,world_profile=None,source_lod=None,coarse_interpolation=None,amplify=0.,amplify_mode='hybrid'):
     source = latent_preview_source(lod,source_lod)
-    key = tile_key(seed,_coarse_cache_level(lod,coarse_interpolation),tx,ty,world_profile)
+    key = tile_key(seed,_coarse_cache_level(lod,coarse_interpolation),tx,ty,world_profile,amplify,amplify_mode)
     return key + '/source3' if source is not None else key
 
 
-def tile_key(seed, lod, tx, ty, world_profile=None):
-    return f'{VERSION}/{generation_profile(world_profile)}/{seed}/{lod}/{tx}/{ty}'
+def tile_key(seed, lod, tx, ty, world_profile=None, amplify=0., amplify_mode='hybrid'):
+    # Pure amplification identity: never consult request.args in a worker.
+    from terrain_lod_interpolation import interpolation_suffix
+    if amplify_mode not in ('hybrid','phasor','mse'):raise ValueError('amplify_mode must be hybrid, phasor or mse')
+    key=f'{VERSION}/{generation_profile(world_profile)}/{seed}/{lod}/{tx}/{ty}'
+    intensity=selected_amplification(0. if amplify is None else amplify,amplify_mode) if lod<0 else 0.
+    if intensity:
+        version=amplification_mode(amplify_mode)['version']
+        key+=f'/amp-{amplify_mode}-{version}-{intensity:.2f}'
+    key+=interpolation_suffix(lod,amplify_mode if intensity else 'classic')
+    return key
 
 
 @app.post('/api/view')
@@ -2024,6 +2153,7 @@ def update_view():
         coarse_interpolation=data.get('coarse_interpolation','monotone')
         if coarse_interpolation not in COARSE_INTERPOLATIONS:
             raise ValueError('coarse_interpolation must be monotone or bilinear')
+        if 'amplify_mode' in data:selected_amplification_mode(data['amplify_mode'])
         tiles = data['tiles']
         if not isinstance(tiles, list) or len(tiles) > 512:
             raise ValueError('View budget exceeded (512 tiles)')
@@ -2033,13 +2163,14 @@ def update_view():
             priority = float(tile.get('priority', 2000))
             if not math.isfinite(priority) or not 0 <= priority < 5000:
                 raise ValueError('Invalid priority')
+            if 'amplify_mode' in tile:selected_amplification_mode(tile['amplify_mode'])
             if tile.get('native_coarse'):
                 if lod != native_coarse.GEOMETRY_LOD:
                     raise ValueError('Native coarse geometry must be LOD 7')
                 wants[native_coarse_key(seed, tx, ty, world_profile, bool(tile.get('learned')))] = priority
             else:
                 source=latent_preview_source(lod,tile.get('source_lod'))
-                wants[request_tile_key(seed,lod,tx,ty,world_profile,source,coarse_interpolation)] = priority
+                wants[request_tile_key(seed,lod,tx,ty,world_profile,source,coarse_interpolation,tile.get('amplify',data.get('amplify',0)),tile.get('amplify_mode',data.get('amplify_mode','hybrid')))] = priority
         if data.get('overview'):
             light=parse_lighting(json.dumps(data['overview_lighting'])) if data.get('overview_lighting') is not None else None
             contours=parse_contours(json.dumps(data['overview_contours'])) if data.get('overview_contours') is not None else None
@@ -2123,6 +2254,8 @@ def read_physical_disk(key,path,report_path,climate_path):
 
 
 def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
+    amplification=request_amplification()
+    amplify,amplify_mode=(amplification['amplify'] if lod<0 else 0.),amplification['amplify_mode']
     if lod<0 and not return_arrays:
         raise ValueError('Refined terrain is memory-only; request arrays')
     wp=generation_profile()
@@ -2136,7 +2269,7 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
     path, report_path = _physical_paths(seed, lod, tx, ty,wp,coarse_interpolation)
     climate_path=path.with_suffix('.climate.npy')
     source_lod=latent_preview_source(lod)
-    delivery_key=request_tile_key(seed,lod,tx,ty,wp,source_lod,coarse_interpolation)
+    delivery_key=request_tile_key(seed,lod,tx,ty,wp,source_lod,coarse_interpolation,amplify,amplify_mode)
     entry=physical_delivery.get(delivery_key)
     if entry and valid_physical_report(entry[1],seed,wp,lod,tx,ty,source_lod,coarse_interpolation):
         metrics['cache_hits'] += 1
@@ -2178,6 +2311,7 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
                 if valid_physical_report(report,seed,wp,lod,tx,ty,source_lod,coarse_interpolation):
                     return None,None,report
             before = dict(gpu_calls)
+            surfaces=[]
             view_batch_tiles=1
             metrics['stage'] = f'LOD {lod} · {tx}, {ty}'
             world = (None if lod>=7 else get_polar_world(seed,wp,preview=bool(source_lod)) if polar else
@@ -2191,12 +2325,12 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
                             view_batch_tiles=prepare_preview_view(world,seed,wp,lod,tx,ty,session)
                             elevation,climate,stage=sample_latent_preview(world,lod,tx,ty)
                         elif polar:
-                            elevation,climate,stage=sample_physical(world,seed,wp,lod,tx,ty,polar=True,coarse_interpolation=coarse_interpolation)
+                            elevation,climate,stage=sample_physical(world,seed,wp,lod,tx,ty,polar=True,coarse_interpolation=coarse_interpolation,**({'amplify':amplify,'amplify_mode':amplify_mode,'surface_out':surfaces} if amplify else {}))
                         elif lod==4:
                             elevation,climate,stage=sample_physical(
                                 world,seed,wp,lod,tx,ty,coarse_interpolation=coarse_interpolation)
                         else:
-                            elevation,climate,stage=sample_physical(world,seed,wp,lod,tx,ty)
+                            elevation,climate,stage=sample_physical(world,seed,wp,lod,tx,ty,**({'amplify':amplify,'amplify_mode':amplify_mode,'surface_out':surfaces} if amplify else {}))
                     if world is not None and not polar and not source_lod and lod <= 3:
                         try:
                             capture_hydrology_cached_base(seed, wp, lod, tx, ty)
@@ -2231,9 +2365,26 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
                               checkpoint_resolution=NATIVE, detail_amplitude_scale=0.5,
                               procedural_octaves=max(0, -lod-1))
             report['climate_source']='conditioning-input' if stage=='conditioning-preview' else 'learned-coarse'
+            if amplify:
+                spec=amplification_mode(amplify_mode)
+                report.update(amplification=spec['amplification'],amplification_mode=amplify_mode,
+                    amplification_version=spec['version'],amplification_intensity=amplify,
+                    source_kind=spec['source_kind'],height_filter=report['height_filter']+
+                    ('+multiscale-erosion-stage-delta+level-resampling' if amplify_mode=='mse' and lod<-1 else
+                     '+phasor-ravine-detail' if amplify_mode=='phasor' else
+                     '+native-drainage-driven-phasor-ravine-detail+mse-surface-processes' if amplify_mode=='hybrid' else ''))
+                if amplify_mode in ('phasor','hybrid') and not getattr(spec['module'],'KEEP_PROCEDURAL_BASE',amplify_mode!='hybrid'):
+                    report['height_filter']=report['height_filter'].replace('+procedural-sparse-convolution-octaves','')
+                    report['procedural_octaves']=0
+                if 'stages' in spec:report['amplification_stages']=spec['stages']
+            floor=relief_floor(amplify_mode if amplify else 'classic')
+            if lod<floor:
+                report.update(relief_floor_lod=floor,relief_interpolation='bounded-c2-biquintic-v1',height_filter=f'bounded-c2-biquintic-interpolation-from-lod{floor}',refinement_level=-floor,procedural_octaves=min(report.get('procedural_octaves',0),max(0,-floor-1)))
+            if amplify:return elevation,climate,report,surfaces[0]
             return elevation,climate,report
     def finalize(value):
-        elevation, climate, report = value
+        elevation, climate, report = value[:3]
+        arrays=(elevation,climate,value[3]) if len(value)>3 else (elevation,climate)
         if preview_only and not polar:
             jobs.check_current_interest()
             if learned_tile_state(seed,wp,lod,tx,ty) is True:
@@ -2259,11 +2410,11 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
                     _atomic_bytes(report_path,json.dumps(saved).encode())
                     disk_cache.record(delivery_key,[path,climate_path,report_path])
             current=getattr(jobs.current,'job',None)
-            physical_delivery.publish(delivery_key,path,report,(elevation,climate),persist if lod>=0 else None,
+            physical_delivery.publish(delivery_key,path,report,arrays,persist if lod>=0 else None,
                                       current.sequence if current else None)
             metrics.update(generated_tiles=metrics['generated_tiles']+1, last_seconds=report['seconds'])
             print(f"Tile {seed}/{lod}/{tx}/{ty} {report['stage']} {report['seconds']}s", flush=True)
-        return path,response_report(report,seed,wp,lod,tx,ty,'generated'),(elevation,climate)
+        return path,response_report(report,seed,wp,lod,tx,ty,'generated'),arrays
     session = request.args.get('session')
     if session:
         session = _session(session)
@@ -2469,7 +2620,7 @@ def native_coarse_tile(seed, tx, ty):
 
 
 @app.get('/height/natural-v1/<int:seed>/<int(signed=True):lod>/<tx>/<ty>.bin')
-@pin_cache_io(lambda seed, lod, tx, ty: request_tile_key(seed, lod, int(tx), int(ty)))
+@pin_cache_io(lambda seed, lod, tx, ty: request_tile_key(seed, lod, int(tx), int(ty),**request_amplification()))
 def height_tile(seed, lod, tx, ty):
     try:
         seed, lod, tx, ty = _tile_coordinates(seed, lod, tx, ty)
@@ -2494,14 +2645,25 @@ def height_tile(seed, lod, tx, ty):
                 payload+=climate.astype('<f4',copy=False).tobytes()
             if hydrology is not None:
                 payload+=hydrology.astype('<f4',copy=False).tobytes()
+            surface=arrays[2] if arrays is not None and len(arrays)>2 else None
+            if surface is not None:
+                payload+=np.rint(np.clip(np.moveaxis(surface,0,-1),0,1)*255).astype(np.uint8).tobytes()
+            gradients=request.args.get('gradients')=='1' and bool(report.get('relief_interpolation'))
+            if gradients:
+                dy,dx=np.gradient(elevation.astype(np.float64),report['resolution'])
+                payload+=np.stack((dx,dy),axis=-1).astype('<f4').tobytes()
         report = dict(report, **tile_relief_stats(elevation, HALO))
         response = Response(payload, mimetype='application/octet-stream')
+        if gradients:response.headers['X-Terrain-Gradient-Format']='rg32float'
         if request.args.get('climate')=='1':
             response.headers['X-Terrain-Climate-Width']=str(climate.shape[2])
             response.headers['X-Terrain-Climate-Height']=str(climate.shape[1])
             response.headers['X-Terrain-Climate-Layers']=str(climate.shape[0])
         if hydrology is not None:
             response.headers['X-Terrain-Hydro-Layers']='4'
+        if surface is not None:
+            response.headers['X-Terrain-Surface-Format']='rgba8unorm'
+            response.headers['X-Terrain-Surface-Channels']='flow,deposit,scree,rock'
         response.cache_control.max_age = 31536000
         response.cache_control.public = True
         return _tile_headers(response, report, cached)
@@ -2516,7 +2678,7 @@ def height_tile(seed, lod, tx, ty):
 
 
 @app.get('/tiles/natural-v1/<int:seed>/<int(signed=True):lod>/<tx>/<ty>.png')
-@pin_cache_io(lambda seed, lod, tx, ty: request_tile_key(seed, lod, int(tx), int(ty)))
+@pin_cache_io(lambda seed, lod, tx, ty: request_tile_key(seed, lod, int(tx), int(ty),**request_amplification()))
 def tile(seed, lod, tx, ty):
     try:
         seed, lod, tx, ty = _tile_coordinates(seed, lod, tx, ty)
@@ -2541,7 +2703,7 @@ def tile(seed, lod, tx, ty):
                 climate=arrays[1] if arrays is not None else np.load(physical_path.with_suffix('.climate.npy'),allow_pickle=False)
                 elevation, hydrology, report = hydrology_display(seed,wp,lod,tx,ty,elevation,report)
                 from terrain_hydrology_render import ground_for_shading, composite_water
-                rgb=render_elevation(ground_for_shading(elevation,hydrology),latent_preview_source(lod) or lod,climate=climate,mode=mode,seed=seed,world_profile=wp,lighting=lighting,contours=contours,render_settings=render_settings,origin=(tx*256*NATIVE*2**lod-HALO*report['resolution'],ty*256*NATIVE*2**lod-HALO*report['resolution']))
+                rgb=render_elevation(ground_for_shading(elevation,hydrology),latent_preview_source(lod) or lod,climate=climate,mode=mode,seed=seed,world_profile=wp,lighting=lighting,contours=contours,render_settings=render_settings,surface=arrays[2] if arrays is not None and len(arrays)>2 else None,origin=(tx*256*NATIVE*2**lod-HALO*report['resolution'],ty*256*NATIVE*2**lod-HALO*report['resolution']))
                 rgb=composite_water(rgb,elevation,hydrology,crop=HALO)
                 buffer=io.BytesIO();Image.fromarray(rgb).save(buffer,format='PNG')
                 report=dict(report,**tile_relief_stats(elevation,HALO),render_seconds=round(time.perf_counter()-started,4))
@@ -2551,7 +2713,7 @@ def tile(seed, lod, tx, ty):
             report = dict(report, **tile_relief_stats(arrays[0], HALO))
             with image_slots, span('tile.render_refinement', lod=lod):
                 started=time.perf_counter()
-                rgb=render_elevation(arrays[0],lod,climate=arrays[1],mode=mode,seed=seed,world_profile=wp,origin=((tx*256-HALO)*NATIVE*2**lod,(ty*256-HALO)*NATIVE*2**lod))
+                rgb=render_elevation(arrays[0],lod,climate=arrays[1],mode=mode,seed=seed,world_profile=wp,surface=arrays[2] if len(arrays)>2 else None,origin=((tx*256-HALO)*NATIVE*2**lod,(ty*256-HALO)*NATIVE*2**lod))
                 buffer=io.BytesIO()
                 Image.fromarray(rgb).save(buffer,format='PNG')
                 report=dict(report,render_seconds=round(time.perf_counter()-started,4))
@@ -2601,6 +2763,14 @@ def tile(seed, lod, tx, ty):
 
 
 def _tile_headers(response, report, cache_hit):
+    if report.get('relief_interpolation'):
+        response.headers['X-Terrain-Relief-Floor-LOD']=str(report['relief_floor_lod'])
+        response.headers['X-Terrain-Relief-Interpolation']=report['relief_interpolation']
+        response.headers['X-Terrain-Height-Filter']=report['height_filter']
+    if report.get('amplification'):
+        for field in ('amplification','amplification_mode','amplification_version','amplification_intensity','amplification_stages','height_filter'):
+            if field not in report:continue
+            response.headers['X-Terrain-'+field.replace('_','-').title()]=json.dumps(report[field]) if isinstance(report[field],list) else str(report[field])
     if report.get('hydro_state'):
         response.headers['X-Terrain-Hydro-State']=report['hydro_state']
         response.headers['X-Terrain-Hydro-Id']=report.get('hydro_id','')

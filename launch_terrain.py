@@ -30,6 +30,27 @@ def start_server():
                                 stdin=subprocess.DEVNULL, stdout=out, stderr=err, **options)
 
 
+def start_illustration():
+    """Reuse an existing connector; own only a newly started process."""
+    try:
+        with urllib.request.urlopen('http://127.0.0.1:8794/status', timeout=1) as response:
+            if json.load(response).get('service') == 'magna-illustration':
+                return
+    except (OSError, ValueError):
+        pass
+    sys.path.insert(0, str(root / 'backend'))
+    from terrain_illustration import illustration_root
+    shared = illustration_root(root)
+    if shared is None:
+        return
+    python = Path(os.environ.get('MAGNA_ILLUSTRATION_PYTHON') or shared / '.venv-illustration' / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python'))
+    if not python.is_file():
+        return
+    options = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {'start_new_session': True}
+    with open(root / 'illustration.log', 'a', encoding='utf-8') as out:
+        subprocess.Popen([str(python), '-u', '-m', 'illustration'], cwd=shared, stdin=subprocess.DEVNULL, stdout=out, stderr=out, **options)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--no-open', action='store_true', help='Start without opening a browser (verification).')
@@ -38,6 +59,7 @@ def main(argv=None):
     parser.add_argument('--cpu', dest='gpu', action='store_false',
                         help="Use the CPU options on a browser's first launch.")
     args = parser.parse_args(argv)
+    start_illustration()
     if not alive():
         process = start_server()
         for _ in range(120):
