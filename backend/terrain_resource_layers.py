@@ -6,7 +6,7 @@ physical tiles already on the GPU plus a per-mode package served once per
 world (LOD-10 fields as half floats, deposits, buckets). The NumPy mirror
 (terrain_resource_gpu.py) is the reference. The world authority
 (terrain_resources.compile_world at LOD 10) is computed once per Orogen
-atlas in a serialized background thread, published stage by
+atlas in a prewarmed process with shared-array publication, stage by
 stage, kept in memory and on disk; requests never wait for it (202 with
 progress). Legends name the unit, the status (derived / synthetic) and
 "proxy" when a value comes from a Render v2 appearance field.
@@ -16,6 +16,7 @@ import json
 import math
 import os
 import threading
+import zipfile
 from collections import OrderedDict
 import time
 from pathlib import Path
@@ -288,11 +289,11 @@ class ResourcesPending(Exception):
 
 # Stage durations measured in the compile process while the viewer opens the
 # world (RESOURCE_LAYERS.md §15), for the ETA shown in the legend.
-STAGES = (('climate', 'productivité climatique', .15),
-          ('tectonics', 'tectonique, roches attendues, climat, eau', 11.),
-          ('environment', 'environnement Render v2 et biologie', 11.),
-          ('geology', 'géologie réalisée et matériaux', 8.),
-          ('deposits', 'gisements et stocks', 10.))
+STAGES = (('climate', 'productivité climatique', .07),
+          ('tectonics', 'tectonique, roches attendues, climat, eau', .68),
+          ('environment', 'environnement Render v2 et biologie', .16),
+          ('geology', 'géologie réalisée et matériaux', .13),
+          ('deposits', 'gisements et stocks', .35))
 _COMPILES = {}          # world key -> _Compile (one background job per world)
 
 
@@ -301,10 +302,10 @@ ATLAS_LAYERS = ('crust', 'boundaries', 'convergence', 'hotspot', 'backArc', 'upl
 
 
 class _Compile:
-    """One serialized background compiler; immutable stages stay in memory.
+    """One serialized background job; immutable stages stay in memory.
 
-    NumPy/SciPy release the GIL for bulk work. HTTP never waits for compilation,
-    and neither atlas arrays nor growing stage snapshots cross a process boundary.
+    The server uses its prewarmed service through shared arrays; library callers
+    without a service retain an in-process fallback. HTTP never waits for compute.
     """
     _compute_lock = threading.Lock()
 
@@ -314,6 +315,7 @@ class _Compile:
         self.started = time.perf_counter()
         self._fields, self._result, self._error = None, None, None
         self._stages, self._lock = [], threading.Lock()
+        self.finished=threading.Event()
         self._v2_cached = False
         self._thread = threading.Thread(target=self._run, args=(atlas,), name='resources-compile', daemon=True)
         self._thread.start()
@@ -331,11 +333,22 @@ class _Compile:
                     with self._lock:
                         self._fields = snapshot
                         self._stages.append([stage, time.perf_counter() - self.started])
-                grid, fields, deposits = R.compile_world(source.layers, source.height_m, int(source.seed),
-                    fantasy=fantasy_enabled(), bounds=self.bounds, v2_fields=v2, progress=publish)
+                from terrain_resource_service import current
+                worker=current()
+                compiler=worker.compile if worker is not None else R.compile_world
+                options={}
+                path=getattr(source,'cache_path',None)
+                if worker is not None and path is not None and Path(path).is_file():
+                    from terrain_array_io import pending
+                    if not pending(path):options['atlas_path']=str(path)
+                grid, fields, deposits = compiler(source.layers, source.height_m, int(source.seed),
+                    fantasy=fantasy_enabled(), bounds=self.bounds, v2_fields=v2, progress=publish,**options)
                 seconds = time.perf_counter() - self.started
+                source._terrain_resource_timings=dict(identity=self.key,elapsed_s=seconds,
+                    stages=list(self._stages),worker=getattr(worker,'last_timings',None))
                 with self._lock:
                     self._result = grid, _slim(fields), deposits, seconds, 'compiled'
+                self.finished.set()
             # Atomic durable cache publication is outside the compute lock and
             # outside the first-layer critical path. Errors cannot discard a
             # successfully compiled world already available to HTTP clients.
@@ -348,6 +361,7 @@ class _Compile:
             import logging
             logging.getLogger(__name__).exception('Cannot compile resources %s', self.key)
             self._error = f'{type(exc).__name__}: {exc}'
+            self.finished.set()
 
     @property
     def error(self):
@@ -381,6 +395,9 @@ class _Compile:
 
 def _load_npz(path):
     try:
+        from terrain_resource_cache import mapped_arrays
+        mapped=mapped_arrays(path)
+        if mapped is not None:return mapped
         with np.load(path, allow_pickle=False) as data:
             if len(data.files) > 20:
                 # ZipFile serializes short reads, while zlib releases the GIL
@@ -389,7 +406,7 @@ def _load_npz(path):
                 from terrain_resource_workers import thread_map
                 return dict(zip(data.files, thread_map(data.__getitem__, data.files)))
             return {k: data[k] for k in data.files}
-    except (OSError, ValueError, KeyError, EOFError):
+    except (OSError, ValueError, KeyError, EOFError, zipfile.BadZipFile):
         return None
 
 
@@ -412,6 +429,10 @@ def _from_disk(key, bounds, stage=False):
             continue
         if fields is None:
             continue
+        if isinstance(deposits,dict) and deposits.get('format') == 'columnar-v1':
+            from terrain_resource_deposits import DepositTable
+            columns={k[9:]:fields.pop(k) for k in list(fields) if k.startswith('deposit__')}
+            deposits=DepositTable(columns,deposits['families'],deposits['metals'])
         grid = R.Lattice(R.WORLD_LOD, bounds=bounds)
         R.stock_layers(grid, fields, deposits)
         return grid, _slim(fields), deposits, time.perf_counter() - started, 'disk'
@@ -430,7 +451,9 @@ def compile_status(atlas):
     with _LOCK:
         cached = getattr(source, '_terrain_resources', None)
         if cached is not None and cached[0] == key:
-            return dict(state='ready', stage='ready', progress=1., eta_s=0., message='prêt', origin=cached[1][4])
+            timings=getattr(source,'_terrain_resource_timings',{})
+            return dict(state='ready', stage='ready', progress=1., eta_s=0., message='prêt', origin=cached[1][4],
+                        compiler_timings=timings if timings.get('identity') == key else None)
         job = _COMPILES.get(key)
         if job is not None and job.result is not None:
             source._terrain_resources = (key, job.result)
@@ -461,6 +484,17 @@ def world_resources(atlas, partial=False):
     if partial and job is not None and job.fields is not None:
         return R.Lattice(R.WORLD_LOD, bounds=job.bounds), job.fields, [], time.perf_counter() - job.started, 'partial'
     raise ResourcesPending(status)
+
+
+def wait_initial_authority(atlas,timeout=2.):
+    """Prioritize the small authority before cold neural-weight initialization.
+
+    Called only in the model job lane, never in metadata/status HTTP handlers.
+    An error or slow world cannot delay model loading beyond the deadline.
+    """
+    if compile_status(atlas)['state'] == 'ready': return True
+    job=_COMPILES.get(_identity(atlas))
+    return job is not None and job.finished.wait(timeout) and job.error is None
 
 
 # ---------------------------------------------------------------------------
@@ -663,18 +697,30 @@ class _World:
                        else R.structural_strike(fields) if 'context_arc' in fields else None)
         self.seed32 = R.key(seed, ['resources', 'gpu']) & 0xffffffff
         n = len(deposits)
-        self.dep_family = np.array([d['family'] for d in deposits]) if n else np.array([], str)
-        offs = [R.key(seed, ['resources', 'deposit-lod0', d['id']]) for d in deposits]
-        span = np.array([1 << d['position_lod'] for d in deposits], np.int64) if n else np.zeros(0, np.int64)
-        pi = np.array([d['position_i'] for d in deposits], np.int64) * span if n else np.zeros(0, np.int64)
-        pj = np.array([d['position_j'] for d in deposits], np.int64) * span if n else np.zeros(0, np.int64)
+        columns=hasattr(deposits,'arrays')
+        if columns:
+            from terrain_resource_deposits import display_addresses
+            order,offs=display_addresses(seed,deposits)
+            data={k:v[order] for k,v in deposits.arrays.items() if k != 'present'}
+            self.dep_family=np.asarray(deposits.families)[data['family']]
+            span=1 << data['lod'].astype(np.int64)
+            pi,pj=data['i']*span,data['j']*span
+            self.dep_ore=data['ore'].astype(np.float64)
+            self.dep_access=data['access']
+            self.dep_gossan=data['gossan']
+        else:
+            self.dep_family = np.array([d['family'] for d in deposits]) if n else np.array([], str)
+            offs = np.array([R.key(seed, ['resources', 'deposit-lod0', d['id']]) for d in deposits],np.uint64)
+            span = np.array([1 << d['position_lod'] for d in deposits], np.int64) if n else np.zeros(0, np.int64)
+            pi = np.array([d['position_i'] for d in deposits], np.int64) * span if n else np.zeros(0, np.int64)
+            pj = np.array([d['position_j'] for d in deposits], np.int64) * span if n else np.zeros(0, np.int64)
+            self.dep_ore = np.array([d['ore_t'] for d in deposits], np.float64) if n else np.zeros(0)
+            self.dep_access = np.array([d['medieval_accessible_share'] for d in deposits]) if n else np.zeros(0)
+            self.dep_gossan = np.array([d['gossan'] for d in deposits], bool) if n else np.zeros(0, bool)
         # LOD-0 cell inside the deposit's LOD-3 cell (keyed, never re-drawn).
-        self.dep_di = pi + np.array([k % 997 for k in offs], np.int64) * span // 997 if n else pi
-        self.dep_dj = pj + np.array([(k >> 20) % 991 for k in offs], np.int64) * span // 991 if n else pj
-        self.dep_ore = np.array([d['ore_t'] for d in deposits], np.float64) if n else np.zeros(0)
-        self.dep_access = np.array([d['medieval_accessible_share'] for d in deposits]) if n else np.zeros(0)
-        self.dep_gossan = np.array([d['gossan'] for d in deposits], bool) if n else np.zeros(0, bool)
-        jit = np.array([((k >> 40) % 1000) / 1000 - .5 for k in offs]) if n else np.zeros(0)
+        self.dep_di=pi+(offs % np.uint64(997)).astype(np.int64)*span//997
+        self.dep_dj=pj+((offs >> np.uint64(20)) % np.uint64(991)).astype(np.int64)*span//991
+        jit=((offs >> np.uint64(40)) % np.uint64(1000)).astype(np.float64)/1000-.5
         ci = (self.dep_di >> 10) - grid.i[0]
         cj = np.clip((self.dep_dj >> 10) - grid.j[0], 0, len(grid.j) - 1)
         self.dep_theta = self.strike[cj, ci % len(grid.i)] + .5 * jit if n else np.zeros(0)
@@ -699,12 +745,17 @@ class _World:
         names = list(FAMILY_LABELS)
         self.dep_color = np.array([names.index(f) if f in names else 0 for f in fam], np.int32)
         self.dep_mass = {}
-        for kind in ('contained', 'medieval_recoverable'):
-            for d_idx, d in enumerate(deposits):
-                for m, v in d[kind].items():
-                    if (kind, m) not in self.dep_mass:
-                        self.dep_mass[kind, m] = np.zeros(n)
-                    self.dep_mass[kind, m][d_idx] = v
+        if columns:
+            for kind,column in (('contained','contained'),('medieval_recoverable','recoverable')):
+                for k,metal in enumerate(deposits.metals):
+                    self.dep_mass[kind,metal]=data[column][:,k].astype(np.float64)
+        else:
+            for kind in ('contained', 'medieval_recoverable'):
+                for d_idx, d in enumerate(deposits):
+                    for m, v in d[kind].items():
+                        if (kind, m) not in self.dep_mass:
+                            self.dep_mass[kind, m] = np.zeros(n)
+                        self.dep_mass[kind, m][d_idx] = v
 
     def authority(self, mode):
         with _AUTH_LOCK:

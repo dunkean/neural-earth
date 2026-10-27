@@ -31,7 +31,7 @@ def fingerprint(fields, deposits):
                                 sha256=hashlib.sha256(np.ascontiguousarray(value).tobytes()).hexdigest())
     return dict(arrays=arrays, deposits=len(deposits),
                 metadata={k:v for k,v in fields.items() if not isinstance(v,np.ndarray)},
-                deposits_sha256=hashlib.sha256(json.dumps(deposits, sort_keys=True).encode()).hexdigest())
+                deposits_sha256=deposits.fingerprint() if hasattr(deposits,'fingerprint') else hashlib.sha256(json.dumps(deposits, sort_keys=True).encode()).hexdigest())
 
 
 def load_inputs(path):
@@ -49,13 +49,11 @@ def main():
     parser.add_argument('--seeds', default='42,20261027')
     parser.add_argument('--label', default='before')
     parser.add_argument('--prepare', action='store_true')
+    parser.add_argument('--profile',default='orogen',help='Orogen profile whose retained atlas supplies the benchmark')
     parser.add_argument('--child', action='store_true')
-    parser.add_argument('--snapshot', action='store_true')
     parser.add_argument('--serial', action='store_true', help='Disable worker processes (recorded in report)')
     parser.add_argument('--reference', action='store_true', help='Load the pinned compiler via git show, without editing the worktree')
     args = parser.parse_args()
-    if args.snapshot and not args.reference:
-        raise SystemExit('Reference snapshots must use --reference (pinned e2046f9 compiler).')
     directory, output = Path(args.directory), Path(args.output)
     directory.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
@@ -64,12 +62,11 @@ def main():
         from terrain_orogen import get_heightmap
         from terrain_generation import resolve_generation
         from terrain_geometry import world_bounds
-        descriptor = resolve_generation('orogen')
+        descriptor = resolve_generation(args.profile)
         for seed in seeds:
-            from terrain_orogen_stages import generate_staged_atlas
             from terrain_resource_layers import ATLAS_LAYERS
-            height, _, _, _, layers = generate_staged_atlas(seed, descriptor.bootstrap_style,
-                                                           width=2048, height=1024, include_layers=True, options=descriptor.bootstrap_options)
+            atlas=get_heightmap(seed,descriptor.bootstrap_style,options=descriptor.bootstrap_options)
+            height,layers=atlas.height_m,atlas.layers
             path = directory / f'{seed}.npz'
             np.savez(path, height_m=height, seed=np.int64(seed), bounds=world_bounds(descriptor.settings),
                      **{'layer_' + k: v for k, v in layers.items() if k in ATLAS_LAYERS or k.startswith('pedology_')})
@@ -79,15 +76,23 @@ def main():
         results = []
         for seed in seeds:
             started = time.perf_counter()
-            subprocess.run([sys.executable, __file__, '--child', '--seeds', str(seed), '--label', args.label,
+            child=subprocess.Popen([sys.executable, __file__, '--child', '--seeds', str(seed), '--label', args.label,
                             '--directory', str(directory), '--output', str(output)] +
-                           (['--snapshot'] if args.snapshot else []) + (['--serial'] if args.serial else []) +
-                           (['--reference'] if args.reference else []), check=True)
+                           (['--serial'] if args.serial else []) + (['--reference'] if args.reference else []),
+                           stdout=subprocess.PIPE,text=True)
+            cold_executable=None
+            for line in child.stdout:
+                message=json.loads(line)
+                if message.get('event') == 'cold_compile_ready':cold_executable=time.perf_counter()-started
+                else:print(line.strip(),flush=True)
+            if child.wait():raise subprocess.CalledProcessError(child.returncode,child.args)
             result = json.loads((output / f'{args.label}-{seed}.json').read_text())
+            result['cold_executable_wall_s']=cold_executable
             result['benchmark_batch_wall_s'] = time.perf_counter() - started
+            (output / f'{args.label}-{seed}.json').write_text(json.dumps(result,indent=2))
             results.append(result)
         (output / f'{args.label}.json').write_text(json.dumps(results, indent=2))
-        print(json.dumps([{k:v for k,v in r.items() if k != 'fingerprint'} for r in results], indent=2))
+        print(json.dumps([{k:v for k,v in r.items() if k not in ('fingerprint','statistics','statistical_deltas')} for r in results], indent=2))
         return
     import terrain_resources as R
     import terrain_resource_workers as W
@@ -104,6 +109,9 @@ def main():
             exec(compile(source, module.__file__, 'exec'), module.__dict__)
         R = sys.modules['terrain_resources']
     from types import SimpleNamespace
+    if not args.reference:
+        from terrain_resource_acceleration import prepare
+        prepare()
     seed = seeds[0]
     # Production runs in its background thread without subdividing geology:
     # these small arrays are slower when NumPy calls compete across threads.
@@ -119,13 +127,14 @@ def main():
     grid, fields, deposits = R.compile_world(layers, height, seed, bounds=bounds, parallel=parallel, progress=progress)
     cold = time.perf_counter() - started
     cold_wall = time.perf_counter() - PROCESS_STARTED
+    print(json.dumps(dict(event='cold_compile_ready',seed=seed)),flush=True)
+    from tools.verification.resource_statistics import world_statistics,compare_statistics
+    statistics=world_statistics(fields,deposits)
+    input_identity=fingerprint(dict(layers,height_m=height),[])
+    references=json.loads((ROOT/'tests/fixtures/resources-statistics-round1.json').read_text())['worlds']
+    expected=next((entry for entry in references.values() if entry['inputs']==input_identity),None)
+    deltas=compare_statistics(expected['statistics'],statistics) if expected is not None else None
     fp = fingerprint(fields, deposits)
-    if args.snapshot:
-        target = ROOT / 'tests/fixtures' / f'resources-e2046f9-{seed}.json'
-        target.write_text(json.dumps(dict(revision='e2046f93bfe1b844bd8a8b838d6742b79e04a7ed',
-                                         input_sha256=hashlib.sha256((directory / f'{seed}.npz').read_bytes()).hexdigest(),
-                                         inputs=fingerprint(dict(layers, height_m=height), []),
-                                         fingerprint=fp), indent=2))
     started = time.perf_counter()
     _, warm_fields, warm_deposits = R.compile_world(layers, height, seed, bounds=bounds, parallel=parallel)
     warm = time.perf_counter() - started
@@ -154,9 +163,10 @@ def main():
     assert disk is not None
     result = dict(seed=seed, shape=grid.shape, serial=args.serial or args.reference, reference=args.reference,
                   cold_process_wall_s=cold_wall, compile_cold_s=cold, compile_warm_s=warm,
-                  stages_s=stages, disk_load_s=disk_s, disk_save_s=save, fingerprint=fp)
+                  setup_and_input_s=cold_wall-cold,stages_s=stages, disk_load_s=disk_s, disk_save_s=save, fingerprint=fp,
+                  statistics=statistics,statistical_deltas=deltas)
     (output / f'{args.label}-{seed}.json').write_text(json.dumps(result, indent=2))
-    print(json.dumps({k:v for k,v in result.items() if k != 'fingerprint'}), flush=True)
+    print(json.dumps({k:v for k,v in result.items() if k not in ('fingerprint','statistics','statistical_deltas')}), flush=True)
 
 
 if __name__ == '__main__':

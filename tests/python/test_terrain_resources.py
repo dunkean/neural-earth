@@ -48,7 +48,7 @@ def digest(f, deposits):
     h = hashlib.sha256()
     for name in sorted(k for k, v in f.items() if isinstance(v, np.ndarray)):
         h.update(name.encode()); h.update(np.ascontiguousarray(f[name]).tobytes())
-    h.update(json.dumps(deposits, sort_keys=True).encode())
+    h.update(json.dumps(deposits.records() if hasattr(deposits,'records') else deposits, sort_keys=True).encode())
     return h.hexdigest()
 
 

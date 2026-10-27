@@ -19,6 +19,11 @@ HERE = Path(__file__).resolve().parent
 _POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix='resource-numpy')
 
 
+def submit(function, *args, **kwargs):
+    """Overlap independent authority work, without starting another process."""
+    return _POOL.submit(function,*args,**kwargs)
+
+
 def thread_map(function, values, timeout=600):
     """Bulk decompression/array work; never call recursively from a pool task."""
     return list(_POOL.map(function, values, timeout=timeout))

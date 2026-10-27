@@ -42,6 +42,8 @@ def _replace(temp, path, tries=100):
 
 
 def _write_json(path, value):
+    if hasattr(value,'records'):
+        value=value.records()
     temp = path.with_suffix('.tmp')
     temp.write_text(json.dumps(value), encoding='utf-8')
     _replace(temp, path)
@@ -101,7 +103,7 @@ def main(key, v2key, cache, fantasy):
         status['state'] = 'ready'
         status['compile_s'] = round(time.perf_counter() - started, 2)
         _write_json(status_path, status)
-        # Durable caches (compressed, ~0.15 GB), then the stage file goes.
+        # Durable columnar cache, then the temporary stage file goes.
         arrays = {k: v for k, v in slim(fields).items() if not k.startswith(('stock_', 'recoverable_'))}
         if v2 is None:
             temp = cache / f'{v2key}-v2.tmp.npz'
