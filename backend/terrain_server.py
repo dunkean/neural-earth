@@ -2707,6 +2707,13 @@ def native_coarse_tile(seed, tx, ty):
                         world = get_world(seed, wp)
                         root = native_coarse.read_native(world, xs, ys, read_rect, jobs.check_current_interest)
                         climate = sample_coarse_climate(world, cx, cy, check=jobs.check_current_interest)
+                        if resolve_generation(wp).settings.get('world_topology', 'sphere') == 'sphere':
+                            def read_strip(column):
+                                sx, sy = native_coarse.sample_axes(column, ty, profile_bounds(wp))
+                                scx, scy = native_coarse.climate_axes(column, ty, profile_bounds(wp))
+                                return (native_coarse.read_native(world, sx, sy, read_rect, jobs.check_current_interest),
+                                        sample_coarse_climate(world, scx, scy, check=jobs.check_current_interest))
+                            root, climate = native_coarse.stitch_longitude(root, climate, tx, ty, profile_bounds(wp), read_strip)
                         stage = 'coarse'
                     jobs.check_current_interest()
                     climate = np.ascontiguousarray(climate, dtype=np.float32)

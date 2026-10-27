@@ -10,7 +10,7 @@ VERSION = 'longitude-strip-v1'
 STRIP_M = 8*7680.
 
 
-def stitch(elevation, xs_m, bounds, lod, tx, read_tile, *, tile=256, halo=24):
+def stitch(elevation, xs_m, bounds, lod, tx, read_tile, *, tile=256, halo=24, offset=.5):
     """Join a regular tile to its opposite end strip before derivatives/filtering.
 
     read_tile(column) supplies the same raw LOD and row, including its halo.
@@ -27,7 +27,7 @@ def stitch(elevation, xs_m, bounds, lod, tx, read_tile, *, tile=256, halo=24):
     cache = {tx: np.asarray(elevation, np.float32)}
 
     def sample(points):
-        q = points/step-.5
+        q = points/step-offset
         columns = np.floor(q/tile).astype(np.int64)
         out = np.empty((elevation.shape[0], len(points)), np.float64)
         for col in np.unique(columns):

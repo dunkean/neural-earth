@@ -75,6 +75,37 @@ class NativeCoarseTests(unittest.TestCase):
         roots=native.encode_height(h)
         np.testing.assert_allclose(np.sign(roots)*roots**2,h,rtol=1e-6)
 
+    def test_learned_native_wrap_joins_height_and_offset_climate(self):
+        bounds = tuple(np.array((-2, -1, 2, 1))*1e6*np.pi)
+        def read(column):
+            x, y = native.sample_axes(column, 2, bounds)
+            cx, cy = native.climate_axes(column, 2, bounds)
+            height = np.broadcast_to(700+x[None, :]*30/20000, (len(y), len(x)))
+            climate = np.broadcast_to(12+cx[None, None, :]*30/1e6, (5, len(cy), len(cx))).copy().astype(np.float32)
+            return native.encode_height(height), climate
+        values = []
+        raw_values = []
+        for edge in (bounds[0], bounds[2]):
+            column = int(np.floor(edge/(native.CELLS*native.RESOLUTION)))
+            root, climate = read(column)
+            joined, climate_joined = native.stitch_longitude(root, climate, column, 2, bounds, read)
+            xs = (column*native.CELLS+np.arange(-native.HALO,native.CELLS+native.HALO)+.5)*native.RESOLUTION
+            cx = (column*native.CELLS+np.arange(native.CLIMATE_SIZE)*native.CLIMATE_STRIDE-native.HALO+.5)*native.RESOLUTION
+            raw_values.append(np.interp(edge, xs, np.sign(root[0])*root[0]**2))
+            values.append((np.interp(edge,xs,np.sign(joined[0])*joined[0]**2),np.interp(edge,cx,climate_joined[0,0])))
+        self.assertGreater(abs(raw_values[0]-raw_values[1]), 600)
+        # Independently sampled nonintegral lattices have a small interpolation
+        # error; the unjoined path misses by hundreds of metres and 12 degrees.
+        self.assertLess(abs(values[0][0]-values[1][0]), 2.)
+        self.assertLess(abs(values[0][1]-values[1][1]), .1)
+
+    def test_interior_native_blocks_do_not_read_opposite_strips(self):
+        root=np.ones((160,160),np.float32)
+        climate=np.ones((5,41,41),np.float32)
+        a,b=native.stitch_longitude(root,climate,0,0,self.bounds,lambda _:self.fail('interior'))
+        self.assertIs(a,root)
+        self.assertIs(b,climate)
+
     def test_endpoint_reuses_source_and_promotes_preview_without_new_lod(self):
         app=Flask(__name__)
         state={'ready':False,'reads':0}
@@ -113,8 +144,10 @@ class NativeCoarseTests(unittest.TestCase):
         self.assertEqual(client.get(url).headers['Cache'],'True')
         self.assertEqual(state['reads'],2)
         from unittest.mock import patch
-        with patch.object(native,'read_native',return_value=np.full((native.WIDTH,native.WIDTH),-10,np.float32)):
+        with patch.object(native,'read_native',return_value=np.full((native.WIDTH,native.WIDTH),-10,np.float32)), \
+                patch.object(native, 'stitch_longitude', wraps=native.stitch_longitude) as join:
             promoted=client.get(url+'&learned=1')
+            join.assert_called_once()
         self.assertEqual(promoted.headers['Stage'],'coarse')
         self.assertEqual(client.get(url).headers['Stage'],'coarse')
         self.assertEqual(state['reads'],2)
