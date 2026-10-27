@@ -135,7 +135,7 @@ class ResourceTests(unittest.TestCase):
         g, f, d = R.compile_world(self.layers, self.height, 42, lod=12, balance=False, bounds=self.bounds, parallel=W.parallel_map,
                                   progress=lambda stage, fields: stages.append((stage, 'land' in fields)))
         self.assertEqual(digest(f, d), digest(self.f, self.deposits))
-        self.assertEqual(stages, [('tectonics', True), ('environment', True), ('geology', True), ('deposits', True)])
+        self.assertEqual(stages, [('climate', True), ('tectonics', True), ('environment', True), ('geology', True), ('deposits', True)])
 
     def test_cached_render_v2_environment_gives_the_same_world(self):
         v2 = {k: self.f[k] for k in R.V2_FIELDS}

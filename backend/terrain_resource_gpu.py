@@ -380,21 +380,34 @@ REALIZED_CLASS_DECAY = 1.
 REALIZED_BETA = (1.6, .7)         # province (group) and class noise weights
 
 
-def realized_class(pkg, gi, gj, lod, warp_floor=None):
+def realized_class(pkg, gi, gj, lod, warp_floor=None, noise_cache=None):
     """Class index at samples; pkg field layers: K biased log-expected shares, cos 2θ, sin 2θ.
     pkg: groups (group index per class), group_aligned, aligned (per class), beta (b1, b2)."""
     seed32, layer, field = pkg['seed32'], pkg['layer'], pkg['field']
     kcls = pkg['classes']
     b1, b2 = (F32(b) for b in pkg.get('beta', REALIZED_BETA))
-    wx, wy = zone_warp(pkg, gi, gj, lod, warp_floor)
-    c2 = field.bilinear(kcls, gi, gj, lod, wx, wy)
-    s2 = field.bilinear(kcls + 1, gi, gj, lod, wx, wy)
-    theta = (F32(.5) * np.arctan2(s2, c2)).astype(F32)
+    # A calibration changes only the log-share biases, never geometry/noise.
+    # The caller owns this scratch cache for one fixed set of sample addresses.
+    if noise_cache is not None and 'geometry' in noise_cache:
+        wx, wy, theta = noise_cache['geometry']
+    else:
+        wx, wy = zone_warp(pkg, gi, gj, lod, warp_floor)
+        c2 = field.bilinear(kcls, gi, gj, lod, wx, wy)
+        s2 = field.bilinear(kcls + 1, gi, gj, lod, wx, wy)
+        theta = (F32(.5) * np.arctan2(s2, c2)).astype(F32)
+        if noise_cache is not None:
+            noise_cache['geometry'] = wx, wy, theta
 
     def noise(salt, octaves, decay, aligned):
+        cache_key = salt, octaves, decay, aligned
+        if noise_cache is not None and cache_key in noise_cache:
+            return noise_cache[cache_key]
         o0, o1 = octaves
-        return (fbm_aligned(gi, gj, lod, seed32, salt, o0, o1, decay, wx, wy, theta) if aligned
-                else fbm(gi, gj, lod, seed32, salt, o0, o1, decay, wx, wy)) * field.seam(gi, lod)
+        value = (fbm_aligned(gi, gj, lod, seed32, salt, o0, o1, decay, wx, wy, theta) if aligned
+                 else fbm(gi, gj, lod, seed32, salt, o0, o1, decay, wx, wy)) * field.seam(gi, lod)
+        if noise_cache is not None:
+            noise_cache[cache_key] = value
+        return value
 
     province = [noise(layer * 64 + 48 + g, REALIZED_GROUP_OCTAVES, 1., a) for g, a in enumerate(pkg['group_aligned'])]
     best = np.full(np.broadcast(gi, gj).shape, -np.inf, F32)

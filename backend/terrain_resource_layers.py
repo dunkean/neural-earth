@@ -6,7 +6,7 @@ physical tiles already on the GPU plus a per-mode package served once per
 world (LOD-10 fields as half floats, deposits, buckets). The NumPy mirror
 (terrain_resource_gpu.py) is the reference. The world authority
 (terrain_resources.compile_world at LOD 10) is computed once per Orogen
-atlas in its own process (terrain_resource_compile.py), published stage by
+atlas in a serialized background thread, published stage by
 stage, kept in memory and on disk; requests never wait for it (202 with
 progress). Legends name the unit, the status (derived / synthetic) and
 "proxy" when a value comes from a Render v2 appearance field.
@@ -288,11 +288,12 @@ class ResourcesPending(Exception):
 
 # Stage durations measured in the compile process while the viewer opens the
 # world (RESOURCE_LAYERS.md §15), for the ETA shown in the legend.
-STAGES = (('tectonics', 'tectonique, roches attendues, climat, eau', 11.),
+STAGES = (('climate', 'productivité climatique', .15),
+          ('tectonics', 'tectonique, roches attendues, climat, eau', 11.),
           ('environment', 'environnement Render v2 et biologie', 11.),
           ('geology', 'géologie réalisée et matériaux', 8.),
           ('deposits', 'gisements et stocks', 10.))
-_COMPILES = {}          # world key -> _Compile (one compile process per world)
+_COMPILES = {}          # world key -> _Compile (one background job per world)
 
 
 ATLAS_LAYERS = ('crust', 'boundaries', 'convergence', 'hotspot', 'backArc', 'uplift', 'temperature_summer',
@@ -300,82 +301,93 @@ ATLAS_LAYERS = ('crust', 'boundaries', 'convergence', 'hotspot', 'backArc', 'upl
 
 
 class _Compile:
-    """Compile of one world in its own process (terrain_resource_compile.py),
-    followed through its status file; stage snapshots are read on demand."""
+    """One serialized background compiler; immutable stages stay in memory.
+
+    NumPy/SciPy release the GIL for bulk work. HTTP never waits for compilation,
+    and neither atlas arrays nor growing stage snapshots cross a process boundary.
+    """
+    _compute_lock = threading.Lock()
 
     def __init__(self, key, atlas):
-        import subprocess
-        import sys
         self.key, self.root = key, _cache_root()
         self.bounds = _atlas_bounds(atlas)
-        self.root.mkdir(parents=True, exist_ok=True)
-        source = getattr(atlas, 'source', atlas)
-        layers = {'layer_' + k: np.asarray(v) for k, v in source.layers.items()
-                  if k in ATLAS_LAYERS or k.startswith('pedology_')}
-        for name in ('status.json', 'stage.npz', 'deposits.json'):
-            (self.root / f'{key}-{name}').unlink(missing_ok=True)
-        np.savez(self.root / f'{key}-atlas.npz', height_m=np.asarray(source.height_m), seed=np.int64(getattr(source, 'seed', 0)), bounds=np.asarray(self.bounds),
-                 **layers)
         self.started = time.perf_counter()
-        self._fields, self._fields_stages, self._result, self._lock = None, 0, None, threading.Lock()
-        script = Path(__file__).with_name('terrain_resource_compile.py')
-        self.proc = subprocess.Popen([sys.executable, str(script), key, _v2_identity(atlas), str(self.root),
-                                      '1' if fantasy_enabled() else '0'])
+        self._fields, self._result, self._error = None, None, None
+        self._stages, self._lock = [], threading.Lock()
+        self._v2_cached = False
+        self._thread = threading.Thread(target=self._run, args=(atlas,), name='resources-compile', daemon=True)
+        self._thread.start()
 
-    def _status_file(self):
+    def _run(self, atlas):
+        import terrain_resources as R
+        from terrain_resource_cache import save_world
+        source = getattr(atlas, 'source', atlas)
         try:
-            return json.loads((self.root / f'{self.key}-status.json').read_text(encoding='utf-8'))
-        except (OSError, ValueError):
-            return dict(state='compiling', stages=[])
+            with self._compute_lock:
+                v2 = _load_npz(self.root / f'{_v2_identity(atlas)}-v2.npz')
+                self._v2_cached = v2 is not None
+                def publish(stage, fields):
+                    snapshot = _slim(fields)
+                    with self._lock:
+                        self._fields = snapshot
+                        self._stages.append([stage, time.perf_counter() - self.started])
+                grid, fields, deposits = R.compile_world(source.layers, source.height_m, int(source.seed),
+                    fantasy=fantasy_enabled(), bounds=self.bounds, v2_fields=v2, progress=publish)
+                seconds = time.perf_counter() - self.started
+                with self._lock:
+                    self._result = grid, _slim(fields), deposits, seconds, 'compiled'
+            # Atomic durable cache publication is outside the compute lock and
+            # outside the first-layer critical path. Errors cannot discard a
+            # successfully compiled world already available to HTTP clients.
+            try:
+                save_world(self.root, self.key, self._result[1], deposits)
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception('Cannot save resource cache %s', self.key)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).exception('Cannot compile resources %s', self.key)
+            self._error = f'{type(exc).__name__}: {exc}'
 
     @property
     def error(self):
-        st = self._status_file()
-        if st.get('state') == 'error':
-            return st.get('error')
-        code = self.proc.poll()
-        if code is not None and st.get('state') != 'ready':
-            return f'compile process exited with code {code}'
-        return None
+        return self._error
 
     @property
     def result(self):
         with self._lock:
-            if self._result is None and self._status_file().get('state') == 'ready':
-                self._result = _from_disk(self.key, self.bounds, stage=True)
             return self._result
 
     @property
     def fields(self):
-        st = self._status_file()
         with self._lock:
-            if len(st.get('stages', [])) > self._fields_stages:
-                loaded = _load_npz(self.root / f'{self.key}-stage.npz')
-                if loaded is not None:
-                    self._fields, self._fields_stages = loaded, len(st['stages'])
             return self._fields
 
     def status(self):
-        st = self._status_file()
-        elapsed = time.perf_counter() - self.started
-        names = [n for n, _, _ in STAGES]
-        done = [n for n, _ in st.get('stages', [])]
-        remaining = sum(sec for n, _, sec in STAGES if n not in done and not (n == 'environment' and st.get('v2_cached')))
-        last = st['stages'][-1][1] if st.get('stages') else 0.
-        current = next((n for n in names if n not in done), None)
+        with self._lock:
+            stages = list(self._stages)
+            ready = self._result is not None
+        done = [n for n, _ in stages]
+        current = next((n for n, _, _ in STAGES if n not in done), None)
         label = dict((n, l) for n, l, _ in STAGES).get(current, '')
-        eta = max(0., remaining + 2 - (elapsed - last))
-        error = self.error
-        state = 'error' if error else 'ready' if st.get('state') == 'ready' else 'compiling'
+        elapsed = time.perf_counter() - self.started
+        eta = sum(sec for n, _, sec in STAGES if n not in done and not (n == 'environment' and self._v2_cached))
+        state = 'error' if self.error else 'ready' if ready else 'compiling'
         return dict(state=state, stage=current if state == 'compiling' else state, stages_done=done, stage_label=label,
-                    elapsed_s=round(elapsed, 1), eta_s=round(eta, 1), progress=round(len(done) / len(STAGES), 2), error=error,
-                    message=error or (f'Calcul des ressources du monde : {label} (étape {len(done) + 1}/{len(STAGES)}, '
-                                      f'~{eta:.0f} s)' if state == 'compiling' else 'prêt'))
+                    elapsed_s=round(elapsed, 1), eta_s=round(eta, 1), progress=round(len(done)/len(STAGES), 2), error=self.error,
+                    message=self.error or (f'Calcul des ressources du monde : {label} (étape {len(done)+1}/{len(STAGES)}, '
+                                           f'~{eta:.0f} s)' if state == 'compiling' else 'prêt'))
 
 
 def _load_npz(path):
     try:
         with np.load(path, allow_pickle=False) as data:
+            if len(data.files) > 20:
+                # ZipFile serializes short reads, while zlib releases the GIL
+                # during inflation. Arrays remain lossless and read-only tasks
+                # share one archive; no extra file handles or pickling.
+                from terrain_resource_workers import thread_map
+                return dict(zip(data.files, thread_map(data.__getitem__, data.files)))
             return {k: data[k] for k in data.files}
     except (OSError, ValueError, KeyError, EOFError):
         return None
@@ -648,7 +660,7 @@ class _World:
         self.nearest_sea = distance_transform_edt(land, return_distances=False, return_indices=True) if land.any() else None
         # Parallel to orogenic belts (stored by the compiler; recomputed for older caches).
         self.strike = (np.asarray(fields['structural_strike'], np.float64) if 'structural_strike' in fields
-                       else R.structural_strike(fields))
+                       else R.structural_strike(fields) if 'context_arc' in fields else None)
         self.seed32 = R.key(seed, ['resources', 'gpu']) & 0xffffffff
         n = len(deposits)
         self.dep_family = np.array([d['family'] for d in deposits]) if n else np.array([], str)

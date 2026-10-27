@@ -1,0 +1,1450 @@
+{
+  "revision": "e2046f93bfe1b844bd8a8b838d6742b79e04a7ed",
+  "input_sha256": "fdf7165dd44bc28c47d7f160ccbdee8736f2f5937b34c7774e92085f5b325cfa",
+  "fingerprint": {
+    "arrays": {
+      "aet_mm": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "a2f40b467be3bf1d68953f82455231f76e35bf619ee273f375f9629fff5873f9"
+      },
+      "arable_area_m2": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "1885de713874ec497d643b2e2f524c139d9e6585b3ebcc457adbd1dc10e11c67"
+      },
+      "area_m2": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "ebfab2f707729448f4f516251fa5b57c66b905c19aef72cd7b390537e057cd5a"
+      },
+      "bog_iron_t_year": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "322cc7ce98229fa52e67402d2c32d54587ac4f0c1c3b1d3d7a2a5dfd4e1d0386"
+      },
+      "cereal_class": {
+        "dtype": "|u1",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "008897d1339938c7e05295e2f11cd4585cbeaf6b4f3aa9f3fb30543e2146eb03"
+      },
+      "cereal_net_t_year": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "834385c8d2c99c338bf43216520ff8bb346e12b83224ea6e38a89dac485c4e64"
+      },
+      "cereal_profile": {
+        "dtype": "|u1",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "3cc4d9399fa433a518c3bb61553c68b2232939c3da358dd6ed56f6a1df21abe2"
+      },
+      "cereal_suitability": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "b1a74b630aab65b9d30ee5042f8150c03e5e0fc9c0d159d0ce13e780ff2b2686"
+      },
+      "cereal_yield_ratio": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "def53c274308df3db9e73c1b205157d86de1d71c0bf752e5e92c3c2710aa6f0b"
+      },
+      "cereal_yield_t_ha": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "a7330bf0105d631ff368d67cd10f8c7bc25322788fa2c243460a35bec840dc05"
+      },
+      "clay": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "c06556d8fe10934e594e8090422ac2e851b6ceea7cde35156d1f7559496f7d67"
+      },
+      "conifer_share": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "8dfc2b0fa6e99f9e10dbe15d8c3c75e5e50e006e77f27d196ae0050b4aa76ba9"
+      },
+      "context_arc": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "50e33cc1267f6eb3fd89d3eb7c76a6dac383ebbc25007967365212e9190ed9a3"
+      },
+      "context_backarc": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "4182f49462984b6192ae8720a0bb2f9fcdfbce74db6a295e7c354dde3cf1eab8"
+      },
+      "context_collision": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "5f9b503fb49aba8d9f4d5cc0378ddb3c58d432aa725dcf27d8e16a512d2cee46"
+      },
+      "context_craton": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "55ac01404b2ca014bb0e623c4ff8a2494f33a74d01f5c84e9124849bbe98c793"
+      },
+      "context_hotspot": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "57e4024a47b6f4deaa633847a3893d9d52cc955677a7a9babf641e1be14c2c2b"
+      },
+      "context_oceanic": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "62d0f61780d0a5858ccf8f09c2f4a326d714a24a88ef94c200e7e076b01bf0e1"
+      },
+      "context_ophiolite": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "a57315e1dca06014071a0551e221226005239dae113d06a07fa3f1300f0903dd"
+      },
+      "context_passive": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "8bb063d6ed001348014528aa0f51d788659641ec2e7e977fcda5571f5afcaf05"
+      },
+      "context_platform": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "2daf3ed9783bc8c51151bb9dd4aa38209b0a1bf5856f0598d9e90c29bde8ca60"
+      },
+      "context_rift": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "e209863ed50a106cf59b467908eff0e28a89289dcb700e3e0b149e852435c3ce"
+      },
+      "felling_months": {
+        "dtype": "|b1",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "f85c041ebd8d6078df5fbbbcda1dc01ef2f06369023cb7654485473d6b2df82f"
+      },
+      "fish_inland_month_t": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "b7bed05175ec8b11e3fd259fb2eedb71447237ff950f53c24aeb744c13277963"
+      },
+      "fish_marine_month_t": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "5bedbeeb859c71da6d8dd1bb9d870206ce81f0d1d1983082f9cccee508bc4e60"
+      },
+      "fish_marine_t_year": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "b8e5b725d107ee70936ae245bbcadda21c3167a241b48ee4f6901caac9a6de8a"
+      },
+      "forage_month_kg_ha": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "bea40489944b26596fdde4bfc7348977d7d5ce5160bbe7e654d582303dc982ca"
+      },
+      "fur_potential": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "92a4137566c74cd45d3a8b85000ac1432ad90f0d27c8e93e218cbe8660e4455b"
+      },
+      "game_harvest_kg_year": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "e917cacb0853d428c154d8d0d9fd0835039e2a558923ee75bceecffc0f8fbb58"
+      },
+      "game_per_km2": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "317626afd034cebe643b764a05cc115b1c29fda5b0cffd4707b537e447d1d3bd"
+      },
+      "growing_months": {
+        "dtype": "|u1",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "be40755aa34f0f83c8defdd72052d7231e5d1e888e98b14319954f8725f53b59"
+      },
+      "harvest_month": {
+        "dtype": "|u1",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "c5ca8a67a641a68eb545a0c05e3c3323709a4e99786a4cab0f3700a26e1c021f"
+      },
+      "height_m": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "5e8077b09de2c9a9bad978a6a9e40c0ebf0c3618cfa0595d82670f908208b614"
+      },
+      "land": {
+        "dtype": "|b1",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "e7c76a0901a70b986ce0eb5c2271288b857a00401a8dc7bf9eecd469fae352f3"
+      },
+      "latitude": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "2a692746de7b47c8aa24ec15e47f3d643d6036e05f6558503d37d9fac8f98735"
+      },
+      "lime": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "51fc55deb874cae5d91236df13a70b77790e9cb552ef851549c6a78685b25c7f"
+      },
+      "lsu_lean_km2": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "f6b47dd1c45a6cb6ca34563435a3f348890cb4aed35fd0a641bcc2564765cce3"
+      },
+      "lsu_month_km2": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "1f10dc0475b63f4f81a8db1d908bfe936b453a2056252ce4281d2be219b4cbf1"
+      },
+      "lsu_year_km2": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "41eb8566fe40dbc63e0788709a3aac2e6f1f81d5239c67e949f2aedc16a35937"
+      },
+      "npp_g_m2": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "2fe58e09781d22491b0fa005a90b38649a5c8634c4ded6ee89597c51b5db6326"
+      },
+      "npp_month_g_m2": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "f67ea0e99587801b5dacc15cce8997c8626ab3b21e43ea6adceb7a865753cdc8"
+      },
+      "peat_area_m2": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "00765421b4290aeb9ad26cb5be71f7fa395ad4d700eda1cb96a9057b80a69ddd"
+      },
+      "peat_stock_m3": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "385817cd2ffb15f129da71c6ab20217f963b86604f4eb925a62e49f44534bb31"
+      },
+      "pedology_calcareous": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "075404847cee6f5c8a88fc492651affc0deb5fbac59e00734a0c69a5bc007f7f"
+      },
+      "pedology_clayey": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "4741693dd7cada3055396b0a8b976046c92f09eaae547eddc283f7061cf9d4f8"
+      },
+      "pedology_ferrallitic": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "fa885165e7c304a71e93be5d87b43643bac657cce44081870d909ab122aacdb2"
+      },
+      "pedology_mineral": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "5a42e0455648762f939a8f041d48d8276fe02327a4c46709a0d7a542fb998e14"
+      },
+      "pedology_organic": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "547329e8d26d206af1757f2eb812a93681794e506ecd2f7b87d40b36646191da"
+      },
+      "pedology_podzolic": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "d52341552042007ef9d0a4d0d07427cb25edfea08f8b44303122202ce173e7b7"
+      },
+      "pedology_sandy": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "c54c4c1ee4c65f6d49b2047f074c4f5a1a1a0b9dd8c8249230526ab36dc61954"
+      },
+      "pet_mm": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "d5383ceb59880065d75091581b2549f9432d3778c1ef636e1f598437c7d66470"
+      },
+      "precipitation_mm": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "ddd2fb68a3facf8fa5c8ff1c844cbf5fbdfc6d215a46846434cb48ccca154080"
+      },
+      "prospect_bif_iron": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "ef435fb8f6b3e78d1785ea09f2adb2d976ca44ffbcde75a37ecdc169f02c68d6"
+      },
+      "prospect_bog_iron": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "5ceecc9b81e77903442d624103ed8ec397bf3d2db59fb73828ab7f559aaad333"
+      },
+      "prospect_coal": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "4517dd291b1cb9efd0be80501cea9466d1b54e43c984815e3ceab4c2005a0fce"
+      },
+      "prospect_epithermal_au_ag": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "8be088605ff478cca551e435ad6d3f0eb1b68884fd02e208d9d3570f12fef80c"
+      },
+      "prospect_evaporite_salt": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "0952755bb2e7389fc10df637264e7a4c0e0e1be03fcd2d49cbac1b53cd87d437"
+      },
+      "prospect_gypsum_quarry": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "eafbbe237f506bbb846c111bcb6953aea102f35200b3a9413cea74e2d7d2f38e"
+      },
+      "prospect_ironstone": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "188b2d3dc3b3fe12d44a2411726cc71a3d8d453509081efe88bb54155db23019"
+      },
+      "prospect_laterite_fe": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "9bc79c06c3b5aaab95a6aaf0fae9a98a91e8d7edf7f7ac55697be3dcdd8849a4"
+      },
+      "prospect_local_ironstone": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "468389a76548ca0e3478d4d9817ecb8b00ede7ea6ac9ef2804b43e6a8530137e"
+      },
+      "prospect_mvt_pb_zn": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "3e70f22834c0c3ed384bb4668c6483db53321d1380ea431c6f1928f87a5cd43f"
+      },
+      "prospect_orogenic_au": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "2434bce3360c6f14a9da6cba3e866a830c00b98032b98f99377fa779b6757961"
+      },
+      "prospect_placer_au": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "3c014e915b5e372c724c6aad0384b3f4770bfc578a467e0d46978f64722a8e80"
+      },
+      "prospect_placer_sn": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "889dcba9d62a3a6ddbc74c438d2ba7af0cdfcabb7a6f98f5949c02ff95c1e582"
+      },
+      "prospect_polymetallic_vein": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "84f7cf1793fe520d24b9604930cccdd4fce0a73452c393304217aa23d6a0f481"
+      },
+      "prospect_porphyry_cu": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "e359938ad655b6957fee6aadfe563f17344c6076c240a08d22e97e8a8843115d"
+      },
+      "prospect_salt_spring": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "4838984f3468e8f20015991a4354c5fb8ac6bb0b19c11eabbce34ab08e29d9da"
+      },
+      "prospect_sediment_cu": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "c473fe784412a807d5acd570a38d30400b29100fe2d07e2b667757c7afddba8a"
+      },
+      "prospect_skarn_fe_cu": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "c5ee4dffd2967f1aa36afb790496f72f012622a1ab2bf6492ab9516a7eec066f"
+      },
+      "prospect_small_coal": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "800430f8bc0cce538293d44fceacc5c9aa82cc9aea030d0802552d21d9aea9fe"
+      },
+      "prospect_small_pb_ag": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "0fb79f3f4e833ed7966c16aac4901e970ceaa7e66df451a1018101c9dc67fe2d"
+      },
+      "prospect_small_sn": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "9632b0ee587e47f5273e0168c9ba04cc4e0b18017a938dd195c3ca8550b7b9b0"
+      },
+      "prospect_sn_w_granite": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "d2df3b2a66ec554e0dec86695111f020ee0989d6148af83df81712d0c334ca13"
+      },
+      "prospect_vms": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "e918a36d54a059205ad83f6234ad7cebba676dd79284daa2bd90cf534d1c396c"
+      },
+      "recoverable_coal": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "957ee48f9a686c5bc0343341467a62e5aff490b50b71d6a703e73e0589402cce"
+      },
+      "recoverable_copper": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "6b8255f2d27c09bdac12bd98c06551801b977dd2b9d88890f6be7890cfe65cfd"
+      },
+      "recoverable_gold": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "d21235e9ba5fb537837d469257330a7bce3b3671dc1334a1917da61f0de643d7"
+      },
+      "recoverable_gypsum": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "91c6e5820bd6f425c4d3858d60ad7117453dd046e0de8107436b6cfacdacb120"
+      },
+      "recoverable_iron": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "a0bae6480fda90d8a8b5c2287b800e9275bb9b02e6853de4152266010c151315"
+      },
+      "recoverable_lead": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "8fe140b4597d2f11a0e2106970a29a42cdd8911ba43887d573cb8b95cdc26ca2"
+      },
+      "recoverable_salt": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "51c884b5e891cfe073d1e39fab42a9e827c3b240909c40ca719642bf0a0f00d0"
+      },
+      "recoverable_silver": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "2c5b85038a0bb094ec4ec44b44cc4bd06a6b24797e5b33ad61088ba32641ccc6"
+      },
+      "recoverable_tin": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "8ed0a50f496af4ae25ef2f4493b4a0037841b565a11b33cbfea1ffe5f1b3bbce"
+      },
+      "recoverable_tungsten": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "78e8d646322ffee1d0c8f5dd548a4130564866761270762fe990063441ab06e5"
+      },
+      "recoverable_zinc": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "e2b6b88db0261adc689e1d9133ce103f4269d217062af95c3d4647d2828f5147"
+      },
+      "rock_basalt": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "ca226199b4d48cfb76cf89ed3cc66b65d06c3f1211394c525b73549277d1d7ab"
+      },
+      "rock_bias": {
+        "dtype": "<f8",
+        "shape": [
+          8
+        ],
+        "sha256": "7c0815471877c058968929f998d13dc6a6b8b8493e8a8952a9a5facb98324e4d"
+      },
+      "rock_evaporite": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "2aa7405d8bcf51b7f519bf8809e2d7d2bf712d2bbf5e5f02ee329bd18aac3d6d"
+      },
+      "rock_expected_basalt": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "1a794701c0edf40b2b8c0e633488317fec483cc9fe5b71e96724779818e7aad6"
+      },
+      "rock_expected_evaporite": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "9fe095d43183f0b20106e5c3362bf5d9c93bb7a8764193fa0a20140be80fea4f"
+      },
+      "rock_expected_granite": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "c74e45b8038ad4d4c58e3e8a87c4991052d5cdd237b98afb73b866ac8f88a870"
+      },
+      "rock_expected_limestone": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "270d770558223219cc150411d7d39f37361c13c8c80b2ee66401d74ec3b1e26e"
+      },
+      "rock_expected_marl": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "7d140f8c07f95dba00b5e405a39c7c90deb4cb808f9752242094b579144f02c8"
+      },
+      "rock_expected_metamorphic": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "e29cbdb4253f5b8e5ab4ea60c78fb62735c07236205f7a7986ec9f45376a83eb"
+      },
+      "rock_expected_sandstone": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "a383efef3110101a11417bef9e13854d7a500899125e8f62cd9e14d8019cefb7"
+      },
+      "rock_expected_ultramafic": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "71f45e16884d46dba43bd6018ba50662a1ab8e2ab7b17df097e6fe149e7e6768"
+      },
+      "rock_granite": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "2ce17ea9b36b11d009685147a45967029f81818e15378bed60b7bddbda278a54"
+      },
+      "rock_limestone": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "d01f6903cf5981b6ceaf2a063740e05e96bfe345f78b0fc52da5f51f36b3dac0"
+      },
+      "rock_marl": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "2f69fd9a9d69e517d4a71826aa3a52c91fbb47ea926d66158150a417fa5c9917"
+      },
+      "rock_metamorphic": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "73457546e80ab19c60be512281ebce94d5a629b9fceb6e3fc3964edca6a4ff38"
+      },
+      "rock_sandstone": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "9118b6ab56a36c6a00d597ce877d38b5be857e7d4237867f42fd38c801df46a9"
+      },
+      "rock_ultramafic": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "e091c4fc20d9249784ce0d7b8ecbd76dabc2ca5fc91101e4d9f5fbb63b311cb5"
+      },
+      "rugged_m": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "bcb2d53660fdcefd473b5e5d019bef60ae440fccbe021c6f59c170237da7873e"
+      },
+      "runoff_mm": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "c723088e47e99416e2e1ed5e3ff2a447b8f4426298181c5b84bea9385d577f36"
+      },
+      "sand_gravel": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "3d756b444cdf9bc7a017cfa8ff358d73ab00e28012f88b57d2ae6227a182d186"
+      },
+      "sea_km": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "a34e5fc5c3229aa1d79df5044dcbdb771162ca3a32f601ba1ba40006ed557cfc"
+      },
+      "sea_salt_month_t": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "10b06980bc0a1fd51125fd215a002bad5d11f2f47d9207f1af7d571f5b4a2a0b"
+      },
+      "slate": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "34ebbbb4500707f84dd40385b5089cf16f3c04d7ca5905ad742fddd47110bf1b"
+      },
+      "sledge_months": {
+        "dtype": "|b1",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "557580e7fc8f78db7b75ebcb2bc28b11038fa1c1359ad7716eab70880ba7e612"
+      },
+      "snow_mm": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "8e3555fb4833e5c4db571d13e8ff356d5b96f867151fcdbe6d4faf72bf435db3"
+      },
+      "stock_coal": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "9c451e0a0ddee0529ccb858cb799bf0ce65d71b225495299bc3baba37bc19483"
+      },
+      "stock_copper": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "02312457c177e8caf76b3a311c5830859eceb3027ad80252da14cc56a3a16602"
+      },
+      "stock_gold": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "9092c806a22912e5aa3904b60b48ae1550c0f6a39dffb78a5bca0dbd850673e3"
+      },
+      "stock_gypsum": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "ba131edcd770a0a3b7aa95d4e61e896226f21296d1cbcb0360298b750f6ba9a7"
+      },
+      "stock_iron": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "50442650cec786c41633ae1edc510b6badb745ce1833fe29f0555bfcc112b37b"
+      },
+      "stock_lead": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "9070706df540c07919efa178400d3966dc63a7b8186fcfd17d5c2cb6bb12a0dd"
+      },
+      "stock_salt": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "7ce8c788eb57e5d051e7135a01ae965eaf9c9ebd4be47d0712bbded870590b39"
+      },
+      "stock_silver": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "ba60e3af96b28816f94a3234ff14fb7b1da37ca9eaf8528f5e8481a6d5a50e6b"
+      },
+      "stock_tin": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "7b58ea843885aa2a7880715af0f3c44f3b42c89a04a5f860d5e77acf2da9face"
+      },
+      "stock_tungsten": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "4894550f9f79105b079645ba5b0e4716c32d5c0f1692b0b4cfd72f279f925b7d"
+      },
+      "stock_zinc": {
+        "dtype": "<i8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "89d5ef2ffc91d4df2cf20b57d0f845fd797f45f8ff8324dc08c0c16ce7fcd2a8"
+      },
+      "stone_ashlar": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "9aff20f70af906c3ec1d51eb5745f3a6bb9f86e9f427c934442a9ff1d9c27247"
+      },
+      "structural_strike": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "2ec39a0c64594631bbc30716e2ce5d134d7df339d1a8cfb5d13d514d4fd1b9f0"
+      },
+      "temperature_c": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "625c97bb5365e77c3b7adc80fd6b7e57526ee2ef3144c73351a5fe4e4b5d0f6e"
+      },
+      "timber_share": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "a5edd56e3a51e1f97946fb6c7c59d6a42c9f4dd28f8569db5f0053bc1ff86be4"
+      },
+      "tract_arc": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "4b80e60152b28ecb3290f064d962b230f0f8b1ff422504e5d01fd77697a6d529"
+      },
+      "tract_backarc": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "be75649e72f32ffe06913c4e73c714386f1c20d5d895beb7101652553b70741d"
+      },
+      "tract_collision": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "f87bfe557cbb0954f66ef64cf7d92530e50ccf4ff3200e2db38d7d51b3b06834"
+      },
+      "tract_craton": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "b5719ade29b9bc1c0e156279b8eff384ae4c9c7b57f8634f1917d97dfe9d34b4"
+      },
+      "tract_hotspot": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "c52f6e05c1fbc7d97c3afdbafacc91e20cd28f0ac1c54d0deb795d2005c530e1"
+      },
+      "tract_ophiolite": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "10475cf6e98252c68f55cec7570ab6ace74ecd70ff60f9dc0b41a8e15135f6d7"
+      },
+      "tract_passive": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "4f9dbe3ffa73b048356429558977e73eb1a98b10ce471b27d09b4f6f6745ff79"
+      },
+      "tract_platform": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "f6674a5c39fec1a7d8c42e53ebfe03d209405c421e26f47a4ae63df19fdecc40"
+      },
+      "tract_rift": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "fd68f607f8fa821230ca9880310d7308d5306b379d58bcd784903098ee12c550"
+      },
+      "transhumance": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "482a83172b23d4b31acf816c1d22bce018d4cb29a57af1d722bf09f9974a6352"
+      },
+      "tree_cover": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "2e4d3b2353827cb98bf1d821414b4a7db1739f3ea3c41cf30738493ecd77829e"
+      },
+      "tree_line_ok": {
+        "dtype": "|b1",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "320889c89842dd1ad7aa7da8fedde5814b8f4f22f14d6ef37b5ad709f80cba4c"
+      },
+      "v2_canopy_m": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "585c514c60309a4adb347fb14cca239ef098dc5042857f596e3d01c00325b784"
+      },
+      "v2_grass_month": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "51f285512d138a6cfec00acf81cc314c4f45b0dd3e7062614af275dce836d01c"
+      },
+      "v2_ice_month": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "df447408f260683309bc6745960a9899e52b779f6f08180ab525bdebb339216f"
+      },
+      "v2_leaf_month": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "8b13184c2cb94c6068d4000cc112bd03835b5afa64421d005142eb8172214bca"
+      },
+      "v2_moisture_month": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "58fe2358102d0ec254dc7e329c5e95cb445012cc5470d358a815f17950680685"
+      },
+      "v2_needle": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "5f87b492732963421e398421f995cc10ac16d946eb0b2a6eb09240a3b08dc577"
+      },
+      "v2_perennial_snow": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "4970224697e515214051ddaf69ae04c3077d53a9a861a51ce581aad456ecfbc6"
+      },
+      "v2_snow_month": {
+        "dtype": "<f4",
+        "shape": [
+          12,
+          206,
+          410
+        ],
+        "sha256": "8bbf482b2dc1c60018dbf94bd442ec9d1d7885067fb15105d2631244f5314cf9"
+      },
+      "v2_woody": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "2e4d3b2353827cb98bf1d821414b4a7db1739f3ea3c41cf30738493ecd77829e"
+      },
+      "water_yield_m3": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "363ff19cd4910c9f818f7a615cd1d721a8ad652628b10a9b29f9a8214aa73d6b"
+      },
+      "wood_flux_m3_year": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "8af542109dea95afbcd2cafab6e95a06329248553597f83e90ae3c5ebe44e386"
+      },
+      "wood_increment_m3_ha": {
+        "dtype": "<f4",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "dd6b7cf3935889dfad39aea9a15f5be921c2eccd5d1a859d169ce7d69f12564d"
+      },
+      "wood_stock_m3": {
+        "dtype": "<f8",
+        "shape": [
+          206,
+          410
+        ],
+        "sha256": "094e4dac13f5f25f521afe3323cc0efebb5dfabeec4f50e08aff08f0238e582b"
+      }
+    },
+    "deposits": 12019,
+    "deposits_sha256": "cd23680e744f8762e0bfb4bfc78a8ce69793ca0232ad224ed6b269ff0a738f2b",
+    "metadata": {
+      "units": {
+        "area_m2": "m2",
+        "arable_area_m2": "m2",
+        "cereal_yield_t_ha": "t/ha/an (brut)",
+        "cereal_net_t_year": "t/an",
+        "npp_g_m2": "g MS/m2/an",
+        "npp_month_g_m2": "g MS/m2/mois",
+        "forage_month_kg_ha": "kg MS/ha/mois",
+        "lsu_month_km2": "UGB/km2",
+        "lsu_year_km2": "UGB/km2",
+        "lsu_lean_km2": "UGB/km2",
+        "wood_increment_m3_ha": "m3/ha/an",
+        "wood_stock_m3": "m3",
+        "wood_flux_m3_year": "m3/an",
+        "game_per_km2": "ind./km2",
+        "game_harvest_kg_year": "kg/an",
+        "water_yield_m3": "m3/an",
+        "runoff_mm": "mm/mois",
+        "fish_inland_month_t": "t/mois",
+        "fish_marine_t_year": "t/an",
+        "sea_salt_month_t": "t/mois",
+        "peat_area_m2": "m2",
+        "peat_stock_m3": "m3",
+        "bog_iron_t_year": "t Fe/an",
+        "temperature_c": "degC",
+        "precipitation_mm": "mm/mois",
+        "growing_months": "mois",
+        "harvest_month": "mois (0=janvier)"
+      }
+    }
+  },
+  "inputs": {
+    "arrays": {
+      "backArc": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "6e502e2c8f4d168a69df0018223911bfc37d1ef0d7d6c9c07f9d55bdea69746e"
+      },
+      "boundaries": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "40d3001ded92314b8ce7695f769870c557e334ddfa0cc01a6ec3944fda99338f"
+      },
+      "convergence": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "40f6359fd05dc35a8739f9c163ccd61dd50b96fb5c33d6640ad746d9208c1893"
+      },
+      "crust": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "b2d4f87c7395621ac01eac25dc274c4311eb152e1aba12867ab163acd504423a"
+      },
+      "height_m": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "0d2c0fea85eab9f3c5e9014456121c36bd8bd30c0afc7ed095729b10b98eeb6d"
+      },
+      "hotspot": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "33db0ba744c98c8e9d91fad7755fd063277d20e48934a9e0db3f546e16973c92"
+      },
+      "pedology_blue": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "1109e22fce6858af63b94639dc52b7bb5617d2b80fc432814de53abfa07c9a83"
+      },
+      "pedology_calcareous": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "e2fc7ca88931853ca73f71c73d04af242da0494da2113a9402c9f36912dfc9b6"
+      },
+      "pedology_clayey": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "a8c627e0cdd4b67ef125cd29bdde9f07060b2a97ce72e0cb60739172b9fb7050"
+      },
+      "pedology_ferrallitic": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "903789ca4a4c5ee110a333d1bd9f37199eb7c2461aba79ae1a5f0fbfd9ae1203"
+      },
+      "pedology_green": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "76556d3326e8bd3503a5371349584963b83999693bcd0c6776bae51a54308653"
+      },
+      "pedology_mineral": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "4d0196694722d687dc4b08f6e5c5b5fce6dff1301c7a839901d529889c1a18a8"
+      },
+      "pedology_organic": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "fd2774c0b2b3c99beeeaa119c11039109015d097d096ee391e40c591d332a2dc"
+      },
+      "pedology_podzolic": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "a33e7a717fcdd7fa60e724bdbe5550c167ab8b2913b8bc433307acc35e0c4ed0"
+      },
+      "pedology_red": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "92b1297c7a0d3b0398eeb742307db06b391ee06c12449e2e0242c9ca72aaf4a8"
+      },
+      "pedology_sandy": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "65e022aeb324b6aea6af1728e1e0c7d221a6980f137f5c7e545b3367e3f12792"
+      },
+      "precip_summer": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "9476d762405cd5ef638ca54a07cb97bfa8a63e6e7f914d715888e1685d08dd17"
+      },
+      "precip_winter": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "5a6d7dedc98935f42848c5e53b7559f67fe84b5e7adb154fcd07f33049107d67"
+      },
+      "soil_sand": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "d49755bedac72c26110f3442b30fa824475410c6aca5df3ab350c47eda9f08c7"
+      },
+      "temperature_summer": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "13ba7e9b4c9d548a4da51ce9ce7a9a0c86644a8bf72a1b9d6f42ef0308724e0b"
+      },
+      "temperature_winter": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "c43a6aef22729082288a9c3f73facaeece68829512aa943f0e3da680e8cbbc35"
+      },
+      "uplift": {
+        "dtype": "<f4",
+        "shape": [
+          1024,
+          2048
+        ],
+        "sha256": "90d4c65caa257fe838fadbbc591813e9553db134066fb65b87a62f202599a771"
+      }
+    },
+    "deposits": 0,
+    "metadata": {},
+    "deposits_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+  }
+}
