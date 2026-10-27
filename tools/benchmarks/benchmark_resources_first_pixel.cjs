@@ -13,7 +13,8 @@ const root=path.resolve(__dirname,'../..');
 const arg=(name,fallback)=>{const i=process.argv.indexOf(name);return i>0?process.argv[i+1]:fallback;};
 const port=Number(arg('--port',8775)),seed=arg('--seed','7985403534069300490'),python=arg('--spawn',null),clear=arg('--clear-cache',null);
 const layers=(arg('--layers','resources-bio-npp,resources-geo-rock,resources-geo-context,resources-agri-cereal-suitability,resources-mat-stone,'+
-  'resources-season-snow,resources-bio-wood-stock,resources-agri-harvest-month,resources-dep-points,resources-dep-stock-copper')).split(',');
+  'resources-season-snow,resources-bio-wood-stock,resources-agri-harvest-month,resources-dep-points,resources-dep-stock-copper,'+
+  'resources-dep-potential-copper,resources-dep-potential-iron,resources-dep-stock-iron')).split(',');
 const base=`http://127.0.0.1:${port}`;
 const sleep=ms=>new Promise(ok=>setTimeout(ok,ms));
 async function up(timeout=180000){const t=Date.now();while(Date.now()-t<timeout){try{if((await fetch(base+'/')).ok)return (Date.now()-t)/1000;}catch(_){}await sleep(500);}throw Error('server not up');}
@@ -33,6 +34,7 @@ async function up(timeout=180000){const t=Date.now();while(Date.now()-t<timeout)
     await page.goto(`${base}/?seed=${seed}&profile=orogen&gpu=1`);
     await page.waitForFunction(()=>window.TerrainResources&&Object.keys(window.TerrainResources.specs()).length>0&&typeof renderer!=='undefined'&&renderer?.status==='webgpu',null,{timeout:300000});
     report.worldOpenS=(Date.now()-t0)/1000;
+    report.worldDiameterKm=await page.evaluate(()=>world.world_diameter_km);
     for(const mode of layers){
       const start=Date.now();let sawProgress=null;
       await page.evaluate(m=>{const s=document.getElementById('mapMode');s.value=m;s.dispatchEvent(new Event('change',{bubbles:true}));},mode);

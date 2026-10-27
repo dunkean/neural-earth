@@ -17,10 +17,10 @@ struct Case { g:vec4<i32>, a:vec4<f32>, b:vec4<f32>, c:vec4<f32> }
   else if(k.g.w==1){out[o]=f32(rRealized(gi,gj,lod));out[o+1u]=f32(rDominant(gi,gj,lod));}
   else if(k.g.w==2){out[o]=rCyclic(gi,gj,lod);}
   else if(k.g.w==3){var d=0.;let rgb=rDeposits(gi,gj,lod,30.*exp2(f32(lod)),k.a.x,vec3<f32>(.5),&d);out[o]=rgb.x;out[o+1u]=rgb.y;out[o+2u]=rgb.z;}
-  else if(k.g.w==4){var d=0.;let rgb=rDeposits(gi,gj,lod,30.*exp2(f32(lod)),k.a.x,vec3<f32>(.5),&d);out[o]=d;out[o+1u]=rgb.x;}
+  else if(k.g.w==4){out[o]=rStock(gi,gj,lod,30.*exp2(f32(lod)));}
   else {out[o]=rTerms(rFeatures(k.a.x,k.b.xy,k.b.zw,k.a.y,k.a.z,k.a.w,k.c.x));}
 }`;
-const kinds={positive:0,bounded:0,seasonal:0,geology:1,cyclic:2,points:3,stock:4};
+const kinds={positive:0,bounded:0,seasonal:0,'potential-copper':0,'potential-iron':0,geology:1,cyclic:2,points:3,stock:4};
 (async()=>{
   const server=http.createServer((_,res)=>res.end('<!doctype html><title>Resources WGSL parity</title>'));
   await new Promise(ok=>server.listen(0,'127.0.0.1',ok));

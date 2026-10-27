@@ -14,6 +14,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'backend'))
 import terrain_resource_gpu as G  # noqa: E402
+import terrain_resources as R  # noqa: E402
 
 F16 = np.float16
 
@@ -57,24 +58,35 @@ def build():
     # Continuous: positive, bounded, seasonal.
     for name, kind, bounded, seasonal, rng_ in [('positive', 'ramp', False, False, [0., 2000.]),
                                                  ('bounded', 'ramp', True, False, [0., .3]),
-                                                 ('seasonal', 'ramp', False, True, [0., 250.])]:
+                                                 ('seasonal', 'ramp', False, True, [0., 250.]),
+                                                 ('potential-copper', 'log', False, False, [5e-4, 5.]),
+                                                 ('potential-iron', 'log', False, False, [.05, 500.])]:
         k = 12 if seasonal else 1
         field = _f16(rng.uniform(.05, .95, (k, H, W)) * (rng_[1] if not bounded else 1))
+        if name.startswith('potential-'):
+            prospect = {'prospect_' + family: rng.uniform(0, 1, (H, W)) for family in {**R.FAMILIES, **R.PLACERS}}
+            field = _f16(R.metal_potential(prospect, name.split('-')[1])[None])
         bounds = [0., 1.] if bounded else rng_
-        h = header(kind, k, bounded=bounded, seasonal=seasonal, range=rng_, bounds=bounds)
+        if name.startswith('potential-'):
+            bounded = True
+            bounds = [0., sum(R.metal_potential_weights(name.split('-')[1]).values())]
+        h = header(kind, k, bounded=bounded, seasonal=seasonal, range=rng_, bounds=bounds, log=kind == 'log')
+        if name.startswith('potential-'):      # per-metal potential: the mineral profile, log scale
+            h.update(coef=list(G.PROFILES['mineral'][0]), sigma=G.PROFILES['mineral'][1])
         pkg = dict(seed32=h['seed32'], layer=h['layer'], field=G.Field(field, i0, j0, world_bounds), seasonal=seasonal, season=.37,
                    profile='arable', range=tuple(rng_), bounded=bounded, bounds=tuple(bounds))
         G.PROFILES['fixture'] = (tuple(h['coef']), h['sigma'])
+        coef_used = tuple(h['coef'])
         pkg['profile'] = 'fixture'
         cases = []
         for gi, gj, lod in samples(10):
             terms = float(rng.uniform(-1, 1))
             feat = dict(slope=np.float32(0), valley=np.float32(0), ridge=np.float32(0), north=np.float32(0), dz=np.float32(0),
                         river=np.float32(0))
-            # Encode the terms through the valley coefficient (1.0) only.
+            # Terms through the valley coefficient only; the GPU case receives the summed terms.
             feat['valley'] = np.float32(terms)
             v = G.evaluate_continuous(pkg, np.array(gi), np.array(gj), lod, feat)
-            cases.append(dict(gi=gi, gj=gj, lod=lod, terms=float(np.clip(terms, -3, 3)), expected=float(v)))
+            cases.append(dict(gi=gi, gj=gj, lod=lod, terms=float(G.terrain_terms(feat, coef_used)), expected=float(v)))
         configs.append(dict(name=name, header=h, season=.37, field=_bits(field), cases=cases))
     # Realized geology (rocks) and dominant class (contexts), on the same package.
     kcls = 8
@@ -123,20 +135,21 @@ def build():
             buckets.reshape(-1, 2)[c, 0] = n
         buckets.reshape(-1, 2)[c, 1] += 1
     palette = [[(c * 37 % 100) / 100, (c * 59 % 100) / 100, (c * 83 % 100) / 100] for c in range(20)]
+    far = np.zeros((1, H, W), np.float32)       # stocks use deposit kernels at every LOD
     for kind in ('points', 'stock'):
-        h = header(kind, 1, palette=palette, deposits=len(deps), range=[1e-3, 1e5])
+        h = header(kind, 1, palette=palette, deposits=len(deps), range=[1e-3, 1e5], max_footprint=max(max(d['a'], d['b']) * 2 for d in deps))
+        stock_pkg = dict(field=G.Field(far, i0, j0, world_bounds))
         cases = []
-        for n in range(16):
+        for n in range(36):
             d = deps[n % len(deps)]
-            lod = int(rng.choice([7, 3, 0, -2]))
+            lod = ([10, 7, 6, 5, 4, 3, 2, 0, -2] if kind == 'stock' else [7, 3, 0, -2])[n % (9 if kind == 'stock' else 4)]
             r = 30. * 2. ** lod
             off = rng.normal(0, max(d['a'], 3 * r) * .6, 2)
             gi = int(np.floor((d['di'] * 30. + 15 + off[0]) / r))
             gj = int(np.floor((d['dj'] * 30. + 15 + off[1]) / r))
             valley = float(rng.uniform(0, 1))
             if kind == 'stock':
-                expected = float(G.stock_density([dd for dd in deps if (dd['dj'] >> 10) - (gj * r // 30720) in range(-3, 4)
-                                                  or True], np.array(gi), np.array(gj), lod, world_bounds))
+                expected = float(G.stock_display(stock_pkg, deps, np.array(gi), np.array(gj), lod))
                 cases.append(dict(gi=gi, gj=gj, lod=lod, valley=valley, expected=expected))
             else:
                 rgb = np.full(3, .5, np.float32)
@@ -154,7 +167,7 @@ def build():
                         rgb = rgb * (1 - .7 * rim) + np.array([.710, .325, .165], np.float32) * (.7 * rim)
                         rgb = rgb * (1 - body) + color * body
                 cases.append(dict(gi=gi, gj=gj, lod=lod, valley=valley, expected=[float(x) for x in rgb]))
-        configs.append(dict(name=kind, header=dict(h, field_shape=[1, 1, 1]), field=_bits(np.zeros((1, 1, 1))), deposits=words.view(np.uint32).ravel().tolist(),
+        configs.append(dict(name=kind, header=dict(h, field_shape=[1, H, W]), field=_bits(far), deposits=words.view(np.uint32).ravel().tolist(),
                             buckets=buckets.ravel().tolist(), cases=cases))
     # Features and terms.
     feats = []

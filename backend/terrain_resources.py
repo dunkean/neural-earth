@@ -31,7 +31,7 @@ NATIVE_M = 30.0
 # colours) must not bump it. V2_INPUTS_VERSION names the inputs given to the
 # Render v2 evaluator (sampling of the atlas); its cached environment also
 # depends on the source of terrain_render_v2.py, an external module.
-COMPILER_VERSION = 'resources-compiler-4'
+COMPILER_VERSION = 'resources-compiler-6'
 V2_INPUTS_VERSION = 'v2-inputs-1'
 WORLD_LOD = 10           # authority grid, 30.72 km
 BUDGET_LOD = 3           # 240 m: last level allocated from world information only
@@ -123,6 +123,27 @@ FANTASY = {
                                metals=dict(star_metal=2e-5), density=.02, tonnage=(2e5, .6), depth=40, sulfide=False),
 }
 GRAM_METALS = {'gold', 'silver', 'star_metal'}   # integers in kg, others in t
+METALS = ('iron', 'copper', 'tin', 'lead', 'zinc', 'silver', 'gold', 'salt', 'gypsum', 'coal', 'tungsten')
+
+# Mining districts (implemented; dimensions provisional, not calibrated): deposits of a family cluster in
+# districts of tens of km inside its permissive tracts (USGS three-part
+# assessments: permissive tract, grade-tonnage model, number of deposits;
+# Singer 1993, Singer & Menzie 2010; clustering: Carlson 1991). Candidate
+# district centres: DISTRICTS_PER_BLOCK keyed candidates per LOD-12 block
+# (123 km grid), 2% active; each is an anisotropic Gaussian
+# (sigma along the structural trend, sigma across), isotropic for basins.
+# A background intensity floor admits occurrences outside districts.
+# Exact count apportionment moves the same
+# source-addressed grade/tonnage marks, preserving counts and contained mass.
+DISTRICT_LOD = 12
+DISTRICTS_PER_BLOCK = 1
+DISTRICT_OCCUPANCY = .02    # sparse active camps inside permissive provinces; provisional
+DISTRICT_BACKGROUND = .05
+DISTRICT_SHAPE = dict(porphyry_cu=(15e3, 5e3), epithermal_au_ag=(12e3, 5e3), sn_w_granite=(15e3, 6e3),
+                      polymetallic_vein=(15e3, 4e3), vms=(15e3, 4e3), orogenic_au=(20e3, 4e3), skarn_fe_cu=(10e3, 5e3),
+                      mvt_pb_zn=(20e3, 20e3), sediment_cu=(25e3, 10e3), bif_iron=(25e3, 8e3), ironstone=(25e3, 15e3),
+                      laterite_fe=(15e3, 15e3), evaporite_salt=(30e3, 30e3), coal=(30e3, 15e3),
+                      fantasy_star_metal=(10e3, 10e3), placer_au=(12e3, 4e3), placer_sn=(12e3, 4e3))
 MEDIEVAL_RECOVERY = dict(gold=.8, silver=.7, copper=.6, lead=.75, zinc=0., tin=.7, tungsten=0., iron=.5,
                          salt=.9, gypsum=.9, coal=.8, star_metal=.5)  # zinc/tungsten: no medieval metal
 
@@ -861,6 +882,119 @@ def _poisson(lam, u, kmax=40):
     return out
 
 
+def metal_potential(f, metal, fantasy=False):
+    """Typical contained metal per km2 (t, or kg for gold, silver, star metal):
+    sum over the families that yield the metal of
+    density (deposits per 10 000 km2 at prospectivity 1) x prospectivity
+    x median ore tonnage x metal grade (Cox & Singer 1986 grade-tonnage
+    medians, as for the deposits). The province and belt pattern of the
+    deposits, without their sampling: a zone layer. Raises KeyError before the
+    deposits stage (prospectivities not computed yet)."""
+    out = None
+    for name, weight in metal_potential_weights(metal, fantasy).items():
+        p = np.clip(np.asarray(f['prospect_' + name], np.float64), 0, 1)
+        term = p * weight
+        out = term if out is None else out + term
+    if out is None:
+        raise KeyError('metal ' + metal)
+    return out
+
+
+def metal_potential_weights(metal, fantasy=False):
+    """Typical grade-tonnage contributions per km2 at unit prospectivity."""
+    families = dict(FAMILIES, **PLACERS, **(FANTASY if fantasy else {}))
+    scale = 1000 if metal in GRAM_METALS else 1
+    return {name: spec['density'] * spec['tonnage'][0] * spec['metals'][metal] * scale / 1e4
+            for name, spec in families.items() if spec['metals'].get(metal)}
+
+
+def district_centres(seed, name, lod, bounds=BOUNDS):
+    """Keyed candidate district centres of a family: (cx, cy, by, bx) arrays over
+    the LOD-12 blocks covering the world at LOD `lod` (metres, block indices)."""
+    grid = Lattice(DISTRICT_LOD, bounds=bounds)
+    bi, bj = grid.i, grid.j
+    BI, BJ = np.meshgrid(bi, bj)
+    ids = cell_id(DISTRICT_LOD, BI, BJ)
+    size = cell_size(DISTRICT_LOD)
+    domain = ('resources', 'district', name)
+    x0, x1 = np.maximum(BI * size, bounds[0]), np.minimum((BI + 1) * size, bounds[2])
+    y0, y1 = np.maximum(BJ * size, bounds[1]), np.minimum((BJ + 1) * size, bounds[3])
+    cx = np.stack([x0 + to_unit(cell_keys(seed, domain + ('x', f'lod{DISTRICT_LOD}'), ids, draw=n + 1)) * (x1 - x0)
+                   for n in range(DISTRICTS_PER_BLOCK)], -1)
+    cy = np.stack([y0 + to_unit(cell_keys(seed, domain + ('y', f'lod{DISTRICT_LOD}'), ids, draw=n + 1)) * (y1 - y0)
+                   for n in range(DISTRICTS_PER_BLOCK)], -1)
+    active = np.stack([to_unit(cell_keys(seed, domain + ('active', f'lod{DISTRICT_LOD}'), ids, draw=n + 1)) < DISTRICT_OCCUPANCY
+                       for n in range(DISTRICTS_PER_BLOCK)], -1)
+    if not active.any():
+        active.flat[key(seed, domain + ('fallback',)) % active.size] = True
+    return cx, cy, int(bi[0]), int(bj[0]), active
+
+
+def district_intensity(x, y, name, centres, strike, grid, widen=0.):
+    """Normalised district intensity (mean 1 over the plane) at points (x, y) in
+    metres; `widen` adds a Gaussian blur (e.g. a cell average). Families without
+    district models return 1."""
+    shape = DISTRICT_SHAPE.get(name)
+    x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
+    if shape is None:
+        return np.ones(np.broadcast(x, y).shape)
+    cx, cy, bi0, bj0, active = centres
+    size = cell_size(DISTRICT_LOD)
+    sa, sc = shape
+    wa, wc = math.hypot(sa, widen), math.hypot(sc, widen)
+    mean = DISTRICT_OCCUPANCY * DISTRICTS_PER_BLOCK * 2 * math.pi * sa * sc / size ** 2
+    width = grid.bounds[2] - grid.bounds[0]
+    bx = np.floor(x / size).astype(np.int64)
+    by = np.floor(y / size).astype(np.int64)
+    total = np.full(np.broadcast(x, y).shape, DISTRICT_BACKGROUND * mean)
+    nbi = cx.shape[1]
+    if bx.size and (bx == bx.flat[0]).all() and (by == by.flat[0]).all():
+        # Points of one block (a deposit's cell): scalar candidates, far ones skipped.
+        x0, x1, y0, y1 = x.min(), x.max(), y.min(), y.max()
+        reach = 5 * max(wa, wc)
+        for oy in (-1, 0, 1):
+            for ox in (-1, 0, 1):
+                col = (int(bx.flat[0]) + ox - bi0) % nbi
+                row = int(by.flat[0]) + oy - bj0
+                if row < 0 or row >= cx.shape[0]:
+                    continue
+                for n in range(DISTRICTS_PER_BLOCK):
+                    if not active[row, col, n]:
+                        continue
+                    px, py = float(cx[row, col, n]), float(cy[row, col, n])
+                    gx = (min(max(px, x0), x1) - px + width / 2) % width - width / 2
+                    if abs(gx) > reach or abs(min(max(py, y0), y1) - py) > reach:
+                        continue
+                    theta = float(strike_at(strike, grid, px, py))
+                    t, c = math.cos(theta), math.sin(theta)
+                    dx = np.mod(x - px + width / 2, width) - width / 2
+                    dy = y - py
+                    u, v = dx * t + dy * c, -dx * c + dy * t
+                    total = total + (sa * sc / (wa * wc)) * np.exp(-.5 * (u * u / (wa * wa) + v * v / (wc * wc)))
+        return total / (mean * (1 + DISTRICT_BACKGROUND))
+    for oy in (-1, 0, 1):
+        for ox in (-1, 0, 1):
+            col = np.mod(bx + ox - bi0, nbi)
+            valid = (by + oy - bj0 >= 0) & (by + oy - bj0 < cx.shape[0])
+            row = np.clip(by + oy - bj0, 0, cx.shape[0] - 1)
+            for n in range(DISTRICTS_PER_BLOCK):
+                px, py = cx[row, col, n], cy[row, col, n]
+                dx = np.mod(x - px + width / 2, width) - width / 2
+                dy = y - py
+                theta = strike_at(strike, grid, px, py)
+                t, c = np.cos(theta), np.sin(theta)
+                u, v = dx * t + dy * c, -dx * c + dy * t
+                total = total + (valid & active[row, col, n]) * (sa * sc / (wa * wc)) * np.exp(-.5 * (u * u / (wa * wa) + v * v / (wc * wc)))
+    return total / (mean * (1 + DISTRICT_BACKGROUND))
+
+
+def strike_at(strike, grid, x, y):
+    """Structural azimuth of the LOD-10 cell containing (x, y)."""
+    i = np.mod(np.floor(np.asarray(x) / grid.size).astype(np.int64) - int(grid.i[0]), strike.shape[1])
+    j = np.clip(np.floor(np.asarray(y) / grid.size).astype(np.int64) - int(grid.j[0]), 0, strike.shape[0] - 1)
+    return strike[j, i]
+
+
 def world_deposits(grid, f, seed, *, fantasy=False, parallel=None):
     """Discrete deposits owned by their LOD-10 cell. List of dicts, id-sorted."""
     families = dict(FAMILIES, **(FANTASY if fantasy else {}))
@@ -871,17 +1005,34 @@ def world_deposits(grid, f, seed, *, fantasy=False, parallel=None):
         runoff = f['runoff_mm'].sum(axis=0)
         prosp[name] = spread * smoothstep(100, 600, runoff) * (1 - smoothstep(200, 900, f['rugged_m'])) * f['land']
     f.update({'prospect_' + k: v.astype(np.float32) for k, v in prosp.items()})
-    jobs = []
+    centres = {name: district_centres(seed, name, grid.lod, grid.bounds) for name in prosp
+               if name in DISTRICT_SHAPE and grid.lod == WORLD_LOD}
+    jobs, marks = [], []
     for name, p in prosp.items():
         spec = families.get(name) or PLACERS[name]
         domain = ('resources', 'fantasy' if name in FANTASY else 'deposit', name)
         lam = spec['density'] * np.clip(p, 0, 1) * grid.area_m2 / 1e10
         u = to_unit(cell_keys(seed, domain + ('count', f'lod{grid.lod}'), grid.ids))
-        count = _poisson(lam, u)
-        jj, ii = np.nonzero(count)
-        for j, i in zip(jj, ii):
-            for k in range(int(count[j, i])):
-                jobs.append((domain, name, spec, j, i, k))
+        original = _poisson(lam, u)
+        source = [(int(j), int(i), k) for j, i in zip(*np.nonzero(original)) for k in range(int(original[j, i]))]
+        count = original
+        if name in centres and grid.lod == WORLD_LOD and source:
+            X, Y = np.meshgrid(grid.x, grid.y)
+            live = lam > 0
+            intensity = np.zeros(grid.shape)
+            intensity[live] = district_intensity(X[live], Y[live], name, centres[name], f['structural_strike'], grid,
+                                                 widen=grid.size / math.sqrt(12))
+            # Move the same addressed deposit marks into districts. Largest
+            # remainders preserves the family's original count exactly, while
+            # every grade/tonnage draw keeps its original source address.
+            count = apportion(len(source), quantize((lam * intensity).ravel()), grid.ids.ravel()).reshape(grid.shape)
+            source.sort(key=lambda v: key(seed, domain + ('district-route', str(int(grid.ids[v[0], v[1]])), str(v[2]))))
+        targets = [(int(j), int(i), k) for j, i in zip(*np.nonzero(count)) for k in range(int(count[j, i]))]
+        for (sj, si, sk), (j, i, k) in zip(source, targets):
+            mark = _deposit(seed, domain, name, spec, grid, f, sj, si, sk, position=cell_id(BUDGET_LOD, 0, 0))
+            marks.append(mark)
+            address = domain + ('district-position', mark['id']) if grid.lod == WORLD_LOD else domain
+            jobs.append((address, name, spec, j, i, k))
     # Positions per family in vectorised batches (same values as _place_in_cell).
     by_name = {}
     for n, job in enumerate(jobs):
@@ -893,11 +1044,37 @@ def world_deposits(grid, f, seed, *, fantasy=False, parallel=None):
             tasks.append(('terrain_resources', 'place_positions',
                           dict(seed=seed, domain=jobs[part[0]][0], lod=grid.lod, field=f['prospect_' + name],
                                jj=np.array([jobs[n][3] for n in part]), ii=np.array([jobs[n][4] for n in part]),
-                               kk=np.array([jobs[n][5] for n in part]), bounds=grid.bounds)))
+                               kk=np.array([jobs[n][5] for n in part]), bounds=grid.bounds, name=name, centres=centres.get(name),
+                               strike=f['structural_strike'] if name in centres else None)))
             owners.append(part)
     results = [place_positions(**t[2]) for t in tasks] if parallel is None else parallel(tasks)
     positions = {n: pos for part, res in zip(owners, results) for n, pos in zip(part, res)}
-    out = [_deposit(seed, job[0], job[1], job[2], grid, f, *job[3:], position=positions[n]) for n, job in enumerate(jobs)]
+    out = []
+    for n, (job, mark) in enumerate(zip(jobs, marks)):
+        _, name, spec, j, i, k = job
+        plod, pi, pj = decode_id(np.uint64(positions[n]))
+        mark.update(source_cell=mark['owner_cell'], owner_cell=int(grid.ids[j, i]), index=k,
+                    position_cell=int(positions[n]), position_lod=int(plod), position_i=int(pi), position_j=int(pj))
+        if name in centres:
+            cx, cy, bi0, bj0, active = centres[name]
+            x, y = (int(pi) + .5) * cell_size(int(plod)), (int(pj) + .5) * cell_size(int(plod))
+            width = grid.bounds[2] - grid.bounds[0]
+            dx = (cx[..., 0] - x + width / 2) % width - width / 2
+            dy = cy[..., 0] - y
+            theta = strike_at(f['structural_strike'], grid, cx[..., 0], cy[..., 0])
+            sa, sc = DISTRICT_SHAPE[name]
+            q = ((dx * np.cos(theta) + dy * np.sin(theta)) / sa) ** 2 + ((-dx * np.sin(theta) + dy * np.cos(theta)) / sc) ** 2
+            q = np.where(active[..., 0], q, np.inf)
+            dj, di = np.unravel_index(int(np.argmin(q)), q.shape)
+            mark['district_id'] = f"{name}:{int(cell_id(DISTRICT_LOD, bi0 + di, bj0 + dj)):016x}:0"
+            mark['district_center_m'] = [float(cx[dj, di, 0]), float(cy[dj, di, 0])]
+        # Grade, ore and depth remain the addressed source marks. Access uses
+        # the new owner's relief; recoverable stocks are then exact integers.
+        extent = max(20., (mark['ore_t'] / 2.7) ** (1 / 3))
+        accessible = float(np.clip((40 + .5 * f['rugged_m'][j, i] - mark['depth_top_m']) / extent, 0, 1))
+        mark['medieval_accessible_share'] = round(accessible, 4)
+        mark['medieval_recoverable'] = {m: int(v * accessible * MEDIEVAL_RECOVERY.get(m, .5)) for m, v in mark['contained'].items()}
+        out.append(mark)
     out.sort(key=lambda d: d['id'])
     return out
 
@@ -932,8 +1109,10 @@ def _deposit(seed, domain, name, spec, grid, f, j, i, k, position=None):
                 status='synthetic' if name in FANTASY else 'derived')
 
 
-def _place_in_cell(seed, domain, grid, f, name, j, i, k):
-    """LOD-10 -> LOD-3 position: keyed weighted choice on interpolated prospectivity."""
+def _place_in_cell(seed, domain, grid, f, name, j, i, k, districts=None):
+    """LOD-10 -> LOD-3 position: keyed weighted choice on interpolated
+    prospectivity, times the district intensity when `districts` = (family,
+    centres, strike) is given (deposits gather in their districts)."""
     n = 1 << (grid.lod - placement_lod(grid.lod))
     ci, cj = int(grid.i[i]), int(grid.j[j])
     sub_i = ci * n + np.arange(n)
@@ -944,6 +1123,10 @@ def _place_in_cell(seed, domain, grid, f, name, j, i, k):
     x, y = (sub_i + .5) * child, (sub_j + .5) * child
     inside = ((x >= grid.bounds[0]) & (x < grid.bounds[2]))[None, :] & ((y >= grid.bounds[1]) & (y < grid.bounds[3]))[:, None]
     weights *= inside
+    if districts is not None:
+        child = grid.size / n
+        X, Y = np.meshgrid((sub_i + .5) * child, (sub_j + .5) * child)
+        weights = weights * district_intensity(X, Y, districts[0], districts[1], districts[2], grid)
     ids = cell_id(plod, sub_i[None, :], sub_j[:, None])
     keys = to_unit(cell_keys(seed, domain + ('position', f'lod{plod}'), ids, draw=k + 1))
     # Exponential race: argmin(-ln u / w) is a weighted choice independent of order.
@@ -955,11 +1138,12 @@ def _place_in_cell(seed, domain, grid, f, name, j, i, k):
     return ids.ravel()[flat]
 
 
-def place_positions(seed, domain, lod, field, jj, ii, kk, bounds=BOUNDS):
+def place_positions(seed, domain, lod, field, jj, ii, kk, bounds=BOUNDS, name=None, centres=None, strike=None):
     """_place_in_cell for deposits of one family (pure; run in worker processes)."""
     grid = Lattice(lod, bounds=bounds)
     f = {'prospect_': field}
-    return [int(_place_in_cell(seed, domain, grid, f, '', int(j), int(i), int(k))) for j, i, k in zip(jj, ii, kk)]
+    districts = (name, centres, strike) if centres is not None else None
+    return [int(_place_in_cell(seed, domain, grid, f, '', int(j), int(i), int(k), districts)) for j, i, k in zip(jj, ii, kk)]
 
 
 def placement_lod(lod):

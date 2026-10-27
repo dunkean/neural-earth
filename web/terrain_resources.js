@@ -29,7 +29,7 @@ window.TerrainResources=(()=>{
     }
     const stops=spec.colors.map((c,i)=>`#${c} ${Math.round(100*i/(spec.colors.length-1))}%`).join(',');
     return `<strong>${esc(spec.label)}</strong><div style="height:10px;margin:4px 0;background:linear-gradient(90deg,${stops})"></div>`+
-      `<div style="display:flex;justify-content:space-between"><span>${fmt(spec.range[0])}</span><span>${esc(spec.unit)}${spec.log?' (échelle log)':''}</span><span>${fmt(spec.range[1])}</span></div>${status}`;
+      `<div style="display:flex;justify-content:space-between"><span>${fmt(spec.range[0])}</span><span>${esc(spec.unit)}${spec.log?' (échelle log)':''}</span><span>${fmt(spec.range[1])}</span></div>${note(spec)}${status}`;
   }
   // Loading state: bar, stage and estimate; the relief map stays visible underneath.
   function showProgress(text,fraction,error){
@@ -39,6 +39,12 @@ window.TerrainResources=(()=>{
     progress.firstElementChild.firstElementChild.style.width=Math.round(100*Math.max(.03,Math.min(1,fraction||0)))+'%';
   }
   const wait=ms=>new Promise(ok=>setTimeout(ok,ms));
+  // What a mineral layer shows: a potential (zones) or the stock of the deposits.
+  function note(spec){
+    if(spec.label.includes('(gisements)'))return '<small>Stock des gisements : densité lissée à l’échelle des districts (écart-type ~45 km) aux petites échelles, amas au zoom moyen, empreintes (filons, amas, placers) au zoom proche ; noyaux normalisés par l’aire sphérique (tolérance numérique mesurée).</small><br>';
+    if(spec.label.startsWith('Potentiel'))return '<small>Potentiel en zones : dotation typique par km² (densité × prospectivité × tonnage médian × teneur, modèles de Cox et Singer), indépendant du tirage des gisements.</small><br>';
+    return '';
+  }
   async function load(mode){
     if(!renderer?.setResources||!world)return;
     const key=world.seed+'|'+mode,mine=++loadTicket,started=performance.now();

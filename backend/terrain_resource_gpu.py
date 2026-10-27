@@ -509,21 +509,62 @@ def deposit_contribution(dep, gi, gj, lod, valley, bounds=None):
     return body.astype(F32), halo.astype(F32), rim.astype(F32)
 
 
+def stock_radii(a, b, lod):
+    """Compact district -> cluster -> footprint support, metres (display only)."""
+    r = F32(30. * 2. ** lod)
+    district = F32(135000) * smoothstep(2, 6, F32(lod))
+    return max(F32(2) * F32(a), F32(3) * r, district), max(F32(2) * F32(b), F32(3) * r, district / F32(3))
+
+
+def stock_normalization(dj, theta, su, sv, bounds=None):
+    """Integral against spherical area, including clipped polar support.
+
+    The planar kernel is 3/(pi*a*b)*(1-q^2)^2 on q<1; its y marginal is
+    16/(5*pi)*(1-t^2)^(5/2). Eight-point Gauss-Legendre integrates the marginal
+    times cos(latitude), with the same float32 operations as WGSL.
+    """
+    if bounds is None:
+        return F32(1)
+    y = F32(dj) * F32(30) + F32(15)
+    radius = F32(bounds[2] - bounds[0]) / F32(6.2831853)
+    cy = F32(bounds[1] + bounds[3]) * F32(.5)
+    sy = np.sqrt((su * F32(math.sin(theta))) ** 2 + (sv * F32(math.cos(theta))) ** 2).astype(F32)
+    lo, hi = max(F32(-1), (F32(bounds[1]) - y) / sy), min(F32(1), (F32(bounds[3]) - y) / sy)
+    mid, half = (lo + hi) * F32(.5), (hi - lo) * F32(.5)
+    out = F32(0)
+    for node, weight in ((.183434642, .362683783), (.525532410, .313706646), (.796666477, .222381034), (.960289856, .101228536)):
+        for sign in (-1, 1):
+            t = mid + F32(sign * node) * half
+            z = max(F32(0), F32(1) - t * t)
+            out += F32(weight) * z * z * np.sqrt(z) * max(F32(0), np.cos((y + sy * t - cy) / radius))
+    return max(F32(1e-8), out * half * F32(16 / (5 * math.pi)))
+
+
 def stock_density(deps, gi, gj, lod, bounds=None):
-    """Sum of normalised Gaussian kernels (mass per km2)."""
-    r = 30. * 2. ** lod
-    out = 0.
+    """Stock per spherical km2: sum of smooth, normalized compact kernels.
+
+    No field interpolation, cutoff Gaussian tail, terrain modulation or stock
+    creation. Canonical masses remain integers; quadrature tolerance is tested.
+    """
+    r = F32(30. * 2. ** lod)
+    out = np.zeros(np.broadcast(gi, gj).shape, F32)
     for d in deps:
-        if lod >= 0:
-            dx = ((np.asarray(gi, np.int64) << lod) - d['di']).astype(F32) * F32(30) + F32(15. * (2 ** lod) - 15.)
-            dy = ((np.asarray(gj, np.int64) << lod) - d['dj']).astype(F32) * F32(30) + F32(15. * (2 ** lod) - 15.)
-        else:
-            s = -lod
-            dx = (np.asarray(gi, np.int64) - (d['di'] << s)).astype(F32) * F32(r) + F32(r * .5 - 15)
-            dy = (np.asarray(gj, np.int64) - (d['dj'] << s)).astype(F32) * F32(r) + F32(r * .5 - 15)
+        dx = (np.asarray(gi, np.float64) + .5) * float(r) - (d['di'] + .5) * 30
+        dy = (np.asarray(gj, np.float64) + .5) * float(r) - (d['dj'] + .5) * 30
+        dx, dy = np.asarray(dx, F32), np.asarray(dy, F32)
         if bounds is not None:
             span = F32(bounds[2] - bounds[0])
-            dx = dx - np.floor(dx / span + F32(.5)) * span
-        sg = F32(max(d['sigma'], .75 * r))
-        out = out + F32(d['mass']) * F32(1e6) / (F32(2 * math.pi) * sg * sg) * np.exp(-(dx * dx + dy * dy) / (F32(2) * sg * sg))
-    return np.asarray(out, F32)
+            dx -= np.floor(dx / span + F32(.5)) * span
+        c, s = F32(math.cos(d['theta'])), F32(math.sin(d['theta']))
+        u, v = dx * c + dy * s, -dx * s + dy * c
+        su, sv = stock_radii(d['a'], d['b'], lod)
+        q = np.maximum(F32(0), F32(1) - u * u / (su * su) - v * v / (sv * sv))
+        norm = stock_normalization(d['dj'], d['theta'], su, sv, bounds)
+        out += F32(d['mass']) * F32(1e6) * F32(3 / math.pi) / (su * sv * norm) * q * q
+    return out.astype(F32)
+
+
+def stock_display(pkg, deps, gi, gj, lod):
+    field = pkg.get('field')
+    bounds = None if field is None or field.bounds is None else field.bounds * F32(AUTH_SIZE)
+    return stock_density(deps, gi, gj, lod, bounds)

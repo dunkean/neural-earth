@@ -47,6 +47,11 @@ FAMILY_LABELS = {
     'ironstone': 'Fer oolithique (34f)', 'laterite_fe': 'Fer latéritique', 'evaporite_salt': 'Sel et gypse évaporitiques (35a)',
     'coal': 'Charbon', 'placer_au': 'Placers aurifères (39a)', 'placer_sn': 'Placers stannifères (39e)',
     'fantasy_star_metal': 'Fantasy · métal stellaire'}
+# Provisional display ranges of per-metal potentials (t or kg per km2).
+# These colour ranges are not physical bounds or measured quantiles.
+POTENTIAL_RANGE = dict(iron=(.05, 500.), copper=(5e-4, 5.), tin=(1e-5, .1), lead=(1e-4, 1.), zinc=(2e-4, 2.),
+                       silver=(5e-4, 5.), gold=(3e-5, .3), salt=(.05, 500.), gypsum=(3e-3, 30.), coal=(.02, 200.),
+                       tungsten=(3e-6, .03), star_metal=(1e-4, 1.))
 METAL_LABELS = dict(iron='fer', copper='cuivre', tin='étain', lead='plomb', zinc='zinc', silver='argent', gold='or',
                     salt='sel', gypsum='gypse', coal='charbon', tungsten='tungstène', star_metal='métal stellaire')
 _LOCK = threading.RLock()
@@ -67,9 +72,10 @@ def _specs():
     out = []
 
     def add(group, name, label, unit, lo, hi, colors, value, status='derived', proxy=False, log=False, kind='ramp', classes=None,
-            seasonal=False):
+            seasonal=False, physical_bounds=None):
         out.append((PREFIX + group + '-' + name, dict(group=group, label=label, unit=unit, range=[lo, hi], colors=colors,
-                   status=status, proxy=proxy, log=log, kind=kind, classes=classes, value=value, seasonal=seasonal)))
+                   status=status, proxy=proxy, log=log, kind=kind, classes=classes, value=value, seasonal=seasonal,
+                   physical_bounds=physical_bounds)))
 
     per_km2 = lambda key, scale=1.: (lambda f, g: np.asarray(f[key], np.float64) / np.maximum(g.area_m2, 1) * 1e6 * scale)
     field = lambda key: (lambda f, g: np.asarray(f[key], np.float64))
@@ -85,20 +91,33 @@ def _specs():
     for r, label in zip(R.ROCKS, R.ROCK_LABELS):
         add('geo', 'rock-' + r, 'Roche · ' + label, 'fraction', 0, 1, WARM, field('rock_' + r), status='derived+synthetic')
     # Deposits
-    add('dep', 'points', 'Gisements discrets · famille, tonnage, accessibilité', 'symbole', 0, 1, SEQ, None, kind='points',
+    add('dep', 'points', 'Gisements discrets (sites) · famille, tonnage, accessibilité', 'symbole', 0, 1, SEQ, None, kind='points',
         classes=[(FAMILY_LABELS[k], FAMILY_COLORS[k]) for k in FAMILY_LABELS if fantasy_enabled() or not k.startswith('fantasy')],
         status='derived (tirages adressés)')
     families = list(R.FAMILIES) + list(R.PLACERS) + (list(R.FANTASY) if fantasy_enabled() else [])
     for fam in families:
-        add('dep', 'prospect-' + fam.replace('_', '-'), 'Prospectivité · ' + FAMILY_LABELS[fam], 'indice 0–1', 0, 1, WARM,
+        add('dep', 'prospect-' + fam.replace('_', '-'), 'Prospectivité · ' + FAMILY_LABELS[fam] + ' (zones)', 'indice 0–1', 0, 1, WARM,
             field('prospect_' + fam), status='synthetic' if fam in R.FANTASY else 'derived')
-    metals = ['iron', 'copper', 'tin', 'lead', 'zinc', 'silver', 'gold', 'salt', 'gypsum', 'coal', 'tungsten'] + (['star_metal'] if fantasy_enabled() else [])
+    metals = list(R.METALS) + (['star_metal'] if fantasy_enabled() else [])
+
+    def per_deposit(key):
+        def value(f, g):
+            if not any(k.startswith('prospect_') for k in f):
+                raise KeyError(key)            # deposits stage not compiled yet
+            return np.asarray(f.get(key, np.zeros(g.shape)), np.float64) / np.maximum(g.area_m2, 1) * 1e6
+        return value
+
     for m in metals:
         unit = 'kg/km²' if m in R.GRAM_METALS else 't/km²'
-        add('dep', 'stock-' + m.replace('_', '-'), f'Stock contenu · {METAL_LABELS[m]}', unit, 1e-3, 1e5, WARM,
-            (lambda key: (lambda f, g: np.asarray(f.get(key, np.zeros(g.shape)), np.float64) / np.maximum(g.area_m2, 1) * 1e6))('stock_' + m), log=True)
-        add('dep', 'recoverable-' + m.replace('_', '-'), f'Récupérable médiéval · {METAL_LABELS[m]}', unit, 1e-3, 1e5, WARM,
-            (lambda key: (lambda f, g: np.asarray(f.get(key, np.zeros(g.shape)), np.float64) / np.maximum(g.area_m2, 1) * 1e6))('recoverable_' + m), log=True)
+        lo, hi = POTENTIAL_RANGE.get(m, (1e-4, 1.))
+        add('dep', 'potential-' + m.replace('_', '-'), f'Potentiel · {METAL_LABELS[m]} (zones)', unit, lo, hi, WARM,
+            (lambda metal: (lambda f, g: R.metal_potential(f, metal, fantasy_enabled())))(m), log=True,
+            physical_bounds=(0., sum(R.metal_potential_weights(m, fantasy_enabled()).values())),
+            status='synthetic' if m == 'star_metal' else 'derived')
+        add('dep', 'stock-' + m.replace('_', '-'), f'Stock contenu · {METAL_LABELS[m]} (gisements)', unit, 1e-3, 1e5, WARM,
+            per_deposit('stock_' + m), log=True)
+        add('dep', 'recoverable-' + m.replace('_', '-'), f'Récupérable médiéval · {METAL_LABELS[m]} (gisements)', unit, 1e-3, 1e5, WARM,
+            per_deposit('recoverable_' + m), log=True)
     # Agriculture and herding
     add('agri', 'cereal-suitability', 'Céréales · aptitude (Ecocrop × sols × relief)', 'indice 0–1', 0, 1, GREEN, field('cereal_suitability'))
     add('agri', 'cereal-class', 'Céréales · classes GAEZ (NS, vmS, mS, MS, S, VS)', 'classe', 0, 5,
@@ -582,7 +601,7 @@ _AUTH_LOCK = threading.RLock()
 
 def profile_of(mode):
     m = mode.split(PREFIX, 1)[-1]
-    rules = [(('cereal', 'arable'), 'arable'), (('lsu', 'forage', 'transhumance'), 'pasture'),
+    rules = [(('potential', 'prospect', 'dep-points'), 'mineral'), (('cereal', 'arable'), 'arable'), (('lsu', 'forage', 'transhumance'), 'pasture'),
              (('tree', 'canopy', 'conifer', 'timber', 'wood', 'felling'), 'forest'),
              (('peat', 'bog-iron', 'fish-inland'), 'wet'), (('fish-marine',), 'marine'), (('season-fish',), 'wet'),
              (('stone', 'slate', 'lime'), 'rock'), (('clay', 'sand', 'salt'), 'lowflat'), (('snow', 'fur'), 'cold'),
@@ -680,6 +699,8 @@ def world_state(atlas):
 
 
 def _bounds_of(spec):
+    if spec.get('physical_bounds') is not None:
+        return tuple(spec['physical_bounds'])
     if spec['unit'] in ('fraction', 'indice 0–1') or spec['label'].startswith('Prospectivité'):
         return (0., 1.)
     if spec['unit'] == 'mois':
@@ -753,7 +774,7 @@ def _gpu_package(state, mode):
         # boundaries), not area shares: shown as the dominant context.
         classes = len(names)
     elif kind == 'stock':
-        field = np.zeros((1, 2, 2), np.float32)
+        field = np.zeros((1,) + grid.shape, np.float32)
     elif kind == 'points':
         field = _mean_preserving(state.authority(PROSPECT_ALL)[None], (0., 1.)).astype(np.float32)
         bounded = (0., 1.)
@@ -789,7 +810,7 @@ def _gpu_package(state, mode):
                   world_bounds=list(grid.bounds), layers=int(field.shape[0]), classes=classes, seasonal=pkg['seasonal'], range=list(spec['range']),
                   bounded=pkg['bounded'], bounds=list(pkg['bounds']), log=bool(spec['log']), profile=G.PROFILE_NAMES.index(profile_of(mode)),
                   coef=list(coef), sigma=sigma, seed32=int(state.seed32), layer=layer,
-                  groups=[], realized=realized, beta=list(G.REALIZED_BETA) if realized else [0, 0], order=order, thresholds=0,
+                  groups=[], realized=realized, beta=list(G.REALIZED_BETA) if realized else [0, 0], order=order, thresholds=0, scale=0., max_footprint=float(np.max(deposits[:, 4:6], initial=0) * 2) if deposits is not None else 0.,
                   palette=[[c / 255 for c in rgb] for rgb in palette], deposits=0 if deposits is None else int(len(deposits)),
                   field_shape=list(field.shape))
     parts = [field.astype(np.float16).tobytes()]

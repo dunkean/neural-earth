@@ -264,6 +264,96 @@ class ResourceTests(unittest.TestCase):
         self.assertTrue(-1 <= float(np.ravel(a)[0]) <= 1)
 
 
+class ResourceDistrictTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.bounds = (-np.pi * 5e5, -np.pi * 2.5e5, np.pi * 5e5, np.pi * 2.5e5)
+        layers, height = atlas()
+        cls.grid, cls.fields, cls.deposits = R.compile_world(layers, height, 42, bounds=cls.bounds, balance=False)
+
+    def test_district_marks_preserve_counts_and_tonnage(self):
+        g, f = self.grid, self.fields
+        actual = {d['id']: d for d in self.deposits}
+        expected = {}
+        for name, spec in {**R.FAMILIES, **R.PLACERS}.items():
+            domain = ('resources', 'deposit', name)
+            lam = spec['density'] * np.clip(f['prospect_' + name], 0, 1) * g.area_m2 / 1e10
+            count = R._poisson(lam, R.to_unit(R.cell_keys(42, domain + ('count', 'lod10'), g.ids)))
+            for j, i in zip(*np.nonzero(count)):
+                for k in range(int(count[j, i])):
+                    d = R._deposit(42, domain, name, spec, g, f, j, i, k, position=R.cell_id(3, 0, 0))
+                    expected[d['id']] = d
+        self.assertTrue(actual)
+        self.assertEqual(set(actual), set(expected))
+        for ident, d in actual.items():
+            self.assertEqual(d['contained'], expected[ident]['contained'])
+            self.assertEqual(d['ore_t'], expected[ident]['ore_t'])
+            self.assertIn('district_id', d)
+            x, y = (d['position_i'] + .5) * 240, (d['position_j'] + .5) * 240
+            self.assertTrue(g.bounds[0] <= x < g.bounds[2] and g.bounds[1] <= y < g.bounds[3])
+            lod, i, j = R.decode_id(np.uint64(d['owner_cell']))
+            self.assertEqual((d['position_i'] >> 7, d['position_j'] >> 7), (int(i), int(j)))
+        for metal in R.METALS:
+            for prefix, key in (('stock_', 'contained'), ('recoverable_', 'medieval_recoverable')):
+                self.assertEqual(int(f.get(prefix + metal, np.array(0)).sum()), sum(d[key].get(metal, 0) for d in actual.values()))
+
+    def test_district_placement_is_query_order_independent(self):
+        g, f = self.grid, self.fields
+        family = 'porphyry_cu'
+        a = R.district_centres(42, family, 10, g.bounds)
+        b = R.district_centres(42, family, 7, g.bounds)
+        np.testing.assert_array_equal(a[0], b[0])
+        np.testing.assert_array_equal(a[1], b[1])
+        jj, ii = np.nonzero(f['prospect_' + family] > 0)
+        jj, ii = jj[:6], ii[:6]
+        kk = np.arange(len(jj))
+        common = dict(seed=42, domain=('resources', 'deposit', family), lod=10,
+                      field=f['prospect_' + family], bounds=g.bounds, name=family, centres=a, strike=f['structural_strike'])
+        first = R.place_positions(**common, jj=jj, ii=ii, kk=kk)
+        second = R.place_positions(**common, jj=jj[::-1], ii=ii[::-1], kk=kk[::-1])
+        self.assertEqual(first, second[::-1])
+        row, col, _ = np.argwhere(a[4])[0]
+        intensity = R.district_intensity(a[0][row, col, 0], a[1][row, col, 0], family, a, f['structural_strike'], g)
+        self.assertGreater(float(intensity), 1.)
+
+    def test_every_metal_potential_is_bounded_and_fantasy_isolated(self):
+        import terrain_resource_gpu as G
+        rng = np.random.default_rng(18)
+        f = {'prospect_' + k: rng.uniform(-1, 2, (4, 8)) for k in {**R.FAMILIES, **R.PLACERS, **R.FANTASY}}
+        families = {**R.FAMILIES, **R.PLACERS, **R.FANTASY}
+        for metal in (*R.METALS, 'star_metal'):
+            p = R.metal_potential(f, metal, fantasy=True)
+            upper = sum(s['density'] * s['tonnage'][0] * s['metals'].get(metal, 0) for s in families.values()) / 1e4
+            upper *= 1000 if metal in R.GRAM_METALS else 1
+            self.assertTrue(np.isfinite(p).all())
+            self.assertTrue(((p >= 0) & (p <= upper * (1 + 1e-12))).all(), metal)
+            pkg = dict(seed32=42, layer=17, field=G.Field(np.full((1, 4, 8), upper, np.float32), -4, -2),
+                       profile='mineral', seasonal=False, bounded=True, bounds=(0., upper), range=(0., upper))
+            v = G.evaluate_continuous(pkg, np.arange(-400, 400), np.zeros(800, int), 3, None)
+            self.assertTrue(((v >= 0) & (v <= np.float32(upper))).all(), metal)
+            if metal != 'star_metal':
+                np.testing.assert_array_equal(p, R.metal_potential(f, metal, fantasy=False))
+        with self.assertRaises(KeyError):
+            R.metal_potential(f, 'star_metal', fantasy=False)
+
+    def test_stock_kernel_integral_at_every_lod_and_polar_clip(self):
+        from scipy.integrate import quad
+        import terrain_resource_gpu as G
+        radius = 2e6
+        bounds = (-np.pi * radius, -np.pi * radius / 2, np.pi * radius, np.pi * radius / 2)
+        for lod in (10, 7, 6, 5, 4, 3, 2, 0, -2):
+            su, sv = G.stock_radii(1200, 35, lod)
+            theta = .83
+            sy = np.hypot(float(su) * np.sin(theta), float(sv) * np.cos(theta))
+            for y in (0, radius * 1.1, bounds[3] - 300):
+                dj = int(y / 30)
+                center = (dj + .5) * 30
+                lo, hi = max(-1, (bounds[1] - center) / sy), min(1, (bounds[3] - center) / sy)
+                integral = 16 / (5 * np.pi) * quad(lambda t: max(0, 1 - t*t)**2.5 * np.cos((center + sy*t) / radius), lo, hi, epsabs=1e-12)[0]
+                norm = G.stock_normalization(dj, theta, su, sv, bounds)
+                self.assertAlmostEqual(integral / float(norm), 1, delta=2e-4)
+
+
 class ResourceGpuMirrorTests(unittest.TestCase):
     """NumPy mirror of the WGSL evaluator: fixture, addressing, realized geology, display tolerance.
 

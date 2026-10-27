@@ -2,7 +2,7 @@
  * Mirror: backend/terrain_resource_gpu.py (operation for operation, float32,
  * uint32 wrapping hashes). Inputs: the tile DEM, its Gaussian pair and water
  * already on the GPU, plus one package per world and mode (LOD-10 fields as
- * half floats, zone thresholds, deposits sorted in LOD-10 buckets).
+ * half floats, deposits sorted in LOD-10 buckets).
  * Method and tolerances: docs/RESOURCE_LAYERS.md section 16. */
 (function(root){
   const PREFIX='resources-';
@@ -209,22 +209,49 @@
       return f32(g-(d<<u32(-lod)))*r+r*.5-15.;
     }
     // Deposit footprints (points) or kernel density (stock) around the sample.
+    fn rStockRadii(a:f32,b:f32,lod:i32,r:f32)->vec2<f32>{
+      let district=135000.*rSmooth(2.,6.,f32(lod));
+      return max(vec2<f32>(2.*a,2.*b),max(vec2<f32>(3.*r),vec2<f32>(district,district/3.)));
+    }
+    fn rStockNorm(dj:i32,theta:f32,su:f32,sv:f32)->f32{
+      if(res.world.z<=res.world.x){return 1.;}
+      let wb=res.world*30720.;let y=f32(dj)*30.+15.;let radius=(wb.z-wb.x)/6.2831853;
+      let sy=length(vec2<f32>(su*sin(theta),sv*cos(theta)));
+      let lo=max(-1.,(wb.y-y)/sy);let hi=min(1.,(wb.w-y)/sy);
+      let mid=(lo+hi)*.5;let half=(hi-lo)*.5;var total=0.;
+      var nodes=array<f32,4>(.183434642,.525532410,.796666477,.960289856);
+      var weights=array<f32,4>(.362683783,.313706646,.222381034,.101228536);
+      for(var k=0;k<4;k++){for(var sign=-1;sign<=1;sign+=2){
+        let t=mid+f32(sign)*nodes[k]*half;let z=max(0.,1.-t*t);
+        total+=weights[k]*z*z*sqrt(z)*max(0.,cos((y+sy*t-(wb.y+wb.w)*.5)/radius));
+      }}
+      return max(1e-8,total*half*1.01859164);
+    }
+    fn rStock(gi:i32,gj:i32,lod:i32,r:f32)->f32{
+      var density=0.;_=rDeposits(gi,gj,lod,r,0.,vec3<f32>(0.),&density);return density;
+    }
     fn rDeposits(gi:i32,gj:i32,lod:i32,r:f32,valley:f32,base:vec3<f32>,density:ptr<function,f32>)->vec3<f32>{
       var rgb=base;
       if(res.zones2.y<.5){return rgb;}
       var cx:i32;var cy:i32;
       if(lod<=10){cx=gi>>u32(10-lod);cy=gj>>u32(10-lod);}else{cx=i32(floor((f32(gi)+.5)*exp2(f32(lod-10))));cy=i32(floor((f32(gj)+.5)*exp2(f32(lod-10))));}
-      let R=clamp(i32(ceil(max(12000.,8.*r)/30720.)),1,3);
+      let R=i32(ceil(max(max(12000.,res.zones.w),max(135000.*rSmooth(2.,6.,f32(lod)),select(9.,3.,res.info.x>5.5)*r))/30720.))+1;
       let W=i32(res.grid.z);let stock=res.info.x>5.5;
-      for(var oy=-R;oy<=R;oy++){for(var ox=-R;ox<=R;ox++){
+      for(var oy=-R;oy<=R;oy++){for(var col=0;col<min(2*R+1,W);col++){let ox=col-R;
+        if(cy+oy<i32(res.grid.y)||cy+oy>=i32(res.grid.y+res.grid.w)){continue;}
         let cr=rColRow(cx+ox,cy+oy);let bucket=resBuckets[u32(cr.y*W+cr.x)];
         for(var k=bucket.x;k<bucket.x+bucket.y;k++){
           let d=resDeposits[k];
           var dx=rDelta(gi,d.ij.x,lod,r);let span=(res.world.z-res.world.x)*30720.;if(span>0.){dx-=floor(dx/span+.5)*span;}let dy=rDelta(gj,d.ij.y,lod,r);
           let dist=sqrt(dx*dx+dy*dy);
-          if(stock){let sg=max(d.extra.z,.75*r);*density+=d.extra.w*1e6/(6.2831853*sg*sg)*exp(-(dx*dx+dy*dy)/(2.*sg*sg));continue;}
           let a=d.dim.x;let b=d.dim.y;let c=cos(d.dim.z);let s=sin(d.dim.z);
           let u=dx*c+dy*s;let v=-dx*s+dy*c;
+          if(stock){
+            let size=rStockRadii(a,b,lod,r);let su=size.x;let sv=size.y;
+            let q=max(0.,1.-u*u/(su*su)-v*v/(sv*sv));
+            if(q>0.){*density+=d.extra.w*1e6*.95492966/(su*sv*rStockNorm(d.ij.y,d.dim.z,su,sv))*q*q;rgb.x+=q*q;}
+            continue;
+          }
           let color=res.palette[min(d.ij.w,19)].rgb*(.45+.55*d.dim.w);
           if((min(a,b)*2./r<1.5&&d.ij.z!=3)||a*2./r<1.5){
             if(d.ij.z==0&&a*2./r>=3.){let body=clamp(1.2-abs(v)/r,0.,1.)*clamp((a-abs(u))/r,0.,1.);rgb=mix(rgb,color,body);continue;}
@@ -266,11 +293,12 @@
         return (.5+.5*cos(6.2831853*(v/12.+vec3<f32>(0.,1./3.,2./3.))))*.9*light;
       }
       if(kind>5.5){
-        var density=0.;_=rDeposits(gi,gj,lod,r,f.valley,neutral,&density);
+        var density=0.;let coverage=rDeposits(gi,gj,lod,r,0.,vec3<f32>(0.),&density).x;
         let lo=res.range.x;let hi=res.range.y;
         if(density<=lo){return neutral;}
         let t=(log(max(density,lo))-log(lo))/(log(hi)-log(lo));
-        return mix(neutral,rRamp(t)*light,rSmooth(0.,.06,t));
+        // Long fade (a quarter of the log range): a kernel tail never ends in a hard edge.
+        return mix(neutral,rRamp(t)*light,rSmooth(0.,.25,t)*rSmooth(0.,.20,coverage));
       }
       let v=rContinuous(gi,gj,lod,rTerms(f));
       if(kind>4.5){
@@ -322,8 +350,8 @@
     const [i0,j0,W,H]=header.lattice;f.set([i0,j0,W,H],0);
     f.set([header.kind,header.layers,header.classes,header.seasonal?1:0],4);
     f.set([header.range[0],header.range[1],header.bounded?1:0,season],8);
-    f.set(header.coef.slice(0,4),12);f.set([header.coef[4],header.coef[5],header.sigma,header.thresholds],16);
-    f.set([header.realized?3:0,...(header.beta||[0,0]),0],20);
+    f.set(header.coef.slice(0,4),12);f.set([header.coef[4],header.coef[5],header.sigma,header.scale||0],16);
+    f.set([header.realized?3:0,...(header.beta||[0,0]),header.max_footprint||12000],20);
     f.set([0,header.deposits?1:0,active?(marine?2:1):0,Math.min(20,header.palette.length)],24);
     u.set([header.seed32>>>0,header.layer>>>0],28);f.set(header.bounds||header.range.slice(0,2),30);
     (header.order||[]).slice(0,12).forEach((v,i)=>{u[32+i]=v;});
