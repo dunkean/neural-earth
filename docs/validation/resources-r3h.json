@@ -1,0 +1,1227 @@
+{
+  "task": "R3h",
+  "base": "ad8c6ba93d635a4a7ced9bcf786548b51c724ec6",
+  "compiler": "resources-compiler-12",
+  "counts": {
+    "before": {
+      "total": 198,
+      "present": {
+        "iron": 11,
+        "copper": 110,
+        "tin": 18,
+        "lead": 99,
+        "zinc": 99,
+        "silver": 154,
+        "gold": 63,
+        "salt": 0,
+        "gypsum": 0,
+        "coal": 2,
+        "tungsten": 8
+      },
+      "recoverable": {
+        "iron": 8,
+        "copper": 105,
+        "tin": 18,
+        "lead": 97,
+        "zinc": 0,
+        "silver": 146,
+        "gold": 60,
+        "salt": 0,
+        "gypsum": 0,
+        "coal": 1,
+        "tungsten": 0
+      },
+      "families": {
+        "coal": 2,
+        "epithermal_au_ag": 20,
+        "ironstone": 10,
+        "mvt_pb_zn": 2,
+        "orogenic_au": 23,
+        "placer_au": 13,
+        "placer_sn": 10,
+        "polymetallic_vein": 92,
+        "porphyry_cu": 2,
+        "sediment_cu": 10,
+        "skarn_fe_cu": 1,
+        "sn_w_granite": 8,
+        "vms": 5
+      }
+    },
+    "cache_key": "eccc77537facfd197ea38482773c0c392a2337193fce3642122c9435185227ee",
+    "after": {
+      "total": 11817,
+      "present": {
+        "iron": 2070,
+        "copper": 3278,
+        "tin": 2645,
+        "lead": 3419,
+        "zinc": 3419,
+        "silver": 3486,
+        "gold": 1059,
+        "salt": 387,
+        "gypsum": 1659,
+        "coal": 461,
+        "tungsten": 1812
+      },
+      "recoverable": {
+        "iron": 2066,
+        "copper": 2957,
+        "tin": 2608,
+        "lead": 3410,
+        "zinc": 3379,
+        "silver": 3479,
+        "gold": 881,
+        "salt": 386,
+        "gypsum": 1658,
+        "coal": 461,
+        "tungsten": 1527
+      },
+      "families": {
+        "bog_iron": 543,
+        "epithermal_au_ag": 17,
+        "evaporite_salt": 1,
+        "gypsum_quarry": 1658,
+        "ironstone": 8,
+        "local_ironstone": 1517,
+        "mvt_pb_zn": 4,
+        "orogenic_au": 43,
+        "placer_au": 1100,
+        "placer_sn": 807,
+        "polymetallic_vein": 84,
+        "porphyry_cu": 3,
+        "salt_spring": 386,
+        "sediment_cu": 3,
+        "skarn_fe_cu": 2,
+        "small_coal": 461,
+        "small_pb_ag": 3324,
+        "small_sn": 1827,
+        "sn_w_granite": 21,
+        "vms": 8
+      }
+    },
+    "status": {
+      "state": "ready",
+      "stages": [
+        [
+          "tectonics",
+          5.21
+        ],
+        [
+          "environment",
+          5.45
+        ],
+        [
+          "geology",
+          8.36
+        ],
+        [
+          "deposits",
+          13.28
+        ]
+      ],
+      "error": null,
+      "pid": null,
+      "atlas_s": 0.16,
+      "v2_cached": true,
+      "compile_s": 13.41,
+      "saved_s": 14.51
+    },
+    "evaporite_share": 0.006833899081263766,
+    "evaporite_expected": 0.007416625417463714,
+    "land_km2": 14126402.812035425
+  },
+  "regional_density": {
+    "iron": {
+      "max_workings_in_10000_km2": 1061,
+      "median_at_a_site": 1015.0
+    },
+    "salt": {
+      "max_workings_in_10000_km2": 108,
+      "median_at_a_site": 68.0
+    },
+    "gypsum": {
+      "max_workings_in_10000_km2": 400,
+      "median_at_a_site": 161.0
+    }
+  },
+  "first_pixel_before": {
+    "port": 8775,
+    "seed": "42",
+    "cold": false,
+    "clearedCache": false,
+    "layers": [
+      {
+        "mode": "resources-bio-npp",
+        "ok": true,
+        "firstPixelS": 0.288,
+        "sinceWorldOpenS": 0.2989999999999995,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-geo-rock",
+        "ok": true,
+        "firstPixelS": 0.2,
+        "sinceWorldOpenS": 0.49900000000000233,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-geo-context",
+        "ok": true,
+        "firstPixelS": 0.283,
+        "sinceWorldOpenS": 0.782,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-agri-cereal-suitability",
+        "ok": true,
+        "firstPixelS": 0.183,
+        "sinceWorldOpenS": 0.9660000000000011,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-mat-stone",
+        "ok": true,
+        "firstPixelS": 0.167,
+        "sinceWorldOpenS": 1.1329999999999991,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-season-snow",
+        "ok": true,
+        "firstPixelS": 0.383,
+        "sinceWorldOpenS": 1.5160000000000018,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-bio-wood-stock",
+        "ok": true,
+        "firstPixelS": 0.267,
+        "sinceWorldOpenS": 1.7830000000000013,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-agri-harvest-month",
+        "ok": true,
+        "firstPixelS": 0.283,
+        "sinceWorldOpenS": 2.065999999999999,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-dep-points",
+        "ok": true,
+        "firstPixelS": 0.166,
+        "sinceWorldOpenS": 2.2319999999999993,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-dep-stock-copper",
+        "ok": true,
+        "firstPixelS": 0.167,
+        "sinceWorldOpenS": 2.399000000000001,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-dep-potential-copper",
+        "ok": true,
+        "firstPixelS": 0.184,
+        "sinceWorldOpenS": 2.583000000000002,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-dep-potential-iron",
+        "ok": true,
+        "firstPixelS": 0.166,
+        "sinceWorldOpenS": 2.7490000000000023,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-dep-stock-iron",
+        "ok": true,
+        "firstPixelS": 0.151,
+        "sinceWorldOpenS": 2.900000000000002,
+        "progressShown": "Chargement de la couche…"
+      }
+    ],
+    "worldOpenS": 19.953,
+    "worldDiameterKm": 4000,
+    "errors": []
+  },
+  "first_pixel_after": {
+    "port": 8775,
+    "seed": "42",
+    "cold": false,
+    "clearedCache": false,
+    "layers": [
+      {
+        "mode": "resources-bio-npp",
+        "ok": true,
+        "firstPixelS": 0.277,
+        "sinceWorldOpenS": 0.2789999999999999,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-geo-rock",
+        "ok": true,
+        "firstPixelS": 0.283,
+        "sinceWorldOpenS": 0.5629999999999988,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-geo-context",
+        "ok": true,
+        "firstPixelS": 0.4,
+        "sinceWorldOpenS": 0.9629999999999974,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-agri-cereal-suitability",
+        "ok": true,
+        "firstPixelS": 0.166,
+        "sinceWorldOpenS": 1.1289999999999978,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-mat-stone",
+        "ok": true,
+        "firstPixelS": 0.184,
+        "sinceWorldOpenS": 1.3129999999999988,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-season-snow",
+        "ok": true,
+        "firstPixelS": 0.283,
+        "sinceWorldOpenS": 1.596,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-bio-wood-stock",
+        "ok": true,
+        "firstPixelS": 0.267,
+        "sinceWorldOpenS": 1.8629999999999995,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-agri-harvest-month",
+        "ok": true,
+        "firstPixelS": 0.183,
+        "sinceWorldOpenS": 2.0459999999999994,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-dep-points",
+        "ok": true,
+        "firstPixelS": 0.283,
+        "sinceWorldOpenS": 2.328999999999997,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-dep-copper",
+        "ok": true,
+        "firstPixelS": 0.167,
+        "sinceWorldOpenS": 2.4959999999999987,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-dep-potential-copper",
+        "ok": true,
+        "firstPixelS": 0.283,
+        "sinceWorldOpenS": 2.779,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-dep-potential-iron",
+        "ok": true,
+        "firstPixelS": 0.167,
+        "sinceWorldOpenS": 2.945999999999998,
+        "progressShown": "Chargement de la couche…"
+      },
+      {
+        "mode": "resources-dep-iron",
+        "ok": true,
+        "firstPixelS": 0.183,
+        "sinceWorldOpenS": 3.128999999999998,
+        "progressShown": "Chargement de la couche…"
+      }
+    ],
+    "worldOpenS": 21.135,
+    "worldDiameterKm": 4000,
+    "errors": []
+  },
+  "parity": {
+    "ok": true,
+    "adapter": {
+      "vendor": "nvidia",
+      "architecture": "ampere"
+    },
+    "summary": [
+      {
+        "name": "positive",
+        "cases": 16,
+        "maxError": 4.3446011650699717e-07,
+        "mismatches": 0
+      },
+      {
+        "name": "bounded",
+        "cases": 16,
+        "maxError": 4.76837158203125e-07,
+        "mismatches": 0
+      },
+      {
+        "name": "seasonal",
+        "cases": 16,
+        "maxError": 7.875869471377548e-07,
+        "mismatches": 0
+      },
+      {
+        "name": "potential-copper",
+        "cases": 16,
+        "maxError": 5.429068514084578e-07,
+        "mismatches": 0
+      },
+      {
+        "name": "potential-iron",
+        "cases": 16,
+        "maxError": 6.345080636774527e-07,
+        "mismatches": 0
+      },
+      {
+        "name": "geology",
+        "cases": 38,
+        "maxError": 0,
+        "mismatches": 0
+      },
+      {
+        "name": "cyclic",
+        "cases": 18,
+        "maxError": 0,
+        "mismatches": 0
+      },
+      {
+        "name": "points",
+        "cases": 36,
+        "maxError": 2.384185791015625e-07,
+        "mismatches": 0
+      },
+      {
+        "name": "points-screen",
+        "cases": 36,
+        "maxError": 3.8743019104003906e-07,
+        "mismatches": 0
+      },
+      {
+        "name": "stock",
+        "cases": 36,
+        "maxError": 2.348752935500778e-06,
+        "mismatches": 0
+      },
+      {
+        "name": "features",
+        "cases": 8,
+        "maxError": 4.76837158203125e-07,
+        "mismatches": 0
+      }
+    ]
+  },
+  "python_tests": "organic stock max integral relative error: 8.978415236515769e-05\n..............................................\n----------------------------------------------------------------------\nRan 46 tests in 23.715s\n\nOK\n",
+  "renderer_test": "{\"skipped\":false,\"status\":\"webgpu\",\"failure\":null,\"timings\":{\"positive\":0.3999999761581421,\"seasonal\":0.3999999761581421,\"geology\":0.19999992847442627,\"points\":0.3999999761581421},\"repeatExact\":true,\"seasonDifference\":24.304668426513672,\"zoneBoundaryShare\":0.00443267822265625,\"zoneColours\":1275,\"distinct\":[[\"positive\",\"seasonal\",15.004683176676432],[\"positive\",\"geology\",54.12594731648763],[\"positive\",\"points\",33.356858571370445],[\"seasonal\",\"geology\",54.308990478515625],[\"seasonal\",\"points\",22.48535919189453],[\"geology\",\"points\",56.82231648763021]]}\n✔ tests\\browser\\test_terrain_resources_gpu.cjs (19075.5094ms)\nℹ tests 1\nℹ suites 0\nℹ pass 1\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 19083.387\n",
+  "inspector": {
+    "ok": true,
+    "menu": {
+      "resources": [
+        "resources-dep-points",
+        "resources-dep-iron",
+        "resources-dep-copper",
+        "resources-dep-tin",
+        "resources-dep-lead",
+        "resources-dep-zinc",
+        "resources-dep-silver",
+        "resources-dep-gold",
+        "resources-dep-salt",
+        "resources-dep-gypsum",
+        "resources-dep-coal",
+        "resources-dep-tungsten",
+        "resources-dep-prospect-porphyry-cu",
+        "resources-dep-prospect-epithermal-au-ag",
+        "resources-dep-prospect-sn-w-granite",
+        "resources-dep-prospect-polymetallic-vein",
+        "resources-dep-prospect-vms",
+        "resources-dep-prospect-orogenic-au",
+        "resources-dep-prospect-mvt-pb-zn",
+        "resources-dep-prospect-sediment-cu",
+        "resources-dep-prospect-skarn-fe-cu",
+        "resources-dep-prospect-bif-iron",
+        "resources-dep-prospect-ironstone",
+        "resources-dep-prospect-laterite-fe",
+        "resources-dep-prospect-evaporite-salt",
+        "resources-dep-prospect-coal",
+        "resources-dep-prospect-bog-iron",
+        "resources-dep-prospect-local-ironstone",
+        "resources-dep-prospect-small-pb-ag",
+        "resources-dep-prospect-salt-spring",
+        "resources-dep-prospect-gypsum-quarry",
+        "resources-dep-prospect-small-sn",
+        "resources-dep-prospect-small-coal",
+        "resources-dep-prospect-placer-au",
+        "resources-dep-prospect-placer-sn",
+        "resources-dep-potential-iron",
+        "resources-dep-potential-copper",
+        "resources-dep-potential-tin",
+        "resources-dep-potential-lead",
+        "resources-dep-potential-zinc",
+        "resources-dep-potential-silver",
+        "resources-dep-potential-gold",
+        "resources-dep-potential-salt",
+        "resources-dep-potential-gypsum",
+        "resources-dep-potential-coal",
+        "resources-dep-potential-tungsten"
+      ],
+      "groups": [
+        "Main maps",
+        "Map styles",
+        "Seasonal climate",
+        "Atmosphere",
+        "Oceans",
+        "Orogen plates",
+        "Relief formation",
+        "Ressources · géologie",
+        "Ressources · gisements",
+        "Ressources · agriculture et élevage",
+        "Ressources · forêt, faune, pêche, eau",
+        "Ressources · matériaux, sel, tourbe",
+        "Ressources · saisons",
+        "Diagnostic"
+      ],
+      "diagnostics": "DiagnosticProspectivité · Porphyre Cu-Au (Cox & Singer 17/20c) (zones)Prospectivité · Épithermal Au-Ag (25a–c) (zones)Prospectivité · Sn-W de granite, filons et greisens (15a–c) (zones)Prospectivité · Filons polymétalliques Pb-Zn-Ag (22c) (zones)Prospectivité · Sulfures massifs volcanogènes (24a, 28a) (zones)Prospectivité · Or orogénique en quartz (36a) (zones)Prospectivité · Pb-Zn type Mississippi (32a–b) (zones)Prospectivité · Cu sédimentaire (30b) (zones)Prospectivité · Skarn Fe-Cu (18b) (zones)Prospectivité · Fer rubané Superior/Algoma (34a, 28b) (zones)Prospectivité · Fer oolithique (34f) (zones)Prospectivité · Fer latéritique (zones)Prospectivité · Sel et gypse évaporitiques (35a) (zones)Prospectivité · Charbon (zones)Prospectivité · Fer des marais (zones)Prospectivité · Petit fer sédimentaire (zones)Prospectivité · Petits filons Pb–Ag (zones)Prospectivité · Source salée / saumure (zones)Prospectivité · Carrière de gypse (zones)Prospectivité · Petits filons Sn–W (zones)Prospectivité · Petit affleurement de charbon (zones)Prospectivité · Placers aurifères (39a) (zones)Prospectivité · Placers stannifères (39e) (zones)Prospectivité · Fantasy · métal stellaire (zones)Potentiel · fer (zones)Potentiel · cuivre (zones)Potentiel · étain (zones)Potentiel · plomb (zones)Potentiel · zinc (zones)Potentiel · argent (zones)Potentiel · or (zones)Potentiel · sel (zones)Potentiel · gypse (zones)Potentiel · charbon (zones)Potentiel · tungstène (zones)Potentiel · métal stellaire (zones)"
+    },
+    "text": "Cellule LOD 10 (11, 85) · 240,3 km²\nContexte dominant : Arc de subduction · roche dominante : Argilo-marneux\n• Carrière de gypse · Gypse à 0 km : 3.72e+6 t récupérables ; teneur 100 % ; profondeur 0,9 m ; emprise 3 032,2 × 606,4 m",
+    "legend": "GypseSel et gypse évaporitiques (35a)Carrière de gypseCouleur : famille. Aire ∝ 9 + 5 × log₁₀(tonnes récupérables), bornée à 10⁰–10⁸ t. Diamètres : 6 px (≤1 t), 9 px (100 t), 11 px (10 000 t), 14 px (≥100 Mt), hors contour de 1 px. Les grands sites passent devant. Fondu vers l’emprise réelle au zoom proche.Statut : derived · détail calculé sur GPU",
+    "count": 1658,
+    "errors": []
+  },
+  "captures": {
+    "ok": true,
+    "errors": [],
+    "responses": [],
+    "world": {
+      "diameter": 4000,
+      "profile": "orogen--g2d683499c4cc36059bc4305c",
+      "bounds": [
+        -6283185.307179586,
+        -3141592.653589793,
+        6283185.307179586,
+        3141592.653589793
+      ],
+      "identity": "8bf06ba2334e544eef2b2671329978745929cf327092d0479fc0d48a2c692dae"
+    },
+    "frames": [
+      {
+        "resource": "copper",
+        "mode": "render-v2",
+        "lod": 10,
+        "file": "copper-render-10.png",
+        "center": [
+          2456355,
+          2071095
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "copper",
+        "mode": "resources-dep-copper",
+        "lod": 10,
+        "file": "copper-sites-10.png",
+        "center": [
+          2456355,
+          2071095
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "copper",
+        "mode": "render-v2",
+        "lod": 7,
+        "file": "copper-render-7.png",
+        "center": [
+          2456355,
+          2071095
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "copper",
+        "mode": "resources-dep-copper",
+        "lod": 7,
+        "file": "copper-sites-7.png",
+        "center": [
+          2456355,
+          2071095
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "copper",
+        "mode": "render-v2",
+        "lod": 4,
+        "file": "copper-render-4.png",
+        "center": [
+          2456355,
+          2071095
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "copper",
+        "mode": "resources-dep-copper",
+        "lod": 4,
+        "file": "copper-sites-4.png",
+        "center": [
+          2456355,
+          2071095
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "copper",
+        "mode": "render-v2",
+        "lod": 2,
+        "file": "copper-render-2.png",
+        "center": [
+          2456355,
+          2071095
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "copper",
+        "mode": "resources-dep-copper",
+        "lod": 2,
+        "file": "copper-sites-2.png",
+        "center": [
+          2456355,
+          2071095
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "copper",
+        "mode": "render-v2",
+        "lod": 0,
+        "file": "copper-render-0.png",
+        "center": [
+          2456355,
+          2071095
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "copper",
+        "mode": "resources-dep-copper",
+        "lod": 0,
+        "file": "copper-sites-0.png",
+        "center": [
+          2456355,
+          2071095
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "iron",
+        "mode": "render-v2",
+        "lod": 10,
+        "file": "iron-render-10.png",
+        "center": [
+          -3567735,
+          -105975
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "iron",
+        "mode": "resources-dep-iron",
+        "lod": 10,
+        "file": "iron-sites-10.png",
+        "center": [
+          -3567735,
+          -105975
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "iron",
+        "mode": "render-v2",
+        "lod": 7,
+        "file": "iron-render-7.png",
+        "center": [
+          -3567735,
+          -105975
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "iron",
+        "mode": "resources-dep-iron",
+        "lod": 7,
+        "file": "iron-sites-7.png",
+        "center": [
+          -3567735,
+          -105975
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "iron",
+        "mode": "render-v2",
+        "lod": 4,
+        "file": "iron-render-4.png",
+        "center": [
+          -3567735,
+          -105975
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "iron",
+        "mode": "resources-dep-iron",
+        "lod": 4,
+        "file": "iron-sites-4.png",
+        "center": [
+          -3567735,
+          -105975
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "iron",
+        "mode": "render-v2",
+        "lod": 2,
+        "file": "iron-render-2.png",
+        "center": [
+          -3567735,
+          -105975
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "iron",
+        "mode": "resources-dep-iron",
+        "lod": 2,
+        "file": "iron-sites-2.png",
+        "center": [
+          -3567735,
+          -105975
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "iron",
+        "mode": "render-v2",
+        "lod": 0,
+        "file": "iron-render-0.png",
+        "center": [
+          -3567735,
+          -105975
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "iron",
+        "mode": "resources-dep-iron",
+        "lod": 0,
+        "file": "iron-sites-0.png",
+        "center": [
+          -3567735,
+          -105975
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "salt",
+        "mode": "render-v2",
+        "lod": 10,
+        "file": "salt-render-10.png",
+        "center": [
+          -5366115,
+          1759725
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "salt",
+        "mode": "resources-dep-salt",
+        "lod": 10,
+        "file": "salt-sites-10.png",
+        "center": [
+          -5366115,
+          1759725
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "salt",
+        "mode": "render-v2",
+        "lod": 7,
+        "file": "salt-render-7.png",
+        "center": [
+          -5366115,
+          1759725
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "salt",
+        "mode": "resources-dep-salt",
+        "lod": 7,
+        "file": "salt-sites-7.png",
+        "center": [
+          -5366115,
+          1759725
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "salt",
+        "mode": "render-v2",
+        "lod": 4,
+        "file": "salt-render-4.png",
+        "center": [
+          -5366115,
+          1759725
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "salt",
+        "mode": "resources-dep-salt",
+        "lod": 4,
+        "file": "salt-sites-4.png",
+        "center": [
+          -5366115,
+          1759725
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "salt",
+        "mode": "render-v2",
+        "lod": 2,
+        "file": "salt-render-2.png",
+        "center": [
+          -5366115,
+          1759725
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "salt",
+        "mode": "resources-dep-salt",
+        "lod": 2,
+        "file": "salt-sites-2.png",
+        "center": [
+          -5366115,
+          1759725
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "salt",
+        "mode": "render-v2",
+        "lod": 0,
+        "file": "salt-render-0.png",
+        "center": [
+          -5366115,
+          1759725
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "salt",
+        "mode": "resources-dep-salt",
+        "lod": 0,
+        "file": "salt-sites-0.png",
+        "center": [
+          -5366115,
+          1759725
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "gypsum",
+        "mode": "render-v2",
+        "lod": 10,
+        "file": "gypsum-render-10.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "gypsum",
+        "mode": "resources-dep-gypsum",
+        "lod": 10,
+        "file": "gypsum-sites-10.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "gypsum",
+        "mode": "render-v2",
+        "lod": 7,
+        "file": "gypsum-render-7.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "gypsum",
+        "mode": "resources-dep-gypsum",
+        "lod": 7,
+        "file": "gypsum-sites-7.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "gypsum",
+        "mode": "render-v2",
+        "lod": 4,
+        "file": "gypsum-render-4.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "gypsum",
+        "mode": "resources-dep-gypsum",
+        "lod": 4,
+        "file": "gypsum-sites-4.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "gypsum",
+        "mode": "render-v2",
+        "lod": 2,
+        "file": "gypsum-render-2.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "gypsum",
+        "mode": "resources-dep-gypsum",
+        "lod": 2,
+        "file": "gypsum-sites-2.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "gypsum",
+        "mode": "render-v2",
+        "lod": 0,
+        "file": "gypsum-render-0.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "gypsum",
+        "mode": "resources-dep-gypsum",
+        "lod": 0,
+        "file": "gypsum-sites-0.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "points",
+        "mode": "render-v2",
+        "lod": 10,
+        "file": "points-render-10.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "points",
+        "mode": "resources-dep-points",
+        "lod": 10,
+        "file": "points-sites-10.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "points",
+        "mode": "render-v2",
+        "lod": 7,
+        "file": "points-render-7.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "points",
+        "mode": "resources-dep-points",
+        "lod": 7,
+        "file": "points-sites-7.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "points",
+        "mode": "render-v2",
+        "lod": 4,
+        "file": "points-render-4.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "points",
+        "mode": "resources-dep-points",
+        "lod": 4,
+        "file": "points-sites-4.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "conditioning-preview"
+        ]
+      },
+      {
+        "resource": "points",
+        "mode": "render-v2",
+        "lod": 2,
+        "file": "points-render-2.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "points",
+        "mode": "resources-dep-points",
+        "lod": 2,
+        "file": "points-sites-2.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "points",
+        "mode": "render-v2",
+        "lod": 0,
+        "file": "points-render-0.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      },
+      {
+        "resource": "points",
+        "mode": "resources-dep-points",
+        "lod": 0,
+        "file": "points-sites-0.png",
+        "center": [
+          -4248705,
+          -937515
+        ],
+        "pending": 0,
+        "sources": [
+          "decoder"
+        ]
+      }
+    ],
+    "contact_sheets": [
+      "docs/images/resources-gpu-sites-copper.jpg",
+      "docs/images/resources-gpu-sites-iron.jpg",
+      "docs/images/resources-gpu-sites-salt.jpg",
+      "docs/images/resources-gpu-sites-gypsum.jpg",
+      "docs/images/resources-gpu-sites-points.jpg"
+    ]
+  }
+}

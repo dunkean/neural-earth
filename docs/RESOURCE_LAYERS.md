@@ -1,8 +1,11 @@
-# Ressources naturelles multi-échelles — potentiel, stock, flux
+# Ressources naturelles multi-échelles — où trouver les ressources
 
 Date : 27 octobre 2026. Branche locale `resources-layers` de Neural Earth, rebasée sur `origin/main` `051dd1f`, qui contient le merge Render v2 `d6cbb78`. Destinataires : Neural Earth, qui produit, Chronos, qui consomme et porte le temps, et Magna Urbis, qui consomme localement et construit les cités.
 
 ## 0. Statut et lecture
+
+**R3h, 27 octobre 2026 : la présentation courante est décrite au §20.** Une couche par ressource indique les gisements récupérables avec les techniques fixes du scénario. Les anciens écrans « Stock contenu » et « Récupérable médiéval » des §1–19 sont des descriptions historiques et des contrats internes, plus des choix du menu. Les potentiels/prospectivités sont regroupés en bas sous **Diagnostic** : intensité servant au placement, pas inventaire de ressources.
+
 
 Ce document distingue trois statuts :
 
@@ -599,7 +602,7 @@ Les budgets canoniques ne changent pas : stocks, tonnages, budgets entiers et to
 | Géologie réalisée | `terrain_resources.realize_rocks` (canon) et `terrain_resource_gpu.realized_class` (même fonction) | parts canoniques des roches mesurées sur la fonction que le GPU affiche (§16.3) |
 | Compilation | `terrain_resource_compile.py` (processus), `terrain_resource_workers.py` (tâches parallèles) | autorité calculée hors du serveur, publiée par étapes ; `/gpu` répond 202 tant qu'une couche attend (§15.1) |
 | Renderer | `web/terrain_renderer.js` | liaisons 11 à 15 (champ, réservée, paramètres, gisements, seaux) dans la passe *shade* et dans le pipeline grossier ; un changement de paquet re-shade les tuiles physiques et relie les blocs grossiers |
-| Légende, curseur de saison, inspecteur | `web/terrain_resources.js` | charge le paquet de la couche choisie ; le curseur réécrit seulement 512 octets de paramètres |
+| Légende, curseur de saison, inspecteur | `web/terrain_resources.js` | charge le paquet de la couche choisie ; le curseur réécrit seulement 704 octets de paramètres |
 | Repli sans WebGPU | `terrain_server.py` | tuiles PNG bilinéaires du LOD 10, sans détail (ancien chemin) |
 
 **Adressage.** Chaque pixel est un échantillon d'indice entier global `(gi, gj)` sur le réseau `30·2^L` m du LOD affiché, origine au centre de la carte. Sur une tuile physique, `L` est celui de la tuile ; sur un bloc grossier, `L` est un cran plus fin que l'empreinte du pixel à l'écran (`dpdx`) : le détail suit le zoom entre deux LOD de blocs, sans marches d'un pixel d'échantillon.
@@ -883,3 +886,121 @@ Planches relues visuellement, Render v2 en haut :
 **Jonction observée.** La planche de jonction assemble les bandes droite puis gauche du viewer, à 3 840 m/pixel, y = 2 300 km. La croûte Orogen se raccorde. Une cassure verticale du détail de terrain reste visible dans **Render v2** ; elle se retrouve dans le relief sous les ressources. La période physique du champ ressource est vérifiée séparément par les tests, mais cette capture ne permet pas d’affirmer que toute la présentation est sans couture. Cette faiblesse non ressource est signalée ; elle n’a pas été réécrite dans cette tâche.
 
 **Faiblesses et proposé.** Le placement et les dimensions des districts, les rampes et les profils de relief demandent une calibration sur plusieurs mondes. Le monde choisi ne fournit aucun gisement d’étain, sel, gypse ou tungstène : leurs couches existent et leurs bornes sont testées, leur apparence réelle n’est pas validée ici. Les potentiels sont des dotations typiques, leurs valeurs ne sont pas des réserves. Les champs de stock sont conservatifs à la tolérance de quadrature ; une somme des couleurs ou de pixels ponctuels n’est pas un export de tonnage. Le gros grès dominant, les aperçus et le temps d’ouverture global restent des limites visibles du monde courant ; aucune réécriture de géométrie, d’Orogen ou de Render v2 n’a été faite. Les anciennes limites de conservation des champs continus (§16.2) restent applicables aux potentiels, distinctement des noyaux de stock.
+
+
+## 20. R3h — localiser les ressources avec des techniques fixes
+
+### 20.1 Implémenté : lecture de la carte et quantités
+
+Le menu offre **Fer, Cuivre, Étain, Plomb, Zinc, Argent, Or, Sel, Gypse, Charbon, Tungstène**, puis le **Métal stellaire** seulement si `TERRAIN_RESOURCES_FANTASY=1`, et **Tous les gisements**. Il n’expose plus les couches de contenu ou une deuxième série « récupérable ». Le contenu reste interne pour calculer teneurs et budgets. Tous les potentiels par métal et toutes les prospectivités par famille viennent en dernier dans **Diagnostic** ; leurs deux légendes, structurée et texte, expliquent leur rôle de placement.
+
+La quantité cartographiée est le **récupérable initial** à techniques fixes, après l’accès par profondeur/relief et le coefficient de récupération. Aucun progrès technique n’est simulé. Or, argent et métal stellaire restent exportés en kg ; les tailles de symboles convertissent ces kg en tonnes physiques, pour garder la même échelle entre ressources. Le total de « Tous » additionne ces masses physiques, sans ajouter le minerai ni le contenu une seconde fois. Les réserves d’un site multirésource apparaissent dans chaque couche concernée ; les comptes par ressource ne se somment donc pas.
+
+**Interprétation Zn/W (provisoire).** Zinc = équivalent Zn dans un minerai triable, notamment utilisable en cémentation du laiton ; tungstène = équivalent W dans du minéral triable, dont l’usage médiéval reste **non validé**. Ces deux couches ne promettent pas la production de métal raffiné. Coefficients fixes proposés : Zn 0,30 et W 0,25, en plus de l’accès ; ils remplacent les zéros du précédent scénario « métal fondu ». Cette convention doit être validée comme règle de jeu, surtout pour W.
+
+Chaque couleur désigne une famille. Pour une masse récupérable M en tonnes :
+
+```text
+rayon_px² = 9 + 5 × clamp(log10(max(M, 1)), 0, 8)
+```
+
+L’aire du disque est donc affine en log10(M), bornée : diamètre 6 px jusqu’à 1 t, 8,7 px à 100 t, 10,8 px à 10 000 t et 14 px à partir de 100 Mt. Un contour sombre de 1 px le sépare du terrain. La taille suit les pixels CSS de la caméra, y compris sur des tuiles plus fines conservées en cache ; un symbole peut rester plus grand lors d’un suréchantillonnage de tuile. Le shader choisit la plus grande masse à chaque recouvrement, indépendamment de l’ordre des seaux. Les petites occurrences occultées se séparent au zoom ; chaque couche ressource reste sélectionnable. Il n’y a pas de regroupement avec compteur.
+
+Le fondu vers l’emprise commence lorsque `sqrt(a×b)/mpp` dépasse le rayon du symbole et finit au double : pas de bascule brutale pour un filon étroit. Amas et lentilles ont un axe transversal courbe, les filons suivent la structure et les placers la pente régionale, avec une modulation bornée par la vallée. Le contour continue à suivre le corps résolu. Les teneurs tirées sont plafonnées pour que la somme des fractions minérales ne dépasse pas 100 % (tolérance des quanta d’arrondi). Les teneurs tirées sont plafonnées pour que la somme des fractions minérales ne dépasse pas 100 % (tolérance des quanta d’arrondi). La coloration ne modifie aucun tonnage. L’inspection par **clic** près du symbole donne famille, ressource, récupérable avec unité, teneur, profondeur du toit et longueur × largeur de l’emprise ; ses centres adressés sont ceux du GPU. Le rayon de recherche suit le zoom et la couche filtre les sites avant de limiter la réponse. Le repli CPU filtre aussi les ressources et utilise la même échelle de symboles ; ses emprises détaillées ne sont pas validées.
+
+### 20.2 Implémenté : populations locales, évaporites et déterminisme
+
+Aux modèles de grands corps s’ajoutent fer des marais, petit fer sédimentaire, petits filons Pb–Ag/Cu, sources salées/saumures, carrières de gypse, petits filons Sn–W et affleurements de charbon. Les placers Au et Sn ont une population plus dense et des médianes abaissées : respectivement 25 000 et 15 000 t de matériau. Il ne s’agit pas de multiplier les anciens corps géants. Les nouveaux sites ont des toits médians de 1–4 m et des médianes de 3 000–30 000 t ; les petites teneurs récupérables peuvent être arrondies à zéro au quantum d’export et sont alors absentes de la couche correspondante.
+
+La rareté des évaporites venait notamment d’une réalisation catégorielle trop peu convergée et d’une porte utilisant les quatre échantillons de roche d’une cellule de 30,72 km. La calibration passe à 12 itérations amorties, un échantillon toutes les quatre cellules terrestres. Le prior lithologique conserve la même formule de paléo-bassin. Les évaporites utilisent désormais les hôtes **attendus continus** pour l’intensité de placement, et un seuil graduel de 0 à 0,003 de fraction attendue, pour éviter de transformer une cellule rarement échantillonnée en interdiction géologique ou en rectangle de carrières. Cette fraction n’est pas une preuve de saumure exploitable partout dans le bassin.
+
+`COMPILER_VERSION` passe de **resources-compiler-7** à **resources-compiler-12** suivant §15.1 ; 8 à 11 étaient des essais locaux, non livrés. Le compteur de Poisson n’est plus tronqué à 40 lorsque la moyenne est élevée dans une grille d’export grossière. Les tirages gardent les domaines adressés et la seed ; chaque marque conserve sa clé, son propriétaire et son district. La position utilise une CDF des poids des enfants dans l’ordre canonique des indices, tirée par la clé de la marque. Les CDF sont réutilisées entre occurrences d’un même propriétaire, avec mémoire de travail bornée ; ni leur cache, ni la taille des lots, ni l’ordre des requêtes ne changent le résultat. Les centres de districts inactifs sont exclus une fois par famille du calcul d’attribution. Les budgets de contenu et de récupérable restent des sommes entières exactes des sites par propriétaire. Le GPU garde un index de seaux LOD 10 (début, nombre), et parcourt uniquement ceux intersectant le symbole ou l’emprise : aucun parcours mondial par pixel. La palette passe à 32 entrées pour ne pas confondre les nouvelles familles.
+
+### 20.3 Proposé : calibration historique et plages de densité
+
+**Points d’ancrage vérifiés, pas inventaire exhaustif.** Le [cadre archéologique du Forest of Dean, Hoyle 2017, p.144](https://historicengland.org.uk/images-books/publications/research-framework-forest-of-dean-district/forest-of-dean-glos-research-framework-2017/) rapporte 25–30 forges au milieu du XIIIe siècle, 43 en 1270 et 60 en 1282. Ce sont des installations de traitement ; plusieurs peuvent exploiter un même gisement. Les [comptes du district de 2019–2020, p.2](https://www.fdean.gov.uk/media/102do2gn/fod-draft-statement-of-accounts-2019-20_final.pdf) donnent une surface moderne de 526 km². Diviser ces comptes par cette surface donne **475–1 141 installations pour 10 000 km²**, calcul indicatif **provisoire** : les limites médiévales et modernes ne coïncident pas. C’est un ordre de grandeur de région spécialisée, pas une densité de minerais du monde entier.
+
+La [notice officielle de Droitwich, Historic England 1020256](https://historicengland.org.uk/listing/the-list/list-entry/1020256) recense cinq puits à saumure au Domesday et plus de 1 000 t/an de sel, puis environ 1 500 t/an vers 1400. Elle confirme aussi la présence côtière et intérieure de cette activité dès la fin du Xe siècle. Il serait trompeur d’en déduire une densité de gisements sans aire de bassin inventoriée. Une plage régionale de **5–100 sources/sites pour 10 000 km²** est donc **provisoire**, et les salines marines restent le flux `sea_salt`, distinct de cette population de saumures et de sel gemme.
+
+Les paramètres ci-dessous sont des occurrences pour **10 000 km² à prospectivité 1**, avant regroupement en districts et accès médiéval. Le nombre réel suit l’intégrale `densité × prospectivité × aire`, pas la densité maximale multipliée par toutes les terres. Les plages sont **proposées, provisoires** pour tous les modèles : les modèles USGS teneur-tonnage ne sont pas des inventaires médiévaux de petites exploitations. Le fer se concentre ensuite dans des régions de district plus denses que la moyenne mondiale. Une calibration archéologique comparable par bassin, famille et période reste à faire.
+
+| Famille | Paramètre implémenté / 10 000 km² | Plage de calibration proposée, provisoire |
+|---|---:|---:|
+| `porphyry_cu` | 0.15 | 0.0375–0.6 |
+| `epithermal_au_ag` | 0.6 | 0.15–2.4 |
+| `sn_w_granite` | 0.5 | 0.125–2 |
+| `polymetallic_vein` | 0.8 | 0.2–3.2 |
+| `vms` | 0.4 | 0.1–1.6 |
+| `orogenic_au` | 0.5 | 0.125–2 |
+| `mvt_pb_zn` | 0.15 | 0.0375–0.6 |
+| `sediment_cu` | 0.1 | 0.025–0.4 |
+| `skarn_fe_cu` | 0.3 | 0.075–1.2 |
+| `bif_iron` | 0.08 | 0.02–0.32 |
+| `ironstone` | 0.25 | 0.0625–1 |
+| `laterite_fe` | 0.3 | 0.075–1.2 |
+| `evaporite_salt` | 0.2 | 0.05–0.8 |
+| `coal` | 0.1 | 0.025–0.4 |
+| `bog_iron` | 25 | 6.25–100 |
+| `local_ironstone` | 30 | 7.5–120 |
+| `small_pb_ag` | 35 | 8.75–140 |
+| `salt_spring` | 20 | 5–80 |
+| `gypsum_quarry` | 100 | 25–400 |
+| `small_sn` | 25 | 6.25–100 |
+| `small_coal` | 20 | 5–80 |
+| `placer_au` | 30 | 7.5–120 |
+| `placer_sn` | 25 | 6.25–100 |
+| `fantasy_star_metal` | 0.02 | 0.005–0.08 |
+
+Ces plages ne constituent pas des intervalles de confiance historiques. Les coefficients d’accès, les tonnages, le nombre de sources salées, le rendement des petites carrières, les dimensions des districts et l’utilité du tungstène restent **provisoires**. Le modèle vise toutes les tailles d’occurrences représentées par ces populations ; il ne peut garantir un recensement exhaustif des sites réels.
+
+### 20.4 Rattrapage documentaire R3g (ad8c6ba), implémenté et mesures archivées
+
+**Ceintures métallifères.** Les tracts tectoniques physiques (`tract_*`) remplacent la somme de faibles appartenances floues comme contrainte minérale. Une union pondérée des contextes est passée dans un seuil lisse au carré, multipliée par les hôtes et par des provinces fertiles adressées de 123/246 km. Les placers dérivent des sources primaires, diffusées régionalement et limitées par l’eau et la rugosité. L’échelle des potentiels métalliques est **linéaire** (borne de couleur 12 % de la borne physique théorique) ; ces couches sont maintenant diagnostiques.
+
+**Emprises organiques.** Les anciennes vues de densité conservée utilisaient cinq lobes pondérés (0,13/0,23/0,28/0,23/0,13), un axe courbe et la pente régionale pour les placers ; le noyau était normalisé en aire sphérique. Elles restent internes au miroir et aux tests d’intégrale, et ne sont plus proposées comme cartes de ressources. Les vues R3h suivent les axes et formes par corps avec un contour et le fondu du §20.1. L’intégrale d’une couleur ou d’un symbole n’est pas un export de masse.
+
+**Jonction longitudinale.** Les champs utilisent la circonférence physique et les centres rognés ; le détail non périodique s’atténue à la jonction. Le correctif R3g de `_wrap_edt` étend le halo jusqu’au support significatif des ceintures, afin qu’une frontière tectonique de l’autre côté de l’antiméridien reste visible. Les distances des dépôts se replient également sur la période physique. Les tests de périodicité concernent les ressources ; la cassure de relief Render v2 signalée en §19.6 reste une limite distincte et n’est pas déclarée corrigée par R3h.
+
+**Contraste mesuré R3g, archives locales** `output/resources-r3g/contrast-before-controlled.json` et `contrast-after.json`, seed 42. Pour le cuivre, la part du potentiel intégrée dans les 10 % de terres les plus dotées passe de **20,56 % à 75,33 %** ; la part de terres sous 1 % de la borne physique passe de **10,07 % à 76,02 %**. Pour le fer : **28,39 % à 93,96 %**, et **33,19 % à 92,06 %**. Ce sont des métriques du diagnostic avant/après R3g, pas de nouveaux taux de gisements R3h ; les densités modifiées interdisent de les présenter comme mesures actuelles.
+
+### 20.5 Mesuré R3h : validation, comptes et captures
+
+**Référence :** Orogen, seed 42, sphère 4 000 km, 14 126 403 km² terrestres, RTX 3090, serveur de ce worktree sur 8775. Comparaison avec `ad8c6ba` (`resources-compiler-7`). Aucun processus sur 8765 n’a été arrêté. Les erreurs transitoires de mémoire Windows des essais intermédiaires ont imposé des captures séquentielles avec redémarrage de 8775 entre ressources ; les résultats finaux ci-dessous sont ceux de la campagne achevée.
+
+| Ressource | Sites présents avant | Sites présents après | Récupérable > 0 avant | Récupérable > 0 après |
+|---|---:|---:|---:|---:|
+| Fer | 11 | 2070 | 8 | 2066 |
+| Cuivre | 110 | 3278 | 105 | 2957 |
+| Étain | 18 | 2645 | 18 | 2608 |
+| Plomb | 99 | 3419 | 97 | 3410 |
+| Zinc | 99 | 3419 | 0 | 3379 |
+| Argent | 154 | 3486 | 146 | 3479 |
+| Or | 63 | 1059 | 60 | 881 |
+| Sel | 0 | 387 | 0 | 386 |
+| Gypse | 0 | 1659 | 0 | 1658 |
+| Charbon | 2 | 461 | 1 | 461 |
+| Tungstène | 8 | 1812 | 0 | 1527 |
+
+**Sites distincts : 198 → 11817.** Un site multirésource compte dans plusieurs lignes ; seule la colonne récupérable > 0 détermine les symboles de la couche. Métal stellaire absent du scénario sans fantasy.
+
+**Évaporites mesurées :** 0.683 % des roches terrestres réalisées, pour 0.742 % attendus (contre environ 0,1 % réalisés dans le retour initial). Le prior physique n’a pas été gonflé pour forcer ce résultat.
+
+**Densité régionale mesurée :** disques sphériques de 10 000 km² centrés sur les sites canoniques à 240 m, récupérable > 0, distance de corde via `cKDTree`. Maxima : fer **1061**, sel **108**, gypse **400**. La réduction des densités locales Fe et saumures corrige l’essai initial qui dépassait 4 000 sites de fer par disque. Le maximum fer est du même ordre que le repère Forest of Dean (475–1 141 installations normalisées) ; ce rapprochement reste provisoire et ne transforme pas les forges recensées en gisements certains.
+
+**Compilation avec environnement V2 en cache : 13.41 s**, contre **12,50 s** dans le cache de référence antérieur (+7.3 %). Étapes cumulées : 5.21 / 5.45 / 8.36 / 13.28 s ; cache durable à 14.51 s. La comparaison est indicative : même monde et environnement en cache, mais la référence antérieure n’a pas été recompilée simultanément sous une charge système contrôlée. Les essais R3h intermédiaires à 43,64 / 33,98 / 19,74 s ne sont pas les performances finales.
+
+**Premier pixel, monde chaud, 13 couches : 0.166–0.400 s**, ouverture 21.135 s, 0 erreur JavaScript. Avant : 0,151–0,383 s, ouverture 19,953 s. Critère identique du script : paquet GPU lié puis deux images `requestAnimationFrame`, sans lecture de pixel ni attente de toutes les tuiles.
+
+**Validation finale :** 46 tests Python réussis (suites demandées), parité NumPy/WGSL 252 cas dans 11 configurations sans désaccord ; erreur normalisée maximale 2,35·10⁻⁶, ou 3,88·10⁻⁷ absolu pour les symboles. Le test navigateur du renderer réel réussit et reproduit exactement son image. Les régressions couvrent aussi le paquet partiel vide, les unités kg/t, les recouvrements indépendants de l’ordre, le fondu, les grandes moyennes de Poisson et les teneurs industrielles bornées.
+
+**Captures :** 50 images sources (5 ressources × 5 LOD × terrain/couche), dimensions 410 × 260, assemblées en cinq planches. Les LOD 10/7/4 utilisent la source courante `conditioning-preview`, les LOD 2/0 exigent `decoder`, avec zéro tuile attendue à la capture. Caméra identique dans chaque paire. Chaque ressource est nettement visible aux cinq zooms sur les planches relues :
+
+- [Cuivre](images/resources-gpu-sites-copper.jpg)
+- [Fer](images/resources-gpu-sites-iron.jpg)
+- [Sel](images/resources-gpu-sites-salt.jpg)
+- [Gypse](images/resources-gpu-sites-gypsum.jpg)
+- [Tous les gisements](images/resources-gpu-sites-points.jpg)
+
+Sources PNG et états détaillés : `output/resources-gpu/r3h-captures/`. Commande complète : `node tools/verification/capture_resources_gpu.cjs --port 8775` ; la variante `--resources copper` emploie les identifiants anglais (`copper`, `iron`, `salt`, `gypsum`, `points`), et `--append` permet une campagne séquentielle avec redémarrage de 8775 entre ressources.
+
+**Faiblesses et proposé :** les districts peuvent rester très concentrés, et certains contacts de populations héritent de la grille permissive LOD 10. Les petits symboles se recouvrent au grand angle, sans compteur ; le zoom et les couches individuelles servent à les séparer. Les aperçus grossiers ont moins de relief que les tuiles du décodeur. La jointure de relief Render v2 reste distincte du correctif de ressources. Les densités, l’interprétation Zn/W, les coefficients de récupération et la géologie n’ont pas de validation archéologique multi-mondes. Les images montrent la présence, pas un inventaire historique vérifié ni l’intégrale de masse d’un raster.
