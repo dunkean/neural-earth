@@ -1004,3 +1004,122 @@ Ces plages ne constituent pas des intervalles de confiance historiques. Les coef
 Sources PNG et états détaillés : `output/resources-gpu/r3h-captures/`. Commande complète : `node tools/verification/capture_resources_gpu.cjs --port 8775` ; la variante `--resources copper` emploie les identifiants anglais (`copper`, `iron`, `salt`, `gypsum`, `points`), et `--append` permet une campagne séquentielle avec redémarrage de 8775 entre ressources.
 
 **Faiblesses et proposé :** les districts peuvent rester très concentrés, et certains contacts de populations héritent de la grille permissive LOD 10. Les petits symboles se recouvrent au grand angle, sans compteur ; le zoom et les couches individuelles servent à les séparer. Les aperçus grossiers ont moins de relief que les tuiles du décodeur. La jointure de relief Render v2 reste distincte du correctif de ressources. Les densités, l’interprétation Zn/W, les coefficients de récupération et la géologie n’ont pas de validation archéologique multi-mondes. Les images montrent la présence, pas un inventaire historique vérifié ni l’intégrale de masse d’un raster.
+
+## 21. Compilation accélérée, sans changement du canon — resources-perf
+
+**27 octobre 2026, référence `e2046f93bfe1b844bd8a8b838d6742b79e04a7ed`.**
+Le premier affichage et le changement de couche sont accélérés ; **l’objectif de compilation complète à 1,5 s n’est pas atteint**. Aucun fichier de `web/`, aucune palette, aucune définition de couche ou légende n’a été modifié.
+
+### 21.1 Protocole et profil avant modification
+
+Deux vrais atlas Orogen du profil par défaut, sphère de **4 000 km**, seeds **42** et **20261027** (nouvelle seed), ont été conservés avant modification dans `E:/TerrainDiffusionRuntime/resources/perf-inputs/`. Grille d’autorité : **410 × 206**, LOD 10. Les atlas, modèles, caches et sorties de profilage restent hors Git ; les empreintes de régression sont dans `tests/fixtures/resources-e2046f9-*.json`.
+
+Matériel : RTX 3090 ; calcul canonique CPU NumPy/SciPy, Numba disponible dans le venv fourni. `OPENBLAS_NUM_THREADS=OMP_NUM_THREADS=MKL_NUM_THREADS=1` pour les mesures. Le port utilisé est exclusivement **8776**. Une tentative initiale a échoué par manque de mémoire engagée Windows ; ses temps ne sont pas repris. Le serveur nécessitait `NUMBA_CACHE_DIR=E:/TerrainDiffusionRuntime/numba-cache/resources-perf` pour éviter les tentatives de cache dans la jonction upstream non modifiable.
+
+Chronométrage de chaque étape, sans `cProfile`, compilateur initial avec ses workers de processus :
+
+| Étape, durée propre (s) | Seed 42 | Seed 20261027 |
+|---|---:|---:|
+| Tectonique, lithologie attendue, calibration, climat et eau | 5,211 | 4,887 |
+| Environnement Render v2 et biologie | 1,463 | 1,290 |
+| Géologie réalisée et matériaux | 2,584 | 2,428 |
+| Gisements et stocks | 5,483 | 5,238 |
+| **Total compilation** | **14,771** | **13,873** |
+| Deuxième compilation dans le même processus, sans cache monde | 14,490 | 14,921 |
+| Lecture du cache durable, reconstruction des stocks comprise | 0,479 | 0,447 |
+
+Profil `cProfile` initial **sériel**, pour voir les fonctions plutôt que l’attente des sous-processus. Temps cumulés, donc **non additionnables** :
+
+| Fonction (s cumulées) | Seed 42 | Seed 20261027 |
+|---|---:|---:|
+| `compile_world` | 13,744 | 14,073 |
+| `world_deposits` | 5,346 | 6,159 |
+| `place_positions` | 1,818 | 2,356 |
+| `_placement_distribution` | 1,474 | 2,006 |
+| `tectonic_contexts` | 2,055 | 2,321 |
+| `_wrap_edt` (six distances) | 1,379 | 1,538 |
+| `lithology` | 1,305 | 1,282 |
+| `calibrate_rock_bias` | 1,360 | 1,137 |
+| `realize_rocks` | 1,388 | 1,058 |
+| `value_noise` (tous les appels) | 1,810 | 1,561 |
+| `render_v2_fields` | 0,939 | 0,824 |
+| `_deposit` | 1,015 | 1,052 |
+
+Le profil ne reproduit donc pas 8 s de calcul Render v2 pur : ici, les processus, imports, publications de snapshots et autres charges distinguent le temps perçu du temps des équations. Les gisements, la préparation à résolution atlas et la géologie sont également déterminants.
+
+### 21.2 Changements implémentés
+
+- **Échantillonnage exact des nœuds utiles.** Les distances et les voisinages tectoniques conservent l’atlas complet, mais les équations de contexte et lithologie ne sont évaluées qu’aux nœuds lus par les quatre voisins bilinéaires de l’autorité. Même ordre des opérations et même conversion float32 ; aucune sous-résolution du canon.
+- **Tables temporaires réutilisées.** Les douze itérations de calibration géologique partagent leurs warps et bruits fixes. Les biais et interpolations restent recalculés à chaque itération ; aucun biais approximatif réutilisé entre mondes.
+- **Render v2 mensuel factorisé.** `terrain_resource_environment.py` calcule une fois les termes indépendants de la date, puis les douze saisons. À 30,72 km, les deux amplitudes des mosaïques fines sont exactement nulles : leurs hashes ne sont plus calculés. Les équations utiles reprennent le miroir CPU indépendant, testé également à 30 et 480 m. Un bake de tuile, dépendant de sa résolution et éventuellement de son affichage, ne remplace pas l’autorité.
+- **NPP publié en premier.** Une étape `climate` publie l’indice de productivité exact dès les seuls champs de climat et hauteur disponibles, avant les distances tectoniques. Sa valeur est vérifiée contre celle de la compilation finale. Les autres couches attendent leurs vrais champs ; aucun stock provisoire n’est envoyé.
+- **HTTP et compilation découplés en mémoire.** Un thread de compilation sérialisé conserve les snapshots immuables en mémoire. Plus d’export d’atlas, de spawn du compilateur ou de relecture de snapshots pour les requêtes. Un pool résident de quatre threads traite les six EDT, qui relâchent le GIL. La petite géologie reste sérielle : la distribuer entre threads s’est révélée plus lente. Le CLI isolé et le map de processus restent disponibles en repli/diagnostic.
+- **Placement des gisements.** CDF optionnelle fusionnée Numba, CPU, sans `fastmath`, sans réduction parallèle ni nouvel aléa ; repli NumPy avec `TERRAIN_RESOURCES_FAST=0` ou en l’absence de Numba. Suppression des grosses copies de champs dans l’interpolation, décodage groupé des positions, calcul par lots du district le plus proche et sommes entières vectorisées des stocks. Les draws et leur ordre restent inchangés.
+- **Cache compact compatible.** Même paire NPZ/JSON, tableaux utiles uniquement, stocks dérivés reconstruits, JSON compact, DEFLATE niveau 1, publication atomique par fichiers temporaires uniques. Exemple seed 42 : tableaux **19,47 Mo** contre **69,46 Mo** sans compression. Décompression des membres NPZ en quatre threads : environ 0,07 s contre 0,15 s en série, sans changer les octets des tableaux. La sauvegarde est hors du chemin critique du premier affichage.
+
+### 21.3 Mesures après et comparaison
+
+Mesure pure : aucun cache d’autorité ni environnement v2 injecté ; Orogen est déjà fourni comme entrée. « Processus froid » inclut imports et lecture de cet atlas, puis **une seule** compilation. Il ne comprend ni la génération d’Orogen, ni la deuxième compilation, ni `cProfile`, ni la sauvegarde. Les caches de fichiers du système ne sont pas vidés. Le cache de code Numba existe ; une toute première JIT sans ce cache a donné 8,71 s de compilation sur seed 42, contre 6,11 s au deuxième appel de cet essai.
+
+| Mesure (s) | Avant 42 | Après 42 | Avant 20261027 | Après 20261027 |
+|---|---:|---:|---:|---:|
+| Compilation initiale, chemin de production de chaque version | 14,771 | 5,993 | 13,873 | 5,664 |
+| Recompilation même processus, sans cache monde | 14,490 | 4,916 | 14,921 | 4,747 |
+| Processus neuf, imports + atlas + compilation, référence **sérielle** | 10,138 | 6,639 | 11,325 | 6,286 |
+| Cache durable, ancien chargeur / nouveau chargeur parallèle | 0,479 | 0,219–0,229 | 0,447 | 0,219–0,233 |
+| Écriture durable, hors chemin critique | 1,370 | 0,709 | 1,335 | 0,707 |
+
+La ligne processus neuf utilise le meilleur chemin sériel initial comme comparaison supplémentaire : compilation seule initiale 9,422 / 10,632 s, deuxième appel 9,513 / 9,141 s. Elle n’attribue pas artificiellement le coût de spawn à l’import du serveur. Les anciennes valeurs `cold_process_wall_s` des premiers fichiers `before*.json` chronométraient tout le lot (warm + profilage compris) ; **ce ne sont pas des temps froids valides**. Le benchmark corrigé conserve ce total sous `benchmark_batch_wall_s`. Le tableau de lecture disque suppose le compilateur déjà importé, comme après le calcul de l’identité dans le serveur : un processus lecteur entièrement neuf a pris **0,640 s**, imports compris, avant deux lectures à 0,229 / 0,225 s. Ce cas ne respecte pas 0,3 s.
+
+| Étape après (durée propre, s) | Seed 42 | Seed 20261027 |
+|---|---:|---:|
+| Productivité initiale | 0,094 | 0,090 |
+| Tectonique et préparation | 1,571 | 1,581 |
+| Environnement et biologie | 0,213 | 0,211 |
+| Géologie | 0,991 | 0,895 |
+| Gisements et stocks | 3,115 | 2,878 |
+
+Le profil après donne `world_deposits` 2,759 / 2,850 s, `realize_rocks` 0,845 / 0,729 s, `family_prospectivities` 0,728 / 0,681 s, et `place_positions` 0,766 / 1,019 s. `cProfile` ne mesure pas toutes les fonctions des threads EDT ; leurs temps restent inclus dans l’étape chronométrée au mur.
+
+**Navigateur réel, seed 42**, ressources et environnement v2 absents d’un répertoire de cache dédié ; serveur initial redémarré depuis la référence pour la mesure avant :
+
+| Mesure (s) | Avant | Après |
+|---|---:|---:|
+| Ouverture du monde | 21,415 | 18,183 |
+| Premier NPP après ouverture | 1,733 | **0,722** |
+| Premier paquet de chaque autre couche (12 couches, compilation éventuelle comprise) | 0,166–2,116 | 0,166–0,617 |
+| Sélection répétée, 13 couches déjà chargées | non mesurée | **0,050–0,067** |
+| Compilation complète sous charge du viewer | 17,08 | **9,62** |
+| Lecture depuis le disque après redémarrage du viewer | non mesurée | **0,83** |
+| Erreurs JavaScript | 0 | 0 |
+
+Le critère du script reste paquet GPU lié + deux `requestAnimationFrame`, **pas une lecture de pixel ni une attente de toutes les tuiles**. Le serveur peut commencer les ressources pendant l’ouverture ; les 0,722 s ne signifient donc pas compilation complète en moins d’une seconde. Le gain d’ouverture n’est pas attribué au seul compilateur : caches terrain et charge de la machine interviennent.
+
+Le script ouvre `gpu=1` : le profil effectif du viewer est ici `orogen--g2d683499c4cc36059bc4305c`, qui active les six étapes Orogen GPU, contrairement au profil `orogen` utilisé par le benchmark pur et ses empreintes. Les comparaisons avant/après restent faites sur les mêmes entrées à l’intérieur de chaque protocole. La tentative navigateur de la seed fraîche 20261027 a expiré après **300 s avant ouverture du monde** ; aucune mesure « premier pixel » n’en est déduite. Cela reste une faiblesse de validation du parcours complet sur cette seed, distincte de ses compilations et équivalences d’autorité réussies.
+
+**Objectifs :** premier affichage < 1 s et changement chaud ≤ 0,3 s atteints dans cette mesure seed 42 ; lecture du cache pur autour de 0,22 s, mais **0,83 s sous charge du viewer après redémarrage**, donc l’objectif disque n’est pas acquis pour ce parcours. Ce second essai navigateur ouvre le monde en 19,475 s, affiche NPP en 0,616 s après ouverture, répète les sélections en 0,050–0,067 s, avec zéro erreur JavaScript. **Compilation complète ≤ 1,5 s, et stretch < 0,5 s : non atteints**, y compris dans le processus chaud. La JIT initiale, le GIL autour des objets de gisements, les bruits géologiques, les prospectivités et les EDT restent des coûts à réduire. Le calcul canonique CUDA n’a pas été introduit ; il faudrait une preuve supplémentaire d’identité des classes et budgets avant de l’activer.
+
+### 21.4 Reproduction et canon
+
+Depuis la racine, avec le Python fourni et les variables de threads ci-dessus :
+
+```powershell
+$py = 'D:/Workspace/Self/RPG/infinite_map/.venv/Scripts/python.exe'
+$env:NUMBA_CACHE_DIR = 'E:/TerrainDiffusionRuntime/numba-cache/resources-perf'
+# Les snapshots sont exclusivement produits avec le code épinglé.
+& $py tools/benchmarks/benchmark_resources_compile.py --prepare
+& $py tools/benchmarks/benchmark_resources_compile.py --reference --snapshot --label reference
+& $py tools/benchmarks/benchmark_resources_compile.py --label after
+# Ne jamais vider le cache partagé ; isoler un répertoire pour le viewer.
+$env:TERRAIN_RESOURCES_CACHE = 'E:/TerrainDiffusionRuntime/resources/perf-viewer-new-run'
+$env:TERRAIN_PRELOAD_MODELS = '0'
+& $py -u backend/terrain_server.py --port 8776
+# Dans un second terminal :
+node tools/benchmarks/benchmark_resources_first_pixel.cjs --port 8776 --seed 42 --repeat --json output/resources-perf/viewer.json
+```
+
+`--reference` charge avec `git show` les modules canoniques de `e2046f9`, sans écrire dans `.git` ni remplacer les sources du worktree. Pour recréer les entrées sur une autre machine, exécuter `--prepare` depuis cette révision : les digests sémantiques des tableaux d’entrée doivent correspondre ; le SHA du conteneur ZIP n’est qu’une trace de l’archive initiale et dépend de ses métadonnées.
+
+**Identité canonique :** `COMPILER_VERSION = resources-compiler-12` conservé. Tous les tableaux, y compris les flottants et classes, tous les budgets, unités et dictionnaires complets de gisements sont comparés aux empreintes initiales. Les deux mondes sont recompilés deux fois : CDF Numba, puis repli NumPy. Tolérance constatée pour les champs compilés : **zéro octet différent**, plus stricte que 10⁻⁵ relatif. Aucun hasard ni réduction GPU dans l’autorité. Les entrées externes absentes entraînent un skip explicite du test complet ; les tests environnement/étape précoce/cache restent autonomes.
+
+Validation finale : **50 tests Python réussis** (suites `test_terrain_resources.py`, `test_terrain_server_world.py` et nouveau `test_terrain_resource_equivalence.py`), dont job non bloquant et aller-retour cache ; parité NumPy/WGSL **252 cas / 11 configurations, zéro désaccord**, erreur normalisée maximale 2,35·10⁻⁶ sur le stock, classes et mois exacts. Les rapports détaillés et profils sont sous `output/resources-perf/`, la livraison Git sous `output/resources-delivery/resources-perf.bundle` ; aucun push.
