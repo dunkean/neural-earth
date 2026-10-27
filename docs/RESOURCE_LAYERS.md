@@ -6,6 +6,8 @@ Date : 27 octobre 2026. Branche locale `resources-layers` de Neural Earth, rebas
 
 **R3i, 27 octobre 2026 : la présentation courante est décrite au §21 ; le §20 archive R3h.** Une couche par ressource indique les gisements récupérables avec les techniques fixes du scénario. Les anciens écrans « Stock contenu » et « Récupérable médiéval » des §1–19 sont des descriptions historiques et des contrats internes, plus des choix du menu. Les potentiels/prospectivités sont regroupés en bas sous **Diagnostic** : intensité servant au placement, pas inventaire de ressources.
 
+**Performance courante : §22, compilateur 13.** Le §21 conserve le bilan du premier essai et son ancien contrat d'identité binaire ; ses snapshots ont été remplacés par le contrat statistique, la reproductibilité et la parité CPU/CUDA décrits au §22.
+
 
 Ce document distingue trois statuts :
 
@@ -1050,3 +1052,232 @@ Les régressions CPU vérifient la conservation des membres et des masses, la s�
 **Résultats de livraison du code :** 74 tests Python réussis, zéro échec/erreur/skip : ressources (38), blocs natifs (8), longitude (3), rendu des tuiles (16), métadonnées serveur (9). Les contrôles Node de traduction et regroupement réussissent ; le contrôle UI réel parcourt les 110 couches dans les cinq langues et distingue deux membres coïncidents d'un troisième site. Le test WebGPU réel réussit avec répétition exacte des pixels et réutilisation des buffers à caméra fixe. Parité NumPy/WGSL : **288 cas**, zéro désaccord, erreur normalisée maximale **2,35·10⁻⁶** ; erreur absolue des chiffres/groupes **2,61·10⁻⁸**.
 
 **Validation visuelle restante, blocage d'environnement :** Windows refuse l'arrêt du PID élevé **5780**, ancien serveur sur 8775. Le nouveau processus de ce worktree a été lancé sur le même port mais les requêtes atteignent encore l'ancien ; une vérification des sources servies le détecte et les scripts de capture refusent désormais cette situation. Les planches `resources-gpu-sites-*.jpg` et `resources-gpu-wrap.jpg` de la livraison restent donc les archives R3h, **sans prétendre valider visuellement ce correctif**. La reprise doit arrêter uniquement ce PID sur 8775, redémarrer ce worktree avec `TERRAIN_PRELOAD_MODELS=0`, relancer la jonction puis les deux campagnes fr/en, et relire les planches. Aucun processus sur 8765 n'a été arrêté. Les chiffres de jonction avant correctif sont conservés dans `output/resources-delivery/wrap-before-lod4.json` ; aucune mesure rendue après correctif n'est inventée.
+
+## 22. Compilation accélérée, sans changement du canon — resources-perf
+
+**27 octobre 2026, référence `e2046f93bfe1b844bd8a8b838d6742b79e04a7ed`.**
+Le premier affichage et le changement de couche sont accélérés ; **l’objectif de compilation complète à 1,5 s n’est pas atteint**. Aucun fichier de `web/`, aucune palette, aucune définition de couche ou légende n’a été modifié.
+
+### 22.1 Protocole et profil avant modification
+
+Deux vrais atlas Orogen du profil par défaut, sphère de **4 000 km**, seeds **42** et **20261027** (nouvelle seed), ont été conservés avant modification dans `E:/TerrainDiffusionRuntime/resources/perf-inputs/`. Grille d’autorité : **410 × 206**, LOD 10. Les atlas, modèles, caches et sorties de profilage restent hors Git ; les empreintes de régression sont dans `tests/fixtures/resources-e2046f9-*.json`.
+
+Matériel : RTX 3090 ; calcul canonique CPU NumPy/SciPy, Numba disponible dans le venv fourni. `OPENBLAS_NUM_THREADS=OMP_NUM_THREADS=MKL_NUM_THREADS=1` pour les mesures. Le port utilisé est exclusivement **8776**. Une tentative initiale a échoué par manque de mémoire engagée Windows ; ses temps ne sont pas repris. Le serveur nécessitait `NUMBA_CACHE_DIR=E:/TerrainDiffusionRuntime/numba-cache/resources-perf` pour éviter les tentatives de cache dans la jonction upstream non modifiable.
+
+Chronométrage de chaque étape, sans `cProfile`, compilateur initial avec ses workers de processus :
+
+| Étape, durée propre (s) | Seed 42 | Seed 20261027 |
+|---|---:|---:|
+| Tectonique, lithologie attendue, calibration, climat et eau | 5,211 | 4,887 |
+| Environnement Render v2 et biologie | 1,463 | 1,290 |
+| Géologie réalisée et matériaux | 2,584 | 2,428 |
+| Gisements et stocks | 5,483 | 5,238 |
+| **Total compilation** | **14,771** | **13,873** |
+| Deuxième compilation dans le même processus, sans cache monde | 14,490 | 14,921 |
+| Lecture du cache durable, reconstruction des stocks comprise | 0,479 | 0,447 |
+
+Profil `cProfile` initial **sériel**, pour voir les fonctions plutôt que l’attente des sous-processus. Temps cumulés, donc **non additionnables** :
+
+| Fonction (s cumulées) | Seed 42 | Seed 20261027 |
+|---|---:|---:|
+| `compile_world` | 13,744 | 14,073 |
+| `world_deposits` | 5,346 | 6,159 |
+| `place_positions` | 1,818 | 2,356 |
+| `_placement_distribution` | 1,474 | 2,006 |
+| `tectonic_contexts` | 2,055 | 2,321 |
+| `_wrap_edt` (six distances) | 1,379 | 1,538 |
+| `lithology` | 1,305 | 1,282 |
+| `calibrate_rock_bias` | 1,360 | 1,137 |
+| `realize_rocks` | 1,388 | 1,058 |
+| `value_noise` (tous les appels) | 1,810 | 1,561 |
+| `render_v2_fields` | 0,939 | 0,824 |
+| `_deposit` | 1,015 | 1,052 |
+
+Le profil ne reproduit donc pas 8 s de calcul Render v2 pur : ici, les processus, imports, publications de snapshots et autres charges distinguent le temps perçu du temps des équations. Les gisements, la préparation à résolution atlas et la géologie sont également déterminants.
+
+### 22.2 Changements implémentés
+
+- **Échantillonnage exact des nœuds utiles.** Les distances et les voisinages tectoniques conservent l’atlas complet, mais les équations de contexte et lithologie ne sont évaluées qu’aux nœuds lus par les quatre voisins bilinéaires de l’autorité. Même ordre des opérations et même conversion float32 ; aucune sous-résolution du canon.
+- **Tables temporaires réutilisées.** Les douze itérations de calibration géologique partagent leurs warps et bruits fixes. Les biais et interpolations restent recalculés à chaque itération ; aucun biais approximatif réutilisé entre mondes.
+- **Render v2 mensuel factorisé.** `terrain_resource_environment.py` calcule une fois les termes indépendants de la date, puis les douze saisons. À 30,72 km, les deux amplitudes des mosaïques fines sont exactement nulles : leurs hashes ne sont plus calculés. Les équations utiles reprennent le miroir CPU indépendant, testé également à 30 et 480 m. Un bake de tuile, dépendant de sa résolution et éventuellement de son affichage, ne remplace pas l’autorité.
+- **NPP publié en premier.** Une étape `climate` publie l’indice de productivité exact dès les seuls champs de climat et hauteur disponibles, avant les distances tectoniques. Sa valeur est vérifiée contre celle de la compilation finale. Les autres couches attendent leurs vrais champs ; aucun stock provisoire n’est envoyé.
+- **HTTP et compilation découplés en mémoire.** Un thread de compilation sérialisé conserve les snapshots immuables en mémoire. Plus d’export d’atlas, de spawn du compilateur ou de relecture de snapshots pour les requêtes. Un pool résident de quatre threads traite les six EDT, qui relâchent le GIL. La petite géologie reste sérielle : la distribuer entre threads s’est révélée plus lente. Le CLI isolé et le map de processus restent disponibles en repli/diagnostic.
+- **Placement des gisements.** CDF optionnelle fusionnée Numba, CPU, sans `fastmath`, sans réduction parallèle ni nouvel aléa ; repli NumPy avec `TERRAIN_RESOURCES_FAST=0` ou en l’absence de Numba. Suppression des grosses copies de champs dans l’interpolation, décodage groupé des positions, calcul par lots du district le plus proche et sommes entières vectorisées des stocks. Les draws et leur ordre restent inchangés.
+- **Cache compact compatible.** Même paire NPZ/JSON, tableaux utiles uniquement, stocks dérivés reconstruits, JSON compact, DEFLATE niveau 1, publication atomique par fichiers temporaires uniques. Exemple seed 42 : tableaux **19,47 Mo** contre **69,46 Mo** sans compression. Décompression des membres NPZ en quatre threads : environ 0,07 s contre 0,15 s en série, sans changer les octets des tableaux. La sauvegarde est hors du chemin critique du premier affichage.
+
+### 22.3 Mesures après et comparaison
+
+Mesure pure : aucun cache d’autorité ni environnement v2 injecté ; Orogen est déjà fourni comme entrée. « Processus froid » inclut imports et lecture de cet atlas, puis **une seule** compilation. Il ne comprend ni la génération d’Orogen, ni la deuxième compilation, ni `cProfile`, ni la sauvegarde. Les caches de fichiers du système ne sont pas vidés. Le cache de code Numba existe ; une toute première JIT sans ce cache a donné 8,71 s de compilation sur seed 42, contre 6,11 s au deuxième appel de cet essai.
+
+| Mesure (s) | Avant 42 | Après 42 | Avant 20261027 | Après 20261027 |
+|---|---:|---:|---:|---:|
+| Compilation initiale, chemin de production de chaque version | 14,771 | 5,993 | 13,873 | 5,664 |
+| Recompilation même processus, sans cache monde | 14,490 | 4,916 | 14,921 | 4,747 |
+| Processus neuf, imports + atlas + compilation, référence **sérielle** | 10,138 | 6,639 | 11,325 | 6,286 |
+| Cache durable, ancien chargeur / nouveau chargeur parallèle | 0,479 | 0,219–0,229 | 0,447 | 0,219–0,233 |
+| Écriture durable, hors chemin critique | 1,370 | 0,709 | 1,335 | 0,707 |
+
+La ligne processus neuf utilise le meilleur chemin sériel initial comme comparaison supplémentaire : compilation seule initiale 9,422 / 10,632 s, deuxième appel 9,513 / 9,141 s. Elle n’attribue pas artificiellement le coût de spawn à l’import du serveur. Les anciennes valeurs `cold_process_wall_s` des premiers fichiers `before*.json` chronométraient tout le lot (warm + profilage compris) ; **ce ne sont pas des temps froids valides**. Le benchmark corrigé conserve ce total sous `benchmark_batch_wall_s`. Le tableau de lecture disque suppose le compilateur déjà importé, comme après le calcul de l’identité dans le serveur : un processus lecteur entièrement neuf a pris **0,640 s**, imports compris, avant deux lectures à 0,229 / 0,225 s. Ce cas ne respecte pas 0,3 s.
+
+| Étape après (durée propre, s) | Seed 42 | Seed 20261027 |
+|---|---:|---:|
+| Productivité initiale | 0,094 | 0,090 |
+| Tectonique et préparation | 1,571 | 1,581 |
+| Environnement et biologie | 0,213 | 0,211 |
+| Géologie | 0,991 | 0,895 |
+| Gisements et stocks | 3,115 | 2,878 |
+
+Le profil après donne `world_deposits` 2,759 / 2,850 s, `realize_rocks` 0,845 / 0,729 s, `family_prospectivities` 0,728 / 0,681 s, et `place_positions` 0,766 / 1,019 s. `cProfile` ne mesure pas toutes les fonctions des threads EDT ; leurs temps restent inclus dans l’étape chronométrée au mur.
+
+**Navigateur réel, seed 42**, ressources et environnement v2 absents d’un répertoire de cache dédié ; serveur initial redémarré depuis la référence pour la mesure avant :
+
+| Mesure (s) | Avant | Après |
+|---|---:|---:|
+| Ouverture du monde | 21,415 | 18,183 |
+| Premier NPP après ouverture | 1,733 | **0,722** |
+| Premier paquet de chaque autre couche (12 couches, compilation éventuelle comprise) | 0,166–2,116 | 0,166–0,617 |
+| Sélection répétée, 13 couches déjà chargées | non mesurée | **0,050–0,067** |
+| Compilation complète sous charge du viewer | 17,08 | **9,62** |
+| Lecture depuis le disque après redémarrage du viewer | non mesurée | **0,83** |
+| Erreurs JavaScript | 0 | 0 |
+
+Le critère du script reste paquet GPU lié + deux `requestAnimationFrame`, **pas une lecture de pixel ni une attente de toutes les tuiles**. Le serveur peut commencer les ressources pendant l’ouverture ; les 0,722 s ne signifient donc pas compilation complète en moins d’une seconde. Le gain d’ouverture n’est pas attribué au seul compilateur : caches terrain et charge de la machine interviennent.
+
+Le script ouvre `gpu=1` : le profil effectif du viewer est ici `orogen--g2d683499c4cc36059bc4305c`, qui active les six étapes Orogen GPU, contrairement au profil `orogen` utilisé par le benchmark pur et ses empreintes. Les comparaisons avant/après restent faites sur les mêmes entrées à l’intérieur de chaque protocole. La tentative navigateur de la seed fraîche 20261027 a expiré après **300 s avant ouverture du monde** ; aucune mesure « premier pixel » n’en est déduite. Cela reste une faiblesse de validation du parcours complet sur cette seed, distincte de ses compilations et équivalences d’autorité réussies.
+
+**Objectifs :** premier affichage < 1 s et changement chaud ≤ 0,3 s atteints dans cette mesure seed 42 ; lecture du cache pur autour de 0,22 s, mais **0,83 s sous charge du viewer après redémarrage**, donc l’objectif disque n’est pas acquis pour ce parcours. Ce second essai navigateur ouvre le monde en 19,475 s, affiche NPP en 0,616 s après ouverture, répète les sélections en 0,050–0,067 s, avec zéro erreur JavaScript. **Compilation complète ≤ 1,5 s, et stretch < 0,5 s : non atteints**, y compris dans le processus chaud. La JIT initiale, le GIL autour des objets de gisements, les bruits géologiques, les prospectivités et les EDT restent des coûts à réduire. Le calcul canonique CUDA n’a pas été introduit ; il faudrait une preuve supplémentaire d’identité des classes et budgets avant de l’activer.
+
+### 22.4 Reproduction et canon
+
+Depuis la racine, avec le Python fourni et les variables de threads ci-dessus :
+
+```powershell
+$py = 'D:/Workspace/Self/RPG/infinite_map/.venv/Scripts/python.exe'
+$env:NUMBA_CACHE_DIR = 'E:/TerrainDiffusionRuntime/numba-cache/resources-perf'
+# Les snapshots sont exclusivement produits avec le code épinglé.
+& $py tools/benchmarks/benchmark_resources_compile.py --prepare
+& $py tools/benchmarks/benchmark_resources_compile.py --reference --snapshot --label reference
+& $py tools/benchmarks/benchmark_resources_compile.py --label after
+# Ne jamais vider le cache partagé ; isoler un répertoire pour le viewer.
+$env:TERRAIN_RESOURCES_CACHE = 'E:/TerrainDiffusionRuntime/resources/perf-viewer-new-run'
+$env:TERRAIN_PRELOAD_MODELS = '0'
+& $py -u backend/terrain_server.py --port 8776
+# Dans un second terminal :
+node tools/benchmarks/benchmark_resources_first_pixel.cjs --port 8776 --seed 42 --repeat --json output/resources-perf/viewer.json
+```
+
+`--reference` charge avec `git show` les modules canoniques de `e2046f9`, sans écrire dans `.git` ni remplacer les sources du worktree. Pour recréer les entrées sur une autre machine, exécuter `--prepare` depuis cette révision : les digests sémantiques des tableaux d’entrée doivent correspondre ; le SHA du conteneur ZIP n’est qu’une trace de l’archive initiale et dépend de ses métadonnées.
+
+**Identité canonique :** `COMPILER_VERSION = resources-compiler-12` conservé. Tous les tableaux, y compris les flottants et classes, tous les budgets, unités et dictionnaires complets de gisements sont comparés aux empreintes initiales. Les deux mondes sont recompilés deux fois : CDF Numba, puis repli NumPy. Tolérance constatée pour les champs compilés : **zéro octet différent**, plus stricte que 10⁻⁵ relatif. Aucun hasard ni réduction GPU dans l’autorité. Les entrées externes absentes entraînent un skip explicite du test complet ; les tests environnement/étape précoce/cache restent autonomes.
+
+Validation finale : **50 tests Python réussis** (suites `test_terrain_resources.py`, `test_terrain_server_world.py` et nouveau `test_terrain_resource_equivalence.py`), dont job non bloquant et aller-retour cache ; parité NumPy/WGSL **252 cas / 11 configurations, zéro désaccord**, erreur normalisée maximale 2,35·10⁻⁶ sur le stock, classes et mois exacts. Les rapports détaillés et profils sont sous `output/resources-perf/`, la livraison Git sous `output/resources-delivery/resources-perf.bundle` ; aucun push.
+
+## 23. Deuxième passe : autorité vectorisée, CUDA résident et cache mappé
+
+**27 octobre 2026, `resources-compiler-13`.** Cette passe utilise l'autorisation de changer l'algorithme de placement. Elle conserve les budgets entiers et le hasard adressé, avec un nouveau contrat statistique. Aucun fichier de `web/`, aucune définition de couche, palette ou légende n'est modifié. La base de livraison reste `e2046f9` ; le point de comparaison intermédiaire est `d7a9404` (§21).
+
+### 23.1 Profil et choix d'implémentation
+
+Le profil du premier essai expliquait ses 5,7–6 s : **gisements 2,88–3,12 s**, préparation tectonique/climat/eau **1,57–1,58 s**, géologie **0,90–0,99 s**. Optimiser seulement le rendu ne pouvait pas atteindre 1,5 s.
+
+- **Gisements en colonnes NumPy.** Comptes Poisson par cellule avec hashes adressés, expansion des comptes, tonnages, teneurs, profondeur, récupération, positions et districts par lots. Aucun objet Python par site dans la compilation, les sommes de stocks ou la construction du paquet GPU. La vue historique en dictionnaires est produite à la demande pour les exports et inspections. Les familles sont triées ; l'ordre des requêtes ou des dictionnaires de familles n'influence aucun résultat.
+- **Districts sur l'autorité.** Intensité et allocation entière sur LOD 10, puis positions adressées uniformes dans les enfants valides de la cellule propriétaire. La recherche du district utilise neuf candidats voisins, avec un repli global vectorisé pour les sites sans voisin actif. La CDF fine de 128 × 128 points par site est supprimée. Les positions changent ; la microstructure permissive et le regroupement à l'intérieur d'une cellule de 30,72 km ne reproduisent plus l'ancien placement pondéré.
+- **Préparation utile uniquement.** Climat et pédologie échantillonnés une fois. Les EDT exactes séparables ne produisent que les colonnes et lignes atlas consommées par l'interpolation de l'autorité. Les voisinages crustaux et le support physique des ceintures restent natifs. Les Gaussiennes de relief gardent l'ordre séparable de SciPy, en éliminant les lignes inutiles entre les deux axes. Les tables de bruit sont hachées une fois par nœud ; leur interpolation séparable est fusionnée. La calibration géologique calcule les scores spatiaux une seule fois, puis ajuste douze fois huit biais constants : leur addition commute avec l'interpolation bilinéaire. Les arrondis float32 intermédiaires peuvent différer de l'ancien algorithme ; ce changement relève du contrat statistique. L'allocation entière ne trie que les restes positifs.
+- **Eau périodique analytique.** Les mêmes forçages et paramètres du bilan partagé alimentent une résolution locale : neige sous forme d'une application annuelle bornée, sol sous forme affine plafonnée, nappe linéaire à point fixe. Cela évite les grands temporaires de chaque année d'itération. Le repli Python utilise le même algorithme. Le contrat historique des ressources `runoff + baseflow` est conservé ; il comprend le terme de baseflow déjà inclus dans le runoff partagé.
+- **Géologie CUDA.** Miroir torch du float32/uint32 NumPy, classes et quatre orientations évaluées par lots, sans `torch.compile`, extension native ni `fastmath`. Un graphe CUDA indépendant de la seed est capturé **au démarrage**, pour la grille 410 × 206 et au plus 196 608 échantillons LOD 9. Les autres formes passent par les mêmes kernels en mode eager, sans capture à la requête. Une marge entre les deux meilleurs scores ≤ 5·10⁻⁴ déclenche une décision NumPy indépendante. La géologie lit des entrées immuables et s'exécute pendant Render v2/biologie sur CPU ; l'attente résiduelle est presque nulle. `TERRAIN_RESOURCES_DEVICE=cpu` force le repli CPU.
+- **Service résident.** Un processus de compilation est lancé et préparé avant l'écoute HTTP : CUDA, graphe et kernels Numba EDT/eau/bruit. Aucune JIT ni création de processus par monde. Le processus séparé évite la contention du GIL avec Flask et les tuiles ; il utilise une stream CUDA prioritaire. Dès que le manifeste du monde a rendu l'atlas disponible, la route de métadonnées lance l'autorité sans attendre sa compilation, avant la rafale de tuiles. Les atlas Orogen persistés non compressés sont mappés directement ; sinon les entrées utiles passent en mémoire partagée. NPP est publié immédiatement, sans acquittement bloquant, puis l'autorité finale une seule fois. Un tampon de sortie de 128 Mio est préparé à l'avance ; les vues reçues restent valides après fermeture du worker. Les tâches de chargement des modèles et d'hydrologie peuvent attendre au plus 2 s cette petite autorité avant de démarrer leurs gros travaux ; les routes HTTP de ressources restent asynchrones.
+- **Cache en colonnes mappables.** NPZ sans compression, membres NPY partageant **un seul mapping**, et petit JSON de schéma. Sommes de stocks reconstruites en int64, sans boucle de sites. Le lecteur accepte aussi les anciens NPZ compressés/listes JSON. Compromis explicite : **72,94 Mo + 444 octets** pour le monde viewer, contre **19,94 Mo + 444 octets** en DEFLATE ; l'ancien JSON de gisements faisait environ 7,8 Mo. La lecture évite l'inflation et les copies des champs mensuels. Les pages restent paresseuses : le chronomètre de chargement n'est pas une lecture physique forcée de tous les octets. L'écriture atomique se fait après publication du résultat, hors chemin critique.
+
+### 23.2 Compilation pure : protocole et mesures
+
+Même Python du venv, RTX 3090, mêmes atlas conservés et sphère 4 000 km (§21), autorité **410 × 206**. Aucun cache de monde ni bake v2 n'est injecté. Variables `OPENBLAS_NUM_THREADS=OMP_NUM_THREADS=MKL_NUM_THREADS=1`, cache de code Numba externe. Un sous-processus neuf par seed prépare le runtime comme le serveur au démarrage, charge les entrées, puis compile une fois. « Chaud » est une recompilation complète dans ce processus, sans cache d'autorité. Les caches de fichiers Windows ne sont pas vidés. La génération d'Orogen et le chargement des modèles ne font pas partie de la compilation des ressources.
+
+| Durée (s) | Premier essai 42 | Courant 42 | Premier essai 20261027 | Courant 20261027 |
+|---|---:|---:|---:|---:|
+| Première compilation, runtime préparé, aucun cache monde | 5,993 | **1,015** | 5,664 | **1,032** |
+| Recompilation complète, même processus | 4,916 | **1,040** | 4,747 | **1,021** |
+| Initialisation runtime et lecture des entrées | — | 3,728 | — | 3,653 |
+| Processus exécutable neuf jusqu'au résultat, démarrage Python compris | — | **4,829** | — | **4,785** |
+| Lecture cache durable, stocks compris | 0,219–0,229 | **0,034** | 0,219–0,233 | **0,038** |
+| Écriture durable hors chemin critique | 0,709 | **0,068** | 0,707 | **0,060** |
+
+L'initialisation n'est donc pas dissimulée dans un résultat « froid » : elle est payée avant que le serveur accepte les requêtes, conformément à la demande de préchauffer hors chemin critique. Le délai depuis le lancement d'un exécutable neuf reste environ **4,8 s**. La compilation seule initiale de `e2046f9` était 14,771 / 13,873 s ; le gain courant est d'environ **14 fois** et **5,6 fois** par rapport au premier essai.
+
+| Étape chronométrée au mur, durée propre (s) | 42 | 20261027 |
+|---|---:|---:|
+| Climat, préparation initiale, NPP | 0,059 | 0,060 |
+| Tectonique, lithologie attendue, calibration et eau | 0,484 | 0,489 |
+| Render v2 et biologie, avec géologie en parallèle | 0,194 | 0,211 |
+| Attente géologie et matériaux restants | 0,003 | 0,003 |
+| Gisements et stocks | 0,271 | 0,265 |
+
+Les profils `cProfile` sont conservés par seed. Fonctions dominantes après optimisation : `compile_deposits` environ 0,27–0,30 s, `tectonic_contexts` 0,12–0,14 s, évaluation CUDA des classes 0,12 s (chevauchée), calibration 0,05–0,08 s, `family_prospectivities` 0,08 s, `render_v2_fields` 0,06–0,07 s. Les cumuls d'un profil multithread peuvent attribuer du temps d'attente à la fonction interrompue et ne sont pas additionnables ; le tableau par étape au mur fait foi. Profils et JSON : `output/resources-perf/round2-final-calibration*`.
+
+### 23.3 Viewer réel, couches et lecture après redémarrage
+
+Même script `benchmark_resources_first_pixel.cjs`, port **8776**, seed 42 et profil effectif `orogen--g2d683499c4cc36059bc4305c`. La différence de profil avec le benchmark pur est maintenue explicite. Répertoire de ressources isolé, sans autorité ni environnement v2 pour les mesures de compilation ; atlas Orogen et caches terrain déjà présents. La mesure inclut l'empaquetage/communication du worker dans `compiler_timings.elapsed_s`. Le critère visuel reste le paquet GPU lié puis deux `requestAnimationFrame`, sans lecture de pixel ni attente de toutes les tuiles.
+
+Contrôle pur sur les entrées exactes de ce viewer : **1,044 s froid, 1,037 s chaud, cache 0,042 s**, 11 817 sites ; écart statistique maximal zéro. Rapport `output/resources-perf/round2-final-viewer-input-42.json`. Le supplément observé dans le viewer vient donc bien de sa charge et de l'intégration, pas seulement de la différence entre profils Orogen.
+
+| Mesure (s) | Premier essai (§21) | Courant |
+|---|---:|---:|
+| Compilation complète sous viewer, communication/publication comprises | 9,62 | **1,511** |
+| Calcul dans le worker / aller-retour RPC | — | 1,461 / 1,477 |
+| Premier NPP après ouverture | 0,722 | **0,613** |
+| Changement de couche déjà chargée, 13 couches | 0,050–0,067 | **0,049–0,067** |
+| Chargement du cache après redémarrage, stocks compris | 0,83 | **0,04** |
+| Premier NPP de ce second parcours disque | 0,616 | **0,606** |
+| Sélections répétées du parcours disque | 0,050–0,067 | **0,066–0,277** |
+| Ouverture totale du monde, parcours compile / disque | 18,183 / 19,475 | 18,408 / 17,892 |
+| Erreurs JavaScript, chaque parcours | 0 | 0 |
+
+La cible de compilation pure ≤1,5 s est atteinte sur les deux seeds, dès le premier monde du runtime préparé. **Sous viewer, le calcul est à 1,46 s, mais le résultat publié à 1,511 s dépasse la borne stricte de 11 ms** : la marge n'est pas suffisante pour garantir 1,5 s sous charge. Le premier affichage <1 s, les changements chauds ≤0,3 s et la lecture du cache ≤0,3 s sont atteints dans ces parcours. Le stretch <0,5 s reste non atteint.
+
+Durée de chaque première sélection, compilation éventuelle comprise ; les couches sont sélectionnées successivement, ce ne sont pas treize compilations froides indépendantes :
+
+| Couche (`resources-…`) | Sans cache de ressources (s) | Après redémarrage, cache disque (s) |
+|---|---:|---:|
+| `bio-npp` | 0,613 | 0,606 |
+| `geo-rock` | 0,600 | 0,600 |
+| `geo-context` | 0,483 | 0,500 |
+| `agri-cereal-suitability` | 0,484 | 0,517 |
+| `mat-stone` | 0,500 | 0,483 |
+| `season-snow` | 1,250 | 0,633 |
+| `bio-wood-stock` | 0,817 | 0,816 |
+| `agri-harvest-month` | 0,500 | 0,383 |
+| `dep-points` | 0,915 | 0,500 |
+| `dep-copper` | 0,185 | 0,399 |
+| `dep-potential-copper` | 0,166 | 0,717 |
+| `dep-potential-iron` | 0,167 | 0,383 |
+| `dep-iron` | 0,167 | 0,500 |
+
+Ces durées incluent le paquet, le transfert et le rythme des images pendant les travaux terrain. Une première sélection de neige à 1,25 s n'est pas une recompilation de l'autorité. Les essais intermédiaires ont réduit la compilation sous viewer de 9,62 s (§21) à 2,13 s avec le service, puis 1,66 s avec le graphe. Les essais proches du tip ont varié de **1,47 à 1,62 s** selon la charge ; les deux derniers sont à 1,508 et 1,511 s. Un essai à 1,59 s a aussi subi la campagne Python en parallèle et est exclu de la comparaison isolée du seul viewer. Le cache compressé restait à 0,57 s sous viewer, ce qui a motivé le mapping sans compression. Rapports finaux : `output/resources-perf/round2/viewer-delivery-prime-{cold,disk}-42.json` ; profils et journaux intermédiaires conservés au même endroit.
+
+### 23.4 Contrat, régressions et reproduction
+
+`tests/fixtures/resources-statistics-round1.json` contient les statistiques et les empreintes sémantiques des entrées de **trois** mondes : seeds 42 et 20261027 du profil par défaut, plus seed 42 avec les options GPU réellement utilisées par le viewer. Elles proviennent du tip du premier essai `d7a9404`, dont le test d'identité avec `e2046f9` avait réussi. Les anciens snapshots de chaque tableau et de chaque position sont supprimés ; les fonctions de fingerprint restent utilisées pour comparer des exécutions courantes, pas pour figer l'ancien canon.
+
+Le test complet impose, **pour chaque ressource**, comptes présents/récupérables et tonnages contenus/récupérables à ±10 %, parts des huit roches à ±0,02 en valeur absolue, moyennes terrestres pondérées NPP/aptitude céréalière/céréales nettes à ±2 %. Les comptes par famille sont également vérifiés à ±10 %. **Écarts constatés sur les trois mondes : zéro pour toutes ces statistiques**, malgré les nouvelles positions. Chaque compilation est répétée, tous les tableaux, métadonnées et colonnes de gisements sont hachés ; les deux runs sont bit-identiques. Les trois mondes complets CPU/CUDA sont également bit-identiques sur cette machine, y compris chaque budget entier et classe, sans tolérance dans ce test.
+
+Tolérances indépendantes documentées : scores CUDA contre NumPy **2·10⁻⁴ absolu** sur trois LOD, avec décisions de classes exactes après garde de marge ; eau analytique contre le solveur partagé **`rtol=1e-5`, `atol=0,05 mm`**. L'identité entre le kernel analytique et son repli Python est couverte par les runs avec/sans préparation des suites. Les mois Render v2, EDT, bruit fusionné et Gaussiennes échantillonnées restent exacts par rapport aux chemins indépendants. La parité des paquets GPU construits depuis colonnes ou dictionnaires est vérifiée octet par octet. Les tests couvrent aussi ordre des familles/requêtes, conservation entière, publication NPP égale au résultat final, cache sans perte, worker partagé et atlas mappé, et durée de vie des vues après arrêt du worker. Les tests complets utilisant les atlas externes signalent un skip si les fichiers manquent ; ils ont tous été exécutés ici.
+
+```powershell
+$py = 'D:/Workspace/Self/RPG/infinite_map/.venv/Scripts/python.exe'
+$env:OPENBLAS_NUM_THREADS = '1'
+$env:OMP_NUM_THREADS = '1'
+$env:MKL_NUM_THREADS = '1'
+$env:NUMBA_CACHE_DIR = 'E:/TerrainDiffusionRuntime/numba-cache/resources-perf'
+& $py tools/benchmarks/benchmark_resources_compile.py --label round2-final
+& $py -m unittest tests/python/test_terrain_resources.py tests/python/test_terrain_server_world.py tests/python/test_terrain_resource_equivalence.py
+# Parité GPU avec le serveur de ce worktree arrêté ; ne pas toucher à 8765.
+node tools/verification/verify_resources_gpu_parity.cjs
+$env:TERRAIN_RESOURCES_CACHE = 'E:/TerrainDiffusionRuntime/resources/perf-viewer-unique-new-run'
+$env:TERRAIN_PRELOAD_MODELS = '0'
+& $py -u backend/terrain_server.py --port 8776
+# Second terminal, puis même commande après redémarrage pour mesurer le cache :
+node tools/benchmarks/benchmark_resources_first_pixel.cjs --port 8776 --seed 42 --repeat --json output/resources-perf/viewer-round2.json
+```
+
+Validation : **60 tests Python réussis**, parité NumPy/WGSL **252 cas / 11 configurations, zéro désaccord**, erreur maximale normalisée **2,35·10⁻⁶**. Aucun push ; bundle incrémental basé sur `e2046f9`, fichiers suivis égaux à son tip.
+
+**Limites conservées :** stretch <0,5 s non atteint ; préchauffage CUDA/Numba et imports toujours payés au lancement du serveur ; fallback CPU plus lent ; capture CUDA spécialisée pour la taille de référence, autres formes en eager ; stockage disque accru ; regroupement fin des positions simplifié. L'ouverture totale du viewer inclut toujours modèles, hydrologie et tuiles et ne devient pas une ouverture en une seconde. La seed fraîche est validée en compilation/statistiques/parité, mais son parcours navigateur avait expiré avant ouverture au premier essai (§21) ; aucune garantie « premier pixel » n'en est déduite. Les statistiques sur ces trois mondes ne constituent pas une validation géologique ou archéologique générale.

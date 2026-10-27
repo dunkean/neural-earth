@@ -1,6 +1,6 @@
 """Natural resources on Neural Earth's LOD lattice: provinces, stocks, flows, budgets.
 
-Pure CPU NumPy/SciPy: no Flask, torch, network or clock. One spatial address
+NumPy/SciPy authority with optional eager CUDA geology: no Flask, network or clock. One spatial address
 for every scale: cell (lod, i, j) covers [i, i+1) x [j, j+1) * 30 * 2**lod map
 metres, origin at the map centre, y southward, exactly like display tiles.
 The world authority is evaluated once at LOD 10 (30.72 km) from the retained
@@ -20,7 +20,7 @@ import math
 import os
 
 import numpy as np
-from scipy.ndimage import distance_transform_edt, gaussian_filter, maximum_filter, minimum_filter
+from scipy.ndimage import distance_transform_edt, gaussian_filter, gaussian_filter1d, maximum_filter, minimum_filter
 from scipy.special import ndtri
 
 VERSION = 'resources-v1-prototype'
@@ -31,7 +31,7 @@ NATIVE_M = 30.0
 # colours) must not bump it. V2_INPUTS_VERSION names the inputs given to the
 # Render v2 evaluator (sampling of the atlas); its cached environment also
 # depends on the source of terrain_render_v2.py, an external module.
-COMPILER_VERSION = 'resources-compiler-12'
+COMPILER_VERSION = 'resources-compiler-13'
 V2_INPUTS_VERSION = 'v2-inputs-1'
 WORLD_LOD = 10           # authority grid, 30.72 km
 BUDGET_LOD = 3           # 240 m: last level allocated from world information only
@@ -317,8 +317,12 @@ def apportion(total, weights, ids):
     s = int(w.sum())
     share, rest = np.divmod(total * w, s)
     left = total - int(share.sum())
-    order = np.lexsort((np.asarray(ids, np.uint64), -rest))
-    share[order[:left]] += 1
+    if left:
+        # sum(rest)=left*s and every nonzero rest<s: there are always
+        # more positive remainders than seats. Zero cells cannot win a tie.
+        live=np.flatnonzero(rest)
+        order=live[np.lexsort((np.asarray(ids,np.uint64)[live],-rest[live]))]
+        share[order[:left]] += 1
     return share
 
 
@@ -336,19 +340,25 @@ def sample_grid(field, xs, ys, *, categorical=False, bounds=BOUNDS):
     ix, iy = np.floor(xx).astype(np.int64), np.floor(yy).astype(np.int64)
     tx, ty = (xx - ix)[None, :], (yy - iy)[:, None]
     by = np.minimum(iy + 1, h - 1)
-    a = field[iy][:, ix % w] * (1 - tx) + field[iy][:, (ix + 1) % w] * tx
-    b = field[by][:, ix % w] * (1 - tx) + field[by][:, (ix + 1) % w] * tx
+    a = field[iy[:,None], (ix % w)[None,:]] * (1 - tx) + field[iy[:,None], ((ix + 1) % w)[None,:]] * tx
+    b = field[by[:,None], (ix % w)[None,:]] * (1 - tx) + field[by[:,None], ((ix + 1) % w)[None,:]] * tx
     return (a * (1 - ty) + b * ty).astype(np.float32)
 
 
-def _wrap_edt(mask, spacing_km, pad=128):
+def _wrap_edt(mask, spacing_km, pad=128, rows=None, cols=None):
     """Distance (km) to True cells, wrapping longitude. Planar metric (see doc)."""
     if not mask.any():
-        return np.full(mask.shape, 1e9, np.float32)
+        shape=mask.shape if rows is None else (len(rows),len(cols))
+        return np.full(shape, 1e9, np.float32)
     pad = min(mask.shape[1], max(pad, math.ceil(1200 / spacing_km)))
     padded = np.concatenate((mask[:, -pad:], mask, mask[:, :pad]), axis=1)
+    if rows is not None:
+        from terrain_resource_distance import ready,kernel
+        if ready:
+            return kernel(padded,rows,cols+pad,float(spacing_km))
     d = distance_transform_edt(~padded, sampling=spacing_km)
-    return d[:, pad:-pad].astype(np.float32)
+    d=d[:, pad:-pad].astype(np.float32)
+    return d if rows is None else d[np.ix_(rows,cols)]
 
 
 def smoothstep(a, b, x):
@@ -367,18 +377,32 @@ def value_noise(seed, name, lod, x, y, bounds=BOUNDS):
     fx, fy = gx - i0, gy - j0
     fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
     out = 0
+    # Hash each province lattice node once, rather than four hashes per
+    # authority sample. The addressed noise and its interpolation are unchanged.
+    jmin,jmax=int(np.min(j0)),int(np.max(j0))+1
+    table=_province_nodes(int(seed),str(name),lod,period,jmin,jmax)
+    if i0.ndim == 2 and j0.ndim == 2 and i0.shape[0] == 1 and j0.shape[1] == 1:
+        from terrain_resource_noise import ready,kernel
+        if ready:
+            return kernel(table,((i0+period//2)%period).ravel(),(j0-jmin).ravel(),fx.ravel(),fy.ravel())
     for di, wx in ((0, 1 - fx), (1, fx)):
         for dj, wy in ((0, 1 - fy), (1, fy)):
-            ii = (i0 + di + period // 2) % period - period // 2
-            out = out + wx * wy * (2 * to_unit(cell_keys(seed, ('resources', 'noise', name, f'lod{lod}'),
-                                                         cell_id(lod, ii, j0 + dj))) - 1)
+            ii = (i0 + di + period // 2) % period
+            out = out + wx * wy * table[j0+dj-jmin,ii]
     return out
+
+
+@functools.lru_cache(maxsize=128)
+def _province_nodes(seed,name,lod,period,jmin,jmax):
+    ii=np.arange(period)-period//2
+    jj=np.arange(jmin,jmax+1)
+    return 2*to_unit(cell_keys(seed,('resources','noise',name,f'lod{lod}'),cell_id(lod,ii[None,:],jj[:,None])))-1
 
 
 # ---------------------------------------------------------------------------
 # World authority (LOD 10)
 
-def tectonic_contexts(layers, height, bounds=BOUNDS, *, with_tracts=False):
+def tectonic_contexts(layers, height, bounds=BOUNDS, *, with_tracts=False, sample=None, distance_masks=None):
     """Soft context fractions at atlas resolution from Orogen plate fields."""
     h, w = height.shape
     spacing = (bounds[2] - bounds[0]) / w / 1000
@@ -391,8 +415,19 @@ def tectonic_contexts(layers, height, bounds=BOUNDS, *, with_tracts=False):
     island_arc = (kind == 1) & cmin
     collision = (kind == 1) & ~cmax
     rift = (kind == 2) & ~cmax
-    d = {name: _wrap_edt(mask, spacing) for name, mask in
-         dict(sub=subduction, io=island_arc, col=collision, rift=rift, conv=kind == 1, sea=~land).items()}
+    from terrain_resource_workers import parallel_map
+    masks = distance_masks or dict(sub=subduction, io=island_arc, col=collision, rift=rift, conv=kind == 1, sea=~land)
+    nodes={} if sample is None else dict(rows=sample[0],cols=sample[1])
+    distances = parallel_map([('terrain_resources', '_wrap_edt', dict(mask=mask, spacing_km=spacing,**nodes))
+                              for mask in masks.values()])
+    d = dict(zip(masks, distances))
+    # Only the four atlas nodes surrounding each authority centre are consumed.
+    # Distances and the 5x5 crust neighbourhood still use the complete atlas.
+    if sample is not None:
+        index = np.ix_(*sample)
+        crust, land = crust[index], land[index]
+        layers = {name: np.asarray(layers[name])[index] for name in
+                  ('convergence', 'hotspot', 'backArc', 'uplift')}
     ocean_plate = crust.astype(np.float64)
     stress = np.asarray(layers['convergence'], np.float64)
     # Orogen boundary zones are several pixels wide: buffers are kept narrow.
@@ -432,13 +467,25 @@ def _atlas_xy(shape, bounds=BOUNDS):
     return x0 + (np.arange(w) + .5) * (x1 - x0) / w, y0 + (np.arange(h) + .5) * (y1 - y0) / h
 
 
+def _height_moment(height, rows, power):
+    """Exact separable atlas Gaussian, retaining only consumed rows.
+
+    scipy's Gaussian visits axis 0 then axis 1. Discarding unused rows between
+    those independent passes preserves the original float64 operations.
+    """
+    value=height.astype(np.float64)
+    if power == 2:value*=value
+    value=gaussian_filter1d(value,1.5,axis=0,mode='nearest')[rows]
+    return gaussian_filter1d(value,1.5,axis=1,mode='wrap')
+
+
 def lithology(contexts, aridity, lowland, seed, xs, ys, bounds=BOUNDS):
     """Expected rock-class shares: context table and aridity-dependent evaporites.
     The canonical shares are realized from them by realize_rocks."""
     rock = np.einsum('kyx,kr->ryx', contexts, LITHOLOGY)
     basin = contexts[CONTEXTS.index('rift')] + contexts[CONTEXTS.index('backarc')] + \
         contexts[CONTEXTS.index('passive')] + contexts[CONTEXTS.index('platform')]
-    X, Y = np.meshgrid(xs, ys)
+    X, Y = np.asarray(xs)[None,:], np.asarray(ys)[:,None]
     # Evaporites record past basins: present aridity is only one proxy, a keyed
     # province field supplies "paleo-arid" basins independent of today's climate.
     paleo = np.clip(value_noise(seed, 'paleo-evaporite', 13, X, Y, bounds), 0, 1)
@@ -461,7 +508,7 @@ def realized_rock_field(expected, strike, bias):
     return np.concatenate((logs, np.cos(2 * strike)[None], np.sin(2 * strike)[None])).astype(np.float32)
 
 
-def realized_classes(field, i0, j0, cells, side, lod, seed32, bounds=BOUNDS):
+def realized_classes(field, i0, j0, cells, side, lod, seed32, bounds=BOUNDS, noise_cache=None):
     """Realized rock class of side x side samples in each LOD-10 cell (rows, cols):
     (n, side * side). Pure function of its arguments (worker processes)."""
     import terrain_resource_gpu as G
@@ -470,7 +517,12 @@ def realized_classes(field, i0, j0, cells, side, lod, seed32, bounds=BOUNDS):
     sub = np.arange(side)
     gi = (i0 + cells[:, 1])[:, None, None] * side + sub[None, None, :] + np.zeros((1, side, 1), np.int64)
     gj = (j0 + cells[:, 0])[:, None, None] * side + sub[None, :, None] + np.zeros((1, 1, side), np.int64)
-    return G.realized_class(pkg, gi, gj, lod).reshape(len(cells), side * side)
+    if noise_cache is None:
+        from terrain_resource_acceleration import evaluator
+        accelerated=evaluator()
+        if accelerated is not None:
+            return accelerated(pkg,gi,gj,lod).reshape(len(cells),side*side)
+    return G.realized_class(pkg, gi, gj, lod, noise_cache=noise_cache).reshape(len(cells), side * side)
 
 
 def _classes(field, grid, cells, side, lod, seed32, parallel, chunks=16):
@@ -495,11 +547,21 @@ def calibrate_rock_bias(expected, strike, land, grid, seed, parallel=None, itera
     cells = np.argwhere(land)[::stride]
     area = grid.area_m2[cells[:, 0], cells[:, 1]]
     target = (expected[:, cells[:, 0], cells[:, 1]] * area).sum(axis=1) / area.sum()
+    import terrain_resource_gpu as G
+    field=G.Field(realized_rock_field(expected,strike,bias),grid.i[0],grid.j[0],getattr(grid,'bounds',None))
+    pkg=dict(seed32=seed32,layer=ROCK_LAYER,classes=kcls,aligned=ROCK_ALIGNED,groups=ROCK_GROUPS,
+             group_aligned=ROCK_GROUP_ALIGNED,field=field)
+    gi=(grid.i[0]+cells[:,1])[:,None,None]
+    gj=(grid.j[0]+cells[:,0])[:,None,None]
+    # A spatially constant class bias commutes with bilinear interpolation.
+    # Evaluate immutable warped scores once; fit only K scalar offsets. This
+    # deliberately allows float32-rounding differences from compiler 12's
+    # twelve biased texture evaluations (covered by the statistical contract).
+    scores=G.realized_class(pkg,gi,gj,WORLD_LOD,return_scores=True).reshape(kcls,-1)
     for _ in range(iterations):
-        # Serial: a few tens of thousands of samples, cheaper than starting workers.
-        cls = realized_classes(realized_rock_field(expected, strike, bias), grid.i[0], grid.j[0], cells, 1, WORLD_LOD, seed32, getattr(grid, 'bounds', None))[:, 0]
-        got = np.bincount(cls, weights=area, minlength=kcls) / area.sum()
-        bias += .5 * np.log(np.maximum(target, 1e-6) / np.maximum(got, 1e-6)) * (target > 0)
+        cls=np.argmax(scores+bias[:,None],axis=0)
+        got=np.bincount(cls,weights=area,minlength=kcls)/area.sum()
+        bias+=.5*np.log(np.maximum(target,1e-6)/np.maximum(got,1e-6))*(target>0)
     return bias
 
 
@@ -585,49 +647,80 @@ def compile_world(layers, height, seed, *, lod=WORLD_LOD, fantasy=False, params=
     height = np.asarray(height, np.float32)
     grid = Lattice(lod, bounds=bounds)
     ax, ay = _atlas_xy(height.shape, bounds)
-    contexts_atlas, sea_km, tracts = tectonic_contexts(layers, height, bounds, with_tracts=True)
-    ts = -45 + 90 * np.asarray(layers['temperature_summer'], np.float64)
-    tw = -45 + 90 * np.asarray(layers['temperature_winter'], np.float64)
-    ps = 1000 * np.maximum(np.asarray(layers['precip_summer'], np.float64), 0)
-    pw = 1000 * np.maximum(np.asarray(layers['precip_winter'], np.float64), 0)
-    pet_proxy = 150 + 55 * np.maximum((ts + tw) / 2 + 5, 0)       # pedology moisture index convention
-    aridity_atlas = 1 - smoothstep(.12, .55, (ps + pw) / pet_proxy)
-    mean_h = gaussian_filter(height.astype(np.float64), 1.5, mode=('nearest', 'wrap'))
-    rugged_atlas = np.sqrt(np.maximum(gaussian_filter(height.astype(np.float64) ** 2, 1.5, mode=('nearest', 'wrap')) - mean_h ** 2, 0))
-    lowland_atlas = (1 - smoothstep(150, 900, mean_h)) * (1 - smoothstep(150, 900, rugged_atlas))
-    rocks_atlas = lithology(contexts_atlas, aridity_atlas, lowland_atlas, seed, ax, ay, bounds)
-
+    # Preserve the original bilinear operations (including their float32 cast),
+    # but evaluate expensive atlas formulas only at the nodes they actually read.
+    h, w = height.shape
+    xx = ((grid.x - bounds[0]) % (bounds[2] - bounds[0])) / (bounds[2] - bounds[0]) * w - .5
+    yy = np.clip((grid.y - bounds[1]) / (bounds[3] - bounds[1]) * h - .5, 0, h - 1)
+    ix, iy = np.floor(xx).astype(np.int64), np.floor(yy).astype(np.int64)
+    cols = np.unique(np.r_[ix % w, (ix + 1) % w])
+    rows = np.unique(np.r_[iy, np.minimum(iy + 1, h - 1)])
+    x0, x1 = np.searchsorted(cols, ix % w), np.searchsorted(cols, (ix + 1) % w)
+    y0, y1 = np.searchsorted(rows, iy), np.searchsorted(rows, np.minimum(iy + 1, h - 1))
+    tx, ty = (xx - ix)[None, :], (yy - iy)[:, None]
+    def sparse_sample(a):
+        top = a[y0[:, None], x0] * (1 - tx) + a[y0[:, None], x1] * tx
+        bottom = a[y1[:, None], x0] * (1 - tx) + a[y1[:, None], x1] * tx
+        return (top * (1 - ty) + bottom * ty).astype(np.float32).astype(np.float64)
+    # Productivity needs only climate and height, not tectonic distances,
+    # geology, monthly Render v2 or deposit placement. Publish that exact layer
+    # immediately; the final _biology calculation uses the identical formula.
     S = lambda a: sample_grid(a, grid.x, grid.y, bounds=bounds).astype(np.float64)
+    from terrain_resource_inputs import prepare
+    inputs=prepare(layers,height.shape,grid)
+    ts,tw,ps,pw=(inputs['__resource_'+name].astype(np.float64) for name in ('ts','tw','ps','pw'))
+    early = dict(area_m2=grid.area_m2, latitude=np.array(grid.lat), height_m=S(height))
+    early['land'] = early['height_m'] > 0
+    early_t, early_p = _months(ts, tw, ps, pw, early['latitude'])
+    early_t, early_p = early_t.astype(np.float32), early_p.astype(np.float32)
+    early['npp_g_m2'] = np.where(early['land'], np.minimum(3000/(1+np.exp(1.315-.119*early_t.mean(axis=0))),
+                              3000*(1-np.exp(-.000664*early_p.sum(axis=0)))),0).astype(np.float32)
+    report('climate', early)
+    index = np.ix_(rows, cols)
+    contexts_atlas, sea_km, tracts = tectonic_contexts(layers, height, bounds, with_tracts=True, sample=(rows, cols))
+    aridity_atlas = inputs['__resource_aridity']
+    from terrain_resource_workers import parallel_map
+    mean_h,mean_h2=parallel_map([('terrain_resources','_height_moment',dict(height=height,rows=rows,power=power))
+                               for power in (1,2)])
+    rugged_nodes = np.sqrt(np.maximum(mean_h2[:,cols]-mean_h[:,cols]**2,0))
+    lowland_atlas = (1 - smoothstep(150, 900, mean_h[:,cols])) * (1 - smoothstep(150, 900, rugged_nodes))
+    rocks_atlas = lithology(contexts_atlas, aridity_atlas, lowland_atlas, seed, ax[cols], ay[rows], bounds)
+
     f = dict(area_m2=grid.area_m2, latitude=np.array(grid.lat), units=UNITS)
-    f['height_m'] = S(height)
-    land = f['height_m'] > 0
+    f['height_m'] = early['height_m']
+    land = early['land']
     f['land'] = land
-    f['rugged_m'] = S(rugged_atlas)
-    f['sea_km'] = S(sea_km)
+    f['npp_g_m2'] = early['npp_g_m2']
+    f['rugged_m'] = sparse_sample(rugged_nodes)
+    f['sea_km'] = sparse_sample(sea_km)
     for k, name in enumerate(CONTEXTS):
-        f['context_' + name] = S(contexts_atlas[k])
+        f['context_' + name] = sparse_sample(contexts_atlas[k])
     for name, tract in tracts.items():
-        f['tract_' + name] = S(tract)
-    expected = np.stack([S(rocks_atlas[k]) for k in range(len(ROCKS))])
+        f['tract_' + name] = sparse_sample(tract)
+    expected = np.stack([sparse_sample(rocks_atlas[k]) for k in range(len(ROCKS))])
     expected /= np.maximum(expected.sum(axis=0), 1e-12)
     f['structural_strike'] = structural_strike(f)
     f['rock_bias'] = calibrate_rock_bias(expected, f['structural_strike'], land, grid, seed, parallel)
     for k, name in enumerate(ROCKS):
         f['rock_expected_' + name] = expected[k]
     for name in ('sandy', 'calcareous', 'clayey', 'ferrallitic', 'organic', 'podzolic', 'mineral'):
-        f['pedology_' + name] = S(layers['pedology_' + name]) if 'pedology_' + name in layers else np.full(grid.shape, 1 / 7)
-    T, P = _months(S(ts), S(tw), S(ps), S(pw), f['latitude'])
+        f['pedology_' + name] = inputs['__resource_pedology_'+name].astype(np.float64)
+    T, P = _months(ts,tw,ps,pw,f['latitude'])
     f['temperature_c'], f['precipitation_mm'] = T.astype(np.float32), P.astype(np.float32)
     _water(f, balance)
     report('tectonics', f)
-    sand = S(layers['soil_sand']) if 'soil_sand' in layers else np.full(grid.shape, .4)
+    # Geology reads only immutable tectonic inputs. Replay its CUDA graph while
+    # the CPU computes Render v2/biology, instead of synchronizing before them.
+    from terrain_resource_workers import submit
+    geology=submit(realize_rocks,expected,f['structural_strike'],land,grid,seed,bias=f['rock_bias'],parallel=parallel)
+    sand = np.full(grid.shape,.4)
     if v2_fields is not None:
         f.update(v2_fields)
     else:
-        render_v2_fields(f, grid, seed, S(ts), S(tw), S(ps), S(pw), sand, parallel)
+        render_v2_fields(f, grid, seed, ts,tw,ps,pw,sand, parallel)
     _biology(f, p)
     report('environment', f)
-    realized, _ = realize_rocks(expected, f['structural_strike'], land, grid, seed, bias=f['rock_bias'], parallel=parallel)
+    realized, _ = geology.result()
     for k, name in enumerate(ROCKS):
         f['rock_' + name] = realized[k]
     _bog_iron(f, p)
@@ -655,13 +748,10 @@ def _water(f, balance):
     from terrain_hydrology_balance import monthly_water_balance, oudin_pet_mm
     lat = f['latitude'][land]
     if balance:
-        b = monthly_water_balance(None, None, latitude_deg=lat,
-                                  temp_summer_c=T[6][land], temp_winter_c=T[0][land],
-                                  precip_summer_mm=P[6][land] * 6, precip_winter_mm=P[0][land] * 6)
-        for out, name in (('pet_mm', 'potential_evaporation_mm'), ('aet_mm', 'evapotranspiration_mm'),
-                          ('snow_mm', 'snow_mm')):
-            f[out][:, land] = b[name]
-        f['runoff_mm'][:, land] = b['runoff_mm'] + b['baseflow_mm']
+        from terrain_resource_water import evaluate
+        values=evaluate(T[:,land],P[:,land],lat)
+        for k,name in enumerate(('pet_mm','aet_mm','runoff_mm','snow_mm')):
+            f[name][:,land]=values[k]
     else:  # Fast bucket-free proxy for tests: AET = min(P, PET).
         for m in range(MONTHS):
             pet = oudin_pet_mm(T[m][land], lat, m)
@@ -719,24 +809,21 @@ def render_v2_fields(f, grid, seed, ts, tw, ps, pw, sand, parallel=None):
         f['v2_%s_month' % name] = np.zeros(shape, np.float32)
     # Land and shelf (> -200 m) only: deep-sea values are never read (zero).
     mask = f['land'] | (f['height_m'] > -200)
-    common = dict(lod=grid.lod, ground=ground, ts=args[1], tw=args[2], ps=args[3], pw=args[4], sand=args[5], v2seed=v2seed,
-                  mask=mask, bounds=grid.bounds)
-    groups = [[m, m + 1] for m in range(0, MONTHS, 2)]
-    tasks = [dict(common, months=g, stand=g[-1] == MONTHS - 1) for g in groups]
-    results = [v2_months(**t) for t in tasks] if parallel is None else         parallel([('terrain_resources', 'v2_months', t) for t in tasks])
-    for g, r in zip(groups, results):
-        for m in g:
-            for name in ('snow', 'grass', 'leaf', 'ice', 'moisture'):
-                f['v2_%s_month' % name][m][mask] = r[m][name]
+    from terrain_resource_environment import months
+    point, land_point, gradient, tpi = _v2_inputs(grid, ground)
+    results = months(point[mask], gradient[mask], tpi[mask], *(a[mask] for a in args[1:5]),
+                     v2seed, grid.size, land_point[mask])
+    for m in range(MONTHS):
+        for name in ('snow', 'grass', 'leaf', 'ice', 'moisture'):
+            f['v2_%s_month' % name][m][mask] = results[m][name]
     e = {}
     for name in ('woody', 'height', 'needle'):
         e[name] = np.zeros(grid.shape, np.float32)
-        e[name][mask] = results[-1][MONTHS - 1][name]
+        e[name][mask] = results[MONTHS - 1][name]
     # Date-independent stand properties (identical for every month).
     f['v2_woody'] = np.asarray(e['woody'], np.float32) * f['land']
     f['v2_canopy_m'] = np.asarray(e['height'], np.float32) * f['land']
     f['v2_needle'] = np.asarray(e['needle'], np.float32) * f['land']
-    _, _, gradient, _ = _v2_inputs(grid, ground)
     slope = np.linalg.norm(gradient, axis=-1)
     supply = np.clip((ps + pw) / np.maximum(120, 20 * (ts + tw) * .5 + 280), 0, 5)
     f['v2_perennial_snow'] = (perennial_snow(np.maximum(ts, tw), supply, slope) * f['land']).astype(np.float32)
@@ -921,7 +1008,7 @@ def family_prospectivities(grid, f, seed, fantasy=False):
     The addressed 123/246-km province field is deliberately independent of the
     sparse mining-district lottery. No per-world quantile or seed calibration.
     """
-    X, Y = np.meshgrid(grid.x, grid.y)
+    X, Y = grid.x[None,:], grid.y[:,None]
     out = {}
     for name, spec in dict(FAMILIES, **(FANTASY if fantasy else {})).items():
         n = (.7 * value_noise(seed, 'fertility-' + name, 13, X, Y, grid.bounds)
@@ -954,6 +1041,8 @@ def _poisson(lam, u, kmax=40):
     n = np.zeros(lam.shape, np.int64)
     for k in range(1, kmax + 1):
         more = u > cdf
+        if not more.any():
+            break
         n += more
         term = term * lam / k
         cdf = cdf + term
@@ -1075,94 +1164,8 @@ def strike_at(strike, grid, x, y):
 
 
 def world_deposits(grid, f, seed, *, fantasy=False, parallel=None):
-    """Discrete deposits owned by their LOD-10 cell. List of dicts, id-sorted."""
-    families = dict(FAMILIES, **(FANTASY if fantasy else {}))
-    prosp = family_prospectivities(grid, f, seed, fantasy)
-    f.update({'prospect_' + k: v.astype(np.float32) for k, v in prosp.items()})
-    centres = {name: district_centres(seed, name, grid.lod, grid.bounds) for name in prosp
-               if name in DISTRICT_SHAPE and grid.lod == WORLD_LOD}
-    jobs, marks = [], []
-    for name, p in prosp.items():
-        spec = families.get(name) or PLACERS[name]
-        domain = ('resources', 'fantasy' if name in FANTASY else 'deposit', name)
-        lam = spec['density'] * np.clip(p, 0, 1) * grid.area_m2 / 1e10
-        u = to_unit(cell_keys(seed, domain + ('count', f'lod{grid.lod}'), grid.ids))
-        original = _poisson(lam, u)
-        source = [(int(j), int(i), k) for j, i in zip(*np.nonzero(original)) for k in range(int(original[j, i]))]
-        count = original
-        if name in centres and grid.lod == WORLD_LOD and source:
-            X, Y = np.meshgrid(grid.x, grid.y)
-            # Districts may concentrate sites only inside the family's fertile
-            # belt. Keep the original Poisson count, reroute its marks into the
-            # upper part of the *same* prospectivity, never into a noise-only camp.
-            live = p >= max(float(p.max()) * .15, 1e-10)
-            intensity = np.zeros(grid.shape)
-            intensity[live] = district_intensity(X[live], Y[live], name, centres[name], f['structural_strike'], grid,
-                                                 widen=grid.size / math.sqrt(12))
-            # Move the same addressed deposit marks into districts. Largest
-            # remainders preserves the family's original count exactly, while
-            # every grade/tonnage draw keeps its original source address.
-            count = apportion(len(source), quantize((lam * intensity * live).ravel()), grid.ids.ravel()).reshape(grid.shape)
-            source.sort(key=lambda v: key(seed, domain + ('district-route', str(int(grid.ids[v[0], v[1]])), str(v[2]))))
-        targets = [(int(j), int(i), k) for j, i in zip(*np.nonzero(count)) for k in range(int(count[j, i]))]
-        for (sj, si, sk), (j, i, k) in zip(source, targets):
-            mark = _deposit(seed, domain, name, spec, grid, f, sj, si, sk, position=cell_id(BUDGET_LOD, 0, 0))
-            marks.append(mark)
-            address = domain + ('district-position', mark['id']) if grid.lod == WORLD_LOD else domain
-            jobs.append((address, name, spec, j, i, k))
-    # Positions per family in vectorised batches (same values as _place_in_cell).
-    by_name = {}
-    for n, job in enumerate(jobs):
-        by_name.setdefault(job[1], []).append(n)
-    tasks, owners = [], []
-    for name, idx in by_name.items():
-        for a in range(0, len(idx), 2048):
-            part = idx[a:a + 2048]
-            tasks.append(('terrain_resources', 'place_positions',
-                          dict(seed=seed, domain=jobs[part[0]][0], domains=[jobs[n][0] for n in part], lod=grid.lod, field=f['prospect_' + name],
-                               jj=np.array([jobs[n][3] for n in part]), ii=np.array([jobs[n][4] for n in part]),
-                               kk=np.array([jobs[n][5] for n in part]), bounds=grid.bounds, name=name, centres=centres.get(name),
-                               strike=f['structural_strike'] if name in centres else None)))
-            owners.append(part)
-    # Cached CDFs make these tasks short. Starting NumPy workers costs more
-    # than placement now; keep the existing parallel stages for geology/V2.
-    results = [place_positions(**t[2]) for t in tasks]
-    positions = {n: pos for part, res in zip(owners, results) for n, pos in zip(part, res)}
-    # Only active district centres can win. Cache their structural angles once
-    # per family instead of allocating the complete candidate grid per site.
-    district_metadata = {}
-    for name, (cx, cy, bi0, bj0, active) in centres.items():
-        rows, cols = np.nonzero(active[..., 0])
-        px, py = cx[rows, cols, 0], cy[rows, cols, 0]
-        theta = strike_at(f['structural_strike'], grid, px, py)
-        district_metadata[name] = (px, py, np.cos(theta), np.sin(theta), rows, cols, bi0, bj0)
-    out = []
-    for n, (job, mark) in enumerate(zip(jobs, marks)):
-        _, name, spec, j, i, k = job
-        plod, pi, pj = decode_id(np.uint64(positions[n]))
-        mark.update(source_cell=mark['owner_cell'], owner_cell=int(grid.ids[j, i]), index=k,
-                    position_cell=int(positions[n]), position_lod=int(plod), position_i=int(pi), position_j=int(pj))
-        if name in centres:
-            cx, cy, cosine, sine, rows, cols, bi0, bj0 = district_metadata[name]
-            x, y = (int(pi) + .5) * cell_size(int(plod)), (int(pj) + .5) * cell_size(int(plod))
-            width = grid.bounds[2] - grid.bounds[0]
-            dx = (cx - x + width / 2) % width - width / 2
-            dy = cy - y
-            sa, sc = DISTRICT_SHAPE[name]
-            q = ((dx * cosine + dy * sine) / sa) ** 2 + ((-dx * sine + dy * cosine) / sc) ** 2
-            nearest = int(np.argmin(q))
-            dj, di = int(rows[nearest]), int(cols[nearest])
-            mark['district_id'] = f"{name}:{int(cell_id(DISTRICT_LOD, bi0 + di, bj0 + dj)):016x}:0"
-            mark['district_center_m'] = [float(cx[nearest]), float(cy[nearest])]
-        # Grade, ore and depth remain the addressed source marks. Access uses
-        # the new owner's relief; recoverable stocks are then exact integers.
-        extent = max(20., (mark['ore_t'] / 2.7) ** (1 / 3))
-        accessible = float(min(1., max(0., (40 + .5 * f['rugged_m'][j, i] - mark['depth_top_m']) / extent)))
-        mark['medieval_accessible_share'] = round(accessible, 4)
-        mark['medieval_recoverable'] = {m: int(v * accessible * MEDIEVAL_RECOVERY.get(m, .5)) for m, v in mark['contained'].items()}
-        out.append(mark)
-    out.sort(key=lambda d: d['id'])
-    return out
+    from terrain_resource_deposits import compile_deposits
+    return compile_deposits(grid,f,seed,fantasy)
 
 
 def _deposit(seed, domain, name, spec, grid, f, j, i, k, position=None):
@@ -1187,7 +1190,8 @@ def _deposit(seed, domain, name, spec, grid, f, j, i, k, position=None):
     outcrop = depth < 5
     if position is None:
         position = _place_in_cell(seed, domain, grid, f, name, j, i, k)
-    lod_b, ib, jb = decode_id(np.uint64(position))
+    pos = int(position)
+    lod_b, ib, jb = (pos >> 59)-16, ((pos >> 29) & ((1 << 30)-1))-(1 << 29), (pos & ((1 << 29)-1))-(1 << 28)
     return dict(id=f"{name}:{cid:016x}:{k}", family=name, owner_cell=cid, index=k,
                 position_cell=int(position), position_lod=int(lod_b), position_i=int(ib), position_j=int(jb),
                 ore_t=int(round(ore)), grade_factor=round(grade, 4), depth_top_m=round(depth, 1),
@@ -1272,25 +1276,38 @@ def sample_lattice(grid, field, xs, ys):
     gy = np.interp(ys, grid.y, np.arange(len(grid.y)))
     i, j = np.floor(gx).astype(int), np.floor(gy).astype(int)
     tx, ty = (gx - i)[None, :], (gy - j)[:, None]
-    v = np.concatenate((field[..., -1:], field, field[..., :1]), axis=-1)
     jp = np.minimum(j + 1, len(grid.y) - 1)
-    a = v[..., j[:, None], i[None, :]] * (1 - tx) + v[..., j[:, None], (i + 1)[None, :]] * tx
-    b = v[..., jp[:, None], i[None, :]] * (1 - tx) + v[..., jp[:, None], (i + 1)[None, :]] * tx
+    left, right = (i - 1) % field.shape[-1], i % field.shape[-1]
+    a = field[..., j[:, None], left] * (1 - tx) + field[..., j[:, None], right] * tx
+    b = field[..., jp[:, None], left] * (1 - tx) + field[..., jp[:, None], right] * tx
     return a * (1 - ty) + b * ty
 
 
 
 def stock_layers(grid, f, deposits):
     """Integer stock per LOD-10 cell and metal: exactly the sum of its deposits."""
+    from terrain_resource_deposits import DepositTable
+    if isinstance(deposits,DepositTable):
+        a=deposits.arrays
+        _,ii,jj=decode_id(a['owner'])
+        indices=(jj-grid.j[0])*len(grid.i)+(ii-grid.i[0])
+        for k,metal in enumerate(deposits.metals):
+            for prefix,column in (('stock_','contained'),('recoverable_','recoverable')):
+                total=np.zeros(grid.shape[0]*grid.shape[1],np.int64)
+                np.add.at(total,indices,a[column][:,k])
+                f[prefix+metal]=total.reshape(grid.shape)
+        return
     metals = sorted({m for d in deposits for m in d['contained']})
-    index = {int(v): k for k, v in enumerate(grid.ids.ravel())}
+    # Decode only occupied owner cells, rather than constructing a Python
+    # dictionary of every cell of the world on each cache read.
+    owners = np.array([d['owner_cell'] for d in deposits], np.uint64)
+    _, ii, jj = decode_id(owners)
+    indices = (jj - grid.j[0]) * len(grid.i) + (ii - grid.i[0])
     for metal in metals:
         total = np.zeros(grid.shape[0] * grid.shape[1], np.int64)
         recov = np.zeros_like(total)
-        for d in deposits:
-            if metal in d['contained']:
-                total[index[d['owner_cell']]] += d['contained'][metal]
-                recov[index[d['owner_cell']]] += d['medieval_recoverable'][metal]
+        np.add.at(total, indices, np.fromiter((d['contained'].get(metal, 0) for d in deposits), np.int64, len(deposits)))
+        np.add.at(recov, indices, np.fromiter((d['medieval_recoverable'].get(metal, 0) for d in deposits), np.int64, len(deposits)))
         f['stock_' + metal] = total.reshape(grid.shape)
         f['recoverable_' + metal] = recov.reshape(grid.shape)
 

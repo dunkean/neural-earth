@@ -105,7 +105,24 @@ def _unit(h):
 def _quad(ix, iy, ux, uy, salt):
     """Bilinear blend (weights already faded) of the four lattice nodes around
     (ix, iy): same values as node_value, with six hashes instead of eight."""
-    ui = (np.asarray(ix, np.int64) & 0xffffffff).astype(U32)
+    ix,iy=np.asarray(ix,np.int64),np.asarray(iy,np.int64)
+    if ix.size and iy.size:
+        x0,x1,y0,y1=int(ix.min()),int(ix.max()),int(iy.min()),int(iy.max())
+        if (x1-x0+2)*(y1-y0+2) < max(ix.size,iy.size)*2 and (x1-x0+2)*(y1-y0+2) < 1000000:
+            # The province wavelengths are much larger than an authority cell.
+            # Hash the small node rectangle, then gather the four neighbours;
+            # identical uint32 and float32 operations to the sample-wise path.
+            x=as_u32(np.arange(x0,x1+2)); y=as_u32(np.arange(y0,y1+2))
+            with np.errstate(over='ignore'):
+                nodes=_unit(_lowbias_inplace((x[None,:]*U32(0x9e3779b1)) ^
+                    _lowbias_inplace(y+U32(0x85ebca77))[:,None] ^ U32(salt)))
+            xi,yi=ix-x0,iy-y0
+            n00,n10=nodes[yi,xi],nodes[yi,xi+1]
+            n01,n11=nodes[yi+1,xi],nodes[yi+1,xi+1]
+            a=n00*(F32(1)-ux)+n10*ux
+            b=n01*(F32(1)-ux)+n11*ux
+            return (a*(F32(1)-uy)+b*uy).astype(F32)
+    ui = (ix & 0xffffffff).astype(U32)
     uj = (np.asarray(iy, np.int64) & 0xffffffff).astype(U32)
     s = U32(salt)
     with np.errstate(over='ignore'):
@@ -380,31 +397,46 @@ REALIZED_CLASS_DECAY = 1.
 REALIZED_BETA = (1.6, .7)         # province (group) and class noise weights
 
 
-def realized_class(pkg, gi, gj, lod, warp_floor=None):
+def realized_class(pkg, gi, gj, lod, warp_floor=None, noise_cache=None, return_scores=False):
     """Class index at samples; pkg field layers: K biased log-expected shares, cos 2θ, sin 2θ.
     pkg: groups (group index per class), group_aligned, aligned (per class), beta (b1, b2)."""
     seed32, layer, field = pkg['seed32'], pkg['layer'], pkg['field']
     kcls = pkg['classes']
     b1, b2 = (F32(b) for b in pkg.get('beta', REALIZED_BETA))
-    wx, wy = zone_warp(pkg, gi, gj, lod, warp_floor)
-    c2 = field.bilinear(kcls, gi, gj, lod, wx, wy)
-    s2 = field.bilinear(kcls + 1, gi, gj, lod, wx, wy)
-    theta = (F32(.5) * np.arctan2(s2, c2)).astype(F32)
+    # A calibration changes only the log-share biases, never geometry/noise.
+    # The caller owns this scratch cache for one fixed set of sample addresses.
+    if noise_cache is not None and 'geometry' in noise_cache:
+        wx, wy, theta = noise_cache['geometry']
+    else:
+        wx, wy = zone_warp(pkg, gi, gj, lod, warp_floor)
+        c2 = field.bilinear(kcls, gi, gj, lod, wx, wy)
+        s2 = field.bilinear(kcls + 1, gi, gj, lod, wx, wy)
+        theta = (F32(.5) * np.arctan2(s2, c2)).astype(F32)
+        if noise_cache is not None:
+            noise_cache['geometry'] = wx, wy, theta
 
     def noise(salt, octaves, decay, aligned):
+        cache_key = salt, octaves, decay, aligned
+        if noise_cache is not None and cache_key in noise_cache:
+            return noise_cache[cache_key]
         o0, o1 = octaves
-        return (fbm_aligned(gi, gj, lod, seed32, salt, o0, o1, decay, wx, wy, theta) if aligned
-                else fbm(gi, gj, lod, seed32, salt, o0, o1, decay, wx, wy)) * field.seam(gi, lod)
+        value = (fbm_aligned(gi, gj, lod, seed32, salt, o0, o1, decay, wx, wy, theta) if aligned
+                 else fbm(gi, gj, lod, seed32, salt, o0, o1, decay, wx, wy)) * field.seam(gi, lod)
+        if noise_cache is not None:
+            noise_cache[cache_key] = value
+        return value
 
     province = [noise(layer * 64 + 48 + g, REALIZED_GROUP_OCTAVES, 1., a) for g, a in enumerate(pkg['group_aligned'])]
     best = np.full(np.broadcast(gi, gj).shape, -np.inf, F32)
     out = np.zeros(best.shape, np.int32)
+    scores=[] if return_scores else None
     for k in range(kcls):
         n = noise(layer * 64 + 32 + k, REALIZED_CLASS_OCTAVES, REALIZED_CLASS_DECAY, pkg['aligned'][k])
         v = (field.bilinear(k, gi, gj, lod, wx, wy) + b1 * province[pkg['groups'][k]] + b2 * n).astype(F32)
+        if return_scores: scores.append(v)
         out = np.where(v > best, k, out)
         best = np.maximum(best, v)
-    return out
+    return np.stack(scores) if return_scores else out
 
 
 def evaluate_dominant(pkg, gi, gj, lod):

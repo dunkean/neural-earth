@@ -435,9 +435,20 @@ def clip_world_axes(xs, ys, profile):
     return (xs if sphere else np.clip(xs, x0/NATIVE, x1/NATIVE)), np.clip(ys, y0/NATIVE, y1/NATIVE)
 
 
+def prioritize_resource_authority(seed,profile,*,wait=True):
+    descriptor=resolve_generation(profile)
+    if descriptor.bootstrap_generator != 'orogen': return
+    from terrain_orogen import get_heightmap
+    from terrain_resource_layers import wait_initial_authority
+    atlas=geometry_heightmap(get_heightmap(seed,descriptor.bootstrap_style,options=descriptor.bootstrap_options),
+                             descriptor.settings)
+    wait_initial_authority(atlas,timeout=2. if wait else 0.)
+
+
 def _create_world(seed, world_profile, cache_limit, *, polar=False):
     runtime = current_runtime()
     if runtime.shared_pipeline is None:
+        prioritize_resource_authority(seed,world_profile)
         runtime.shared_pipeline = load_pipeline(seed, device=runtime.index)
     shared_pipeline = runtime.shared_pipeline
     # Seed-local mutable caches; neural weights remain shared on the GPU.
@@ -1268,6 +1279,10 @@ def metadata(seed, world_profile=None):
         initial_image=None
     overview_bounds=list(extent)
     manifest=world_manifest(seed,world_profile)
+    # Manifest construction has already made the immutable Orogen atlas
+    # available. Start its small authority before the viewer's tile/hydrology
+    # burst, without waiting for compilation in this metadata HTTP handler.
+    prioritize_resource_authority(seed,world_profile,wait=False)
     return {'version':VERSION, 'cache_profile':PROFILE, 'generation_profile':world_profile,
             'appearance_identity':APPEARANCE_IDENTITY,
             'world_profile':descriptor.base_profile,'generation_settings':descriptor.settings,
@@ -1323,6 +1338,9 @@ _hydrology_base_revision = 0
 
 def read_hydrology_source(seed, profile):
     """The selected final physical source, without requesting neural detail."""
+    # This is the hydrology background lane. Let the much smaller resource
+    # authority finish before global 2048x1024 routing/balance starts.
+    prioritize_resource_authority(seed,profile)
     from terrain_conditioning import make_conditioning_factory
     from terrain_geometry import world_bounds, world_latitude, reference_coordinates
     settings = resolve_generation(profile).settings
@@ -3207,6 +3225,8 @@ if __name__ == '__main__':
     # process serves them from memory meanwhile and flushes before exiting.
     terrain_array_io.deferred = True
     wait_for_replaced_server(arguments.port)
+    from terrain_resource_service import start as start_resource_compiler
+    start_resource_compiler()
     if os.environ.get('TERRAIN_PRELOAD_MODELS', '1') == '1':
         preload_devices(gpu_plan['devices'])
     app.run(host='127.0.0.1', port=arguments.port, threaded=True, debug=False)

@@ -1,0 +1,881 @@
+{
+  "revision": "d7a9404a2377dba6fd6d9853c2759c7efcbb64fd",
+  "worlds": {
+    "42": {
+      "statistics": {
+        "resources": {
+          "iron": {
+            "count": 2152,
+            "recoverable_count": 2147,
+            "contained": 253380612,
+            "recoverable": 15350044
+          },
+          "copper": {
+            "count": 3286,
+            "recoverable_count": 2958,
+            "contained": 3303081,
+            "recoverable": 756223
+          },
+          "tin": {
+            "count": 2686,
+            "recoverable_count": 2649,
+            "contained": 964989,
+            "recoverable": 612341
+          },
+          "lead": {
+            "count": 3425,
+            "recoverable_count": 3418,
+            "contained": 9226721,
+            "recoverable": 6367679
+          },
+          "zinc": {
+            "count": 3425,
+            "recoverable_count": 3387,
+            "contained": 7902360,
+            "recoverable": 1878162
+          },
+          "silver": {
+            "count": 3493,
+            "recoverable_count": 3487,
+            "contained": 49716230,
+            "recoverable": 31813778
+          },
+          "gold": {
+            "count": 1105,
+            "recoverable_count": 931,
+            "contained": 286850,
+            "recoverable": 170776
+          },
+          "salt": {
+            "count": 376,
+            "recoverable_count": 376,
+            "contained": 11880737,
+            "recoverable": 9578689
+          },
+          "gypsum": {
+            "count": 1693,
+            "recoverable_count": 1693,
+            "contained": 101308532,
+            "recoverable": 77868242
+          },
+          "coal": {
+            "count": 452,
+            "recoverable_count": 451,
+            "contained": 253630559,
+            "recoverable": 9159057
+          },
+          "tungsten": {
+            "count": 1791,
+            "recoverable_count": 1513,
+            "contained": 183106,
+            "recoverable": 40115
+          }
+        },
+        "families": {
+          "bog_iron": 583,
+          "coal": 2,
+          "epithermal_au_ag": 19,
+          "gypsum_quarry": 1693,
+          "ironstone": 8,
+          "local_ironstone": 1559,
+          "mvt_pb_zn": 3,
+          "orogenic_au": 42,
+          "placer_au": 1155,
+          "placer_sn": 873,
+          "polymetallic_vein": 85,
+          "porphyry_cu": 3,
+          "salt_spring": 376,
+          "sediment_cu": 3,
+          "skarn_fe_cu": 2,
+          "small_coal": 450,
+          "small_pb_ag": 3330,
+          "small_sn": 1803,
+          "sn_w_granite": 22,
+          "vms": 8
+        },
+        "rocks": {
+          "granite": 0.17395134842233523,
+          "limestone": 0.11670016078939041,
+          "sandstone": 0.19447532186171035,
+          "marl": 0.15065293067522587,
+          "basalt": 0.18712791749893787,
+          "metamorphic": 0.1612644301139154,
+          "ultramafic": 0.00930389092465813,
+          "evaporite": 0.006523999713826726
+        },
+        "means": {
+          "npp_g_m2": 805.5576260764208,
+          "cereal_suitability": 0.28923095829155654,
+          "cereal_net_t_year": 6953.474744151137
+        }
+      },
+      "inputs": {
+        "arrays": {
+          "backArc": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "6e502e2c8f4d168a69df0018223911bfc37d1ef0d7d6c9c07f9d55bdea69746e"
+          },
+          "boundaries": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "40d3001ded92314b8ce7695f769870c557e334ddfa0cc01a6ec3944fda99338f"
+          },
+          "convergence": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "40f6359fd05dc35a8739f9c163ccd61dd50b96fb5c33d6640ad746d9208c1893"
+          },
+          "crust": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "b2d4f87c7395621ac01eac25dc274c4311eb152e1aba12867ab163acd504423a"
+          },
+          "height_m": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "0d2c0fea85eab9f3c5e9014456121c36bd8bd30c0afc7ed095729b10b98eeb6d"
+          },
+          "hotspot": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "33db0ba744c98c8e9d91fad7755fd063277d20e48934a9e0db3f546e16973c92"
+          },
+          "pedology_blue": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "1109e22fce6858af63b94639dc52b7bb5617d2b80fc432814de53abfa07c9a83"
+          },
+          "pedology_calcareous": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "e2fc7ca88931853ca73f71c73d04af242da0494da2113a9402c9f36912dfc9b6"
+          },
+          "pedology_clayey": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "a8c627e0cdd4b67ef125cd29bdde9f07060b2a97ce72e0cb60739172b9fb7050"
+          },
+          "pedology_ferrallitic": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "903789ca4a4c5ee110a333d1bd9f37199eb7c2461aba79ae1a5f0fbfd9ae1203"
+          },
+          "pedology_green": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "76556d3326e8bd3503a5371349584963b83999693bcd0c6776bae51a54308653"
+          },
+          "pedology_mineral": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "4d0196694722d687dc4b08f6e5c5b5fce6dff1301c7a839901d529889c1a18a8"
+          },
+          "pedology_organic": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "fd2774c0b2b3c99beeeaa119c11039109015d097d096ee391e40c591d332a2dc"
+          },
+          "pedology_podzolic": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "a33e7a717fcdd7fa60e724bdbe5550c167ab8b2913b8bc433307acc35e0c4ed0"
+          },
+          "pedology_red": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "92b1297c7a0d3b0398eeb742307db06b391ee06c12449e2e0242c9ca72aaf4a8"
+          },
+          "pedology_sandy": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "65e022aeb324b6aea6af1728e1e0c7d221a6980f137f5c7e545b3367e3f12792"
+          },
+          "precip_summer": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "9476d762405cd5ef638ca54a07cb97bfa8a63e6e7f914d715888e1685d08dd17"
+          },
+          "precip_winter": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "5a6d7dedc98935f42848c5e53b7559f67fe84b5e7adb154fcd07f33049107d67"
+          },
+          "soil_sand": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "d49755bedac72c26110f3442b30fa824475410c6aca5df3ab350c47eda9f08c7"
+          },
+          "temperature_summer": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "13ba7e9b4c9d548a4da51ce9ce7a9a0c86644a8bf72a1b9d6f42ef0308724e0b"
+          },
+          "temperature_winter": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "c43a6aef22729082288a9c3f73facaeece68829512aa943f0e3da680e8cbbc35"
+          },
+          "uplift": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "90d4c65caa257fe838fadbbc591813e9553db134066fb65b87a62f202599a771"
+          }
+        },
+        "deposits": 0,
+        "metadata": {},
+        "deposits_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    },
+    "20261027": {
+      "statistics": {
+        "resources": {
+          "iron": {
+            "count": 2876,
+            "recoverable_count": 2872,
+            "contained": 58263129,
+            "recoverable": 16662098
+          },
+          "copper": {
+            "count": 3362,
+            "recoverable_count": 3030,
+            "contained": 21118003,
+            "recoverable": 2669878
+          },
+          "tin": {
+            "count": 1908,
+            "recoverable_count": 1883,
+            "contained": 592110,
+            "recoverable": 404710
+          },
+          "lead": {
+            "count": 3490,
+            "recoverable_count": 3480,
+            "contained": 11784080,
+            "recoverable": 6610630
+          },
+          "zinc": {
+            "count": 3490,
+            "recoverable_count": 3457,
+            "contained": 13547867,
+            "recoverable": 1859481
+          },
+          "silver": {
+            "count": 3552,
+            "recoverable_count": 3543,
+            "contained": 91985400,
+            "recoverable": 43335129
+          },
+          "gold": {
+            "count": 878,
+            "recoverable_count": 746,
+            "contained": 1015549,
+            "recoverable": 702507
+          },
+          "salt": {
+            "count": 488,
+            "recoverable_count": 488,
+            "contained": 12991878,
+            "recoverable": 11550811
+          },
+          "gypsum": {
+            "count": 1060,
+            "recoverable_count": 1060,
+            "contained": 65928075,
+            "recoverable": 51946030
+          },
+          "coal": {
+            "count": 355,
+            "recoverable_count": 355,
+            "contained": 420238182,
+            "recoverable": 17837030
+          },
+          "tungsten": {
+            "count": 1341,
+            "recoverable_count": 1125,
+            "contained": 115436,
+            "recoverable": 27615
+          }
+        },
+        "families": {
+          "bog_iron": 665,
+          "coal": 3,
+          "epithermal_au_ag": 18,
+          "gypsum_quarry": 1060,
+          "ironstone": 11,
+          "local_ironstone": 2199,
+          "mvt_pb_zn": 1,
+          "orogenic_au": 26,
+          "placer_au": 888,
+          "placer_sn": 545,
+          "polymetallic_vein": 71,
+          "porphyry_cu": 7,
+          "salt_spring": 488,
+          "sediment_cu": 9,
+          "skarn_fe_cu": 1,
+          "small_coal": 352,
+          "small_pb_ag": 3405,
+          "small_sn": 1347,
+          "sn_w_granite": 18,
+          "vms": 15
+        },
+        "rocks": {
+          "granite": 0.17411955715126998,
+          "limestone": 0.11706271697975501,
+          "sandstone": 0.18973207883783816,
+          "marl": 0.14955236573253936,
+          "basalt": 0.17456369604678587,
+          "metamorphic": 0.17428944737354873,
+          "ultramafic": 0.011973790840243987,
+          "evaporite": 0.008706347038018846
+        },
+        "means": {
+          "npp_g_m2": 746.5434512907187,
+          "cereal_suitability": 0.2503623203421794,
+          "cereal_net_t_year": 6137.715684560639
+        }
+      },
+      "inputs": {
+        "arrays": {
+          "backArc": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "cc6527c19cdfe907ea76aba6416404a185111d4991fc7fe33ce43a712cc23f66"
+          },
+          "boundaries": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "910b8e57ef1a8244a16c2fe1cad2811952c2cd8cd02762fb36268e3be6723ef6"
+          },
+          "convergence": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "a5b785e86f1b9d01804ec975025a674974614a24ca09119c6b3aeaa2e2071a1d"
+          },
+          "crust": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "1eae3d799967ad0fec68840f350489cbf51d55c67d7a389447272b0ff36da628"
+          },
+          "height_m": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "59a11eb38fdf90ee8e5b12932d64b9bf3f723d031f2c9c8cc785896f2f132d6a"
+          },
+          "hotspot": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "d3f0dc2002ed1e2700737e4f5ebddd29bf50b9c71e2c1bb36652dd576ab5079c"
+          },
+          "pedology_blue": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "f6c0dc7c49f7e27de750fb06515a3736e5865b451cba00e109590c3eaa5e8533"
+          },
+          "pedology_calcareous": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "447bac0712f0dcf2191c28d04cdcfd0362533622ce8b611af2959aa92064de2e"
+          },
+          "pedology_clayey": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "0e5c4c0172d99ae340c40f096e876962c4fce4db01dd5af2376d1178390e6444"
+          },
+          "pedology_ferrallitic": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "6128c1fd64b59040a04b07b896a37b57ff8dfe6ab5f9e609b1034c010c47c6b3"
+          },
+          "pedology_green": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "2c47526a1a23015bfcd1ef253cdbd751ba23670b55278f69b786060e9b9a6873"
+          },
+          "pedology_mineral": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "1b949f8645ceeff073327e2c6353ddc3956e8cb4152c39b62c9e6f753dc82c4a"
+          },
+          "pedology_organic": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "34986d5d0503ef9b1a92c3b5b56394b2cf28ae473a958a1a12366c85b2edeabf"
+          },
+          "pedology_podzolic": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "dfe6f82c0db412962f7230d297e2cd12ece924401024c95bdcc460d772199a1e"
+          },
+          "pedology_red": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "f65a45ff8867fadd6ab556b7fc007f112c0218136ecfb7d369a1faf95f67ca05"
+          },
+          "pedology_sandy": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "01233e495aef4a62077715f668f4b14f96e0fe00f5de5ce24ffc316bb08a86ca"
+          },
+          "precip_summer": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "efce46b60dcc1dfdefcad1a2d7593ade94cf6daa57101df55925b2f22dc9b28e"
+          },
+          "precip_winter": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "7f2ec3ed226a61fc1e3238cb07c8bd56fdc690219529319b70316c696e78b768"
+          },
+          "soil_sand": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "e6ed33c5bbb8b51e33a1c8932c070ff881c9aa789b3a0d1a8ce7d63fe0edce6e"
+          },
+          "temperature_summer": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "d03b9097e5719768713a30b0d8a5bb225e188231d5c6e3b8fea66c1376f1a9ed"
+          },
+          "temperature_winter": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "74b2f3759135d4baadca0e5a2f3222872e785803a17040376a322cacd35c5d2c"
+          },
+          "uplift": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "c3a6b15a43eab280ca43587ba3c869d46cd11d7a1dc4731ecab21762986a4b9e"
+          }
+        },
+        "deposits": 0,
+        "metadata": {},
+        "deposits_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    },
+    "viewer-42": {
+      "statistics": {
+        "resources": {
+          "iron": {
+            "count": 2070,
+            "recoverable_count": 2066,
+            "contained": 252954976,
+            "recoverable": 13913977
+          },
+          "copper": {
+            "count": 3278,
+            "recoverable_count": 2957,
+            "contained": 3400684,
+            "recoverable": 845574
+          },
+          "tin": {
+            "count": 2645,
+            "recoverable_count": 2608,
+            "contained": 954583,
+            "recoverable": 596407
+          },
+          "lead": {
+            "count": 3419,
+            "recoverable_count": 3410,
+            "contained": 9300742,
+            "recoverable": 6522750
+          },
+          "zinc": {
+            "count": 3419,
+            "recoverable_count": 3379,
+            "contained": 8228503,
+            "recoverable": 1888386
+          },
+          "silver": {
+            "count": 3486,
+            "recoverable_count": 3479,
+            "contained": 49308078,
+            "recoverable": 32502172
+          },
+          "gold": {
+            "count": 1059,
+            "recoverable_count": 881,
+            "contained": 265910,
+            "recoverable": 150001
+          },
+          "salt": {
+            "count": 387,
+            "recoverable_count": 386,
+            "contained": 91371293,
+            "recoverable": 9292387
+          },
+          "gypsum": {
+            "count": 1659,
+            "recoverable_count": 1658,
+            "contained": 115063270,
+            "recoverable": 77252434
+          },
+          "coal": {
+            "count": 461,
+            "recoverable_count": 461,
+            "contained": 7667684,
+            "recoverable": 6019721
+          },
+          "tungsten": {
+            "count": 1812,
+            "recoverable_count": 1527,
+            "contained": 181890,
+            "recoverable": 39045
+          }
+        },
+        "families": {
+          "bog_iron": 543,
+          "epithermal_au_ag": 17,
+          "evaporite_salt": 1,
+          "gypsum_quarry": 1658,
+          "ironstone": 8,
+          "local_ironstone": 1517,
+          "mvt_pb_zn": 4,
+          "orogenic_au": 43,
+          "placer_au": 1100,
+          "placer_sn": 807,
+          "polymetallic_vein": 84,
+          "porphyry_cu": 3,
+          "salt_spring": 386,
+          "sediment_cu": 3,
+          "skarn_fe_cu": 2,
+          "small_coal": 461,
+          "small_pb_ag": 3324,
+          "small_sn": 1827,
+          "sn_w_granite": 21,
+          "vms": 8
+        },
+        "rocks": {
+          "granite": 0.1722457668791713,
+          "limestone": 0.11566774119654696,
+          "sandstone": 0.1883903044411841,
+          "marl": 0.15458706902280128,
+          "basalt": 0.1897925712088887,
+          "metamorphic": 0.1627840175427443,
+          "ultramafic": 0.00969863062739953,
+          "evaporite": 0.006833899081263766
+        },
+        "means": {
+          "npp_g_m2": 795.107377951271,
+          "cereal_suitability": 0.2944062017048455,
+          "cereal_net_t_year": 7238.911402802098
+        }
+      },
+      "inputs": {
+        "arrays": {
+          "backArc": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "6e1b1fbe68fe23f37062138cfe7690ecfc03c165f297e398bcd8c8fbc59e1b7c"
+          },
+          "boundaries": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "40d3001ded92314b8ce7695f769870c557e334ddfa0cc01a6ec3944fda99338f"
+          },
+          "convergence": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "8a08b52b5fd9a121960e8e45550162aa785f0426c4c55d0d898264b2d9c7e9fa"
+          },
+          "crust": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "b2d4f87c7395621ac01eac25dc274c4311eb152e1aba12867ab163acd504423a"
+          },
+          "height_m": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "0dd78388b79870d2c74e9cb0dff64642bb090604f326293c062a67de72dd7eeb"
+          },
+          "hotspot": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "33db0ba744c98c8e9d91fad7755fd063277d20e48934a9e0db3f546e16973c92"
+          },
+          "pedology_blue": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "77ecedec225e71ce5511f147003f3c1b1670c4df45cb83bc2b94008b52cb770c"
+          },
+          "pedology_calcareous": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "c66364f71b86627343c01c14cd28cf245244d3c90aa63eb1d433a21c5ac91cad"
+          },
+          "pedology_clayey": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "d39b95e143031ce1dc74b35cd37acf7ae936b92383137c19627692cebdde4cd5"
+          },
+          "pedology_ferrallitic": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "9c969e43143289abcee5ac5972d4dde818f860920e8ea9eec2487b2266b74f45"
+          },
+          "pedology_green": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "32a546c4d27969e72249e9a16aaf8a3290974eaf2b8ef7939c5d1901a0d1a2f1"
+          },
+          "pedology_mineral": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "9363c7e38a8e2a8cbb879e37727ceb3b59857be2404c7a4849a0b3d9748ddae6"
+          },
+          "pedology_organic": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "cc7c78468d362c152a44e1b6c24f7c1abf9c2fac1a63271084183594ccb64f36"
+          },
+          "pedology_podzolic": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "60f0192a8748261b00158b61fd9b940f9b5079e64630eba143bf346bf70e6762"
+          },
+          "pedology_red": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "2a00829ac00d39222ee60585fe4d64ea046707a5282e5002bcfa6bb0388f677e"
+          },
+          "pedology_sandy": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "8f7fbec9d132cd4d6d350b5c85f1a7ebbdd091c35349e94c423031a0a6274319"
+          },
+          "precip_summer": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "eee6c280f5b84d768aa947f1fe5f755c99faeb22c75071c7ae2f5e717b4ee0f9"
+          },
+          "precip_winter": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "cbbdbfe7ca478faa4d58b60efc9b6db1fbf6ccc4b925dc5c5ed380bb9bcb9f15"
+          },
+          "soil_sand": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "8ce741d13c89856e1630bfc0b5cdbf8db8374ec10b8c8850c7526ee420d27e69"
+          },
+          "temperature_summer": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "ee71f5b90796e61a1aa5fdb2c6d0fe44c9b4c50b2cfe2127d1b57b20e49a7e1b"
+          },
+          "temperature_winter": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "8553103ce3cd56e0e305b0e3c673bf88b622c374d4ab682974cb8ea50ce33085"
+          },
+          "uplift": {
+            "dtype": "<f4",
+            "shape": [
+              1024,
+              2048
+            ],
+            "sha256": "b0d050ca46a172efba114e19eb516efe85adedca8c47772a35eed80f12a71d04"
+          }
+        },
+        "deposits": 0,
+        "metadata": {},
+        "deposits_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+      }
+    }
+  }
+}

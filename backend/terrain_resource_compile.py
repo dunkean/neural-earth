@@ -1,6 +1,7 @@
 """Compile one world's resource authority in its own process.
 
-Started by terrain_resource_layers for a world whose cache is missing. Running
+Optional isolated CLI fallback; the HTTP server now uses an in-process
+serialized background job in terrain_resource_layers. Running this fallback
 apart from the server keeps the compile off the server's GIL (tile requests
 are served at full speed), bounds its memory to this process and isolates a
 native crash. The server writes the atlas layers the compiler reads to
@@ -41,6 +42,8 @@ def _replace(temp, path, tries=100):
 
 
 def _write_json(path, value):
+    if hasattr(value,'records'):
+        value=value.records()
     temp = path.with_suffix('.tmp')
     temp.write_text(json.dumps(value), encoding='utf-8')
     _replace(temp, path)
@@ -100,18 +103,17 @@ def main(key, v2key, cache, fantasy):
         status['state'] = 'ready'
         status['compile_s'] = round(time.perf_counter() - started, 2)
         _write_json(status_path, status)
-        # Durable caches (compressed, ~0.15 GB), then the stage file goes.
+        # Durable columnar cache, then the temporary stage file goes.
         arrays = {k: v for k, v in slim(fields).items() if not k.startswith(('stock_', 'recoverable_'))}
         if v2 is None:
             temp = cache / f'{v2key}-v2.tmp.npz'
             np.savez_compressed(temp, **{k: np.asarray(fields[k]) for k in R.V2_FIELDS if k in fields})
             _replace(temp, cache / f'{v2key}-v2.npz')
-        temp = cache / f'{key}.tmp.npz'
-        np.savez_compressed(temp, **arrays)
-        _replace(temp, cache / f'{key}.npz')
-        _replace(cache / f'{key}-deposits.json', cache / f'{key}.json')
+        from terrain_resource_cache import save_world
+        save_world(cache, key, arrays, deposits)
         status['saved_s'] = round(time.perf_counter() - started, 2)
         _write_json(status_path, status)
+        (cache / f'{key}-deposits.json').unlink(missing_ok=True)
         for _ in range(100):
             try:
                 (cache / f'{key}-stage.npz').unlink(missing_ok=True)

@@ -4,7 +4,7 @@
 // GPU (TerrainResources.state().current) and a frame has been drawn.
 //
 // usage: node tools/benchmarks/benchmark_resources_first_pixel.cjs [--spawn PYTHON] [--port 8775]
-//        [--seed 7985403534069300490] [--clear-cache DIR] [--json OUT] [--layers a,b,...]
+//        [--seed 7985403534069300490] [--clear-cache DIR] [--json OUT] [--layers a,b,...] [--repeat]
 // --spawn starts `PYTHON -u backend/terrain_server.py --port PORT` (TERRAIN_PRELOAD_MODELS=0)
 // and stops it at the end (--log FILE keeps its output); --clear-cache empties the resource cache first.
 const {loadPlaywright,browserExecutable}=require('../platform.cjs');
@@ -29,13 +29,16 @@ async function up(timeout=180000){const t=Date.now();while(Date.now()-t<timeout)
   const browser=await loadPlaywright().chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu','--ignore-gpu-blocklist']});
   try{
     const page=await browser.newPage({viewport:{width:1280,height:760}}),errors=[];
+    let resourceProfile='orogen';
+    page.on('request',request=>{const url=new URL(request.url());
+      if(/\/api\/resources\/\d+\/(gpu|status)$/.test(url.pathname))resourceProfile=url.searchParams.get('world_profile')||'orogen';});
     page.on('pageerror',e=>errors.push(e.message));
     const t0=Date.now();
     await page.goto(`${base}/?seed=${seed}&profile=orogen&gpu=1`);
     await page.waitForFunction(()=>window.TerrainResources&&Object.keys(window.TerrainResources.specs()).length>0&&typeof renderer!=='undefined'&&renderer?.status==='webgpu',null,{timeout:300000});
     report.worldOpenS=(Date.now()-t0)/1000;
     report.worldDiameterKm=await page.evaluate(()=>world.world_diameter_km);
-    for(const mode of layers){
+    for(const mode of [...layers,...(process.argv.includes('--repeat')?layers:[])]){
       const start=Date.now();let sawProgress=null;
       await page.evaluate(m=>{const s=document.getElementById('mapMode');s.value=m;s.dispatchEvent(new Event('change',{bubbles:true}));},mode);
       let ok=false;
@@ -47,10 +50,16 @@ async function up(timeout=180000){const t=Date.now();while(Date.now()-t<timeout)
         await sleep(100);
       }
       await page.evaluate(()=>new Promise(ok=>requestAnimationFrame(()=>requestAnimationFrame(ok))));
-      const row={mode,ok,firstPixelS:(Date.now()-start)/1000,sinceWorldOpenS:(Date.now()-t0)/1000-report.worldOpenS,progressShown:sawProgress};
+      const row={mode,warm:report.layers.length>=layers.length,ok,firstPixelS:(Date.now()-start)/1000,sinceWorldOpenS:(Date.now()-t0)/1000-report.worldOpenS,progressShown:sawProgress};
       report.layers.push(row);console.log(JSON.stringify(row));
     }
     report.errors=errors;
+    report.resources=await page.evaluate(async({seed,profile})=>{
+      const query=`?world_profile=${encodeURIComponent(profile)}`;
+      const status=await fetch(`/api/resources/${seed}/status${query}`).then(r=>r.json());
+      const detail=await fetch(`/api/resources/${seed}/inspect${query}&x=0&y=0`).then(r=>r.json());
+      return {...status,compileSeconds:detail.seconds,cache:detail.cache,profile};
+    },{seed,profile:resourceProfile});
   }finally{await browser.close();if(server)server.kill();}
   const out=arg('--json',null);if(out){fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,JSON.stringify(report,null,2));}
   console.log(JSON.stringify({worldOpenS:report.worldOpenS,serverStartS:report.serverStartS}));

@@ -1,14 +1,8 @@
-"""Parallel map over short-lived Python worker processes for the resource compiler.
+"""Resident NumPy/SciPy worker threads, plus an optional isolated CLI fallback.
 
-The heavy parts of the world authority (Render v2 environment per month,
-realized geology per chunk of cells) are pure NumPy functions of their
-arguments. Threads barely help them (the GIL is held between small array
-operations), so they run in worker processes started with this file as the
-entry point: no import of the server's __main__, no shared state, and the
-same NumPy code, hence bit-identical results in any order.
-
-Each task is (module, function, kwargs); arguments and results travel as
-pickles in temporary files. Workers that fail raise in the parent.
+Each task is (module, function, kwargs). The server parallelizes only bulk EDT
+kernels; geology stays serial because its small array operations contend for
+the GIL. No task pickles or interpreter spawns on the normal HTTP path.
 """
 from __future__ import annotations
 
@@ -19,8 +13,20 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor
 
 HERE = Path(__file__).resolve().parent
+_POOL = ThreadPoolExecutor(max_workers=4, thread_name_prefix='resource-numpy')
+
+
+def submit(function, *args, **kwargs):
+    """Overlap independent authority work, without starting another process."""
+    return _POOL.submit(function,*args,**kwargs)
+
+
+def thread_map(function, values, timeout=600):
+    """Bulk decompression/array work; never call recursively from a pool task."""
+    return list(_POOL.map(function, values, timeout=timeout))
 
 
 def default_workers():
@@ -28,7 +34,18 @@ def default_workers():
 
 
 def parallel_map(tasks, workers=None, timeout=600):
-    """Run [(module, function, kwargs), ...] in worker processes; results in task order."""
+    """Share arrays across resident threads; preserve task order and exceptions.
+
+    Bulk NumPy/SciPy kernels release the GIL. The former file-pickle/spawn
+    implementation paid for a complete interpreter and imports for every task.
+    """
+    if workers == 1 or len(tasks) <= 1:
+        return [_call(*task) for task in tasks]
+    return thread_map(lambda task: _call(*task), tasks, timeout=timeout)
+
+
+def process_map(tasks, workers=None, timeout=600):
+    """Legacy isolated path, retained for reference timings and crash isolation."""
     workers = workers or default_workers()
     if workers <= 1 or len(tasks) <= 1:
         return [_call(*task) for task in tasks]

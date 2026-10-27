@@ -95,6 +95,7 @@ class ServerWorldConstructionTests(unittest.TestCase):
             lru_cache=lru_cache, hashlib=hashlib, json=json,
             os=SimpleNamespace(environ={'TERRAIN_DISTILL_LIVE': '0'}),
             load_pipeline=self.loader, WorldPipeline=WorldPipeline, COARSE_DEVICE=0,
+            prioritize_resource_authority=Mock(),
             live_models=lambda:SimpleNamespace(install=Mock()),
             runtime_profile=profile, coarse_stream_setting={'coarse':1}, OUTPUT=Path(self.temporary.name),
             WORLD_BOUNDS=(-20e6, -10e6, 20e6, 10e6), profile_bounds=profile_bounds,
@@ -146,6 +147,26 @@ class ServerWorldConstructionTests(unittest.TestCase):
         self.namespace['live_models'] = lambda: models
         world = self.namespace['get_world'](42, 'natural')
         models.install.assert_called_once_with(world)
+
+    def test_resource_priming_does_not_wait_in_metadata_lane(self):
+        tree=ast.parse(source_path('terrain_server.py',root=ROOT).read_text(encoding='utf-8'))
+        node=next(n for n in tree.body if getattr(n,'name',None)=='prioritize_resource_authority')
+        atlas=object()
+        namespace=dict(resolve_generation=resolve_generation,geometry_heightmap=Mock(return_value=atlas))
+        exec(compile(ast.Module(body=[node],type_ignores=[]),'<resource-priming>','exec'),namespace)
+        with patch('terrain_orogen.get_heightmap'),patch('terrain_resource_layers.wait_initial_authority') as wait:
+            namespace['prioritize_resource_authority'](42,'orogen',wait=False)
+            wait.assert_called_once_with(atlas,timeout=0.)
+            wait.reset_mock()
+            namespace['prioritize_resource_authority'](42,'natural',wait=False)
+            wait.assert_not_called()
+
+    def test_authority_priority_runs_before_cold_model_loading(self):
+        order=[]
+        self.namespace['prioritize_resource_authority'].side_effect=lambda *args:order.append('resources')
+        self.loader.side_effect=lambda *args,**kwargs:(order.append('models') or self.loader.return_value)
+        self.namespace['get_world'](42,'natural')
+        self.assertEqual(order[:2],['resources','models'])
 
     def test_full_orogen_configuration_is_accepted_by_world_endpoint(self):
         settings=resolve_generation('orogen').settings

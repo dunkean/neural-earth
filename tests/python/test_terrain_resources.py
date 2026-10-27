@@ -48,7 +48,7 @@ def digest(f, deposits):
     h = hashlib.sha256()
     for name in sorted(k for k, v in f.items() if isinstance(v, np.ndarray)):
         h.update(name.encode()); h.update(np.ascontiguousarray(f[name]).tobytes())
-    h.update(json.dumps(deposits, sort_keys=True).encode())
+    h.update(json.dumps(deposits.records() if hasattr(deposits,'records') else deposits, sort_keys=True).encode())
     return h.hexdigest()
 
 
@@ -135,7 +135,7 @@ class ResourceTests(unittest.TestCase):
         g, f, d = R.compile_world(self.layers, self.height, 42, lod=12, balance=False, bounds=self.bounds, parallel=W.parallel_map,
                                   progress=lambda stage, fields: stages.append((stage, 'land' in fields)))
         self.assertEqual(digest(f, d), digest(self.f, self.deposits))
-        self.assertEqual(stages, [('tectonics', True), ('environment', True), ('geology', True), ('deposits', True)])
+        self.assertEqual(stages, [('climate', True), ('tectonics', True), ('environment', True), ('geology', True), ('deposits', True)])
 
     def test_cached_render_v2_environment_gives_the_same_world(self):
         v2 = {k: self.f[k] for k in R.V2_FIELDS}
