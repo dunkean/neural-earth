@@ -1610,6 +1610,11 @@ def transport_script():
     return send_from_directory(WEB_ROOT, 'terrain_transport.js')
 
 
+@app.get('/terrain_locale.js')
+def locale_script():
+    return send_from_directory(WEB_ROOT, 'terrain_locale.js')
+
+
 @app.get('/terrain_styles.js')
 def styles_script():
     source='window.TerrainStyles='+json.dumps(STYLES)+';\n'+(source_path('terrain_style_rendering.js', root=ROOT)).read_text(encoding='utf-8')

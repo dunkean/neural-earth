@@ -33,6 +33,8 @@ const packedBase=await preparePackedBase(root,join(out,'runtime/models/base.nf4'
 // Explicit generated artifact from the former original-base build.
 await rm(join(root,'wasm/dist/runtime/models/base.safetensors'),{force:true});
 await cp(join(root,'web'),out,{recursive:true});
+// Keep the in-app method links available in static and offline WASM builds.
+for(const directory of ['design','methods'])await cp(join(root,'docs',directory),join(out,'docs',directory),{recursive:true});
 for(const name of ['client.mjs','runtime-worker.mjs','orogen-worker.mjs','models.mjs','physics.mjs','physical-tile.mjs','share.mjs','generation-schema.json','webgpu.mjs'])await cp(join(root,'wasm',name),join(out,'runtime',name));
 await cp(join(root,'wasm/pkg'),join(out,'runtime/pkg'),{recursive:true});
 await cp(join(root,'wasm/render-pkg'),join(out,'runtime/render-pkg'),{recursive:true});

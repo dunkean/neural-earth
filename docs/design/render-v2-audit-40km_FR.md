@@ -1,5 +1,7 @@
 # Audit Render v2 sur les tuiles générées
 
+[English](render-v2-audit-40km.md)
+
 Date : 23 octobre 2026. État : référence avant corrections, 24 sites réels capturés ; nouvelle validation en préparation.
 
 Le rendu n'est pas validé visuellement. Les comparaisons de référence montrent une perte de luminosité au zoom, des plages recouvertes et une neige intermédiaire trop morcelée. Les constats et chiffres ci-dessous décrivent cette version de référence ; ils ne sont pas des mesures après correction. Les shaders ont depuis été modifiés et demandent une nouvelle inspection appariée.

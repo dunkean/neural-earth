@@ -26,7 +26,7 @@ assert.equal(distanceLabel(1500),'1.50 km');
     const errors = [], requests = [];let pauseWorld=false,releaseWorld,snrHeightRequests=0,computing=0;
     let pauseFineTiles=false,firstFineRequestResolve;
     const fineReleases=[];
-    await page.addInitScript(()=>{if(!localStorage.getItem('neural-earth-preferences-v1'))localStorage.setItem('neural-earth-preferences-v1',JSON.stringify({gpuAcceleration:true,rendering:{gpuRender:true,coarseGpu:true}}))});
+    await page.addInitScript(()=>{localStorage.setItem('neural-earth-locale-v1','en');if(!localStorage.getItem('neural-earth-preferences-v1'))localStorage.setItem('neural-earth-preferences-v1',JSON.stringify({gpuAcceleration:true,rendering:{gpuRender:true,coarseGpu:true}}))});
     page.on('pageerror',e=>errors.push(e.message));
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM0LJrHwMDAxAAGAA7JAUW48M0QAAAAAElFTkSuQmCC','base64');
     const physical = new Float32Array(304*304+5*33*33); physical.fill(-125.5,0,304*304);
@@ -37,6 +37,7 @@ assert.equal(distanceLabel(1500),'1.50 km');
       if(u.pathname==='/terrain_renderer.js')return route.fulfill({contentType:'application/javascript',body:gpuStub});
       if(u.pathname==='/terrain_styles.js')return route.fulfill({contentType:'application/javascript',body:'window.TerrainStyles='+readRepositoryFile('terrain_styles.json','utf8')+';\n'+readRepositoryFile('terrain_style_rendering.js','utf8')});
       if(['/terrain_lighting.js','/terrain_globe.js','/terrain_lod.js','/terrain_generation_controls.js','/terrain_map_tools.js','/terrain_toolbar.js'].includes(u.pathname))return route.fulfill({contentType:'application/javascript',body:readRepositoryFile(u.pathname.slice(1),'utf8')});
+      if(u.pathname.endsWith('.js'))return route.fulfill({contentType:'application/javascript',body:readRepositoryFile(u.pathname.slice(1),'utf8')});
       if(u.pathname==='/api/generation/run'){const data=route.request().postDataJSON();return route.fulfill({json:{world_profile:data.profile,generation_settings:data.settings}});}
       if(u.pathname==='/api/world'){if(pauseWorld)await new Promise(resolve=>releaseWorld=resolve);return route.fulfill({json:{version:'natural-v1',cache_profile:'mock',world_profile:u.searchParams.get('world_profile'),generation_profile:u.searchParams.get('world_profile'),seed:u.searchParams.get('seed'),world_bounds:[-500000,-250000,500000,250000],overview_bounds:[-500000,-250000,500000,250000],overview:'/overview.png',gpu:'Mock GPU',generation_schema:{properties:JSON.parse(readRepositoryFile('native/orogen/climate-parameters.json','utf8'))}}});}
       if(u.pathname==='/api/status')return route.fulfill({json:{scheduler:{queued:0,computing,encoding:0}}});
@@ -153,6 +154,16 @@ assert.equal(distanceLabel(1500),'1.50 km');
     const draft=await page.evaluate(()=>generationControls.read());
     assert.equal(draft.orogen_biome_tropical_snow,4.125,'exact entry must retain precision beyond slider steps');
     assert.deepEqual(draft.orogen_biome_color_af,[68/255,136/255,34/255]);
+    // Switching language translates dynamically installed controls and the
+    // current draft status without changing entered values or the search query.
+    for(const [locale,expected] of [['fr','Couleur Af'],['zh','Af 颜色'],['es','Color Af'],['pt','Cor Af']]){
+      await page.evaluate(value=>{const select=document.getElementById('ui-language');select.value=value;select.dispatchEvent(new Event('change'));},locale);
+      assert.equal(await page.locator('#orogen_biome_color_af').getAttribute('aria-label'),expected);
+      assert.equal(await page.locator('#orogenClimateSearch').inputValue(),'Af color');
+      assert.equal(await page.evaluate(()=>generationControls.read().orogen_biome_tropical_snow),4.125);
+      assert.deepEqual(await page.evaluate(()=>generationControls.read().orogen_biome_color_af),[68/255,136/255,34/255]);
+    }
+    await page.evaluate(()=>{const select=document.getElementById('ui-language');select.value='en';select.dispatchEvent(new Event('change'));});
     for(const key of Object.keys(JSON.parse(readRepositoryFile('native/orogen/climate-parameters.json','utf8'))))assert.ok(key in draft,key+' must be editable');
     assert.equal(requests.filter(path=>path==='/api/world').length,worldRequests,'draft changes must not generate a world');
     await page.locator('#resetGeneration').click();

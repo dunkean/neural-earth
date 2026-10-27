@@ -40,7 +40,7 @@ window.TerrainShare=(()=>{
     const compatibility=document.createElement('p');compatibility.id='shareCompatibility';compatibility.setAttribute('role','status');panel.querySelector('.toolPanel').append(compatibility);
     const $=id=>document.getElementById(id),cache=new Map();let timer=null,sequence=0,lastScheduled=null;
     async function save(){
-      if(!canShare())throw Error('Wait for generation to finish before sharing');
+      if(!canShare())throw Error(window.NeuralEarthLocale?.text('wait')||'Wait for generation to finish before sharing');
       const snapshot=capture(),key=JSON.stringify([snapshot.generation,snapshot.rendering]);
       let recipes=cache.get(key);
       if(!recipes){recipes=await request('/api/share',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({generation:snapshot.generation,rendering:snapshot.rendering})});cache.set(key,recipes);if(cache.size>16)cache.delete(cache.keys().next().value);}
@@ -53,12 +53,12 @@ window.TerrainShare=(()=>{
         const link=new URL(url(state),location.origin).href,code=format(state);
         $('generationUid').value=state.generation;$('shareCode').value=code;
         history.replaceState({terrainLocal:true},'',link);
-        if(copy){try{await navigator.clipboard.writeText(copy==='link'?link:code);$('shareStatus').textContent='Copied '+(copy==='link'?'link':'code');}catch(_){$('shareCode').focus();$('shareCode').select();$('shareStatus').textContent='Select and copy the code above';}}
-        else $('shareStatus').textContent='View saved';
-      }catch(error){$('shareStatus').textContent=error.message;}
+        if(copy){try{await navigator.clipboard.writeText(copy==='link'?link:code);$('shareStatus').textContent=window.NeuralEarthLocale?.text(copy==='link'?'copiedLink':'copiedCode')||'Copied';}catch(_){$('shareCode').focus();$('shareCode').select();$('shareStatus').textContent=window.NeuralEarthLocale?.text('copyManually')||'Select and copy the code above';}}
+        else $('shareStatus').textContent=window.NeuralEarthLocale?.text('saved')||'View saved';
+      }catch(error){$('shareStatus').textContent=window.NeuralEarthLocale?.error(error.message)||error.message;}
     }
     $('copyShare').onclick=()=>publish('code');$('copyShareLink').onclick=()=>publish('link');
-    $('openShare').onclick=()=>{try{const state=parse($('openShareCode').value);location.assign(url(state));}catch(error){$('shareStatus').textContent=error.message;}};
+    $('openShare').onclick=()=>{try{const state=parse($('openShareCode').value);location.assign(url(state));}catch(error){$('shareStatus').textContent=window.NeuralEarthLocale?.error(error.message)||error.message;}};
     panel.addEventListener('toggle',()=>{if(panel.open)publish();});
     return {updateURL(){if(!canShare())return;const key=JSON.stringify(capture());if(key===lastScheduled)return;lastScheduled=key;clearTimeout(timer);++sequence;timer=setTimeout(()=>publish(),200);},save,format,params};
   }

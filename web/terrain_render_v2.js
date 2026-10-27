@@ -1,7 +1,7 @@
 /* Render v2. Appearance/microhabitat model, not new terrain or weather.
  * The environmental equations are mirrored in backend/terrain_render_v2.py
  * and Magna Urbis terrainRenderV2.ts. World metres; temperatures Celsius;
- * annual rain mm; cover fractions. See docs/design/render-v2-implementation.fr.md. */
+ * annual rain mm; cover fractions. See docs/design/render-v2-implementation.md. */
 (root=>{
   'use strict';
   const MODES={'render-v2':-8,'render-v2-substrate':-9,'render-v2-moisture':-10,'render-v2-vegetation':-11,'render-v2-snow':-12};
@@ -11,10 +11,19 @@
   if(typeof location!=='undefined') {const x=new URLSearchParams(location.search).get('v2season');if(x!==null)season=normalize(x);}
   function mount(container,onChange,onDiagnostic=()=>{}){
     changed=onChange;const field=document.createElement('fieldset');field.id='renderV2Settings';field.hidden=true;
-    field.innerHTML='<legend>Render v2 · satellite landscape</legend><label>Saison <input id="renderV2Season" type="range" min="0" max="1" step="0.0025" aria-label="Render v2 season"><output id="renderV2Date"></output></label><label>Diagnostic <select id="renderV2Diagnostic" aria-label="Render v2 diagnostic"><option value="render-v2">None · satellite landscape</option><option value="render-v2-substrate">Substrate</option><option value="render-v2-moisture">Local moisture</option><option value="render-v2-vegetation">Vegetation</option><option value="render-v2-snow">Snow and ice</option></select></label><small>One annual calendar for foliage, ground, snow and ice. Appearance model; no terrain regeneration. <a href="/docs/design/render-v2-implementation.fr.md" target="_blank">Method and limitations</a></small>';
+    field.innerHTML='<legend>Render v2 · satellite landscape</legend><label>Saison <input id="renderV2Season" type="range" min="0" max="1" step="0.0025" aria-label="Render v2 season"><output id="renderV2Date"></output></label><label>Diagnostic <select id="renderV2Diagnostic" aria-label="Render v2 diagnostic"><option value="render-v2">None · satellite landscape</option><option value="render-v2-substrate">Substrate</option><option value="render-v2-moisture">Local moisture</option><option value="render-v2-vegetation">Vegetation</option><option value="render-v2-snow">Snow and ice</option></select></label><small>One annual calendar for foliage, ground, snow and ice. Appearance model; no terrain regeneration. <a href="./docs/design/render-v2-implementation.md" target="_blank">Method and limitations</a></small>';
     container.prepend(field);const input=field.querySelector('input'),output=field.querySelector('output'),diagnostic=field.querySelector('select');
-    sync=()=>{input.value=season;output.textContent=new Intl.DateTimeFormat('en',{month:'long'}).format(new Date(Date.UTC(2024,0,1+Math.floor(season*365))));};
-    input.oninput=()=>{season=normalize(input.value);sync();changed();};diagnostic.onchange=()=>onDiagnostic(diagnostic.value);sync();return {show:(yes,mode='render-v2')=>{field.hidden=!yes;diagnostic.value=isStyle(mode)?mode:'render-v2';}};
+    sync=()=>{input.value=season;output.textContent=new Intl.DateTimeFormat(root.NeuralEarthLocale?.locale()||'en',{month:'long',timeZone:'UTC'}).format(new Date(Date.UTC(2024,0,1+Math.floor(season*365))));};
+    const translate=()=>{
+      const locale=root.NeuralEarthLocale;if(!locale)return;
+      const t=name=>locale.text('v2.'+name),labels=field.querySelectorAll('label');
+      field.querySelector('legend').textContent=t('title');
+      labels[0].firstChild.textContent=t('season')+' ';input.setAttribute('aria-label',t('season'));
+      labels[1].firstChild.textContent=t('diagnostic')+' ';diagnostic.setAttribute('aria-label',t('diagnostic'));
+      for(const [value,name] of [['render-v2','none'],['render-v2-substrate','substrate'],['render-v2-moisture','moisture'],['render-v2-vegetation','vegetation'],['render-v2-snow','snow']])diagnostic.querySelector('option[value="'+value+'"]').textContent=t(name);
+      const hint=field.querySelector('small');hint.firstChild.textContent=t('hint');const method=hint.querySelector('a');method.textContent=t('method');method.href='./docs/design/render-v2-implementation.'+(locale.locale()==='fr'?'fr':'en')+'.md';sync();
+    };
+    root.addEventListener('neural-locale-change',translate);input.oninput=()=>{season=normalize(input.value);sync();changed();};diagnostic.onchange=()=>onDiagnostic(diagnostic.value);sync();translate();return {show:(yes,mode='render-v2')=>{field.hidden=!yes;diagnostic.value=isStyle(mode)?mode:'render-v2';}};
   }
   // Fixed-amplitude bands. Filtering removes variance; it never amplifies a
   // last remaining octave, and ecological identity is independent of the view.

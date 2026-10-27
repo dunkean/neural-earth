@@ -1,5 +1,7 @@
 # Corpus réel de référence Render v2
 
+[English translation](render-v2-reference-protocol.md).
+
 Le corpus prévu comprend **60 centres distincts × cinq zooms × trois vues = 900 PNG**. Les images proviennent exclusivement du viewer sur les tuiles réellement générées du monde `7985403534069300490`. Les statistiques de l’atlas Orogen servent à choisir les centres ; elles ne constituent aucune preuve du relief natif ou de l’aspect final.
 
 Le manifeste et tous les résultats résident dans `output/render-v2-reference/`, séparément des premières captures `output/render-v2-40km/`. Les centres communs aux listes initiales sont dédupliqués à un millimètre et conservent leurs identifiants d’origine dans `aliases`. Le corpus réunit la matrice initiale, les autres situations réelles, les positions exactes de l’utilisateur, les candidats de remplacement et trois compléments côtiers/arides. Deux centres supplémentaires visent explicitement une plage déjà visible dans la capture réelle et un point de mer dans la banquise ; leurs échantillons natifs et leur provenance sont consignés.

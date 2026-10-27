@@ -1,5 +1,7 @@
 # Hydrologie multi-échelle : revue ciblée de la littérature et des projets
 
+[English translation](hydrology-literature.md).
+
 Date : 21 octobre 2026. Cette revue accompagne la [conception de la stack](multiscale-hydrology.md). Elle sélectionne les méthodes utiles à Neural Earth ; elle ne constitue ni une revue systématique exhaustive, ni une reproduction des résultats publiés. Aucun chiffre de performance externe n'est présenté comme une mesure de notre intégration.
 
 Le problème est spécifique : le monde est fini, sphérique ou plan, mais son relief neural détaillé arrive à la demande. Il faut préserver les relations amont-aval sans connaître tout le DEM fin. Les méthodes qui supposent un DEM global déjà disponible et celles qui construisent tout le terrain autour des rivières apportent des briques ; aucune ne s'intègre telle quelle.

@@ -1,6 +1,6 @@
 # Neural Earth — conception du moteur de régions
 
-Cette note conserve les orientations prospectives en français. Le runtime livré est décrit dans [architecture.md](../architecture.md). Les audits, benchmarks, reviews et comptes rendus historiques sont archivés hors du dépôt.
+Cette note conserve les orientations prospectives en français. [English translation](realtime-design.md). Le runtime livré est décrit dans [architecture.md](../architecture.md). Les audits, benchmarks, reviews et comptes rendus historiques sont archivés hors du dépôt.
 
 ## Unité de calcul
 

@@ -1,0 +1,34 @@
+const key='neural-earth-locale-v1';
+const supported=['en','fr','zh','es','pt'];
+let locale=(()=>{try{return supported.includes(localStorage.getItem(key))?localStorage.getItem(key):supported.includes(navigator.language.slice(0,2))?navigator.language.slice(0,2):'en';}catch{return 'en';}})();
+const current=()=>locale;
+export function tileText(fr,en,zh,es,pt){return ({fr,en,zh,es,pt})[current()];}
+const strings={
+  back:['← Neural Earth · carte et modèles originaux','← Neural Earth · map and original models','← Neural Earth · 地图与原始模型','← Neural Earth · mapa y modelos originales','← Neural Earth · mapa e modelos originais'],
+  title:['Du croquis au relief · 40 × 40 km','From sketch to terrain · 40 × 40 km','从草图到地形 · 40 × 40 公里','Del boceto al relieve · 40 × 40 km','Do esboço ao relevo · 40 × 40 km'],
+  intro:['Prototype expérimental. Les formes du terrain sont encore en cours d’amélioration. Seul le relief final est affiché.','Experimental prototype. Terrain shapes are still being improved. Only final terrain is displayed.','实验性原型。地形形态仍在改进中。仅显示最终地形。','Prototipo experimental. Las formas del terreno siguen mejorándose. Solo se muestra el relieve final.','Protótipo experimental. As formas do terreno ainda estão sendo aprimoradas. Apenas o relevo final é exibido.'],
+  form:['Croquis et paramètres','Sketch and settings','草图与设置','Boceto y parámetros','Esboço e parâmetros'], preset:['Forme de départ','Starting shape','初始形状','Forma inicial','Forma inicial'],
+  sketchHint:['Dessine les altitudes sur le croquis. Il décrit toute la tuile de 40 km.','Paint elevations on the sketch. It describes the entire 40 km tile.','在草图上绘制高程。它描述完整的 40 公里地块。','Dibuja las elevaciones en el boceto. Representa toda la tesela de 40 km.','Desenhe as altitudes no esboço. Ele representa todo o bloco de 40 km.'],
+  sketchAria:['Croquis d’altitude éditable, également modifiable avec les champs ligne et colonne','Editable elevation sketch; row and column fields can also be used','可编辑高程草图，也可使用行和列字段修改','Boceto de elevación editable, también mediante los campos de fila y columna','Esboço de elevação editável, também pelos campos de linha e coluna'],
+  altitude:['Altitude du pinceau (mètres)','Brush elevation (metres)','画笔高程（米）','Elevación del pincel (metros)','Altitude do pincel (metros)'], row:['Ligne','Row','行','Fila','Linha'], column:['Colonne','Column','列','Columna','Coluna'], edit:['Appliquer à cette case','Apply to this cell','应用到此单元','Aplicar a esta celda','Aplicar a esta célula'],
+  climate:['Climat','Climate','气候','Clima','Clima'], arid:['Aride','Arid','干旱','Árido','Árido'], cold:['Froid','Cold','寒冷','Frío','Frio'], tropical:['Tropical','Tropical','热带','Tropical','Tropical'], temperate:['Tempéré','Temperate','温带','Templado','Temperado'], oceanic:['Océanique','Oceanic','海洋性','Oceánico','Oceânico'],
+  seed:['Graine','Seed','种子','Semilla','Semente'], engine:['Lieu du calcul','Compute location','计算位置','Lugar de cálculo','Local do cálculo'], server:['Backend Python (serveur)','Python backend (server)','Python 后端（服务器）','Backend Python (servidor)','Backend Python (servidor)'], browser:['Navigateur','Browser','浏览器','Navegador','Navegador'], provider:['Calcul','Compute','计算','Cálculo','Cálculo'],
+  decoder:['Décodeur','Decoder','解码器','Decodificador','Decodificador'], compact:['Décodeur16 · 10k · compact','Decoder16 · 10k · compact','Decoder16 · 10k · 紧凑','Decodificador16 · 10k · compacto','Decodificador16 · 10k · compacto'], quality:['Décodeur64 · 200k · qualité','Decoder64 · 200k · quality','Decoder64 · 200k · 高质量','Decodificador64 · 200k · calidad','Decodificador64 · 200k · qualidade'],
+  decoderHelp:['Compact privilégie la rapidité. Qualité conserve davantage de détails et prend plus de temps, surtout sur CPU.','Compact prioritizes speed. Quality retains more detail and takes longer, especially on CPU.','紧凑模式优先速度。高质量模式保留更多细节但耗时更长，尤其在 CPU 上。','Compacto prioriza la rapidez. Calidad conserva más detalle y tarda más, especialmente con CPU.','Compacto prioriza velocidade. Qualidade preserva mais detalhes e demora mais, especialmente na CPU.'],
+  generate:['Générer le relief','Generate terrain','生成地形','Generar relieve','Gerar relevo'], retry:['Réessayer la préparation','Retry preparation','重试准备','Reintentar la preparación','Tentar preparação novamente'],
+  result:['Terrain généré','Generated terrain','生成的地形','Terreno generado','Terreno gerado'], resultAria:['Ombrage du terrain généré, altitudes et export disponibles ci-dessous','Generated terrain shading; elevations and exports available below','生成地形的阴影，以下提供高程与导出','Sombreado del terreno generado; elevaciones y exportación disponibles abajo','Sombreamento do terreno gerado; altitudes e exportação disponíveis abaixo'],
+  image:['Image PNG','PNG image','PNG 图像','Imagen PNG','Imagem PNG'], dem:['Hauteurs .f32','Heights .f32','高程 .f32','Alturas .f32','Alturas .f32'], parameters:['Paramètres JSON','JSON parameters','JSON 参数','Parámetros JSON','Parâmetros JSON'], metadata:['Valeurs et provenance du résultat','Result values and provenance','结果数值与来源','Valores y procedencia del resultado','Valores e origem do resultado'],
+};
+const translated=(arr)=>tileText(...arr);
+export function setupTileLocale(onChange){
+  const label=document.createElement('label');label.className='tile-language';const title=document.createElement('span');const select=document.createElement('select');select.setAttribute('aria-label','Language');
+  for(const [id,name] of [['en','English'],['fr','Français'],['zh','中文'],['es','Español'],['pt','Português']])select.add(new Option(name,id));
+  label.append(title,document.createTextNode(' '),select);document.querySelector('h1').before(label);
+  function update(){const locale=current();document.documentElement.lang=locale;document.title=translated(strings.title);title.textContent=tileText('Langue','Language','语言','Idioma','Idioma');select.value=locale;select.setAttribute('aria-label',title.textContent);
+    for(const el of document.querySelectorAll('[data-tile-text]'))el.textContent=translated(strings[el.dataset.tileText]);
+    for(const el of document.querySelectorAll('[data-tile-aria]'))el.setAttribute('aria-label',translated(strings[el.dataset.tileAria]));
+    onChange?.();}
+  select.onchange=()=>{locale=select.value;try{localStorage.setItem(key,locale);}catch{}update();};
+  window.addEventListener('storage',e=>{if(e.key===key&&supported.includes(e.newValue)){locale=e.newValue;update();}});update();
+}
+export function presetLabel(value){const names={Plaine:['Plaine','Plain','平原','Llanura','Planície'],Collines:['Collines','Hills','丘陵','Colinas','Colinas'],Massif:['Massif','Mountain range','山地','Macizo','Maciço'],Crête:['Crête','Ridge','山脊','Cresta','Crista'],Vallée:['Vallée','Valley','山谷','Valle','Vale'],Plateau:['Plateau','Plateau','高原','Meseta','Planalto']};return names[value]?translated(names[value]):value;}

@@ -1,5 +1,7 @@
 # Revue polaire réelle avant gel de Render v2
 
+[English translation](render-v2-polar-review.md).
+
 ## Reproducteur et preuves
 
 Monde `bd36737badf0cedf99200ba94bf7dc761070aca686a98784373247c86efe87dd`, centre océanique réel `[14657326.440143395, 7263946.615556731]`, hydrologie désactivée. Le centre voisin initial de l'utilisateur est terrestre ; le déplacement de 12 km sert à examiner effectivement la banquise. Les captures utilisent les vrais caches décodeur à 30 m, LOD0 forcé, et une caméra identique entre V2 et Render3D.

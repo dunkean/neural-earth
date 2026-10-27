@@ -48,6 +48,22 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4n
   const sender=await create('https://sender.test',{width:1280,height:900},false);
   await sender.page.goto('https://sender.test/?seed=18446744073709551615&profile=natural');
   await sender.page.waitForFunction(()=>world&&!worldLoading&&rendererReady);
+  // Changing interface language must preserve world and view state.
+  const seedBeforeLanguage=await sender.page.locator('#seed').inputValue();
+  const sourceBeforeLanguage=await sender.page.locator('#generatorType').inputValue();
+  const materialsBeforeLanguage=await sender.page.evaluate(()=>renderMaterials.get());
+  for(const [language,label,error,source,forest] of [['fr','Copier le code','Collez un code de partage NE1 ou un lien','Bruit','Couvert forestier'],['en','Copy code','Paste an NE1 share code or a share link','Noise','Forest cover'],['zh','复制代码','请粘贴 NE1 分享代码或链接','噪声','森林覆盖'],['es','Copiar código','Pega un código NE1 o un enlace','Ruido','Cobertura forestal'],['pt','Copiar código','Cole um código NE1 ou um link','Ruído','Cobertura florestal']]){
+   await sender.page.selectOption('#ui-language',language);
+   assert.equal(await sender.page.locator('#copyShare').textContent(),label);
+   assert.equal(await sender.page.locator('#seed').inputValue(),seedBeforeLanguage);
+   assert.equal(await sender.page.locator('#generatorType').inputValue(),sourceBeforeLanguage);
+   assert.equal(await sender.page.locator('#generatorType option[value=natural]').textContent(),source);
+   assert.equal(await sender.page.locator('#render_forest').getAttribute('aria-label'),forest);
+   assert.deepEqual(await sender.page.evaluate(()=>renderMaterials.get()),materialsBeforeLanguage);
+   await sender.page.evaluate(()=>{$('openShareCode').value='invalid';$('openShare').click();});
+   assert.equal(await sender.page.locator('#shareStatus').textContent(),error);
+  }
+  await sender.page.selectOption('#ui-language','en');
   await sender.page.evaluate(()=>{
    cx=123456.125;cy=-78901.25;mpp=1600;viewMode='render';$('mapMode').value='render';
    renderMaterials.set({season:.23,snow:.75,vegetation_tint:[.123456,.78,.9]});
@@ -66,6 +82,12 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4n
   await sender.page.locator('#viewport').click({position:{x:click.x+100,y:click.y+40},modifiers:['Alt']});
   assert.equal(await sender.page.locator('.mapPin').count(),2,'Alt+click creates coordinate-only pins');
   const pins=await sender.page.evaluate(()=>terrainPins.get());
+  for(const [language,prefix] of [['fr','Supprimer le repère à'],['en','Remove pin at'],['zh','删除此位置的标记：'],['es','Quitar marcador en'],['pt','Remover marcador em']]){
+   await sender.page.selectOption('#ui-language',language);
+   assert((await sender.page.locator('.mapPin').first().getAttribute('aria-label')).startsWith(prefix));
+   assert.deepEqual(await sender.page.evaluate(()=>terrainPins.get()),pins);
+  }
+  await sender.page.selectOption('#ui-language','en');
   assert(Math.abs(pins[0][0]-(123456.125+60*1600))<1e-5);
   assert(Math.abs(pins[0][1]-(-78901.25-40*1600))<1600,'mouse events may round a fractional CSS pixel, but pin coordinates stay within one pixel of the click');
   assert.equal(new URL(sender.page.url()).searchParams.get('pins'),pins.map(pin=>pin.join(',')).join(';'),'pin coordinates update the URL immediately');

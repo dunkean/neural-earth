@@ -2,7 +2,7 @@
 
 Status: river stack implemented and the reference neural scene checked live, 2026-10-21. This document retains the wider design scope; the [integration note](../methods/hydrology-integration.md), [verification results](../methods/hydrology-verification.md) and individual [method notes](../methods/) describe the delivered algorithms and their limits. Lake rendering is deferred at the user's request. Bars, oxbows, distributaries, monthly lake storage and standalone WASM execution remain later work.
 
-Companion: [French literature and project review](hydrology-literature.fr.md).
+Companion: [French literature and project review](hydrology-literature_FR.md).
 
 Current scope adjustment (2026-10-21): lake rendering is deferred at the user's
 request after close-zoom inspection. Depression/lake nodes remain in drainage

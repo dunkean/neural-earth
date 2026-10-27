@@ -1,6 +1,8 @@
 # Render v2 : implémentation et vérification
 
-2026-10-23. Spécification : [render-v2.fr.md](render-v2.fr.md).
+[English](render-v2-implementation.md)
+
+2026-10-23. Spécification : [render-v2.fr.md](render-v2_FR.md).
 
 ## Résultat et architecture
 
@@ -25,7 +27,7 @@ Son microhabitat, ses couleurs proches, son calendrier, sa composition d'eau et
 ses diagnostics enrichissent cette référence. Il ne se contente pas de renommer Render3D.
 
 La présence de ces fonctions ne vaut pas acceptation visuelle. L'[audit sur les
-vraies tuiles](render-v2-audit-40km.fr.md) conserve les régressions de référence
+vraies tuiles](render-v2-audit-40km_FR.md) conserve les régressions de référence
 et leurs comparaisons. Render et Render3D restent le seuil de qualité : les
 plages, bancs sédimentaires et ombres du relief doivent rester lisibles.
 Une amélioration de palette ou de détail ne compense pas leur disparition :

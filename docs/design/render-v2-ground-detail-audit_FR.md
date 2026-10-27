@@ -1,5 +1,7 @@
 # Sol détaillé sous végétation : audit et points d'intégration
 
+[English](render-v2-ground-detail-audit.md)
+
 Audit initial de code du 23 octobre 2026, rapproché exclusivement des captures de vrais DEM, puis correction de composition décrite en fin de document. Les défauts analysés ci-dessous correspondent à l'état **avant correction**. La recherche bibliographique et le choix final du spectre/filtre sont traités séparément : cette note décrit les contraintes concrètes du code à respecter pour les intégrer.
 
 ## Deux causes différentes du sol lisse
@@ -85,7 +87,7 @@ Conserver les coordonnées entières/fractionnaires du sol (`r3.cells`, `r3.frac
 
 ## Portée et vérification sur les preuves existantes
 
-Les captures BWH `arid-plain/rolling` montrent le sol presque uniforme en fenêtre 640 m, et les BSK le passage de masses floues aux couronnes. La canopée AF/CFB réelle perd du contraste local en v2 ; ces constats sont consignés dans [l'audit réel](render-v2-audit-real-open-ground.fr.md), avec méthodes et limites. Ils sont compatibles avec ce chemin de composition, sans constituer une ablation de chaque terme du shader.
+Les captures BWH `arid-plain/rolling` montrent le sol presque uniforme en fenêtre 640 m, et les BSK le passage de masses floues aux couronnes. La canopée AF/CFB réelle perd du contraste local en v2 ; ces constats sont consignés dans [l'audit réel](render-v2-audit-real-open-ground_FR.md), avec méthodes et limites. Ils sont compatibles avec ce chemin de composition, sans constituer une ablation de chaque terme du shader.
 
 Pour l'étape 1, reprendre les **mêmes positions et emprises réelles**, en particulier une zone BWH sans couronne, une trouée AF, une zone BSK entre arbres et un contrôle EF. Vérifier que la modulation du sol survit au retour sans arbre et dans les trouées, que les couronnes restent inchangées, et que le détail disparaît proprement lorsqu'il devient subpixel. Vérifier aussi un léger déplacement de caméra pour détecter le scintillement ; une seule image nette ne suffit pas.
 

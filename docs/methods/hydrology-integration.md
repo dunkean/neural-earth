@@ -2,7 +2,7 @@
 
 This is the implementation note for `terrain_hydrology_service.py`,
 `terrain_hydrology_sampling.py`, the server endpoints and the viewer integration.
-The [literature review](../design/hydrology-literature.fr.md) and
+The [literature review](../design/hydrology-literature.md) and
 [design](../design/multiscale-hydrology.md) distinguish the research sources from
 the choices made here. The other method notes cover [routing and lakes](hydrology-routing.md),
 [water balance](hydrology-balance.md), [regional routing](hydrology-regions.md),

@@ -111,7 +111,7 @@ def register_tile40_routes(app,assets=None,python_runtime=None):
 
     @app.get('/tile40/<path:name>')
     def tile40_asset(name):
-        fixed={'demo.mjs':web/'tile40_demo.mjs','demo_helpers.mjs':web/'tile40_demo_helpers.mjs',
+        fixed={'demo.mjs':web/'tile40_demo.mjs','demo_helpers.mjs':web/'tile40_demo_helpers.mjs','locale.mjs':web/'tile40_locale.mjs',
             'worker.js':web/'tile40_demo_worker.js','runtime/tile40_runtime.mjs':web/'tile40_runtime.mjs',
             'runtime/noise.mjs':web/'noise.mjs'}
         if name.startswith('ort/') and Path(name).name==name[4:]:

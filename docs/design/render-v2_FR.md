@@ -1,5 +1,7 @@
 # Render v2 — paysage satellite procédural multiscale
 
+[English](render-v2.md)
+
 Date : 2026-10-22. Spécification d'implémentation pour Neural Earth et Magna Urbis.
 
 ## Objectif et périmètre autorisé

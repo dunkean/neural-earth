@@ -1,5 +1,7 @@
 # Sols Render v2 : références et application au shader
 
+[English translation](render-v2-soil-literature.md).
+
 23 octobre 2026. Recherche demandée par l'utilisateur pendant l'audit des vraies tuiles. Les références orientent les corrections ; leurs algorithmes complets ne sont pas présentés comme déjà implémentés.
 
 ## Décision de conception

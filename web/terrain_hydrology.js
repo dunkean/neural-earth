@@ -220,11 +220,6 @@
   }
   function formatFlow(q) {return `${q<.01?q.toPrecision(2):q<10?q.toFixed(2):q<100?q.toFixed(1):Math.round(q).toLocaleString('en')} m³/s`;}
   function km2(m2) {return `${(Number(m2||0)/1e6).toLocaleString('en',{maximumFractionDigits:m2<1e7?2:0})} km²`;}
-  function monthList(months) {return months.length>4?`${months.length} months`:months.map(m=>MONTHS[m-1]).join(', ');}
-  function regimeText(e) {
-    if(e.regime==='unresolved') return `regime unresolved (no monthly variation${e.count?`; backend reports ${e.count} low-flow months`:''})`;
-    return e.regime==='perennial'?'perennial':`${e.regime}, below ${DRY_Q} m³/s in ${monthList(e.dry)}`;
-  }
   // Screen continuity between consecutive vertices. On the map, a step drawn
   // much longer than its wrapped world length crosses the longitude seam; long
   // coarse segments at fine zoom stay continuous. The globe hides its far side
@@ -260,12 +255,13 @@
   }
   function create({getState, requestFrame=()=>{}, onChange=()=>{}, fetchJSON=null, initial=null}={}) {
     if(typeof getState!=='function') throw Error('Hydrology needs a geographic view state');
+    const t=(name,fallback)=>typeof window!=='undefined'&&window.NeuralEarthLocale ? window.NeuralEarthLocale.text('hydrology.'+name) : fallback;
     let settings=normalize(initial||fromParams(new URLSearchParams(typeof location==='undefined'?'':location.search)));
     // `identity` is the world of the stored network; `networkOptions` and
     // `networkMonth` are the server options and month it was requested with.
     let network=null, index=null, identity=null, networkOptions=null, networkMonth=null, queryBounds=null, queryLod=Infinity, queryRevision=null, refreshAt=0, controller=null, timer=null, fetching=false, nextAttempt=0;
     let networkRevision=0,displayAck=null,displayCache=null;
-    let status='idle', failure=null, panel=null, statusLabel=null, inspector=null, selected=null, selection=null, catchment=null, inspection=0, shownCount=0;
+    let status='idle', failure=null, panel=null, statusLabel=null, inspector=null, selected=null, selection=null, selectedLake=null, catchment=null, inspection=0, shownCount=0;
     const projected=[], lakeShapes=[];
     const fetcher=fetchJSON||((url,options)=>fetch(url,options));
     function cancel() {
@@ -273,11 +269,24 @@
       if(timer!==null) clearTimeout(timer); timer=null;
     }
     function reset() {
-      cancel(); network=null; index=null; identity=null; networkOptions=null; networkMonth=null; queryBounds=null; queryLod=Infinity; queryRevision=null; refreshAt=0; selected=null; selection=null;
+      cancel(); network=null; index=null; identity=null; networkOptions=null; networkMonth=null; queryBounds=null; queryLod=Infinity; queryRevision=null; refreshAt=0; selected=null; selection=null; selectedLake=null;
       status='idle';displayAck=null;displayCache=null;networkRevision++; catchment=null;inspection++;projected.length=0;lakeShapes.length=0;shownCount=0;
-      if(inspector)inspector.textContent='Click a river or lake to inspect it.';
+      if(inspector)inspector.textContent=t('inspect','Click a river or lake to inspect it.');
     }
-    function showSelection() {if(inspector&&selection)inspector.textContent=describe(selection.entry)+selection.suffix;}
+    function showSelection() {
+      if(!inspector)return;
+      if(selection) {
+        const reach=selection.entry.reach;
+        const outletKeys={sea:'outletSea',closed:'outletClosed',edge:'outletEdge',unresolved:'outletUnresolved'};
+        const outlet=outletKeys[catchment?.outlet_kind]?t(outletKeys[catchment.outlet_kind],catchment.outlet_kind):catchment?.outlet_kind;
+        const suffix=catchment?` · ${reach.kind==='tributary'&&reach.parent_id!=null?t('parentCatchment','parent river watershed'):t('catchment','catchment')} ${km2(catchment.area_m2)} · ${t('drainsTo','drains to')} ${outlet}`:'';
+        inspector.textContent=describe(selection.entry)+suffix;
+      } else if(selectedLake) {
+        const lake=selectedLake;
+        inspector.textContent=`${t('lake','Lake')}${lake.resolution==='source'?' ('+t('approximate','approximate shore')+')':''} · ${km2(lake.area_m2)}${Number.isFinite(Number(lake.level_m))?` · ${t('surface','surface')} ${Math.round(lake.level_m)} m`:''}`+
+          `${Number.isFinite(Number(lake.max_depth_m))?` · ${t('maxDepth','max depth')} ${Number(lake.max_depth_m).toFixed(1)} m`:''}${lake.closed===true?' · '+t('closedBasin','closed basin, no outlet'):lake.closed===false?' · '+t('hasOutlet','drains through an outlet'):''}`;
+      } else inspector.textContent=t('inspect','Click a river or lake to inspect it.');
+    }
     // Server options refetch in the background while the stored network of
     // the same world stays drawn; the month and display settings only redraw.
     function set(value) {
@@ -287,8 +296,8 @@
       syncControls(); onChange({...settings},before); requestFrame();
     }
     function syncStatus() {
-      if(statusLabel) statusLabel.textContent=!settings.enabled?'Hidden':failure?`Hydrology: ${failure}`:
-        status==='building'?'Preparing river network…':network?`${shownCount} of ${network.reaches?.length||0} river reaches shown${network.lakes?.length?` · ${network.lakes.length} lakes`:''}${network.regional?.errors?.length?' · some fine detail unavailable':''}`:'River network loads with the map';
+      if(statusLabel) statusLabel.textContent=!settings.enabled?t('hidden','Hidden'):failure?`${t('water','Water')}: ${failure}`:
+        status==='building'?t('preparing','Preparing river network…'):network?`${shownCount} ${t('of','of')} ${network.reaches?.length||0} ${t('shown','river reaches shown')}${network.lakes?.length?` · ${network.lakes.length} ${t('lakeCount','lakes')}`:''}${network.regional?.errors?.length?' · '+t('unavailable','some fine detail unavailable'):''}`:t('loading','River network loads with the map');
     }
     function syncControls() {
       if(!panel) return;
@@ -298,6 +307,27 @@
       }
       for(const out of panel.querySelectorAll('[data-hydro-value]')) out.textContent=`${settings[out.dataset.hydroValue].toFixed(2)}×`;
       panel.querySelector('[data-hydro="density"]').disabled=settings.minArea>0;
+      syncStatus();
+    }
+    function translatePanel() {
+      if(!panel||typeof window==='undefined'||!window.NeuralEarthLocale)return;
+      panel.querySelector('summary').textContent=t('water','Water');
+      panel.querySelector('.panelHeading strong').textContent=t('rivers','Rivers');
+      panel.querySelector('.panelClose').setAttribute('aria-label',t('close','Close water settings'));
+      const help={density:'densityHelp',minArea:'areaHelp',widthScale:'widthHelp',intermittent:'intermittentHelp',minLakeArea:'lakeAreaHelp',minLakeDepth:'lakeDepthHelp',smoothShores:'shoreHelp',terrainDetail:'detailHelp'};
+      for(const input of panel.querySelectorAll('[data-hydro]')) {
+        const name=input.dataset.hydro,label=input.closest('label');
+        if(label?.firstChild?.nodeType===Node.TEXT_NODE)label.firstChild.textContent=t(name,name)+' ';
+        if(help[name])label.title=t(help[name],label.title);
+      }
+      const diagnostics=panel.querySelector('[data-hydro="diagnostic"]');
+      for(const option of diagnostics.options)option.textContent=t(option.value,option.textContent);
+      const month=panel.querySelector('[data-hydro="month"]');month.options[0].textContent=t('annual','Annual mean');
+      for(let i=1;i<=12;i++)month.options[i].textContent=new Intl.DateTimeFormat(window.NeuralEarthLocale.locale(),{month:'long',timeZone:'UTC'}).format(new Date(Date.UTC(2000,i-1,1)));
+      const notes=panel.querySelectorAll('.toolPanel > small:not([data-hydro-status])');
+      for(const [i,name] of ['lakesHeading','serverHeading','refine'].entries())notes[i].textContent=t(name,notes[i].textContent);
+      panel.querySelector('a').textContent=t('method','Hydrology methods');
+      showSelection();
       syncStatus();
     }
     function mount(parent) {
@@ -321,14 +351,14 @@
         '<small>Server work (slower)</small>'+
         box('terrainDetail','Detailed channel carving (slow)','Generates extra regional neural terrain and carves physical river channels into it; much slower')+
         COSMETICS.map(name=>box(name,COSMETIC_LABELS[name])).join('')+
-        '<small>Local rivers refine as terrain loads.</small><small data-hydro-status style="display:block"></small><p data-hydro-inspector style="line-height:1.6;margin-bottom:4px">Click a river or lake to inspect it.</p><a href="/docs/methods/hydrology-rendering.md" target="_blank" rel="noopener">Hydrology methods</a></div>';
+        '<small>Local rivers refine as terrain loads.</small><small data-hydro-status style="display:block"></small><p data-hydro-inspector style="line-height:1.6;margin-bottom:4px">Click a river or lake to inspect it.</p><a href="./docs/methods/hydrology-rendering.md" target="_blank" rel="noopener">Hydrology methods</a></div>';
       parent.append(panel); statusLabel=panel.querySelector('[data-hydro-status]'); inspector=panel.querySelector('[data-hydro-inspector]');
       panel.querySelector('.panelClose').onclick=()=>{panel.open=false;};
       for(const input of panel.querySelectorAll('[data-hydro]')) {
         const name=input.dataset.hydro,read=()=>input.type==='checkbox'?input.checked:input.tagName==='SELECT'&&name==='diagnostic'?input.value:Number(input.value);
         input[input.type==='range'?'oninput':'onchange']=()=>set({[name]:read()});
       }
-      syncControls();
+      syncControls();translatePanel();window.addEventListener('neural-locale-change',translatePanel);
     }
     function key(state) {return `${state.seed}/${state.profile}/${state.worldIdentity||''}`;}
     async function ensure(state) {
@@ -508,18 +538,24 @@
         if(!response.ok)return;
         const data=await response.json();if(ticket!==inspection||data.status!=='ready')return;
         catchment=data;
-        const label=reach.kind==='tributary'&&reach.parent_id!=null?'parent river watershed':'catchment';
-        if(selection?.entry.reach===reach){selection.suffix=` · ${label} ${km2(data.area_m2)} · drains to ${data.outlet_kind}`;showSelection();}
+        if(selection?.entry.reach===reach)showSelection();
         requestFrame();
       }catch(_){/* The reach inspector remains usable during a world switch. */}
     }
     // Text for a drawn reach in the selected month: class, regime, flows, drainage.
     function describe(e) {
       const r=e.reach,q=monthlyFlow(r,settings.month),nav=navigation(r,settings.month,networkMonth),low=Math.min(...(r.monthly_flow_m3s?.length===12?r.monthly_flow_m3s.map(Number):[e.annual]));
-      const lowMonth=r.monthly_flow_m3s?.length===12?` (${MONTHS[r.monthly_flow_m3s.map(Number).indexOf(low)]})`:'';
-      return `${riverClass(e.annual)}${r.morphology==='connector'?' through a lake':''} · ${regimeText(e)} · mean ${formatFlow(e.annual)}`+
-        `${settings.month?` · ${MONTHS[settings.month-1]} ${formatFlow(q)}`:''} · lowest month ${formatFlow(low)}${lowMonth} · ${km2(r.area_m2)} upstream · basin ${r.basin_id}`+
-        `${nav.label?` · navigation estimate: ${nav.label}`:''}`;
+      const monthName=i=>typeof window!=='undefined'&&window.NeuralEarthLocale?new Intl.DateTimeFormat(window.NeuralEarthLocale.locale(),{month:'short',timeZone:'UTC'}).format(new Date(Date.UTC(2000,i,1))):MONTHS[i];
+      const lowMonth=r.monthly_flow_m3s?.length===12?` (${monthName(r.monthly_flow_m3s.map(Number).indexOf(low))})`:'';
+      const className=riverClass(e.annual),classKey={'Main river':'mainRiver',River:'river',Stream:'stream',Rill:'rill'}[className];
+      const dryMonths=e.dry.length>4?`${e.dry.length} ${t('months','months')}`:e.dry.map(m=>monthName(m-1)).join(', ');
+      const regime=e.regime==='unresolved'?`${t('unresolved','regime unresolved (no monthly variation')}${e.count?`; ${t('reports','backend reports')} ${e.count} ${t('lowMonths','low-flow months')}`:''})`:
+        e.regime==='perennial'?t('perennial','perennial'):`${t(e.regime,e.regime)}, ${t('below','below')} ${DRY_Q} m³/s ${t('inMonths','in')} ${dryMonths}`;
+      const navigationKeys={canoe:'canoe',riverboat:'riverboat',ship:'ship','no continuous route':'noRoute'};
+      const navigationLabel=navigationKeys[nav.label]?t(navigationKeys[nav.label],nav.label):nav.label;
+      return `${t(classKey,className)}${r.morphology==='connector'?' '+t('connector','through a lake'):''} · ${regime} · ${t('mean','mean')} ${formatFlow(e.annual)}`+
+        `${settings.month?` · ${monthName(settings.month-1)} ${formatFlow(q)}`:''} · ${t('lowest','lowest month')} ${formatFlow(low)}${lowMonth} · ${km2(r.area_m2)} ${t('upstream','upstream')} · ${t('basin','basin')} ${r.basin_id}`+
+        `${navigationLabel?` · ${t('navEstimate','navigation estimate')}: ${navigationLabel}`:''}`;
     }
     function inspect(x,y) {
       let best=null,distance=8;
@@ -529,12 +565,10 @@
       }
       const lake=best?null:lakeShapes.slice().reverse().find(shape=>insideRings(x,y,shape.rings))?.lake;
       if(lake){
-        selected=lake.id??null;selection=null;catchment=null;inspection++;
-        if(inspector)inspector.textContent=`Lake${lake.resolution==='source'?' (approximate shore)':''} · ${km2(lake.area_m2)}${Number.isFinite(Number(lake.level_m))?` · surface ${Math.round(lake.level_m)} m`:''}`+
-          `${Number.isFinite(Number(lake.max_depth_m))?` · max depth ${Number(lake.max_depth_m).toFixed(1)} m`:''}${lake.closed===true?' · closed basin, no outlet':lake.closed===false?' · drains through an outlet':''}`;
+        selected=lake.id??null;selection=null;selectedLake=lake;catchment=null;inspection++;showSelection();
         if(panel)panel.open=true;requestFrame();return true;
       }
-      if(!best)return false; selected=best.reach.id;selection={entry:best.entry,suffix:''};catchment=null;
+      if(!best)return false; selected=best.reach.id;selection={entry:best.entry};selectedLake=null;catchment=null;
       showSelection();
       if(panel)panel.open=true;loadCatchment(best.reach);return true;
     }
@@ -551,7 +585,7 @@
       return physical?{hydro:'1'}:null;
     }
     return {get:()=>({...settings}),set,reset,mount,draw,inspect,snapshot,writeParams:params=>writeParams(params,settings),tileParams,
-      optionsIdentity:()=>optionsIdentity(settings),tileIdentity:()=>tileIdentity(settings),dispose:()=>{reset();if(displayController===displayOwner)displayController=null;}};
+      optionsIdentity:()=>optionsIdentity(settings),tileIdentity:()=>tileIdentity(settings),dispose:()=>{reset();if(typeof window!=='undefined')window.removeEventListener('neural-locale-change',translatePanel);if(displayController===displayOwner)displayController=null;}};
   }
   return {defaults:()=>({...DEFAULTS}),normalize,fromParams,writeParams,requestParams,optionsIdentity,tileIdentity,hasRiver,hasInlandWater,v2DisplayIdentity,v2TileParams,contains,segmentDistance,monthlyFlow,
     regime,navigation,servesMonth,thresholdArea,riverClass,riverDisplay,regionalRiverDisplayEnabled,acknowledgeRiverDisplay,create};

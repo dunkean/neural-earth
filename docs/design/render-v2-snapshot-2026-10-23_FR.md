@@ -1,5 +1,7 @@
 # Render v2 — état sauvegardé le 23 octobre 2026
 
+[English translation](render-v2-snapshot-2026-10-23.md).
+
 Branche demandée par l'utilisateur : `codex/render-v2-snapshot-2026-10-23`,
 dans Neural Earth et Magna Urbis. Il s'agit de l'état actuel demandé pour
 commit/push, pas d'une déclaration de finition photoréaliste.
@@ -45,6 +47,6 @@ intrants locaux ; leur présence dans la branche ne signifie pas qu'ils sont
 intégrés ou validés. Le serveur HTTP déjà ouvert doit être relancé pour charger
 le dernier miroir NumPy annuel ; le prochain démarrage charge le code sauvegardé.
 
-Voir [l'implémentation et ses limites](render-v2-implementation.fr.md),
-[le protocole de référence](render-v2-reference-protocol.fr.md) et
-[les références sur les sols](render-v2-soil-literature.fr.md).
+Voir [l'implémentation et ses limites](render-v2-implementation_FR.md),
+[le protocole de référence](render-v2-reference-protocol_FR.md) et
+[les références sur les sols](render-v2-soil-literature_FR.md).

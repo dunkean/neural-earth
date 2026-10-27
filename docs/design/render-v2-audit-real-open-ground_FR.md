@@ -1,5 +1,7 @@
 # Audit des vrais sols ouverts et des vues MID
 
+[English](render-v2-audit-real-open-ground.md)
+
 État de lecture du 23 octobre 2026. Aucun changement de production dans cet audit. Les anciennes matrices synthétiques sont exclues des preuves visuelles et ne valident pas le rendu utilisateur.
 
 ## Provenance et résolution

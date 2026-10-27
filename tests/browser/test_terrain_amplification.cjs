@@ -143,12 +143,12 @@ test('camera views at/below each relief floor ignore finer history and retain re
   }
 });
 test('controls keyboard, badge and amplified Render/Render3D shaders',async t=>{
-  const html='<meta charset="utf-8"><div id="controls"><div id="pane"></div></div><canvas id="map" width="256" height="256" style="width:256px;height:256px"></canvas>'+['terrain_render_controls.js','terrain_forest_brushes.js','terrain_render3d.js','terrain_renderer.js'].map(n=>`<script src="/${n}"></script>`).join('');
+  const html='<meta charset="utf-8"><header></header><div id="controls"><div id="pane"></div></div><canvas id="map" width="256" height="256" style="width:256px;height:256px"></canvas>'+['terrain_render_controls.js','terrain_forest_brushes.js','terrain_render3d.js','terrain_renderer.js','terrain_locale.js'].map(n=>`<script src="/${n}"></script>`).join('');
   const server=http.createServer((req,res)=>{const name=new URL(req.url,'http://x').pathname.slice(1);res.setHeader('Content-Type',name.endsWith('.js')?'application/javascript':'text/html');res.end(name.endsWith('.js')?read(name):html);});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));let browser;
   try{
     browser=await loadPlaywright().chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu']});
-    const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(`http://127.0.0.1:${server.address().port}`);
+    const page=await browser.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));await page.addInitScript(()=>localStorage.setItem('neural-earth-locale-v1','fr'));await page.goto(`http://127.0.0.1:${server.address().port}`);
     const forced=await page.evaluate(html=>{const doc=new DOMParser().parseFromString(html,'text/html'),select=doc.getElementById('forcedLod');return [-2,-4,-6,-7,-8,-9,-10,-11,-12].map(lod=>{select.value=String(lod);return select.value;});},read('index.html'));
     assert.deepEqual(forced,['-2','-4','-6','-7','-8','-9','-10','-11','-12'],'fine LOD choices must remain selectable');
     await page.evaluate(()=>{TerrainAmplification.mount(document.getElementById('pane'),()=>{});});
@@ -159,6 +159,13 @@ test('controls keyboard, badge and amplified Render/Render3D shaders',async t=>{
     await page.selectOption('#amplificationMode','phasor');
     await page.locator('#amplificationIntensity').fill('1.4');await page.locator('body').click();await page.keyboard.press('b');
     assert.equal(await page.evaluate(()=>TerrainAmplification.effective()),0);await page.keyboard.press('b');assert.equal(await page.evaluate(()=>TerrainAmplification.effective()),1.4);
+    for(const [language,label] of [['en','Terrain amplification (experimental)'],['fr','Amplification du terrain (expérimental)'],['zh','地形增强（实验性）'],['es','Amplificación del terreno (experimental)'],['pt','Amplificação do terreno (experimental)']]){
+      await page.selectOption('#ui-language',language);
+      assert.equal(await page.locator('#amplificationSettings legend').textContent(),label);
+      assert.equal(await page.locator('#amplificationMode').inputValue(),'phasor');
+      assert.equal(await page.evaluate(()=>TerrainAmplification.effective()),1.4);
+    }
+    await page.selectOption('#ui-language','fr');
     await page.evaluate(()=>TerrainAmplification.set({mode:'off',intensity:1.4}));
     for(const mode of ['hybrid','phasor','mse','off']){await page.keyboard.press('Shift+B');assert.equal(await page.evaluate(()=>TerrainAmplification.effectiveMode()),mode);}
     await page.click('#amplificationCycle');assert.equal(await page.evaluate(()=>TerrainAmplification.effectiveMode()),'hybrid');

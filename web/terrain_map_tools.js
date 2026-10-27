@@ -15,6 +15,7 @@
   }
   const distanceLabel = metres => metres >= 1000 ? `${(metres / 1000).toFixed(2)} km` : metres>=1?`${metres.toFixed(1)} m`:metres>=.01?`${(metres*100).toFixed(1)} cm`:`${(metres*1000).toFixed(1)} mm`;
   function mount({view, mini, button, altitude, extent, distance, getState, redraw}) {
+    const t = (name, fallback) => window.NeuralEarthLocale?.text('mapTools.'+name) || fallback;
     let pointer = null, armed = false, segment = null, measuringId = null, frame = null;
     let flight = null, fetchTimer = null, generation = null;
     const samples = new Map(), failures = new WeakMap();
@@ -26,7 +27,7 @@
       button.setAttribute('aria-pressed', String(value));
       view.classList.toggle('measuring', value);
       button.textContent = value ? '×' : '↔';
-      button.title = value ? 'Annuler la mesure' : 'Measure distance';
+      button.title = value ? t('cancel','Cancel measurement') : t('measure','Measure distance');
       button.setAttribute('aria-label', button.title);
     }
     function clearMeasurement() {
@@ -76,19 +77,19 @@
         clearTimeout(fetchTimer); fetchTimer = null;
         samples.clear(); clearMeasurement();
       }
-      const km = metres => (metres / 1000).toLocaleString(undefined, {minimumFractionDigits:2,maximumFractionDigits:metres < 1000 ? 5 : 2});
-      extent.textContent = s.world ? `Visible area: ${km(s.W*s.mpp)} × ${km(s.H*s.mpp)} km · ${s.W} × ${s.H} px (width × height)` : 'Visible area: —';
-      distance.textContent = segment ? `Distance on map: ${distanceLabel(Math.hypot(segment.end.x-segment.start.x, segment.end.y-segment.start.y))}`
-        : armed ? 'Distance: click and drag · Esc to cancel' : 'Distance: —';
+      const km = metres => (metres / 1000).toLocaleString(window.NeuralEarthLocale?.locale(), {minimumFractionDigits:2,maximumFractionDigits:metres < 1000 ? 5 : 2});
+      extent.textContent = s.world ? `${t('area','Visible area')}: ${km(s.W*s.mpp)} × ${km(s.H*s.mpp)} km · ${s.W} × ${s.H} px (${t('dimensions','width × height')})` : `${t('area','Visible area')}: —`;
+      distance.textContent = segment ? `${t('distance','Distance on map')}: ${distanceLabel(Math.hypot(segment.end.x-segment.start.x, segment.end.y-segment.start.y))}`
+        : armed ? t('instruction','Distance: click and drag · Esc to cancel') : `${t('distanceEmpty','Distance')}: —`;
       // A noise-policy view has no elevation payload. Avoid launching terrain
       // inference merely because the pointer crosses this diagnostic layer.
       altitude.hidden = !!s.mode?.startsWith('snr-');
       if (altitude.hidden) {flight?.controller.abort();flight=null;clearTimeout(fetchTimer);fetchTimer=null;return;}
       if (!s.world || !pointer || pointer.x < 0 || pointer.y < 0 || pointer.x >= s.W || pointer.y >= s.H) {
-        altitude.textContent = 'Cursor elevation: —'; return;
+        altitude.textContent = `${t('elevation','Cursor elevation')}: —`; return;
       }
       const point = worldPoint(pointer, s);
-      if (!inside(point, s.worldBounds)) { altitude.textContent = 'Cursor elevation: outside world'; return; }
+      if (!inside(point, s.worldBounds)) { altitude.textContent = `${t('elevation','Cursor elevation')}: ${t('outside','outside world')}`; return; }
       const entry = s.visiblePlan.find(entry => inside(point, entry.bounds));
       // The saved initial image protects its rectangle from the draw plan, but
       // the ordinary scheduler still loads its native physical tiles.
@@ -96,8 +97,8 @@
         ? [...s.tiles].find(tile => tile.lod === 0 && inside(point, tile.b)) : null);
       const data = tile?.heights ? tile : samples.get(tile);
       const value = data ? sampleHeight(data, point) : null;
-      const preview = ['conditioning-preview','orogen-diagnostic'].includes(tile?.stage) ? ' · input preview' : '';
-      altitude.textContent = value === null ? 'Cursor elevation: waiting for terrain…' : `Cursor elevation: ${value.toFixed(1)} m${preview}`;
+      const preview = ['conditioning-preview','orogen-diagnostic'].includes(tile?.stage) ? ' · '+t('preview','input preview') : '';
+      altitude.textContent = value === null ? `${t('elevation','Cursor elevation')}: ${t('waiting','waiting for terrain…')}` : `${t('elevation','Cursor elevation')}: ${value.toFixed(1)} m${preview}`;
       if (tile && !data && !flight && fetchTimer === null && s.publishedEpoch === s.cameraEpoch && (failures.get(tile) || 0) <= Date.now()) {
         fetchTimer = setTimeout(() => {
           fetchTimer = null;
@@ -162,6 +163,7 @@
       else if (measuringId !== null) {event.preventDefault(); event.stopImmediatePropagation();}
     }, true);
     view.addEventListener('wheel', event => {if (measuringId !== null) {event.preventDefault(); event.stopImmediatePropagation();}}, {capture:true,passive:false});
+    window.addEventListener('neural-locale-change', () => { setArmed(armed); queueUpdate(); });
     return {draw,cancel(){pointer=null;clearMeasurement();flight?.controller?.abort();}};
   }
   if (typeof module !== 'undefined' && module.exports) module.exports = {sampleHeight, distanceLabel};

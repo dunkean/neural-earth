@@ -1,5 +1,7 @@
 # Complément hydrologique réel de Render v2
 
+[English translation](render-v2-hydrology-reference.md).
+
 Ce complément reste distinct des 60 situations sans hydrologie et de leurs 900 images. Il comprend six centres sélectionnés dans le réseau source du même monde : rivière humide, rivière tempérée, rivière aride intermittente, lac continental froid à été tempéré, lac polaire et lac aride fermé. Chaque centre est prévu aux cinq emprises 153,6 km, 40 km, 10 km, 2,56 km et 160 m, en juillet V2/Render3D et janvier V2. Le DEM reste respectivement latent 240 m au LOD3 puis décodeur 30 m au LOD0 ; le dernier zoom agrandit ce DEM et éprouve le matériau, sans créer de géométrie submétrique.
 
 La sélection est conservée dans `output/render-v2-hydrology-reference/manifest.json`. Les niveaux, surfaces et chemins du réseau dérivent de l'atlas à 19,53 km : ce sont des repères, pas une validation des rives du DEM neuronal. Les hydrogrammes mensuels sont modélisés, non observés. Le cas intermittent actuellement sélectionné est BSh, avec juillet alimenté et janvier sec dans son hydrogramme ; il ne doit pas être présenté comme une savane Aw.

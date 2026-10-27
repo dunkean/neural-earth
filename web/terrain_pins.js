@@ -9,6 +9,8 @@ window.TerrainPins=(()=>{
   const serialize=pins=>pins.map(pin=>pin.join(',')).join(';');
   function mount({view,getState,onChange}){
     let pins=[];const overlay=document.createElement('div');overlay.id='mapPins';overlay.style.cssText='position:absolute;inset:0;pointer-events:none;z-index:2';view.append(overlay);
+    function label(marker){marker.setAttribute('aria-label',(window.NeuralEarthLocale?.text('removePin')||'Remove pin at')+' '+marker.title);}
+    window.addEventListener('neural-locale-change',()=>{for(const marker of overlay.children)label(marker);});
     function draw(){
       const s=getState();
       for(let i=0;i<pins.length;i++){
@@ -21,7 +23,7 @@ window.TerrainPins=(()=>{
     function rebuild(){
       overlay.replaceChildren();
       for(let i=0;i<pins.length;i++){
-        const marker=document.createElement('button');marker.type='button';marker.className='mapPin';marker.title=serialize([pins[i]]);marker.setAttribute('aria-label','Remove pin at '+marker.title);
+        const marker=document.createElement('button');marker.type='button';marker.className='mapPin';marker.title=serialize([pins[i]]);label(marker);
         marker.style.cssText='position:absolute;width:26px;height:32px;min-height:0;padding:0;border:0;background:transparent;transform:translate(-50%,-100%);pointer-events:auto;cursor:pointer';
         marker.innerHTML='<svg viewBox="0 0 26 32" width="26" height="32" aria-hidden="true"><path d="M13 31C10 26 1 18 1 13a12 12 0 0 1 24 0c0 5-9 13-12 18Z" fill="#ed5353" stroke="#fff" stroke-width="1.5"/><circle cx="13" cy="13" r="4" fill="#fff"/></svg>';
         marker.addEventListener('pointerdown',event=>event.stopPropagation());
