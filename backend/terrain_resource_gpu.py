@@ -488,7 +488,8 @@ def deposit_contribution(dep, gi, gj, lod, valley, bounds=None, screen_mpp=0.):
     c, s_ = F32(math.cos(dep['theta'])), F32(math.sin(dep['theta']))
     u, v = dx * c + dy * s_, -dx * s_ + dy * c
     dist = np.sqrt(dx * dx + dy * dy)
-    rpx = F32(np.clip(dep['symbol'], 3., 7.)) * F32(max(1., screen_mpp/float(r)))
+    cluster = dep.get('gossan', 0) < 0
+    rpx = F32(np.clip(dep['symbol'], 3., 7.) + (3 if cluster else 0)) * F32(max(1., screen_mpp/float(r)))
     disc = np.clip(rpx + F32(.5) - dist/r, 0, 1)
     disc_outer = np.clip(rpx + F32(1.5) - dist/r, 0, 1)
     curved_v = v - b * F32(.28) * np.sin(F32(3) * u / np.maximum(a, F32(1)))
@@ -500,7 +501,7 @@ def deposit_contribution(dep, gi, gj, lod, valley, bounds=None, screen_mpp=0.):
         outer = np.clip((b+F32(1.5)*r-np.abs(curved_v))/r, 0, 1)*np.clip((a+F32(1.5)*r-np.abs(u))/r, 0, 1)
     elif dep['shape'] == SHAPES['placer']:
         body = body * np.clip(F32(.6)+F32(.4)*valley, F32(.4), F32(1))
-    fade = smoothstep(rpx, F32(2)*rpx, np.sqrt(a*b)/r)
+    fade = F32(0) if cluster else smoothstep(rpx, F32(2)*rpx, np.sqrt(a*b)/r)
     body = disc*(F32(1)-fade)+body*fade
     outer = disc_outer*(F32(1)-fade)+outer*fade
     return body.astype(F32), np.zeros_like(body), np.maximum(F32(0),outer-body).astype(F32)
@@ -516,6 +517,28 @@ def deposit_color(deps, gi, gj, lod, valley, palette, bounds=None, base=(.5,.5,.
             mass = d['mass']
             rgb = np.asarray(base, np.float32)*(1-ring)+np.array([.035,.045,.055], np.float32)*ring
             rgb = rgb*(1-body)+np.asarray(palette[min(d['color'],31)], np.float32)*body
+            if d.get('gossan', 0) < 0:
+                r = F32(30. * 2. ** lod)
+                # Same exact-address delta as deposit_contribution / rDelta.
+                if lod >= 0:
+                    dx = F32((int(gi) << lod) - d['di']) * F32(30) + F32(15. * 2**lod - 15.)
+                    dy = F32((int(gj) << lod) - d['dj']) * F32(30) + F32(15. * 2**lod - 15.)
+                else:
+                    dx = F32(int(gi) - (d['di'] << -lod)) * r + r * F32(.5) - F32(15)
+                    dy = F32(int(gj) - (d['dj'] << -lod)) * r + r * F32(.5) - F32(15)
+                if bounds is not None:
+                    span = F32(bounds[2] - bounds[0])
+                    dx -= np.floor(dx / span + F32(.5)) * span
+                css = F32(max(1., screen_mpp / float(r)))
+                n = min(int(-d['gossan']), 99999)
+                digits = len(str(n))
+                x = int(np.floor(dx / (r * css) + F32((digits * 4 - 1) * .5) + F32(.0001)))
+                y = int(np.floor(dy / (r * css) + F32(2.5) + F32(.0001)))
+                if 0 <= x < digits * 4 - 1 and 0 <= y < 5 and x % 4 != 3:
+                    digit = n // 10**(digits - 1 - x // 4) % 10
+                    glyph = (31599, 29874, 31183, 29647, 5101, 29671, 31719, 4687, 31727, 29679)[digit]
+                    if (glyph >> (y * 3 + 2 - x % 4)) & 1:
+                        rgb = np.array([.025, .035, .045], np.float32)
     return rgb
 
 

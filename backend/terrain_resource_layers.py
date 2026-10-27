@@ -567,7 +567,7 @@ def draw_deposits(grid, deposits, xs, ys, base, metal='points'):
     return rgb
 
 
-def inspect(atlas, x, y, radius_m=60000., mode=None):
+def inspect(atlas, x, y, radius_m=60000., mode=None, *, all_members=False):
     """Values under the pointer and nearby deposits, for the viewer panel."""
     import terrain_resources as R
     grid, fields, deposits, seconds, origin = world_resources(atlas)
@@ -595,7 +595,7 @@ def inspect(atlas, x, y, radius_m=60000., mode=None):
         dx = (px - xw + span / 2) % span - span / 2
         dist = math.hypot(dx, py - float(y))
         if dist <= radius_m + state.dep_a[n]:
-            near.append(dict(d, distance_m=round(dist), label=FAMILY_LABELS.get(d['family'], d['family']),
+            near.append(dict(d, distance_m=round(dist), site_index=n, symbol_cell=[int(state.dep_di[n]), int(state.dep_dj[n])], label=FAMILY_LABELS.get(d['family'], d['family']),
                              footprint_m=[round(2*state.dep_a[n], 1), round(2*state.dep_b[n], 1)]))
     if mode and mode.startswith(PREFIX + 'dep-') and mode != PREFIX + 'dep-points':
         metal = mode.removeprefix(PREFIX + 'dep-').replace('-', '_')
@@ -603,7 +603,7 @@ def inspect(atlas, x, y, radius_m=60000., mode=None):
     near.sort(key=lambda d: d['distance_m'])
     return dict(cell=dict(lod=grid.lod, i=int(grid.i[i]), j=int(grid.j[j]), id=str(int(grid.ids[j, i])),
                           area_km2=round(float(grid.area_m2[j, i]) / 1e6, 1)),
-                dominant=dominant, values=values, deposits=near[:12], cache=origin, seconds=round(seconds, 2))
+                dominant=dominant, values=values, deposits=near if all_members else near[:12], cache=origin, seconds=round(seconds, 2))
 
 
 # ---------------------------------------------------------------------------
@@ -851,7 +851,7 @@ def _gpu_package(state, mode):
                   coef=list(coef), sigma=sigma, seed32=int(state.seed32), layer=layer,
                   groups=[], realized=realized, beta=list(G.REALIZED_BETA) if realized else [0, 0], order=order, thresholds=0, scale=0., max_footprint=float(np.max(deposits[:, 4:6], initial=0) * 2.4) if deposits is not None else 0.,
                   palette=[[c / 255 for c in rgb] for rgb in palette], deposits=0 if deposits is None else int(len(deposits)),
-                  field_shape=list(field.shape))
+                  field_shape=list(field.shape), site_indices=kind == 'points')
     parts = [field.astype(np.float16).tobytes()]
     if deposits is not None:
         size = sum(len(x) for x in parts)
@@ -897,7 +897,9 @@ def _deposit_buffers(state, mode, kind):
     words[:, 7] = state.dep_bend[idx] if kind == 'stock' else state.dep_access[idx]
     words[:, 8] = state.dep_gossan[idx]
     words[:, 9] = np.sqrt(9. + 5. * np.clip(np.log10(np.maximum(mass[idx], 1.)), 0., 8.))
-    words[:, 10] = np.sqrt(state.dep_ore[idx] / 2.7 / 30.) / 2
+    # Point symbols do not consume the stock kernel's sigma slot. Retain the
+    # authoritative index here so coincident sites stay distinct in inspection.
+    words[:, 10] = idx if kind == 'points' else np.sqrt(state.dep_ore[idx] / 2.7 / 30.) / 2
     words[:, 11] = mass[idx]
     buckets = np.zeros((len(grid.j), len(grid.i), 2), np.uint32)
     if len(idx):

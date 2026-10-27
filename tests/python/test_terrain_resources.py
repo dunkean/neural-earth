@@ -291,6 +291,21 @@ class ResourceDistrictTests(unittest.TestCase):
         self.assertEqual(data['deposits'][0]['distance_m'],0)
         self.assertTrue(all(d['medieval_recoverable'].get('iron',0)>0 for d in data['deposits']))
 
+    def test_cluster_inspector_returns_every_member_with_gpu_cell_address(self):
+        import terrain_resource_layers as L
+        from unittest.mock import patch
+        state = L._World(self.grid, self.fields, self.deposits, 42, 'cluster-inspector')
+        with patch.object(L, 'world_resources', return_value=(self.grid, self.fields, self.deposits, 0, 'fixture')), \
+                patch.object(L, 'world_state', return_value=state), patch.object(L, 'specs', return_value={}):
+            short = L.inspect(object(), 0, 0, radius_m=1e9, mode='resources-dep-points')
+            complete = L.inspect(object(), 0, 0, radius_m=1e9, mode='resources-dep-points', all_members=True)
+        self.assertEqual(len(short['deposits']), 12)
+        self.assertEqual(len(complete['deposits']), len(self.deposits))
+        expected = {d['id']: [int(state.dep_di[n]), int(state.dep_dj[n])] for n, d in enumerate(self.deposits)}
+        for deposit in complete['deposits']:
+            self.assertEqual(deposit['symbol_cell'], expected[deposit['id']])
+            self.assertEqual(self.deposits[deposit['site_index']]['id'], deposit['id'])
+
     def test_district_marks_preserve_counts_and_tonnage(self):
         g, f = self.grid, self.fields
         actual = {d['id']: d for d in self.deposits}

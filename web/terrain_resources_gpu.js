@@ -230,14 +230,23 @@
     fn rStock(gi:i32,gj:i32,lod:i32,r:f32)->f32{
       var density=0.;_=rDeposits(gi,gj,lod,r,0.,vec3<f32>(0.),&density);return density;
     }
+    fn rCount(p:vec2<f32>,count:f32)->f32{
+      let n=u32(min(count,99999.));let digits=select(select(select(select(1u,2u,n>=10u),3u,n>=100u),4u,n>=1000u),5u,n>=10000u);
+      let q=vec2<i32>(floor(p+vec2<f32>(f32(digits*4u-1u)*.5,2.5)+.0001));
+      if(q.x<0||q.y<0||q.y>=5||q.x>=i32(digits*4u-1u)||q.x%4==3){return 0.;}
+      var divisor=1u;for(var i=0u;i<digits-1u-u32(q.x/4);i++){divisor*=10u;}
+      let digit=(n/divisor)%10u;
+      var glyphs=array<u32,10>(31599u,29874u,31183u,29647u,5101u,29671u,31719u,4687u,31727u,29679u);
+      return f32((glyphs[digit]>>u32(q.y*3+2-q.x%4))&1u);
+    }
     fn rDeposits(gi:i32,gj:i32,lod:i32,r:f32,valley:f32,base:vec3<f32>,density:ptr<function,f32>)->vec3<f32>{
-      var rgb=base;var bestMass:f32=-1.;var bestBody:f32=0.;var bestRing:f32=0.;var bestColor=base;
+      var rgb=base;var bestMass:f32=-1.;var bestBody:f32=0.;var bestRing:f32=0.;var bestColor=base;var bestCount:f32=0.;
       if(res.zones2.y<.5){return rgb;}
       var cx:i32;var cy:i32;
       if(lod<=10){cx=gi>>u32(10-lod);cy=gj>>u32(10-lod);}else{cx=i32(floor((f32(gi)+.5)*exp2(f32(lod-10))));cy=i32(floor((f32(gj)+.5)*exp2(f32(lod-10))));}
       let W=i32(res.grid.z);let stock=res.info.x>5.5;
       let district=select(0.,162000.*rSmooth(2.,6.,f32(lod)),stock);
-      let R=i32(ceil(max(res.zones.w,max(district,select(9.,3.,stock)*max(r,res.prof1.w)))/30720.))+1;
+      let R=i32(ceil(max(res.zones.w,max(district,select(12.,3.,stock)*max(r,res.prof1.w)))/30720.))+1;
       for(var oy=-R;oy<=R;oy++){for(var col=0;col<min(2*R+1,W);col++){let ox=col-R;
         if(cy+oy<i32(res.grid.y)||cy+oy>=i32(res.grid.y+res.grid.w)){continue;}
         let cr=rColRow(cx+ox,cy+oy);let bucket=resBuckets[u32(cr.y*W+cr.x)];
@@ -272,7 +281,8 @@
           }
           // Radius squared is affine in log10(recoverable physical tonnes).
           let color=res.palette[min(d.ij.w,31)].rgb;
-          let rpx=clamp(d.extra.y,3.,7.)*max(1.,res.prof1.w/r);let qpx=dist/r;
+          let cluster=d.extra.x<0.;let css=max(1.,res.prof1.w/r);
+          let rpx=(clamp(d.extra.y,3.,7.)+select(0.,3.,cluster))*css;let qpx=dist/r;
           let disc=clamp(rpx+.5-qpx,0.,1.);
           let discOuter=clamp(rpx+1.5-qpx,0.,1.);
           let curvedV=v-b*.28*sin(3.*u/max(a,1.));
@@ -285,14 +295,14 @@
           }else if(d.ij.z==3){
             body=body*clamp(.6+.4*valley,.4,1.);
           }
-          let fade=rSmooth(rpx,2.*rpx,sqrt(a*b)/r);
+          let fade=select(rSmooth(rpx,2.*rpx,sqrt(a*b)/r),0.,cluster);
           body=mix(disc,body,fade);outer=mix(discOuter,outer,fade);
           // Global mass priority is independent of bucket traversal order.
-          if(outer>0.&&d.extra.w>bestMass){bestMass=d.extra.w;bestBody=body;bestRing=max(0.,outer-body);bestColor=color;}
+          if(outer>0.&&d.extra.w>bestMass){bestMass=d.extra.w;bestBody=body;bestRing=max(0.,outer-body);bestColor=color;bestCount=select(0.,rCount(vec2<f32>(dx,dy)/(r*css),-d.extra.x),cluster);}
         }
       }}
       rgb=mix(rgb,vec3<f32>(.035,.045,.055),bestRing);
-      return mix(rgb,bestColor,bestBody);
+      return mix(mix(rgb,bestColor,bestBody),vec3<f32>(.025,.035,.045),bestCount);
     }
     `;
   // Colour of one sample from its global sample index and terrain features;
@@ -392,5 +402,48 @@
     if(header.deposits){at=Math.ceil(at/4)*4;deposits=new Uint32Array(bytes.slice(at,at+header.deposits*48));at+=header.deposits*48;buckets=new Uint32Array(bytes.slice(at,at+header.lattice[2]*header.lattice[3]*8));}
     return {field,fieldShape:[W,H,K],tau,deposits,buckets};
   }
-  root.TerrainResourcesGPU={PREFIX,KINDS,PARAM_BYTES,wgsl:core+color,coarse:core+coarse,core,isMode,number,isNumber,pack,parse};
+  // Camera-scale pre-binning only: no terrain readback, server request or pan work.
+  // Stable mass/coordinate priority makes package order irrelevant. Anchors stay
+  // on real sites; each site belongs to exactly one symbol. Unresolved bodies
+  // merge within 22 CSS pixels, while resolved footprints remain individual.
+  function aggregate(header,data,mpp){
+    const started=performance.now(),src=data.deposits;
+    if(!src||header.kind!==5||!(mpp>0))return null;
+    const ints=new Int32Array(src.buffer,src.byteOffset,src.length),f=new Float32Array(src.buffer,src.byteOffset,src.length);
+    const bounds=header.world_bounds,span=bounds?bounds[2]-bounds[0]:0,lo=bounds?.[0]||0;
+    const wrap=x=>span?((x-lo)%span+span)%span+lo:x;
+    const delta=x=>span?x-Math.floor(x/span+.5)*span:x;
+    const distance=22*mpp,bins=new Map(),groups=[];
+    const order=Array.from({length:src.length/12},(_,i)=>i).sort((a,b)=>f[b*12+11]-f[a*12+11]||ints[a*12]-ints[b*12]||ints[a*12+1]-ints[b*12+1]||ints[a*12+3]-ints[b*12+3]);
+    for(const index of order){
+      const at=index*12,x=wrap((ints[at]+.5)*30),y=(ints[at+1]+.5)*30;
+      const resolved=Math.sqrt(f[at+4]*f[at+5])/mpp>f[at+9];
+      let best=null,bestDistance=distance*distance;
+      if(!resolved)for(const shift of span?[-span,0,span]:[0]){
+        const bx=Math.floor((x+shift)/distance),by=Math.floor(y/distance);
+        for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++)for(const g of bins.get(`${bx+i},${by+j}`)||[]){
+          const d=delta(x-g.x)**2+(y-g.y)**2;
+          if(d<bestDistance||(d===bestDistance&&g.rank<(best?.rank??Infinity))){best=g;bestDistance=d;}
+        }
+      }
+      if(best){best.members.push(index);best.mass+=f[at+11];}
+      else{
+        const g={index,rank:groups.length,x,y,mass:f[at+11],members:[index]};groups.push(g);
+        if(!resolved){const key=`${Math.floor(x/distance)},${Math.floor(y/distance)}`;if(!bins.has(key))bins.set(key,[]);bins.get(key).push(g);}
+      }
+    }
+    const [i0,j0,W,H]=header.lattice;
+    const cell=g=>Math.max(0,Math.min(H-1,Math.floor(g.y/30720)-j0))*W+((Math.floor(g.x/30720)-i0)%W+W)%W;
+    groups.sort((a,b)=>cell(a)-cell(b)||a.x-b.x||a.y-b.y||f[a.index*12+3]-f[b.index*12+3]);
+    const deposits=new Uint32Array(groups.length*12),words=new Float32Array(deposits.buffer),outInts=new Int32Array(deposits.buffer),buckets=new Uint32Array(W*H*2);
+    groups.forEach((g,k)=>{
+      deposits.set(src.subarray(g.index*12,g.index*12+12),k*12);
+      // Negative gossan encodes a display cluster, never a physical deposit.
+      if(g.members.length>1){words[k*12+8]=-g.members.length;words[k*12+9]=Math.sqrt(9+5*Math.min(8,Math.max(0,Math.log10(Math.max(1,g.mass)))));words[k*12+11]=g.mass;}
+      g.di=outInts[k*12];g.dj=outInts[k*12+1];
+      const c=cell(g);if(!buckets[c*2+1])buckets[c*2]=k;buckets[c*2+1]++;
+    });
+    return {deposits,buckets,groups,mpp,input:order.length,symbols:groups.length,clusters:groups.filter(g=>g.members.length>1).length,ms:performance.now()-started};
+  }
+  root.TerrainResourcesGPU={PREFIX,KINDS,PARAM_BYTES,wgsl:core+color,coarse:core+coarse,core,isMode,number,isNumber,pack,parse,aggregate};
 })(typeof window!=='undefined'?window:globalThis);

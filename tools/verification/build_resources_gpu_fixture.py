@@ -136,7 +136,11 @@ def build():
         buckets.reshape(-1, 2)[c, 1] += 1
     palette = [[(c * 37 % 100) / 100, (c * 59 % 100) / 100, (c * 83 % 100) / 100] for c in range(20)]
     far = np.zeros((1, H, W), np.float32)       # stocks use deposit kernels at every LOD
-    for kind in ('points', 'points-screen', 'stock'):
+    for kind in ('points', 'points-screen', 'stock', 'points-clusters'):
+        if kind == 'points-clusters':
+            previous_rng_state = rng.bit_generator.state
+            deps = [dict(d, gossan=-count) for d, count in zip(deps, (2, 12, 108, 1658, 3, 25))]
+            words[:, 8] = [d['gossan'] for d in deps]
         screen_mpp = 600. if kind == 'points-screen' else 0.
         h = header('points' if kind.startswith('points') else kind, 1, screen_mpp=screen_mpp,
                    palette=palette, deposits=len(deps), range=[1e-3, 1e5], max_footprint=max(max(d['a'], d['b']) * 2 for d in deps))
@@ -146,7 +150,7 @@ def build():
             d = deps[n % len(deps)]
             lod = ([10, 7, 6, 5, 4, 3, 2, 0, -2] if kind == 'stock' else [10, 7, 4, 2, 0, -2])[n % (9 if kind == 'stock' else 6)]
             r = 30. * 2. ** lod
-            off = rng.normal(0, max(d['a'], 3 * r) * .6, 2)
+            off = rng.normal(0, (2*r if kind == 'points-clusters' else max(d['a'], 3 * r) * .6), 2)
             gi = int(np.floor((d['di'] * 30. + 15 + off[0]) / r))
             gj = int(np.floor((d['dj'] * 30. + 15 + off[1]) / r))
             valley = float(rng.uniform(0, 1))
@@ -158,6 +162,8 @@ def build():
                 cases.append(dict(gi=gi, gj=gj, lod=lod, valley=valley, expected=[float(x) for x in rgb]))
         configs.append(dict(name=kind, header=dict(h, field_shape=[1, H, W]), field=_bits(far), deposits=words.view(np.uint32).ravel().tolist(),
                             buckets=buckets.ravel().tolist(), cases=cases))
+        if kind == 'points-clusters':
+            rng.bit_generator.state = previous_rng_state
     # Features and terms.
     feats = []
     for _ in range(8):

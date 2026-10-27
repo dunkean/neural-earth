@@ -43,6 +43,15 @@ const configs=Object.fromEntries(fixture.configs.filter(c=>['positive','seasonal
      tau:c.tau?new Uint16Array(c.tau):null,deposits:c.deposits?new Uint32Array(c.deposits):null,buckets:c.buckets?new Uint32Array(c.buckets):null},{season:.5});return performance.now()-t0;};
    for(const [name,c] of Object.entries(configs)){timings[name]=load(c);images[name]=await read();}
    const repeat=await read();
+   // Dense unresolved sites must actually reach the real shade pass as one
+   // count-bearing symbol, with conserved mass and no per-frame pre-binning.
+   const dense=new Uint32Array(20*12),denseF=new Float32Array(dense.buffer),denseI=new Int32Array(dense.buffer);
+   for(let k=0;k<20;k++){denseI.set([-4834+k%5,-1000+Math.floor(k/5),0,0],k*12);denseF.set([1,1,0,1,0,3,0,10],k*12+4);}
+   const dc=configs.points,dh={...dc.header,deposits:20};
+   r.setResources(dh,{field:new Uint16Array(dc.field),fieldShape:[dh.field_shape[2],dh.field_shape[1],dh.field_shape[0]],deposits:dense,buckets:new Uint32Array(dc.buckets)},{season:.5});
+   const densePixels=await read(),aggregation=r.res.aggregation;
+   const denseRepeat=await read();
+   const denseReport={input:aggregation.input,symbols:aggregation.symbols,clusters:aggregation.clusters,mass:aggregation.groups.reduce((n,g)=>n+g.mass,0),ms:aggregation.ms,reused:aggregation===r.res.aggregation,repeatExact:densePixels.every((v,i)=>v===denseRepeat[i])};
    load(configs.seasonal);r.setResourceSeason(.05);const january=await read();r.setResourceSeason(.55);const july=await read();
    // Zones: coherent regions, not per-pixel noise.
    load(configs.geology);const zones=await read();let changes=0,pairs=0;const colours=new Set();
@@ -51,11 +60,13 @@ const configs=Object.fromEntries(fixture.configs.filter(c=>['positive','seasonal
    const names=Object.keys(images),distinct=[];
    for(let a=0;a<names.length;a++)for(let b=a+1;b<names.length;b++)distinct.push([names[a],names[b],difference(images[names[a]],images[names[b]])]);
    return {skipped:false,status:r.status,failure,timings,repeatExact:images.points.every((v,i)=>v===repeat[i]),seasonDifference:difference(january,july),
-     zoneBoundaryShare:changes/pairs,zoneColours:colours.size,distinct};
+     zoneBoundaryShare:changes/pairs,zoneColours:colours.size,distinct,dense:denseReport};
   },configs);
   if(report.skipped){console.log('SKIP: actual WebGPU adapter unavailable');return;}
   assert.equal(report.status,'webgpu');assert.equal(report.failure,null);
   assert(report.repeatExact,'same package, same pixels');
+  assert.equal(report.dense.symbols,1);assert.equal(report.dense.clusters,1);assert.equal(report.dense.mass,200);
+  assert(report.dense.reused&&report.dense.repeatExact,'fixed camera reuses the exact cluster buffers and pixels');
   assert(report.seasonDifference>2,'seasonal layers follow the month');
   for(const [a,b,d] of report.distinct)assert(d>2,`${a} and ${b} must differ`);
   assert(report.zoneColours>=3,'several zone classes');

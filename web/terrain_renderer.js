@@ -1302,7 +1302,7 @@
       const storage=(values,min)=>{const b=d.createBuffer({size:Math.max(min,Math.ceil(values.byteLength/4)*4),usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});d.queue.writeBuffer(b,0,values);return b;};
       const [W,H,K]=data.fieldShape;
       this.res={field:upload(data.field,[W,H,K]),tau:data.tau?upload(data.tau,[W,H,header.thresholds]):old.tau,
-        params:old.params,deposits:data.deposits?storage(data.deposits,48):old.deposits,buckets:data.buckets?storage(data.buckets,16):old.buckets,header,season};
+        params:old.params,deposits:data.deposits?storage(data.deposits,48):old.deposits,buckets:data.buckets?storage(data.buckets,16):old.buckets,header,season,source:data};
       d.queue.writeBuffer(this.res.params,0,rg.pack(header,{season,active:true,marine:header.mode.includes('fish-marine')||header.mode.includes('season-fish')}));
       for(const key of ['field','tau','deposits','buckets'])if(old[key]!==this.res[key]&&old[key]!==this.res.params)setTimeout(()=>old[key].destroy(),2000);
       this.resGeneration++;this.lastResourceUploadMs=performance.now()-started;
@@ -1477,9 +1477,15 @@
       // tiles or native blocks are drawn at a different camera scale.
       if(this.res?.header?.kind===5&&visible.length){
         const r=visible[0],tile=this.tiles.get(r.key),uv=r.uv||[0,0,1,1];
-        const screenMpp=tile.resolution*(tile.params[0]-2*(tile.halo||0))*uv[2]/r.width;
+        const screenMpp=Math.round(tile.resolution*(tile.params[0]-2*(tile.halo||0))*uv[2]/r.width*1e6)/1e6;
         if(Number.isFinite(screenMpp)&&screenMpp>0&&this.res.screenMpp!==screenMpp){
           this.res.screenMpp=screenMpp;
+          const aggregation=rg.aggregate(this.res.header,this.res.source,screenMpp);
+          this.res.aggregation=aggregation;
+          if(aggregation){
+            if(aggregation.deposits.length)this.device.queue.writeBuffer(this.res.deposits,0,aggregation.deposits);
+            this.device.queue.writeBuffer(this.res.buckets,0,aggregation.buckets);
+          }
           this.device.queue.writeBuffer(this.res.params,19*4,new Float32Array([screenMpp]));
           for(const t of this.tiles.values())if(!t.native&&rg.isNumber(t.params[2]))t.shadedMode=null;
         }

@@ -1778,7 +1778,7 @@ def resources_inspect(seed):
                                    descriptor.settings)
         return jsonify(inspect_resources(atlas, float(request.args['x']), float(request.args['y']),
                                          radius_m=min(2e6, max(1000., float(request.args.get('radius_m', 60000)))),
-                                         mode=request.args.get('mode')))
+                                         mode=request.args.get('mode'), all_members=request.args.get('cluster') == '1'))
     except ResourcesPending as pending:
         return jsonify(pending.status), 202
     except (ValueError, TypeError, KeyError) as exc:
