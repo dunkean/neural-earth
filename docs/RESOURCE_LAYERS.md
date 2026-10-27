@@ -1,6 +1,6 @@
 # Ressources naturelles multi-échelles — potentiel, stock, flux
 
-Date : 26 octobre 2026. Branche locale `resources-layers` de Neural Earth, rebasée sur `origin/main` `051dd1f`, qui contient le merge Render v2 `d6cbb78`. Destinataires : Neural Earth, qui produit, Chronos, qui consomme et porte le temps, et Magna Urbis, qui consomme localement et construit les cités.
+Date : 27 octobre 2026. Branche locale `resources-layers` de Neural Earth, rebasée sur `origin/main` `051dd1f`, qui contient le merge Render v2 `d6cbb78`. Destinataires : Neural Earth, qui produit, Chronos, qui consomme et porte le temps, et Magna Urbis, qui consomme localement et construit les cités.
 
 ## 0. Statut et lecture
 
@@ -9,6 +9,8 @@ Ce document distingue trois statuts :
 - **Implémenté** : code présent dans `backend/terrain_resources.py` (autorité), `backend/terrain_resource_layers.py` (couches, paquets GPU), `backend/terrain_resource_gpu.py` (miroir NumPy de l'évaluateur), `web/terrain_resources_gpu.js` (évaluateur WGSL), `web/terrain_resources.js`, et testé par `tests/python/test_terrain_resources.py`, `tests/browser/test_terrain_resources_gpu.cjs` et `tools/verification/verify_resources_gpu_parity.cjs`.
 - **Mesuré** : valeur obtenue sur le monde Orogen en cache (seed `7985403534069300490`, style `continents`), avec la commande indiquée.
 - **Proposé** : conception non encore codée, ou calibration provisoire.
+
+**Mise à jour R3e, 27 octobre :** le monde initial Orogen a désormais un diamètre de **4 000 km** ; les mesures actuelles sont au §19. Les tableaux de performance des §15–16 sont conservés comme référence historique sur le monde de **12 732 km**, et ne décrivent pas le nouveau monde.
 
 Toute valeur numérique sans référence vérifiée est marquée « provisoire ». Les sources sont listées au §17. Seules les valeurs relues sur la source y figurent ; les autres sont signalées comme non vérifiées.
 
@@ -69,7 +71,7 @@ Une cellule `(LOD, i, j)` couvre `[i, i+1) × [j, j+1) × 30·2^LOD` mètres de 
 - **Parent** : `(i >> k, j >> k)`, c'est-à-dire une division entière arrondie vers le bas, aussi pour les indices négatifs.
 - **Aire exacte sur la sphère** pour une cellule équirectangulaire : `Δx · R · (sin φ_nord − sin φ_sud)`. Les cellules du bord (antiméridien, pôles) sont rognées aux limites du monde ; leur aire est celle de la partie rognée.
 - La somme des aires vaut `4πR²` à 10⁻¹² près, testé aux LOD 10, 12 et 14. Les aires des enfants somment exactement celle du parent.
-- **Limite (implémenté) :** seul le diamètre par défaut est pris en charge (bornes ±20 000 × ±10 000 km). Un monde plan ou redimensionné est refusé avec une erreur explicite.
+- **Bornes (implémenté)** : le réseau conserve son pas physique de 30,72 km et son origine. Ses dimensions, les aires rognées, la période en longitude, les distances tectoniques et les entrées Render v2 des ressources suivent les bornes de l’atlas. Ces bornes entrent dans les identités des caches de l’autorité et de l’environnement. Validation actuelle : sphère de 4 000 km ; monde plan non validé.
 
 ### 3.2 Hasard adressé (implémenté)
 
@@ -200,7 +202,7 @@ Les associations entre contexte, roche hôte et type de gîte suivent les modèl
 2. **Tonnage** : `minerai = médiane · 10^(σ·Φ⁻¹(u))`, avec σ provisoire entre 0,65 et 0,8.
 3. **Teneur** : facteur commun `10^(0,25·Φ⁻¹(u))`, appliqué à tous les métaux du gisement. Un gisement polymétallique garde ainsi une seule masse hôte.
 4. **Profondeur du toit** : log-normale autour d'une médiane par famille.
-5. **Position** : choix pondéré entre les 128 × 128 enfants du LOD 3, par course exponentielle `argmin(−ln u / w)`. Les poids `w` sont la prospectivité interpolée. Le choix est indépendant de l'ordre.
+5. **Position** : choix pondéré entre les 128 × 128 enfants du LOD 3, par course exponentielle `argmin(−ln u / w)`. Les poids `w` sont la prospectivité interpolée, multipliée par l’intensité du district. Les centres et le routage des marques sont décrits au §19.2. Le choix est indépendant de l'ordre.
 
 **Accessibilité médiévale (implémenté, provisoire).** L'extension verticale vaut `(minerai / 2,7 t/m³)^(1/3)`. La profondeur atteignable vaut `40 m + 0,5 × rugosité régionale`, pour tenir compte des galeries d'exhaure en relief. La part accessible est `clip((atteignable − toit) / extension, 0, 1)`. Le récupérable médiéval est `contenu × accessible × rendement de fonte`. Le zinc et le tungstène ne sont pas récupérés comme métaux au Moyen Âge.
 
@@ -448,7 +450,7 @@ Doctrine de `GROUND_MATERIAL_MAPPING.md` : « les règles fixent le possible, le
 
 ## 14. Layers informatives du viewer (implémenté)
 
-100 vues `resources-*`, plus 3 vues fantasy si elle est activée, en six groupes du menu : géologie (20), gisements (39), agriculture et élevage (11), forêt-faune-pêche-eau (14), matériaux-sel-tourbe (9), saisons (7). 16 vues sont des proxys Render v2, 7 sont saisonnières.
+111 vues `resources-*`, plus 4 vues fantasy si elle est activée, en six groupes du menu : géologie (20), gisements (50), agriculture et élevage (11), forêt-faune-pêche-eau (14), matériaux-sel-tourbe (9), saisons (7). 16 vues sont des proxys Render v2, 7 sont saisonnières.
 
 Elles sont calculées **sur le GPU**, comme Render v2, sur la carte et le globe (§16). Le serveur ne sert qu'un paquet par monde et par couche ; les tuiles PNG Python ne restent qu'en repli sans WebGPU et pour l'aperçu monde (bilinéaire, 2 048 × 1 024).
 
@@ -458,7 +460,7 @@ Elles sont calculées **sur le GPU**, comme Render v2, sur la carte et le globe 
 
 `terrain_orogen_layers.py` n'est pas modifié, car il fait partie de l'identité de l'atlas Orogen. L'enregistrement se fait dans `terrain_server.py`. **Ce fichier, `index.html` et `terrain_toolbar.js` font partie de l’identité d’implémentation de `terrain_manifest.py` : leur modification invalide les caches de tuiles neuronales** (`terrain_renderer.js` et les modules ressources n’en font pas partie). Voir `docs/layers.md`.
 
-## 15. Mesures et validation
+## 15. Mesures et validation historiques (12 732 km)
 
 Machine locale de Gregory, Windows 11, RTX 3090. L'autorité, la réalisation des roches et les budgets sont calculés sur le CPU (NumPy) ; l'affichage dans le navigateur (WebGPU).
 
@@ -493,7 +495,7 @@ Machine locale de Gregory, Windows 11, RTX 3090. L'autorité, la réalisation de
   - chargement : environ 1,4 s ;
   - écriture : environ 10 s, après que le monde est servi.
 - **Clé du cache** :
-  - monde : `cache_key` de l'atlas, ou hachage du relief ;
+  - monde : `cache_key` de l'atlas, ou hachage du relief, **et bornes physiques de l’atlas** ;
   - graine et option fantasy ;
   - `terrain_resources.COMPILER_VERSION` ;
   - hachage de `terrain_render_v2.py`, une entrée externe.
@@ -597,7 +599,7 @@ Les budgets canoniques ne changent pas : stocks, tonnages, budgets entiers et to
 | Géologie réalisée | `terrain_resources.realize_rocks` (canon) et `terrain_resource_gpu.realized_class` (même fonction) | parts canoniques des roches mesurées sur la fonction que le GPU affiche (§16.3) |
 | Compilation | `terrain_resource_compile.py` (processus), `terrain_resource_workers.py` (tâches parallèles) | autorité calculée hors du serveur, publiée par étapes ; `/gpu` répond 202 tant qu'une couche attend (§15.1) |
 | Renderer | `web/terrain_renderer.js` | liaisons 11 à 15 (champ, réservée, paramètres, gisements, seaux) dans la passe *shade* et dans le pipeline grossier ; un changement de paquet re-shade les tuiles physiques et relie les blocs grossiers |
-| Légende, curseur de saison, inspecteur | `web/terrain_resources.js` | charge le paquet de la couche choisie ; le curseur réécrit seulement 496 octets de paramètres |
+| Légende, curseur de saison, inspecteur | `web/terrain_resources.js` | charge le paquet de la couche choisie ; le curseur réécrit seulement 512 octets de paramètres |
 | Repli sans WebGPU | `terrain_server.py` | tuiles PNG bilinéaires du LOD 10, sans détail (ancien chemin) |
 
 **Adressage.** Chaque pixel est un échantillon d'indice entier global `(gi, gj)` sur le réseau `30·2^L` m du LOD affiché, origine au centre de la carte. Sur une tuile physique, `L` est celui de la tuile ; sur un bloc grossier, `L` est un cran plus fin que l'empreinte du pixel à l'écran (`dpdx`) : le détail suit le zoom entre deux LOD de blocs, sans marches d'un pixel d'échantillon.
@@ -664,7 +666,7 @@ classe(x) = argmax_k [ log E_k(x + w) + b_k + β₁·N_g(k)(x + w) + β₂·N_k(
 ### 16.4 Gisements et stocks
 
 - **Gisements** : position au LOD 0 tirée par clé dans la cellule du LOD 3 (inchangé). Forme par famille : filon orienté selon la structure (longueur ∝ minerai^0,45), amas ellipsoïdal, lentille stratiforme 5:1, placer dans les fonds de vallée. Halo de prospectivité, anneau de chapeau de fer pour un sulfuré affleurant ; sous 1,5 pixel, symbole de taille écran constante. Le GPU parcourt les seaux des cellules du LOD 10 à ±1 à ±3 cellules selon le zoom.
-- **Stocks** contenus et récupérables : somme de noyaux gaussiens normalisés, un par gisement ; l'intégrale égale la masse du gisement à tout LOD.
+- **Stocks** contenus et récupérables : somme de noyaux compacts elliptiques normalisés par l’aire sphérique, un par gisement. Seule leur largeur change avec le LOD (§19.3). L’intégrale retrouve la masse à la tolérance de quadrature mesurée ; les budgets canoniques restent des sommes exactes d’entiers.
 
 ### 16.5 Parité CPU/WGSL et tests
 
@@ -721,7 +723,7 @@ Erreurs du viewer pendant les captures : délais d'attente de Render v2 (chargem
 
 1. **Calibration.** Densités de gisements, σ des log-normales, semence, part assolée, pêche côtière, sel solaire, épaisseur de tourbe : provisoires. Les médianes USGS marquées « vérifiées » restent à relire sur le PDF.
 2. **Résolution de l'autorité.** Le LOD 10 (30,72 km) est plus grossier que l'atlas (19,5 km). Le LOD 9 (15,36 km) suivrait mieux la source, pour environ 4 fois le coût (la limite de `monthly_water_balance` est d'environ 1 M cellules terrestres).
-3. **Métrique** plane dans l'atlas pour les distances tectoniques ; monde de diamètre par défaut seulement.
+3. **Métrique** plane dans l'atlas pour les distances tectoniques, avec le pas physique du monde courant. Sphère de 4 000 km validée au §19 ; monde plan non validé.
 4. **Hydrologie** : les placers et la pêche continentale devraient suivre les unités de propriété des tronçons (`multiscale-hydrology.md` §2), plutôt qu'un lissage et un proxy de plaine inondable.
 5. **LOD 3** : les budgets entiers (export Chronos) sont répartis avec des intensités interpolées ; le relief latent à 240 m ne module que l'affichage (§16), pas encore `descend_budget`.
 6. **Paléoclimat** du charbon et des évaporites : un champ adressé existe pour les évaporites seulement.
@@ -759,3 +761,125 @@ Seules les références relues pendant cette étude sont listées. Les valeurs n
 - Tobler, W.R., 1979. Smooth pycnophylactic interpolation for geographical regions. *Journal of the American Statistical Association* 74(367):519–530. Principe de conservation des moyennes par région ; notre variante est discrète, en une itération.
 - Dwarf Fortress wiki, « Stone layers », « Vein », « Ore » : couches et hôtes de minerais, à titre de comparaison ludique. Azgaar's Fantasy Map Generator, v1.124.0, « Goods » : placement non déterministe par biome et hauteur ; nous retenons l'adressage par clés.
 - Projet : `docs/design/multiscale-hydrology.md`, `docs/design/render-v2*.fr.md`, `docs/methods/render-v2-glacier-provenance.md`, Chronos `conception_generateur_histoire_multiechelle_v3.md` §5.4, §10, §15, `docs/reviews/vision-entites-sociales.md`, Magna Urbis `docs/GROUND_MATERIAL_MAPPING.md` et `docs/GROUND_TEXTURE_MAPPING_V1.md`.
+
+
+## 19. Monde de 4 000 km et R3e — implémentation et mesures du 27 octobre
+
+### 19.1 Périmètre implémenté
+
+Le profil initial `orogen` demande `world_diameter_km=4000` dans `terrain_generation.py` et dans le repli des contrôles du viewer. Les mécanismes de géométrie existants sont conservés. Une recette enregistrée reste une recette explicite ; ce changement ne réécrit pas ses réglages.
+
+Sur cette sphère, les bornes sont ±6 283,185307 × ±3 141,592654 km. L’autorité LOD 10 passe de **1 304 × 652 = 850 208** à **410 × 206 = 84 460 cellules**, soit 9,94 % du réseau initial. L’atlas Orogen reste à 2 048 × 1 024 : le changement de diamètre ne réduit pas sa résolution en pixels, mais son pas devient 6,136 km. L’environnement Render v2 consommé par les ressources suit le rayon et les coordonnées du nouvel atlas.
+
+La texture GPU interpole entre les centres réels des cellules rognées. La longitude se replie sur la circonférence physique, et non sur le nombre entier de colonnes multiplié par 30,72 km. Le détail procédural non périodique s’atténue sur les deux cellules voisines de la jonction ; le champ d’atlas reste périodique. Les distances des emprises de gisements se replient sur la même circonférence. Les bornes sont présentes dans le paquet, les entrées des processus de travail et les deux identités de cache.
+
+`COMPILER_VERSION = resources-compiler-6` : la version 4 couvre les nouvelles entrées géométriques ; la réalisation finale des districts change les propriétaires, les positions et les clés de placement. La version 5 a servi à mesurer une réalisation intermédiaire trop dispersée, écartée après inspection des regroupements. `V2_INPUTS_VERSION` reste inchangée : les nouvelles bornes différencient directement son cache. Les classes de roches de ce petit monde restent très dominées par le grès ; ce n’est pas une calibration géologique multi-mondes.
+
+### 19.2 Potentiels et districts implémentés ; paramètres proposés
+
+**Potentiel par métal.** Onze couches `resources-dep-potential-<métal>` couvrent fer, cuivre, étain, plomb, zinc, argent, or, sel, gypse, charbon et tungstène. Le métal stellaire n’est exposé qu’en mode fantasy. Pour un métal m :
+
+```text
+potentiel_m = Σ_f [ densité_f × prospectivité_f × tonnage_médian_f × teneur_f,m ] / 10 000
+```
+
+Les familles, médianes et teneurs sont celles de `FAMILIES` et `PLACERS`, issues des modèles déjà documentés au §5.2. Le facteur 1 000 convertit tonnes en kilogrammes pour or, argent et métal stellaire. La grandeur est une **dotation typique pondérée par km²**, pas l’espérance mathématique d’une loi lognormale, ni un inventaire de gisements découverts. Son domaine est [0, somme des contributions maximales des familles]. La rampe logarithmique a des bornes de couleur provisoires ; elle ne définit pas les bornes physiques. Le champ continu utilise le profil minéral GPU, avec son miroir NumPy et deux configurations de parité (cuivre, fer). Les zones proviennent des prospectivités ; elles ne suivent pas le tirage des sites.
+
+**Hiérarchie.** Provinces permissives (prospectivités), puis candidats de districts adressés au LOD 12 (123 km), puis gisements au LOD 3. Deux pour cent des candidats par famille sont actifs, avec au moins un candidat actif dans le domaine. Leur intensité est elliptique, orientée par l’azimut structural de la ceinture. Les écarts-types vont de 10–30 km dans l’axe à 4–30 km en travers ; les bassins évaporitiques sont isotropes. Les placers ont également des districts. L’occupation de 2 %, ces dimensions et le plancher de fond de 0,05 sont **proposés pour la calibration**, bien que le mécanisme soit implémenté. Ils ne sont pas des constantes tirées de la littérature.
+
+Le nombre initial de marques d’une famille est toujours le tirage de Poisson adressé du §5.3. La répartition par plus forts restes déplace **ce même nombre entier** vers les districts, pondérés par la prospectivité et l’aire. Chaque marque garde son identifiant, son `source_cell`, son minerai, sa teneur et ses métaux contenus ; `owner_cell` désigne sa nouvelle cellule propriétaire. Les clés de placement incluent l’identifiant de la marque. `district_id` et `district_center_m` rendent l’appartenance inspectable dans les données. Les cellules partielles ne placent aucun centre hors du monde. L’accès médiéval est recalculé avec le relief du nouveau propriétaire : le récupérable peut donc changer, sans changer le contenu.
+
+Ce choix est inspiré par la séparation entre domaine permissif, modèles teneur-tonnage et estimation du nombre de gisements de [Singer & Menzie, 2010](https://academic.oup.com/book/42025). Le regroupement spatial est discuté dans [USGS OFR 93-23](https://pubs.usgs.gov/of/1993/0023/report.pdf). L’introduction de [Cox & Singer, 1986](https://pubs.usgs.gov/bul/b1693/html/bull1nzi.htm) distingue explicitement gisements individuels et données parfois agrégées en districts : notre district est un regroupement spatial, et n’ajoute pas un second stock aux marques qu’il regroupe.
+
+### 19.3 Affichage des stocks implémenté
+
+Même somme de gisements à tous les LOD, pour le contenu comme pour le récupérable. Pour chaque emprise de demi-axes a, b, la longueur de support devient :
+
+```text
+d = 135 km × smoothstep(LOD 2, LOD 6)
+A = max(2a, 3 pixels, d)
+B = max(2b, 3 pixels, d/3)
+K(x,y) = 3 / (π A B Z) × max(0, 1 − u²/A² − v²/B²)²
+valeur = Σ_g masse_g × K_g × 10⁶     [t/km², ou kg/km²]
+```
+
+L’ellipse suit l’orientation de l’emprise. Les LOD 10–6 élargissent le stock jusqu’à un écart-type de 45 km dans l’axe (support 135 km), ou trois pixels au très grand angle ; les LOD 5–3 révèlent les amas et les LOD ≤2 reviennent aux emprises. Les filons conservent leur allongement quand ils deviennent résolus. Les symboles et géométries de la couche « Gisements discrets » restent disponibles.
+
+`Z` est l’intégrale du noyau contre l’aire sphérique, avec rognage aux pôles. Sa marginale en latitude est intégrée par huit points de Gauss-Legendre, dans le miroir et le WGSL. Il n’y a ni champ de stock interpolé pour remplacer les sites à petite échelle, ni terme de relief modifiant leur masse. Le support compact a une valeur et une dérivée nulles au bord. Un fondu de couleur sur la couverture du noyau évite que l’échelle logarithmique durcisse visuellement cette fin de support ; ce fondu ne change pas la densité. L’évaluateur parcourt tous les seaux qui intersectent le support, sans dupliquer les lignes polaires ni les colonnes repliées.
+
+**Tolérance mesurée de l’intégrale** : erreur relative maximale **0,01164 %** contre une quadrature adaptative indépendante, sur 27 cas (LOD 10, 7, 6, 5, 4, 3, 2, 0, −2 ; équateur, latitude intermédiaire, centre à 300 m du pôle). Test borné à 0,02 %. C’est une tolérance float32 et quadrature, pas une égalité bit à bit d’un raster de pixels. Les budgets et sommes par propriétaire sont, eux, exactement entiers. Le masque terre/mer du viewer reste une présentation : il ne sert pas à intégrer un stock.
+
+### 19.4 Mesures sur la référence 4 000 km
+
+Monde seed 42, profil `orogen`, GPU activé, RTX 3090, Chrome, serveur de ce worktree sur **8775**. Numba est redirigé vers `E:/TerrainDiffusionRuntime/numba-cache`, sans écriture dans la jonction amont. Aucun test de noyaux CUDA nécessitant l’arrêt d’un autre serveur n’a été lancé.
+
+Les durées du premier pixel utilisent le critère existant de `benchmark_resources_first_pixel.cjs` : paquet lié au GPU, puis deux images `requestAnimationFrame`. Elles ne chronomètrent pas une lecture de pixel GPU. Les captures ci-dessous vérifient séparément que le viewer a effectivement rendu la couche et que les tuiles proches sont des sorties du décodeur.
+
+| Mesure | Ancienne référence 12 732 km (§15) | 4 000 km, tâche A |
+|---|---|---|
+| Compilation pendant l’ouverture, environnement neuf | 41,1 s | 13,60 s |
+| Étapes tectonique / environnement / géologie / gisements | 12,1 / 23,2 / 31,1 / 41,1 s | 5,72 / 7,61 / 11,04 / 13,57 s |
+| Ouverture du viewer | 11,4–12,6 s | 21,20 s ; seconde ouverture 19,86 s |
+| Premier passage NPP / roches | 25,3 / 1,3 s, monde neuf | 2,854 / 2,131 s |
+| Dix couches sur monde chaud | 0,2–1,4 s | 0,166–0,317 s |
+
+La réduction de l’autorité est mesurée ; l’ouverture globale n’est pas accélérée dans cet essai. Les coûts fixes de l’atlas, des aperçus et du viewer restent présents. Les deux dépassements de 2 s du premier passage sont conservés dans les résultats ; ils ne sont pas présentés comme des mesures sur monde chaud.
+
+**R3e final, version 6 (mesuré).** Compilation 12,62 s, avec environnement Render v2 en cache ; étapes 4,59 / 4,91 / 8,33 / 12,55 s, cache durable prêt à 13,70 s. À comparer aux 31,0 s historiques avec environnement en cache, et non aux 41,1 s du cas entièrement neuf. Les graines des campagnes historiques diffèrent : cette comparaison est indicative, pas une expérience contrôlée à relief identique.
+
+| Premier pixel, monde chaud | Secondes |
+|---|---:|
+| Potentiel cuivre | 0,499 |
+| Potentiel fer | 0,384 |
+| Stock cuivre | 0,383 |
+| Stock fer | 0,816 |
+| Ensemble des 13 couches du benchmark | 0,291–0,816 |
+
+Commande : `node tools/benchmarks/benchmark_resources_first_pixel.cjs --port 8775 --seed 42 --json output/resources-gpu/first-pixel-4000-r3e-final-warm.json`. Les 13 couches sont affichées, zéro erreur JavaScript remontée, ouverture du viewer en 15,346 s. Au premier passage après recompilation, les quatre nouvelles vues ont pris 1,603 / 0,500 / 0,167 / 0,183 s ; l’ouverture a pris 21,873 s. L’objectif de moins de 2 s sur monde chaud est tenu sur cette campagne.
+
+### 19.5 Budgets et regroupements mesurés
+
+Comparaison du cache 4 000 km de la tâche A (702 gisements) avec la version finale (703). Un site peut contenir plusieurs métaux : les nombres de la table ne se somment pas. Les unités sont des tonnes, sauf or et argent en kilogrammes.
+
+| Métal | Nombre avant → après | Contenu avant → après |
+|---|---:|---:|
+| Fer | 41 → 41 | 1 196 220 427 → identique |
+| Cuivre | 496 → 496 | 42 867 557 → identique |
+| Plomb | 469 → 469 | 26 395 082 → identique |
+| Zinc | 469 → 469 | 17 648 514 → identique |
+| Argent | 589 → 590 | 228 869 786 → 228 870 035 kg |
+| Or | 153 → 154 | 1 726 244 → 1 728 234 kg |
+| Charbon | 14 → 14 | 3 485 635 794 → identique |
+| Étain, sel, gypse, tungstène | 0 → 0 chacun | 0 → 0 chacun |
+
+Le gisement orogénique supplémentaire (1 990 kg d’or, 249 kg d’argent) vient de la correction du champ géologique périodique des bornes ; les teneurs/tonnages des autres marques sont conservés. À champs permissifs identiques, le test reconstruit les tirages initiaux et vérifie **exactement** les identifiants, comptes, minerais et contenus de toutes les marques après routage. Les stocks et récupérables par propriétaire sont aussi comparés exactement aux sommes de gisements.
+
+**Le récupérable change réellement**, car les galeries ont désormais le relief du district d’arrivée : cuivre 3 847 205 → 2 273 612 t (−40,9 %), fer 63 778 402 → 52 443 764 t (−17,8 %), plomb 12 932 191 → 13 424 584 t, argent 79 532 424 → 75 697 403 kg, or 763 512 → 572 261 kg, charbon 165 838 620 → 120 875 144 t. Zinc : 0 inchangé. Ce changement est documenté et n’est pas présenté comme une conservation du récupérable entre versions.
+
+Les **703 gisements occupent 125 districts**, de 1 à 29 sites ; 31 districts sont des singletons. Distance plane médiane au plus proche gisement du même métal, avec repli longitudinal : cuivre **108,26 → 3,97 km**, fer **393,30 → 27,07 km**, or **167,36 → 8,11 km**, charbon **775,56 → 28,77 km**. Cela mesure le regroupement, sans valider géologiquement les dimensions proposées.
+
+### 19.6 Validation et captures relues
+
+- **Python : 54 tests réussis**, 112,998 s, suites `test_terrain_resources.py` (27), `test_terrain_server_world.py` (9), `test_terrain_tile_rendering.py` (16), `test_terrain_web_assets.py` (2). Inclut centres et placement déterministes, requêtes en ordre inverse, appartenance au propriétaire, budgets exacts, conservation des marques, bornes de tous les potentiels et isolation fantasy. Les bornes s’appliquent également à l’évaluateur continu GPU, indépendamment de la rampe de couleur.
+- **CPU/WGSL : 216 cas, 10 configurations, zéro désaccord**, erreur relative maximale normalisée **7,88·10⁻⁷** ; classes, mois et contextes identiques. Commandes : `python tools/verification/build_resources_gpu_fixture.py`, puis `node tools/verification/verify_resources_gpu_parity.cjs`. Les paquets synthétiques incluent des cellules longitudinales partielles, des échantillons extérieurs au domaine, deux potentiels effectivement composés depuis les familles et des stocks aux LOD 10 à −2.
+- **Renderer réel : un test navigateur réussi**, répétition exacte, différence saisonnière moyenne 24,30/255 ; aucune erreur de shader détectée par ce test. `node --test tests/browser/test_terrain_resources_gpu.cjs`.
+- **Captures : 30 images sources**, 410 × 260, assemblées en quatre planches ; 5 LOD × (Render v2, potentiel, stock) × 2 métaux. `node tools/verification/capture_resources_gpu.cjs --port 8775`. Même caméra et mêmes tuiles dans chaque comparaison ; zéro tuile attendue au déclenchement. LOD 10/7/4 : source `conditioning-preview` ou bloc natif courant du viewer ; LOD 2/0 : source **`decoder`**, vérifiée par le script. Les vignettes proches ne sont donc pas un agrandissement de l’aperçu monde.
+
+Planches relues visuellement, Render v2 en haut :
+
+- [Potentiel cuivre](images/resources-gpu-potential-copper.jpg)
+- [Potentiel fer](images/resources-gpu-potential-iron.jpg)
+- [Stock cuivre](images/resources-gpu-stock-copper.jpg)
+- [Stock fer](images/resources-gpu-stock-iron.jpg)
+- [Jonction des longitudes : Orogen, Render v2 et ressources](images/resources-gpu-wrap.jpg), `node tools/verification/capture_resources_wrap.cjs`.
+
+| Planche | Constat après lecture | Limite restante |
+|---|---|---|
+| Potentiel cuivre | domaine continental continu au LOD 10, régions cohérentes aux LOD 7/4, relief lisible aux LOD 2/0 | le monde très gréseux donne un potentiel assez uniforme ; marbrure trop présente au LOD 7 |
+| Potentiel fer | provinces régionales et larges zones compatibles avec les roches sédimentaires, sans sites isolés ; détail de relief conservé au zoom proche | contraste régional limité dans le continent choisi, et texture grossière à moyenne échelle |
+| Stock cuivre | districts visibles à grande échelle ; regroupements allongés au zoom moyen ; corps résolu au zoom proche | la plus grosse lentille choisie devient une bande qui remplit la vue au LOD 0 ; les très petits sites restent sous-pixel |
+| Stock fer | concentrations regroupées, plusieurs corps au LOD 4 et une lentille au LOD 2 ; même contenu total du modèle | 41 sites seulement : le monde conserve de grandes plages sans stock ; un grand corps couvre la vue LOD 0 |
+
+**Jonction observée.** La planche de jonction assemble les bandes droite puis gauche du viewer, à 3 840 m/pixel, y = 2 300 km. La croûte Orogen se raccorde. Une cassure verticale du détail de terrain reste visible dans **Render v2** ; elle se retrouve dans le relief sous les ressources. La période physique du champ ressource est vérifiée séparément par les tests, mais cette capture ne permet pas d’affirmer que toute la présentation est sans couture. Cette faiblesse non ressource est signalée ; elle n’a pas été réécrite dans cette tâche.
+
+**Faiblesses et proposé.** Le placement et les dimensions des districts, les rampes et les profils de relief demandent une calibration sur plusieurs mondes. Le monde choisi ne fournit aucun gisement d’étain, sel, gypse ou tungstène : leurs couches existent et leurs bornes sont testées, leur apparence réelle n’est pas validée ici. Les potentiels sont des dotations typiques, leurs valeurs ne sont pas des réserves. Les champs de stock sont conservatifs à la tolérance de quadrature ; une somme des couleurs ou de pixels ponctuels n’est pas un export de tonnage. Le gros grès dominant, les aperçus et le temps d’ouverture global restent des limites visibles du monde courant ; aucune réécriture de géométrie, d’Orogen ou de Render v2 n’a été faite. Les anciennes limites de conservation des champs continus (§16.2) restent applicables aux potentiels, distinctement des noyaux de stock.
