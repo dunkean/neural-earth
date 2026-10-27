@@ -7,14 +7,14 @@
 (function(root){
   const PREFIX='resources-';
   const KINDS={ramp:0,log:1,mix:2,classes:3,cyclic:4,points:5,stock:6};
-  const PARAM_BYTES=(8+3+20)*16;
+  const PARAM_BYTES=(8+3+20+1)*16;
   let order=[];
   const isMode=mode=>typeof mode==='string'&&mode.startsWith(PREFIX);
   // Stable numbers below the existing ranges (Render v2 uses -8..-12).
   const number=mode=>{let i=order.indexOf(mode);if(i<0){order.push(mode);i=order.length-1;}return -100-i;};
   const isNumber=n=>n<=-100;
   const core=`
-    struct ResParams { grid:vec4<f32>, info:vec4<f32>, range:vec4<f32>, prof0:vec4<f32>, prof1:vec4<f32>, zones:vec4<f32>, zones2:vec4<f32>, seeds:vec4<u32>, order:array<vec4<u32>,3>, palette:array<vec4<f32>,20> }
+    struct ResParams { grid:vec4<f32>, info:vec4<f32>, range:vec4<f32>, prof0:vec4<f32>, prof1:vec4<f32>, zones:vec4<f32>, zones2:vec4<f32>, seeds:vec4<u32>, order:array<vec4<u32>,3>, palette:array<vec4<f32>,20>, world:vec4<f32> }
     struct ResDeposit { ij:vec4<i32>, dim:vec4<f32>, extra:vec4<f32> }
     @group(0) @binding(11) var resField:texture_2d_array<f32>;
     @group(0) @binding(12) var resTau:texture_2d_array<f32>;
@@ -44,12 +44,12 @@
     fn rWarp(gi:i32,gj:i32,lod:i32,layer:u32,lo:i32,hi:i32,amp:f32)->vec2<f32>{
       var w=vec2<f32>(0.);
       for(var o=max(lo,lod+2);o<=hi;o++){let a=amp*rLam(o);w+=a*vec2<f32>(rOctave(gi,gj,lod,o,rSalt(layer,o,1u),vec2<f32>(0.)),rOctave(gi,gj,lod,o,rSalt(layer,o,2u),vec2<f32>(0.)));}
-      return w;
+      return w*rSeam(gi,lod);
     }
     fn rFbm(gi:i32,gj:i32,lod:i32,layer:u32,lo:i32,hi:i32,decay:f32,w:vec2<f32>)->f32{
       var total=0.;var norm=0.;
       for(var o=max(lo,lod+2);o<=hi;o++){let a=exp2(decay*f32(o-hi));total+=a*rOctave(gi,gj,lod,o,rSalt(layer,o,0u),w/rLam(o));norm+=a*a;}
-      return total/(max(sqrt(norm),1e-6)*.45);
+      return total/(max(sqrt(norm),1e-6)*.45)*rSeam(gi,lod);
     }
     // Strike-aligned fbm: four integer orientations, a axis stretched x2, blended by strike.
     fn rOctaveS(a:i32,b:i32,lod:i32,o:i32,salt:u32,w:vec2<f32>)->f32{
@@ -77,7 +77,16 @@
         for(var o=max(lo,lod+2);o<=hi;o++){n+=exp2(decay*f32(o-hi))*rOctaveS(a,b,lod,o,rSalt(layer,o,3u+u32(d)),wv);}
         total+=wd*(n/scale);weight2+=wd*wd;
       }
-      return total/sqrt(max(weight2,1e-6));
+      return total/sqrt(max(weight2,1e-6))*rSeam(gi,lod);
+    }
+    // Fade nonperiodic procedural detail at the physical seam. The atlas field
+    // remains periodic; the fade width is two authority cells on every planet.
+    fn rSeam(gi:i32,lod:i32)->f32{
+      if(res.world.z<=res.world.x){return 1.;}
+      let width=res.world.z-res.world.x;
+      let q=(f32(gi)+.5)*exp2(f32(lod-10))-res.world.x;
+      let x=q-floor(q/width)*width;
+      return rSmooth(0.,2.,min(x,width-x));
     }
     fn rCellPos(g:i32,lod:i32,w:f32)->RLat{
       var base:i32;var frac:f32;
@@ -85,16 +94,29 @@
       else{let pos=(f32(g)+.5)*exp2(f32(lod-10))-.5;base=i32(floor(pos));frac=pos-floor(pos);}
       let q=frac+w*(1./30720.);let fl=floor(q);return RLat(base+i32(fl),q-fl);
     }
+    fn rAxisPos(g:i32,lod:i32,w:f32,axis:i32)->RLat{
+      let q=rCellPos(g,lod,w);
+      let lo=res.world[u32(axis)];let hi=res.world[u32(axis+2)];
+      if(hi<=lo){return q;}
+      let first=i32(res.grid[u32(axis)]);let last=first+i32(res.grid[u32(axis+2)])-1;
+      let a=(f32(first+1)+lo)*.5;let b=(f32(last)+hi)*.5;
+      var x=f32(q.i)+q.f+.5;
+      if(axis==0){x=x-floor((x-lo)/(hi-lo))*(hi-lo);}else{x=clamp(x,a,b);}
+      let c=clamp(i32(floor(x-.5)),first,last-1);
+      let left=select(f32(c)+.5,a,c==first);let right=select(f32(c)+1.5,b,c+1==last);
+      if(axis==0&&(x<a||x>=b)){return RLat(last,(select(x,x+hi-lo,x<a)-b)/(a+hi-lo-b));}
+      return RLat(c,(x-left)/(right-left));
+    }
     fn rColRow(c:i32,r:i32)->vec2<i32>{let W=i32(res.grid.z);let H=i32(res.grid.w);return vec2<i32>(((c-i32(res.grid.x))%W+W)%W,clamp(r-i32(res.grid.y),0,H-1));}
     fn rFieldAt(layer:i32,c:i32,r:i32)->f32{return textureLoad(resField,rColRow(c,r),layer,0).r;}
     fn rField(layer:i32,gi:i32,gj:i32,lod:i32,w:vec2<f32>)->f32{
-      let x=rCellPos(gi,lod,w.x);let y=rCellPos(gj,lod,w.y);
+      let x=rAxisPos(gi,lod,w.x,0);let y=rAxisPos(gj,lod,w.y,1);
       let a=rFieldAt(layer,x.i,y.i)*(1.-x.f)+rFieldAt(layer,x.i+1,y.i)*x.f;
       let b=rFieldAt(layer,x.i,y.i+1)*(1.-x.f)+rFieldAt(layer,x.i+1,y.i+1)*x.f;
       return a*(1.-y.f)+b*y.f;
     }
     fn rNearest(layer:i32,gi:i32,gj:i32,lod:i32,w:vec2<f32>)->f32{
-      let x=rCellPos(gi,lod,w.x);let y=rCellPos(gj,lod,w.y);
+      let x=rAxisPos(gi,lod,w.x,0);let y=rAxisPos(gj,lod,w.y,1);
       return rFieldAt(layer,x.i+select(0,1,x.f>=.5),y.i+select(0,1,y.f>=.5));
     }
     fn rSmooth(a:f32,b:f32,x:f32)->f32{let t=clamp((x-a)/(b-a),0.,1.);return t*t*(3.-2.*t);}
@@ -135,7 +157,7 @@
     }
     // One of the four cells around the sample, with probability = bilinear weight (organic blobs, no blending).
     fn rSelect(gi:i32,gj:i32,lod:i32,w:vec2<f32>)->vec2<i32>{
-      let x=rCellPos(gi,lod,0.);let y=rCellPos(gj,lod,0.);
+      let x=rAxisPos(gi,lod,0.,0);let y=rAxisPos(gj,lod,0.,1);
       let u=rUniform(rFbm(gi,gj,lod,res.seeds.y*16u+8u,8,10,.7,w));
       let w00=(1.-x.f)*(1.-y.f);let w10=x.f*(1.-y.f);let w01=(1.-x.f)*y.f;
       let a=w00;let b=w00+w10;let c=w00+w10+w01;
@@ -198,7 +220,7 @@
         let cr=rColRow(cx+ox,cy+oy);let bucket=resBuckets[u32(cr.y*W+cr.x)];
         for(var k=bucket.x;k<bucket.x+bucket.y;k++){
           let d=resDeposits[k];
-          let dx=rDelta(gi,d.ij.x,lod,r);let dy=rDelta(gj,d.ij.y,lod,r);
+          var dx=rDelta(gi,d.ij.x,lod,r);let span=(res.world.z-res.world.x)*30720.;if(span>0.){dx-=floor(dx/span+.5)*span;}let dy=rDelta(gj,d.ij.y,lod,r);
           let dist=sqrt(dx*dx+dy*dy);
           if(stock){let sg=max(d.extra.z,.75*r);*density+=d.extra.w*1e6/(6.2831853*sg*sg)*exp(-(dx*dx+dy*dy)/(2.*sg*sg));continue;}
           let a=d.dim.x;let b=d.dim.y;let c=cos(d.dim.z);let s=sin(d.dim.z);
@@ -306,6 +328,7 @@
     u.set([header.seed32>>>0,header.layer>>>0],28);f.set(header.bounds||header.range.slice(0,2),30);
     (header.order||[]).slice(0,12).forEach((v,i)=>{u[32+i]=v;});
     header.palette.slice(0,20).forEach((c,i)=>f.set([c[0],c[1],c[2],1],44+i*4));
+    if(header.world_bounds)f.set(header.world_bounds.map(v=>v/30720),124);
     return buffer;
   }
   // Binary package: field (f16), thresholds (f16), deposits (12 words each), buckets (2 u32 per cell).

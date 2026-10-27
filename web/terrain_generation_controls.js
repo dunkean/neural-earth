@@ -59,7 +59,7 @@ window.TerrainGenerationControls=(()=>{
     const propertyDefaults=Object.fromEntries(Object.entries(schema?.properties||{}).filter(([,spec])=>spec.default!==undefined).map(([key,spec])=>[key,clone(spec.default)]));
     if(schema?.defaults_by_profile?.[profile])return withGpu({...propertyDefaults,...clone(schema.defaults_by_profile[profile]),climate_source:'orogen'},localPreferences().gpuAcceleration===true);
     const natural=profile==='natural';
-    return {...propertyDefaults,world_diameter_km:40000/Math.PI,world_topology:"sphere",...withGpu({},localPreferences().gpuAcceleration===true),...Object.fromEntries(cityFields.map(([key,label,min,max,step,value])=>[key,value])),height_source:natural?'natural':profile==='orogen'?'orogen':'native',climate_source:'orogen',relief_pipeline:'orogen',
+    return {...propertyDefaults,world_diameter_km:profile==='orogen'?4000:40000/Math.PI,world_topology:"sphere",...withGpu({},localPreferences().gpuAcceleration===true),...Object.fromEntries(cityFields.map(([key,label,min,max,step,value])=>[key,value])),height_source:natural?'natural':profile==='orogen'?'orogen':'native',climate_source:'orogen',relief_pipeline:'orogen',
       continental_style:profile.startsWith('terrestrial-')?profile.slice(12):profile==='orogen'?'continents':'earthlike',
       continental_strength:.8,macro_scale_km:600,frequency_mult:[1,1,1,1,1],
       octaves:[4,2,4,4,4],cond_snr:natural?[.5,.5,.5,.5,.5]:[.05,.5,.5,.5,.5],drop_water_pct:.5,

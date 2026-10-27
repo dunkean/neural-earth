@@ -84,7 +84,7 @@ def main(key, v2key, cache, fantasy):
         atlas_path = cache / f'{key}-atlas.npz'
         with np.load(atlas_path, allow_pickle=False) as data:
             layers = {k[6:]: data[k] for k in data.files if k.startswith('layer_')}
-            height, seed = data['height_m'], int(data['seed'])
+            height, seed, bounds = data['height_m'], int(data['seed']), tuple(data['bounds'])
         atlas_path.unlink(missing_ok=True)
         status['atlas_s'] = round(time.perf_counter() - started, 2)
         v2 = None
@@ -95,7 +95,7 @@ def main(key, v2key, cache, fantasy):
             v2 = None
         status['v2_cached'] = v2 is not None
         grid, fields, deposits = R.compile_world(layers, height, seed, fantasy=fantasy,
-                                                 progress=publish, parallel=W.parallel_map, v2_fields=v2)
+                                                 progress=publish, parallel=W.parallel_map, v2_fields=v2, bounds=bounds)
         _write_json(cache / f'{key}-deposits.json', deposits)
         status['state'] = 'ready'
         status['compile_s'] = round(time.perf_counter() - started, 2)

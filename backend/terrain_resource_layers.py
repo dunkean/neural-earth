@@ -214,7 +214,7 @@ def _identity(atlas):
     import terrain_resources as R
     source = getattr(atlas, 'source', atlas)
     return hashlib.sha256(json.dumps(dict(world=_world_key(atlas), compiler=R.COMPILER_VERSION, v2=_render_v2_code(),
-                                          fantasy=fantasy_enabled(), seed=str(getattr(source, 'seed', 0))),
+                                          bounds=_atlas_bounds(atlas), fantasy=fantasy_enabled(), seed=str(getattr(source, 'seed', 0))),
                                      sort_keys=True).encode()).hexdigest()
 
 
@@ -222,7 +222,7 @@ def _v2_identity(atlas):
     import terrain_resources as R
     source = getattr(atlas, 'source', atlas)
     return hashlib.sha256(json.dumps(dict(world=_world_key(atlas), inputs=R.V2_INPUTS_VERSION, v2=_render_v2_code(),
-                                          seed=str(getattr(source, 'seed', 0))), sort_keys=True).encode()).hexdigest()
+                                          bounds=_atlas_bounds(atlas), seed=str(getattr(source, 'seed', 0))), sort_keys=True).encode()).hexdigest()
 
 
 # Intermediate monthly arrays not served by any view nor export; dropped after
@@ -274,13 +274,14 @@ class _Compile:
         import subprocess
         import sys
         self.key, self.root = key, _cache_root()
+        self.bounds = _atlas_bounds(atlas)
         self.root.mkdir(parents=True, exist_ok=True)
         source = getattr(atlas, 'source', atlas)
         layers = {'layer_' + k: np.asarray(v) for k, v in source.layers.items()
                   if k in ATLAS_LAYERS or k.startswith('pedology_')}
         for name in ('status.json', 'stage.npz', 'deposits.json'):
             (self.root / f'{key}-{name}').unlink(missing_ok=True)
-        np.savez(self.root / f'{key}-atlas.npz', height_m=np.asarray(source.height_m), seed=np.int64(getattr(source, 'seed', 0)),
+        np.savez(self.root / f'{key}-atlas.npz', height_m=np.asarray(source.height_m), seed=np.int64(getattr(source, 'seed', 0)), bounds=np.asarray(self.bounds),
                  **layers)
         self.started = time.perf_counter()
         self._fields, self._fields_stages, self._result, self._lock = None, 0, None, threading.Lock()
@@ -308,7 +309,7 @@ class _Compile:
     def result(self):
         with self._lock:
             if self._result is None and self._status_file().get('state') == 'ready':
-                self._result = _from_disk(self.key, stage=True)
+                self._result = _from_disk(self.key, self.bounds, stage=True)
             return self._result
 
     @property
@@ -347,7 +348,7 @@ def _load_npz(path):
         return None
 
 
-def _from_disk(key, stage=False):
+def _from_disk(key, bounds, stage=False):
     """The compiled world from its cache, or (stage=True) from the final stage
     snapshot while the compressed cache is still being written."""
     import terrain_resources as R
@@ -366,22 +367,19 @@ def _from_disk(key, stage=False):
             continue
         if fields is None:
             continue
-        grid = R.Lattice(R.WORLD_LOD)
+        grid = R.Lattice(R.WORLD_LOD, bounds=bounds)
         R.stock_layers(grid, fields, deposits)
         return grid, _slim(fields), deposits, time.perf_counter() - started, 'disk'
     return None
 
 
-def _check_bounds(atlas):
+def _atlas_bounds(atlas):
     import terrain_resources as R
-    bounds = tuple(float(b) for b in getattr(atlas, 'bounds', R.BOUNDS))
-    if any(abs(a - b) > 1 for a, b in zip(bounds, R.BOUNDS)):
-        raise ValueError('Resource layers currently require the default planet bounds')
+    return tuple(float(b) for b in getattr(atlas, 'bounds', R.BOUNDS))
 
 
 def compile_status(atlas):
     """Start (or report) the world's resources: never waits for the compile."""
-    _check_bounds(atlas)
     source = getattr(atlas, 'source', atlas)
     key = _identity(atlas)
     with _LOCK:
@@ -394,7 +392,7 @@ def compile_status(atlas):
             del _COMPILES[key]
             return dict(state='ready', stage='ready', progress=1., eta_s=0., message='prêt', origin='compiled')
         if job is None or job.error:
-            result = _from_disk(key)
+            result = _from_disk(key, _atlas_bounds(atlas))
             if result is not None:
                 source._terrain_resources = (key, result)
                 return dict(state='ready', stage='ready', progress=1., eta_s=0., message='prêt', origin='disk')
@@ -416,7 +414,7 @@ def world_resources(atlas, partial=False):
         return source._terrain_resources[1]
     job = _COMPILES.get(_identity(atlas))
     if partial and job is not None and job.fields is not None:
-        return R.Lattice(R.WORLD_LOD), job.fields, [], time.perf_counter() - job.started, 'partial'
+        return R.Lattice(R.WORLD_LOD, bounds=job.bounds), job.fields, [], time.perf_counter() - job.started, 'partial'
     raise ResourcesPending(status)
 
 
@@ -429,22 +427,9 @@ def _hex(colors):
 
 def _sample(grid, value, xs, ys):
     """Bilinear between LOD-10 cell centres; longitude wraps, latitude clamps."""
-    s = grid.size
-    period = (grid.i[-1] - grid.i[0] + 1)
-    x0, y0, x1, y1 = (-2e7, -1e7, 2e7, 1e7)
-    xs = (np.asarray(xs, np.float64) - x0) % (x1 - x0) + x0
-    gx = xs / s - .5 - grid.i[0]
-    gy = np.clip(np.asarray(ys, np.float64) / s - .5 - grid.j[0], 0, len(grid.j) - 1)
-    ix, iy = np.floor(gx).astype(np.int64), np.floor(gy).astype(np.int64)
-    tx, ty = (gx - ix)[None, :], (gy - iy)[:, None]
-    i0, i1 = np.clip(ix, 0, period - 1), np.clip(ix + 1, 0, period - 1)
-    j0, j1 = iy, np.minimum(iy + 1, len(grid.j) - 1)
-    stacked = value.ndim == 3
-    v = value if stacked else value[None]
-    a = v[:, j0][:, :, i0] * (1 - tx) + v[:, j0][:, :, i1] * tx
-    b = v[:, j1][:, :, i0] * (1 - tx) + v[:, j1][:, :, i1] * tx
-    out = a * (1 - ty) + b * ty
-    return out if stacked else out[0]
+    import terrain_resources as R
+    return R.sample_lattice(grid, value, xs, ys)
+
 
 
 def _ramp(t, colors):
@@ -488,7 +473,7 @@ def _render(spec, mode, grid, fields, deposits, land, base, xs, ys):
     if spec['kind'] in ('classes', 'cyclic'):
         # Categorical: nearest cell, never interpolated.
         s = grid.size
-        xw = (np.asarray(xs, np.float64) + 2e7) % 4e7 - 2e7
+        xw = (np.asarray(xs, np.float64) - grid.bounds[0]) % (grid.bounds[2] - grid.bounds[0]) + grid.bounds[0]
         ix = np.clip(np.floor(xw / s).astype(int) - grid.i[0], 0, len(grid.i) - 1)
         iy = np.clip(np.floor(np.asarray(ys) / s).astype(int) - grid.j[0], 0, len(grid.j) - 1)
         cat = value[iy[:, None], ix[None, :]]
@@ -519,7 +504,7 @@ def draw_deposits(grid, deposits, xs, ys, base):
         return rgb
     pos = np.array([[(d['position_i'] + .5) * R.cell_size(d['position_lod']), (d['position_j'] + .5) * R.cell_size(d['position_lod'])]
                     for d in deposits])
-    span = 4e7
+    span = grid.bounds[2] - grid.bounds[0]
     xc = (xs[0] + xs[-1]) / 2
     px = pos[:, 0] + np.round((xc - pos[:, 0]) / span) * span
     # Symbols shrink in overviews (about 1-2 px at 40 km/px) so provinces stay readable.
@@ -553,7 +538,7 @@ def inspect(atlas, x, y, radius_m=60000.):
     import terrain_resources as R
     grid, fields, deposits, seconds, origin = world_resources(atlas)
     s = grid.size
-    xw = (float(x) + 2e7) % 4e7 - 2e7
+    xw = (float(x) - grid.bounds[0]) % (grid.bounds[2] - grid.bounds[0]) + grid.bounds[0]
     i = int(np.clip(math.floor(xw / s) - grid.i[0], 0, len(grid.i) - 1))
     j = int(np.clip(math.floor(float(y) / s) - grid.j[0], 0, len(grid.j) - 1))
     values = {}
@@ -570,7 +555,8 @@ def inspect(atlas, x, y, radius_m=60000.):
     for d in deposits:
         px = (d['position_i'] + .5) * R.cell_size(d['position_lod'])
         py = (d['position_j'] + .5) * R.cell_size(d['position_lod'])
-        dx = (px - xw + 2e7) % 4e7 - 2e7
+        span = grid.bounds[2] - grid.bounds[0]
+        dx = (px - xw + span / 2) % span - span / 2
         dist = math.hypot(dx, py - float(y))
         if dist <= radius_m:
             near.append(dict(d, distance_m=round(dist), label=FAMILY_LABELS.get(d['family'], d['family'])))
@@ -785,7 +771,7 @@ def _gpu_package(state, mode):
     realized = kind == 'mix' and mode.endswith('geo-rock')
     layer = R.ROCK_LAYER if realized else names_all.index(mode) + 1
     coef, sigma = G.PROFILES[profile_of(mode)]
-    pkg = dict(seed32=state.seed32, layer=layer, field=G.Field(field, grid.i[0], grid.j[0]), classes=classes,
+    pkg = dict(seed32=state.seed32, layer=layer, field=G.Field(field, grid.i[0], grid.j[0], grid.bounds), classes=classes,
                groups=groups, seasonal=bool(spec.get('seasonal')), season=.5, profile=profile_of(mode),
                range=tuple(spec['range']), bounded=bounded is not None, bounds=tuple(bounded or spec['range']))
     if realized:
@@ -800,7 +786,7 @@ def _gpu_package(state, mode):
     order = ([int(a) << 4 | g for a, g in zip(R.ROCK_ALIGNED, R.ROCK_GROUPS)] + [int(a) for a in R.ROCK_GROUP_ALIGNED]
              if realized else [])
     header = dict(mode=mode, kind=G.KINDS[kind], lattice=[int(grid.i[0]), int(grid.j[0]), int(grid.shape[1]), int(grid.shape[0])],
-                  layers=int(field.shape[0]), classes=classes, seasonal=pkg['seasonal'], range=list(spec['range']),
+                  world_bounds=list(grid.bounds), layers=int(field.shape[0]), classes=classes, seasonal=pkg['seasonal'], range=list(spec['range']),
                   bounded=pkg['bounded'], bounds=list(pkg['bounds']), log=bool(spec['log']), profile=G.PROFILE_NAMES.index(profile_of(mode)),
                   coef=list(coef), sigma=sigma, seed32=int(state.seed32), layer=layer,
                   groups=[], realized=realized, beta=list(G.REALIZED_BETA) if realized else [0, 0], order=order, thresholds=0,

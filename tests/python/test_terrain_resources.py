@@ -76,6 +76,25 @@ class ResourceTests(unittest.TestCase):
         self.assertEqual(children.shape, (8, 8))
         self.assertAlmostEqual(children.area_m2.sum() / parent.area_m2.sum(), 1, places=12)
 
+    def test_resized_world_bounds_and_cache_identity(self):
+        from types import SimpleNamespace
+        import terrain_resource_layers as L
+        from terrain_generation import _defaults
+        from terrain_geometry import world_bounds
+        bounds = world_bounds(_defaults('orogen'))
+        self.assertEqual(_defaults('orogen')['world_diameter_km'], 4000.)
+        g = R.Lattice(10, bounds=bounds)
+        self.assertEqual(g.shape, (206, 410))
+        self.assertAlmostEqual(g.area_m2.sum() / (4 * np.pi * 2e6 ** 2), 1, places=12)
+        a = SimpleNamespace(seed=42, height_m=self.height, bounds=bounds)
+        b = SimpleNamespace(seed=42, height_m=self.height, bounds=R.BOUNDS)
+        self.assertNotEqual(L._identity(a), L._identity(b))
+        self.assertNotEqual(L._v2_identity(a), L._v2_identity(b))
+        field = np.arange(np.prod(g.shape)).reshape(g.shape)
+        eps = .001
+        v = R.sample_lattice(g, field, [bounds[0] + eps, bounds[2] - eps], [0])
+        np.testing.assert_allclose(v[0, 0], v[0, 1], rtol=0, atol=.001)
+
     def test_cell_ids_roundtrip_and_parents(self):
         i, j = np.array([-5, 0, 7, -(1 << 20)]), np.array([3, -1, -9, 1 << 19])
         for lod in (-6, 0, 3, 10, 15):

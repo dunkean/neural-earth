@@ -181,9 +181,10 @@ def fbm(gi, gj, lod, seed32, layer, lo, hi, decay=.8, wx=None, wy=None):
 # Parent field sampling (LOD-10 texture: K layers, wrap in longitude)
 
 class Field:
-    def __init__(self, data, i0, j0):
+    def __init__(self, data, i0, j0, bounds=None):
         self.data = np.asarray(data, F32)          # (K, H, W)
         self.i0, self.j0 = int(i0), int(j0)
+        self.bounds = None if bounds is None else np.asarray(bounds, F32) / F32(AUTH_SIZE)
         self.k, self.h, self.w = self.data.shape
 
     def cell_pos(self, g, lod, w):
@@ -201,9 +202,36 @@ class Field:
         fl = np.floor(q)
         return base + fl.astype(np.int64), (q - fl).astype(F32)
 
+    def axis_pos(self, g, lod, w, axis):
+        c, f = self.cell_pos(g, lod, w)
+        if self.bounds is None:
+            return c, f
+        lo, hi = self.bounds[axis], self.bounds[axis + 2]
+        first, last = (self.i0, self.i0 + self.w - 1) if axis == 0 else (self.j0, self.j0 + self.h - 1)
+        a, b = (F32(first + 1) + lo) * F32(.5), (F32(last) + hi) * F32(.5)
+        x = c.astype(F32) + f + F32(.5)
+        x = (x - lo) % (hi - lo) + lo if axis == 0 else np.clip(x, a, b)
+        c = np.clip(np.floor(x - F32(.5)).astype(np.int64), first, last - 1)
+        left = np.where(c == first, a, c.astype(F32) + F32(.5))
+        right = np.where(c + 1 == last, b, c.astype(F32) + F32(1.5))
+        f = (x - left) / (right - left)
+        if axis == 0:
+            seam = (x < a) | (x >= b)
+            f = np.where(seam, (np.where(x < a, x + hi - lo, x) - b) / (a + hi - lo - b), f)
+            c = np.where(seam, last, c)
+        return c, f.astype(F32)
+
+    def seam(self, gi, lod):
+        if self.bounds is None:
+            return F32(1)
+        x = (np.asarray(gi, F32) + F32(.5)) * F32(2. ** (lod - AUTH_LOD))
+        lo, hi = self.bounds[0], self.bounds[2]
+        x = (x - lo) % (hi - lo)
+        return smoothstep(0, 2, np.minimum(x, hi - lo - x))
+
     def bilinear(self, layer, gi, gj, lod, wx, wy):
-        ci, fx = self.cell_pos(gi, lod, wx)
-        cj, fy = self.cell_pos(gj, lod, wy)
+        ci, fx = self.axis_pos(gi, lod, wx, 0)
+        cj, fy = self.axis_pos(gj, lod, wy, 1)
         c0, c1 = (ci - self.i0) % self.w, (ci + 1 - self.i0) % self.w
         r0, r1 = np.clip(cj - self.j0, 0, self.h - 1), np.clip(cj + 1 - self.j0, 0, self.h - 1)
         d = self.data[layer]
@@ -212,8 +240,8 @@ class Field:
         return (a * (F32(1) - fy) + b * fy).astype(F32)
 
     def nearest(self, layer, gi, gj, lod, wx, wy):
-        ci, fx = self.cell_pos(gi, lod, wx)
-        cj, fy = self.cell_pos(gj, lod, wy)
+        ci, fx = self.axis_pos(gi, lod, wx, 0)
+        cj, fy = self.axis_pos(gj, lod, wy, 1)
         ci, cj = ci + (fx >= .5), cj + (fy >= .5)
         return self.data[layer][np.clip(cj - self.j0, 0, self.h - 1), (ci - self.i0) % self.w]
 
@@ -262,6 +290,8 @@ def evaluate_continuous(pkg, gi, gj, lod, feat):
     seed32, layer = pkg['seed32'], pkg['layer']
     field = pkg['field']
     wx, wy = warp(gi, gj, lod, seed32, layer * 4 + 1, 8, 10, .25)
+    seam = field.seam(gi, lod)
+    wx, wy = wx * seam, wy * seam
     if pkg['seasonal']:
         a, b, t = season_layers(pkg['season'], field.k)
         p = field.bilinear(a, gi, gj, lod, wx, wy) * (F32(1) - t) + field.bilinear(b, gi, gj, lod, wx, wy) * t
@@ -272,7 +302,7 @@ def evaluate_continuous(pkg, gi, gj, lod, feat):
     n = fbm(gi, gj, lod, seed32, layer * 4 + 2, 7, 9, .8)
     terms = terrain_terms(feat, coef) if feat is not None else np.zeros_like(n)
     # Terrain terms fade from LOD 1 to 5: a coarse DEM texel's roughness is not landform.
-    z = terms * (F32(1) - F32(.75) * smoothstep(1, 5, np.float32(lod))) + F32(sigma) * n
+    z = terms * (F32(1) - F32(.75) * smoothstep(1, 5, np.float32(lod))) + F32(sigma) * n * seam
     if pkg['bounded']:
         lo, hi = pkg.get('bounds', pkg['range'])     # physical bounds, not the colour range
         q = np.clip((p - F32(lo)) / F32(hi - lo), F32(1e-4), F32(1 - 1e-4))
@@ -331,7 +361,9 @@ def fbm_aligned(gi, gj, lod, seed32, layer, lo, hi, decay, wx, wy, theta):
 
 def zone_warp(pkg, gi, gj, lod, warp_floor=None):
     lo = lod + 1 if warp_floor is None else warp_floor
-    return warp(gi, gj, lod, pkg['seed32'], pkg['layer'] * 4 + 1, lo, ZONE_WARP[0], ZONE_WARP[1])
+    wx, wy = warp(gi, gj, lod, pkg['seed32'], pkg['layer'] * 4 + 1, lo, ZONE_WARP[0], ZONE_WARP[1])
+    seam = pkg['field'].seam(gi, lod)
+    return wx * seam, wy * seam
 
 
 # Realized geology: class = argmax_k (log E_k + b1 * N_g(k) + b2 * N_k), where
@@ -362,7 +394,7 @@ def realized_class(pkg, gi, gj, lod, warp_floor=None):
     def noise(salt, octaves, decay, aligned):
         o0, o1 = octaves
         return (fbm_aligned(gi, gj, lod, seed32, salt, o0, o1, decay, wx, wy, theta) if aligned
-                else fbm(gi, gj, lod, seed32, salt, o0, o1, decay, wx, wy))
+                else fbm(gi, gj, lod, seed32, salt, o0, o1, decay, wx, wy)) * field.seam(gi, lod)
 
     province = [noise(layer * 64 + 48 + g, REALIZED_GROUP_OCTAVES, 1., a) for g, a in enumerate(pkg['group_aligned'])]
     best = np.full(np.broadcast(gi, gj).shape, -np.inf, F32)
@@ -378,6 +410,8 @@ def realized_class(pkg, gi, gj, lod, warp_floor=None):
 def evaluate_dominant(pkg, gi, gj, lod):
     """Generalised class at small scales: the largest parent share (warped bilinear)."""
     wx, wy = warp(gi, gj, lod, pkg['seed32'], pkg['layer'] * 4 + 1, lod + 1, ZONE_WARP[0], ZONE_WARP[1])
+    seam = pkg['field'].seam(gi, lod)
+    wx, wy = wx * seam, wy * seam
     best = np.full(np.broadcast(gi, gj).shape, -1., F32)
     out = np.zeros(best.shape, np.int32)
     for k in range(pkg['classes']):
@@ -409,9 +443,9 @@ def select_cell(pkg, gi, gj, lod, wx, wy):
     organic blobs, and nothing is blended (categorical values such as months)."""
     field = pkg['field']
     zero = np.zeros(np.broadcast(gi, gj).shape, F32)
-    ci, fx = field.cell_pos(gi, lod, zero)
-    cj, fy = field.cell_pos(gj, lod, zero)
-    u = uniformize(fbm(gi, gj, lod, pkg['seed32'], pkg['layer'] * 16 + 8, 8, 10, .7, wx, wy))
+    ci, fx = field.axis_pos(gi, lod, zero, 0)
+    cj, fy = field.axis_pos(gj, lod, zero, 1)
+    u = uniformize(fbm(gi, gj, lod, pkg['seed32'], pkg['layer'] * 16 + 8, 8, 10, .7, wx, wy) * field.seam(gi, lod))
     w00 = (F32(1) - fx) * (F32(1) - fy)
     w10 = fx * (F32(1) - fy)
     w01 = (F32(1) - fx) * fy
@@ -424,6 +458,8 @@ def select_cell(pkg, gi, gj, lod, wx, wy):
 def evaluate_cyclic(pkg, gi, gj, lod):
     """Month-like layers: value of a selected neighbouring cell (no blending of months)."""
     wx, wy = warp(gi, gj, lod, pkg['seed32'], pkg['layer'] * 4 + 1, max(lod + 1, -5), 10, .25)
+    seam = pkg['field'].seam(gi, lod)
+    wx, wy = wx * seam, wy * seam
     ci, cj = select_cell(pkg, gi, gj, lod, wx, wy)
     f = pkg['field']
     return f.data[0][np.clip(cj - f.j0, 0, f.h - 1), (ci - f.i0) % f.w]
@@ -432,7 +468,7 @@ def evaluate_cyclic(pkg, gi, gj, lod):
 # ---------------------------------------------------------------------------
 # Deposits (shapes and kernels)
 
-def deposit_contribution(dep, gi, gj, lod, valley):
+def deposit_contribution(dep, gi, gj, lod, valley, bounds=None):
     """Alpha of the body, halo and gossan rim, and colour index, of one deposit.
 
     dep: dict(di, dj (LOD-0 cell indices), a, b (m), theta, shape, gossan).
@@ -445,6 +481,9 @@ def deposit_contribution(dep, gi, gj, lod, valley):
         s = -lod
         dx = (np.asarray(gi, np.int64) - (dep['di'] << s)).astype(F32) * r + r * F32(.5) - F32(15)
         dy = (np.asarray(gj, np.int64) - (dep['dj'] << s)).astype(F32) * r + r * F32(.5) - F32(15)
+    if bounds is not None:
+        span = F32(bounds[2] - bounds[0])
+        dx = dx - np.floor(dx / span + F32(.5)) * span
     a, b = F32(dep['a']), F32(dep['b'])
     c, s_ = F32(math.cos(dep['theta'])), F32(math.sin(dep['theta']))
     u, v = dx * c + dy * s_, -dx * s_ + dy * c
@@ -470,7 +509,7 @@ def deposit_contribution(dep, gi, gj, lod, valley):
     return body.astype(F32), halo.astype(F32), rim.astype(F32)
 
 
-def stock_density(deps, gi, gj, lod):
+def stock_density(deps, gi, gj, lod, bounds=None):
     """Sum of normalised Gaussian kernels (mass per km2)."""
     r = 30. * 2. ** lod
     out = 0.
@@ -482,6 +521,9 @@ def stock_density(deps, gi, gj, lod):
             s = -lod
             dx = (np.asarray(gi, np.int64) - (d['di'] << s)).astype(F32) * F32(r) + F32(r * .5 - 15)
             dy = (np.asarray(gj, np.int64) - (d['dj'] << s)).astype(F32) * F32(r) + F32(r * .5 - 15)
+        if bounds is not None:
+            span = F32(bounds[2] - bounds[0])
+            dx = dx - np.floor(dx / span + F32(.5)) * span
         sg = F32(max(d['sigma'], .75 * r))
         out = out + F32(d['mass']) * F32(1e6) / (F32(2 * math.pi) * sg * sg) * np.exp(-(dx * dx + dy * dy) / (F32(2) * sg * sg))
     return np.asarray(out, F32)

@@ -31,7 +31,7 @@ NATIVE_M = 30.0
 # colours) must not bump it. V2_INPUTS_VERSION names the inputs given to the
 # Render v2 evaluator (sampling of the atlas); its cached environment also
 # depends on the source of terrain_render_v2.py, an external module.
-COMPILER_VERSION = 'resources-compiler-3'
+COMPILER_VERSION = 'resources-compiler-4'
 V2_INPUTS_VERSION = 'v2-inputs-1'
 WORLD_LOD = 10           # authority grid, 30.72 km
 BUDGET_LOD = 3           # 240 m: last level allocated from world information only
@@ -204,8 +204,8 @@ def parent_index(i, j, up):
     return np.asarray(i, np.int64) >> up, np.asarray(j, np.int64) >> up
 
 
-def latitude(y):
-    return 90 - (np.asarray(y, np.float64) - BOUNDS[1]) / (BOUNDS[3] - BOUNDS[1]) * 180
+def latitude(y, bounds=BOUNDS):
+    return 90 - (np.asarray(y, np.float64) - bounds[1]) / (bounds[3] - bounds[1]) * 180
 
 
 class Lattice:
@@ -215,20 +215,22 @@ class Lattice:
     sample point are those of the clipped part, so areas sum to 4 pi R^2.
     """
 
-    def __init__(self, lod, window=None):
+    def __init__(self, lod, window=None, *, bounds=BOUNDS):
         s = cell_size(lod)
-        x0, y0, x1, y1 = BOUNDS if window is None else window
+        self.bounds = tuple(float(v) for v in bounds)
+        self.radius_m = (bounds[2] - bounds[0]) / (2 * math.pi)
+        x0, y0, x1, y1 = bounds if window is None else window
         self.lod, self.size = lod, s
         self.i = np.arange(math.floor(x0 / s), math.ceil(x1 / s), dtype=np.int64)
         self.j = np.arange(math.floor(y0 / s), math.ceil(y1 / s), dtype=np.int64)
-        ax0 = np.maximum(self.i * s, max(x0, BOUNDS[0])); ax1 = np.minimum((self.i + 1) * s, min(x1, BOUNDS[2]))
-        ay0 = np.maximum(self.j * s, max(y0, BOUNDS[1])); ay1 = np.minimum((self.j + 1) * s, min(y1, BOUNDS[3]))
+        ax0 = np.maximum(self.i * s, max(x0, bounds[0])); ax1 = np.minimum((self.i + 1) * s, min(x1, bounds[2]))
+        ay0 = np.maximum(self.j * s, max(y0, bounds[1])); ay1 = np.minimum((self.j + 1) * s, min(y1, bounds[3]))
         self.x, self.y = (ax0 + ax1) / 2, (ay0 + ay1) / 2
-        north, south = np.radians(latitude(ay0)), np.radians(latitude(ay1))
+        north, south = np.radians(latitude(ay0, bounds)), np.radians(latitude(ay1, bounds))
         # Exact equirectangular cell area on the sphere: dx * R * (sin(north) - sin(south)).
-        self.area_m2 = (np.maximum(ax1 - ax0, 0)[None, :] * RADIUS_M
+        self.area_m2 = (np.maximum(ax1 - ax0, 0)[None, :] * self.radius_m
                         * np.maximum(np.sin(north) - np.sin(south), 0)[:, None])
-        self.lat = np.broadcast_to(latitude(self.y)[:, None], self.area_m2.shape)
+        self.lat = np.broadcast_to(latitude(self.y, bounds)[:, None], self.area_m2.shape)
         self.ids = cell_id(lod, self.i[None, :], self.j[:, None])
 
     @property
@@ -275,10 +277,10 @@ def apportion(total, weights, ids):
 # ---------------------------------------------------------------------------
 # Sampling the Orogen atlas (equirectangular pixel centres, periodic longitude)
 
-def sample_grid(field, xs, ys, *, categorical=False):
+def sample_grid(field, xs, ys, *, categorical=False, bounds=BOUNDS):
     field = np.asarray(field)
     h, w = field.shape
-    x0, y0, x1, y1 = BOUNDS
+    x0, y0, x1, y1 = bounds
     xx = ((np.asarray(xs) - x0) % (x1 - x0)) / (x1 - x0) * w - .5
     yy = np.clip((np.asarray(ys) - y0) / (y1 - y0) * h - .5, 0, h - 1)
     if categorical:
@@ -295,6 +297,7 @@ def _wrap_edt(mask, spacing_km, pad=128):
     """Distance (km) to True cells, wrapping longitude. Planar metric (see doc)."""
     if not mask.any():
         return np.full(mask.shape, 1e9, np.float32)
+    pad = min(mask.shape[1], max(pad, math.ceil(1200 / spacing_km)))
     padded = np.concatenate((mask[:, -pad:], mask, mask[:, :pad]), axis=1)
     d = distance_transform_edt(~padded, sampling=spacing_km)
     return d[:, pad:-pad].astype(np.float32)
@@ -305,14 +308,16 @@ def smoothstep(a, b, x):
     return t * t * (3 - 2 * t)
 
 
-def value_noise(seed, name, lod, x, y):
+def value_noise(seed, name, lod, x, y, bounds=BOUNDS):
     """Keyed value noise on the LOD lattice, bilinear: the same at every scale."""
     s = cell_size(lod)
-    gx, gy = np.asarray(x, np.float64) / s - .5, np.asarray(y, np.float64) / s - .5
+    period = max(1, int(round((bounds[2] - bounds[0]) / s)))
+    # Fit an integer number of noise periods to the exact physical circumference.
+    gx = (np.asarray(x, np.float64) - bounds[0]) / (bounds[2] - bounds[0]) * period - period // 2 - .5
+    gy = np.asarray(y, np.float64) / s - .5
     i0, j0 = np.floor(gx).astype(np.int64), np.floor(gy).astype(np.int64)
     fx, fy = gx - i0, gy - j0
     fx, fy = fx * fx * (3 - 2 * fx), fy * fy * (3 - 2 * fy)
-    period = int(round((BOUNDS[2] - BOUNDS[0]) / s))
     out = 0
     for di, wx in ((0, 1 - fx), (1, fx)):
         for dj, wy in ((0, 1 - fy), (1, fy)):
@@ -325,10 +330,10 @@ def value_noise(seed, name, lod, x, y):
 # ---------------------------------------------------------------------------
 # World authority (LOD 10)
 
-def tectonic_contexts(layers, height):
+def tectonic_contexts(layers, height, bounds=BOUNDS):
     """Soft context fractions at atlas resolution from Orogen plate fields."""
     h, w = height.shape
-    spacing = (BOUNDS[2] - BOUNDS[0]) / w / 1000
+    spacing = (bounds[2] - bounds[0]) / w / 1000
     crust = np.asarray(layers['crust']) > .5
     kind = np.rint(np.asarray(layers['boundaries'])).astype(np.int8)
     land = height > 0
@@ -362,13 +367,13 @@ def tectonic_contexts(layers, height):
     return weights / weights.sum(axis=0), d['sea']
 
 
-def _atlas_xy(shape):
+def _atlas_xy(shape, bounds=BOUNDS):
     h, w = shape
-    x0, y0, x1, y1 = BOUNDS
+    x0, y0, x1, y1 = bounds
     return x0 + (np.arange(w) + .5) * (x1 - x0) / w, y0 + (np.arange(h) + .5) * (y1 - y0) / h
 
 
-def lithology(contexts, aridity, lowland, seed, xs, ys):
+def lithology(contexts, aridity, lowland, seed, xs, ys, bounds=BOUNDS):
     """Expected rock-class shares: context table and aridity-dependent evaporites.
     The canonical shares are realized from them by realize_rocks."""
     rock = np.einsum('kyx,kr->ryx', contexts, LITHOLOGY)
@@ -377,7 +382,7 @@ def lithology(contexts, aridity, lowland, seed, xs, ys):
     X, Y = np.meshgrid(xs, ys)
     # Evaporites record past basins: present aridity is only one proxy, a keyed
     # province field supplies "paleo-arid" basins independent of today's climate.
-    paleo = np.clip(value_noise(seed, 'paleo-evaporite', 13, X, Y), 0, 1)
+    paleo = np.clip(value_noise(seed, 'paleo-evaporite', 13, X, Y, bounds), 0, 1)
     rock[ROCKS.index('evaporite')] += .10 * basin * lowland * np.maximum(aridity, .6 * paleo)
     return rock / rock.sum(axis=0)
 
@@ -397,12 +402,12 @@ def realized_rock_field(expected, strike, bias):
     return np.concatenate((logs, np.cos(2 * strike)[None], np.sin(2 * strike)[None])).astype(np.float32)
 
 
-def realized_classes(field, i0, j0, cells, side, lod, seed32):
+def realized_classes(field, i0, j0, cells, side, lod, seed32, bounds=BOUNDS):
     """Realized rock class of side x side samples in each LOD-10 cell (rows, cols):
     (n, side * side). Pure function of its arguments (worker processes)."""
     import terrain_resource_gpu as G
     pkg = dict(seed32=seed32, layer=ROCK_LAYER, classes=len(ROCKS), aligned=ROCK_ALIGNED, groups=ROCK_GROUPS,
-               group_aligned=ROCK_GROUP_ALIGNED, field=G.Field(field, i0, j0))
+               group_aligned=ROCK_GROUP_ALIGNED, field=G.Field(field, i0, j0, bounds))
     sub = np.arange(side)
     gi = (i0 + cells[:, 1])[:, None, None] * side + sub[None, None, :] + np.zeros((1, side, 1), np.int64)
     gj = (j0 + cells[:, 0])[:, None, None] * side + sub[None, :, None] + np.zeros((1, 1, side), np.int64)
@@ -411,10 +416,10 @@ def realized_classes(field, i0, j0, cells, side, lod, seed32):
 
 def _classes(field, grid, cells, side, lod, seed32, parallel, chunks=16):
     if parallel is None or len(cells) < 20000:
-        return realized_classes(field, grid.i[0], grid.j[0], cells, side, lod, seed32)
+        return realized_classes(field, grid.i[0], grid.j[0], cells, side, lod, seed32, getattr(grid, 'bounds', None))
     bounds = np.linspace(0, len(cells), chunks + 1).astype(int)
     tasks = [('terrain_resources', 'realized_classes',
-              dict(field=field, i0=int(grid.i[0]), j0=int(grid.j[0]), cells=cells[a:b], side=side, lod=lod, seed32=seed32))
+              dict(field=field, i0=int(grid.i[0]), j0=int(grid.j[0]), cells=cells[a:b], side=side, lod=lod, seed32=seed32, bounds=grid.bounds))
              for a, b in zip(bounds[:-1], bounds[1:]) if b > a]
     return np.concatenate(parallel(tasks))
 
@@ -433,7 +438,7 @@ def calibrate_rock_bias(expected, strike, land, grid, seed, parallel=None, itera
     target = (expected[:, cells[:, 0], cells[:, 1]] * area).sum(axis=1) / area.sum()
     for _ in range(iterations):
         # Serial: a few tens of thousands of samples, cheaper than starting workers.
-        cls = realized_classes(realized_rock_field(expected, strike, bias), grid.i[0], grid.j[0], cells, 1, WORLD_LOD, seed32)[:, 0]
+        cls = realized_classes(realized_rock_field(expected, strike, bias), grid.i[0], grid.j[0], cells, 1, WORLD_LOD, seed32, getattr(grid, 'bounds', None))[:, 0]
         got = np.bincount(cls, weights=area, minlength=kcls) / area.sum()
         bias += np.log(np.maximum(target, 1e-6) / np.maximum(got, 1e-6)) * (target > 0)
     return bias
@@ -500,7 +505,7 @@ PARAMS = dict(
 
 
 def compile_world(layers, height, seed, *, lod=WORLD_LOD, fantasy=False, params=None, balance=True,
-                  progress=None, parallel=None, v2_fields=None):
+                  progress=None, parallel=None, v2_fields=None, bounds=BOUNDS):
     """World authority on the LOD lattice. Returns (lattice, fields, deposits).
 
     ``layers``/``height`` are the retained Orogen atlas arrays. Monthly fields
@@ -519,9 +524,9 @@ def compile_world(layers, height, seed, *, lod=WORLD_LOD, fantasy=False, params=
     p = dict(PARAMS, **(params or {}))
     report = progress or (lambda stage, fields: None)
     height = np.asarray(height, np.float32)
-    grid = Lattice(lod)
-    ax, ay = _atlas_xy(height.shape)
-    contexts_atlas, sea_km = tectonic_contexts(layers, height)
+    grid = Lattice(lod, bounds=bounds)
+    ax, ay = _atlas_xy(height.shape, bounds)
+    contexts_atlas, sea_km = tectonic_contexts(layers, height, bounds)
     ts = -45 + 90 * np.asarray(layers['temperature_summer'], np.float64)
     tw = -45 + 90 * np.asarray(layers['temperature_winter'], np.float64)
     ps = 1000 * np.maximum(np.asarray(layers['precip_summer'], np.float64), 0)
@@ -531,9 +536,9 @@ def compile_world(layers, height, seed, *, lod=WORLD_LOD, fantasy=False, params=
     mean_h = gaussian_filter(height.astype(np.float64), 1.5, mode=('nearest', 'wrap'))
     rugged_atlas = np.sqrt(np.maximum(gaussian_filter(height.astype(np.float64) ** 2, 1.5, mode=('nearest', 'wrap')) - mean_h ** 2, 0))
     lowland_atlas = (1 - smoothstep(150, 900, mean_h)) * (1 - smoothstep(150, 900, rugged_atlas))
-    rocks_atlas = lithology(contexts_atlas, aridity_atlas, lowland_atlas, seed, ax, ay)
+    rocks_atlas = lithology(contexts_atlas, aridity_atlas, lowland_atlas, seed, ax, ay, bounds)
 
-    S = lambda a: sample_grid(a, grid.x, grid.y).astype(np.float64)
+    S = lambda a: sample_grid(a, grid.x, grid.y, bounds=bounds).astype(np.float64)
     f = dict(area_m2=grid.area_m2, latitude=np.array(grid.lat), units=UNITS)
     f['height_m'] = S(height)
     land = f['height_m'] > 0
@@ -609,20 +614,20 @@ def _v2_inputs(grid, ground):
     """Geometry inputs of the Render v2 evaluator at the cell centres."""
     from terrain_render import terrain_derivatives
     from terrain_soil import coordinates
-    point = coordinates(grid.x, grid.y, BOUNDS, True)
+    point = coordinates(grid.x, grid.y, grid.bounds, True)
     xx, yy = np.meshgrid(grid.x, grid.y)
-    lon = np.remainder((xx - BOUNDS[0]) / (BOUNDS[2] - BOUNDS[0]), 1) * 2 * np.pi - np.pi
-    land_point = np.stack((RADIUS_M * np.cos(lon), RADIUS_M * np.sin(lon), yy - BOUNDS[1]), -1).astype(np.float32)
+    lon = np.remainder((xx - grid.bounds[0]) / (grid.bounds[2] - grid.bounds[0]), 1) * 2 * np.pi - np.pi
+    land_point = np.stack((grid.radius_m * np.cos(lon), grid.radius_m * np.sin(lon), yy - grid.bounds[1]), -1).astype(np.float32)
     gradient, tpi = terrain_derivatives(ground, grid.size)
     return point, land_point, gradient, tpi
 
 
-def v2_months(lod, ground, ts, tw, ps, pw, sand, v2seed, months, mask, stand=False):
+def v2_months(lod, ground, ts, tw, ps, pw, sand, v2seed, months, mask, stand=False, bounds=BOUNDS):
     """Render v2 environment for some months at the masked cells (1-D results;
     the evaluator is per sample). Pure; run in worker processes, which rebuild
     the geometry inputs instead of receiving them."""
     from terrain_render_v2 import evaluate
-    grid = Lattice(lod)
+    grid = Lattice(lod, bounds=bounds)
     ground = np.asarray(ground, np.float64)
     point, land_point, gradient, tpi = _v2_inputs(grid, ground)
     sub = [a[mask] for a in (point, ground.astype(np.float32), gradient, tpi, ts, tw, ps, pw, sand)]
@@ -654,7 +659,7 @@ def render_v2_fields(f, grid, seed, ts, tw, ps, pw, sand, parallel=None):
     # Land and shelf (> -200 m) only: deep-sea values are never read (zero).
     mask = f['land'] | (f['height_m'] > -200)
     common = dict(lod=grid.lod, ground=ground, ts=args[1], tw=args[2], ps=args[3], pw=args[4], sand=args[5], v2seed=v2seed,
-                  mask=mask)
+                  mask=mask, bounds=grid.bounds)
     groups = [[m, m + 1] for m in range(0, MONTHS, 2)]
     tasks = [dict(common, months=g, stand=g[-1] == MONTHS - 1) for g in groups]
     results = [v2_months(**t) for t in tasks] if parallel is None else         parallel([('terrain_resources', 'v2_months', t) for t in tasks])
@@ -888,7 +893,7 @@ def world_deposits(grid, f, seed, *, fantasy=False, parallel=None):
             tasks.append(('terrain_resources', 'place_positions',
                           dict(seed=seed, domain=jobs[part[0]][0], lod=grid.lod, field=f['prospect_' + name],
                                jj=np.array([jobs[n][3] for n in part]), ii=np.array([jobs[n][4] for n in part]),
-                               kk=np.array([jobs[n][5] for n in part]))))
+                               kk=np.array([jobs[n][5] for n in part]), bounds=grid.bounds)))
             owners.append(part)
     results = [place_positions(**t[2]) for t in tasks] if parallel is None else parallel(tasks)
     positions = {n: pos for part, res in zip(owners, results) for n, pos in zip(part, res)}
@@ -935,20 +940,24 @@ def _place_in_cell(seed, domain, grid, f, name, j, i, k):
     sub_j = cj * n + np.arange(n)
     plod = placement_lod(grid.lod)
     weights = descend_weights(grid, f['prospect_' + name], j, i, sub_i, sub_j)
+    child = grid.size / n
+    x, y = (sub_i + .5) * child, (sub_j + .5) * child
+    inside = ((x >= grid.bounds[0]) & (x < grid.bounds[2]))[None, :] & ((y >= grid.bounds[1]) & (y < grid.bounds[3]))[:, None]
+    weights *= inside
     ids = cell_id(plod, sub_i[None, :], sub_j[:, None])
     keys = to_unit(cell_keys(seed, domain + ('position', f'lod{plod}'), ids, draw=k + 1))
     # Exponential race: argmin(-ln u / w) is a weighted choice independent of order.
     if not (weights > 0).any():
-        weights = np.ones_like(weights)
+        weights = inside.astype(np.float64)
     with np.errstate(divide='ignore'):
         race = np.where(weights > 0, -np.log(np.maximum(keys, 1e-300)) / np.maximum(weights, 1e-300), np.inf)
     flat = int(np.argmin(race))
     return ids.ravel()[flat]
 
 
-def place_positions(seed, domain, lod, field, jj, ii, kk):
+def place_positions(seed, domain, lod, field, jj, ii, kk, bounds=BOUNDS):
     """_place_in_cell for deposits of one family (pure; run in worker processes)."""
-    grid = Lattice(lod)
+    grid = Lattice(lod, bounds=bounds)
     f = {'prospect_': field}
     return [int(_place_in_cell(seed, domain, grid, f, '', int(j), int(i), int(k))) for j, i, k in zip(jj, ii, kk)]
 
@@ -961,19 +970,25 @@ def placement_lod(lod):
 
 def descend_weights(grid, field, j, i, sub_i, sub_j):
     """Bilinear interpolation of a world intensity at child centres (parent + 8 neighbours)."""
-    s = grid.size
-    child = s / len(sub_i)
-    xs = (sub_i + .5) * child
-    ys = (sub_j + .5) * child
-    gx = (xs - grid.x[0]) / s
-    gy = (ys - grid.y[0]) / s
-    i0 = np.clip(np.floor(gx).astype(int), 0, field.shape[1] - 2)
-    j0 = np.clip(np.floor(gy).astype(int), 0, field.shape[0] - 2)
-    tx = np.clip(gx - i0, 0, 1)[None, :]
-    ty = np.clip(gy - j0, 0, 1)[:, None]
-    a = field[j0][:, i0] * (1 - tx) + field[j0][:, i0 + 1] * tx
-    b = field[j0 + 1][:, i0] * (1 - tx) + field[j0 + 1][:, i0 + 1] * tx
-    return np.maximum(a * (1 - ty) + b * ty, 0)
+    child = grid.size / len(sub_i)
+    return sample_lattice(grid, field, (sub_i + .5) * child, (sub_j + .5) * child)
+
+
+def sample_lattice(grid, field, xs, ys):
+    """Bilinear between the actual clipped centres; physical longitude period."""
+    width = grid.bounds[2] - grid.bounds[0]
+    x = (np.asarray(xs) - grid.bounds[0]) % width + grid.bounds[0]
+    xc = np.r_[grid.x[-1] - width, grid.x, grid.x[0] + width]
+    gx = np.interp(x, xc, np.arange(len(xc)))
+    gy = np.interp(ys, grid.y, np.arange(len(grid.y)))
+    i, j = np.floor(gx).astype(int), np.floor(gy).astype(int)
+    tx, ty = (gx - i)[None, :], (gy - j)[:, None]
+    v = np.concatenate((field[..., -1:], field, field[..., :1]), axis=-1)
+    jp = np.minimum(j + 1, len(grid.y) - 1)
+    a = v[..., j[:, None], i[None, :]] * (1 - tx) + v[..., j[:, None], (i + 1)[None, :]] * tx
+    b = v[..., jp[:, None], i[None, :]] * (1 - tx) + v[..., jp[:, None], (i + 1)[None, :]] * tx
+    return a * (1 - ty) + b * ty
+
 
 
 def stock_layers(grid, f, deposits):
@@ -1020,7 +1035,7 @@ def descend_budget(grid, f, name, j, i, *, lod=BUDGET_LOD, seed=0, relief=None):
     sub_i, sub_j = ci * n + np.arange(n), cj * n + np.arange(n)
     intensity = np.asarray(f[name], np.float64) / np.maximum(grid.area_m2, 1)
     weights = descend_weights(grid, intensity, j, i, sub_i, sub_j)
-    child = Lattice(lod, (ci * grid.size, cj * grid.size, (ci + 1) * grid.size, (cj + 1) * grid.size))
+    child = Lattice(lod, (ci * grid.size, cj * grid.size, (ci + 1) * grid.size, (cj + 1) * grid.size), bounds=grid.bounds)
     weights = weights * child.area_m2
     if relief is not None:
         weights = weights * relief
