@@ -1776,7 +1776,9 @@ def resources_inspect(seed):
         from terrain_resource_layers import inspect as inspect_resources
         atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options),
                                    descriptor.settings)
-        return jsonify(inspect_resources(atlas, float(request.args['x']), float(request.args['y'])))
+        return jsonify(inspect_resources(atlas, float(request.args['x']), float(request.args['y']),
+                                         radius_m=min(2e6, max(1000., float(request.args.get('radius_m', 60000)))),
+                                         mode=request.args.get('mode')))
     except ResourcesPending as pending:
         return jsonify(pending.status), 202
     except (ValueError, TypeError, KeyError) as exc:

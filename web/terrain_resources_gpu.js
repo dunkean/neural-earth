@@ -7,14 +7,14 @@
 (function(root){
   const PREFIX='resources-';
   const KINDS={ramp:0,log:1,mix:2,classes:3,cyclic:4,points:5,stock:6};
-  const PARAM_BYTES=(8+3+20+1)*16;
+  const PARAM_BYTES=(8+3+32+1)*16;
   let order=[];
   const isMode=mode=>typeof mode==='string'&&mode.startsWith(PREFIX);
   // Stable numbers below the existing ranges (Render v2 uses -8..-12).
   const number=mode=>{let i=order.indexOf(mode);if(i<0){order.push(mode);i=order.length-1;}return -100-i;};
   const isNumber=n=>n<=-100;
   const core=`
-    struct ResParams { grid:vec4<f32>, info:vec4<f32>, range:vec4<f32>, prof0:vec4<f32>, prof1:vec4<f32>, zones:vec4<f32>, zones2:vec4<f32>, seeds:vec4<u32>, order:array<vec4<u32>,3>, palette:array<vec4<f32>,20>, world:vec4<f32> }
+    struct ResParams { grid:vec4<f32>, info:vec4<f32>, range:vec4<f32>, prof0:vec4<f32>, prof1:vec4<f32>, zones:vec4<f32>, zones2:vec4<f32>, seeds:vec4<u32>, order:array<vec4<u32>,3>, palette:array<vec4<f32>,32>, world:vec4<f32> }
     struct ResDeposit { ij:vec4<i32>, dim:vec4<f32>, extra:vec4<f32> }
     @group(0) @binding(11) var resField:texture_2d_array<f32>;
     @group(0) @binding(12) var resTau:texture_2d_array<f32>;
@@ -231,12 +231,13 @@
       var density=0.;_=rDeposits(gi,gj,lod,r,0.,vec3<f32>(0.),&density);return density;
     }
     fn rDeposits(gi:i32,gj:i32,lod:i32,r:f32,valley:f32,base:vec3<f32>,density:ptr<function,f32>)->vec3<f32>{
-      var rgb=base;
+      var rgb=base;var bestMass:f32=-1.;var bestBody:f32=0.;var bestRing:f32=0.;var bestColor=base;
       if(res.zones2.y<.5){return rgb;}
       var cx:i32;var cy:i32;
       if(lod<=10){cx=gi>>u32(10-lod);cy=gj>>u32(10-lod);}else{cx=i32(floor((f32(gi)+.5)*exp2(f32(lod-10))));cy=i32(floor((f32(gj)+.5)*exp2(f32(lod-10))));}
-      let R=i32(ceil(max(max(12000.,res.zones.w),max(162000.*rSmooth(2.,6.,f32(lod)),select(9.,3.,res.info.x>5.5)*r))/30720.))+1;
       let W=i32(res.grid.z);let stock=res.info.x>5.5;
+      let district=select(0.,162000.*rSmooth(2.,6.,f32(lod)),stock);
+      let R=i32(ceil(max(res.zones.w,max(district,select(9.,3.,stock)*max(r,res.prof1.w)))/30720.))+1;
       for(var oy=-R;oy<=R;oy++){for(var col=0;col<min(2*R+1,W);col++){let ox=col-R;
         if(cy+oy<i32(res.grid.y)||cy+oy>=i32(res.grid.y+res.grid.w)){continue;}
         let cr=rColRow(cx+ox,cy+oy);let bucket=resBuckets[u32(cr.y*W+cr.x)];
@@ -269,24 +270,29 @@
             }
             continue;
           }
-          let color=res.palette[min(d.ij.w,19)].rgb*(.45+.55*d.dim.w);
-          if((min(a,b)*2./r<1.5&&d.ij.z!=3)||a*2./r<1.5){
-            if(d.ij.z==0&&a*2./r>=3.){let body=clamp(1.2-abs(v)/r,0.,1.)*clamp((a-abs(u))/r,0.,1.);rgb=mix(rgb,color,body);continue;}
-            let rpx=d.extra.y*2.5*clamp(4000./r,.4,1.)+1.5;let q=dist/r;
-            let disc=clamp(rpx+.5-q,0.,1.);let ring=clamp(rpx+1.5-q,0.,1.)-disc;
-            rgb=mix(rgb,color,disc);rgb=rgb*(1.-ring);continue;
+          // Radius squared is affine in log10(recoverable physical tonnes).
+          let color=res.palette[min(d.ij.w,31)].rgb;
+          let rpx=clamp(d.extra.y,3.,7.)*max(1.,res.prof1.w/r);let qpx=dist/r;
+          let disc=clamp(rpx+.5-qpx,0.,1.);
+          let discOuter=clamp(rpx+1.5-qpx,0.,1.);
+          let curvedV=v-b*.28*sin(3.*u/max(a,1.));
+          let q=sqrt((u/a)*(u/a)+(curvedV/b)*(curvedV/b));
+          var body=clamp((1.-q)*b/r+.5,0.,1.);
+          var outer=clamp((1.-q)*b/r+1.5,0.,1.);
+          if(d.ij.z==0){
+            body=clamp((b+.5*r-abs(curvedV))/r,0.,1.)*clamp((a+.5*r-abs(u))/r,0.,1.);
+            outer=clamp((b+1.5*r-abs(curvedV))/r,0.,1.)*clamp((a+1.5*r-abs(u))/r,0.,1.);
+          }else if(d.ij.z==3){
+            body=body*clamp(.6+.4*valley,.4,1.);
           }
-          let q=sqrt((u/a)*(u/a)+(v/b)*(v/b));
-          var body:f32;
-          if(d.ij.z==0){body=clamp((b+.5*r-abs(v))/r,0.,1.)*clamp((a-abs(u))/(r+.05*a),0.,1.);}
-          else if(d.ij.z==3){body=.8*clamp(1.2-dist/a,0.,1.)*valley;}
-          else{body=clamp((1.-q)*b/r,0.,1.);}
-          let haloR=min(max(a,2.*r),4000.);let halo=.2*exp(-(dist/haloR)*(dist/haloR));
-          let rim=clamp((1.6-q)/.6,0.,1.)*(1.-body)*d.extra.x;
-          rgb=mix(rgb,vec3<f32>(.788,.651,.290),halo);rgb=mix(rgb,vec3<f32>(.710,.325,.165),.7*rim);rgb=mix(rgb,color,body);
+          let fade=rSmooth(rpx,2.*rpx,sqrt(a*b)/r);
+          body=mix(disc,body,fade);outer=mix(discOuter,outer,fade);
+          // Global mass priority is independent of bucket traversal order.
+          if(outer>0.&&d.extra.w>bestMass){bestMass=d.extra.w;bestBody=body;bestRing=max(0.,outer-body);bestColor=color;}
         }
       }}
-      return rgb;
+      rgb=mix(rgb,vec3<f32>(.035,.045,.055),bestRing);
+      return mix(rgb,bestColor,bestBody);
     }
     `;
   // Colour of one sample from its global sample index and terrain features;
@@ -318,11 +324,11 @@
         // Long fade (a quarter of the log range): a kernel tail never ends in a hard edge.
         return mix(neutral,rRamp(t)*light,rSmooth(0.,.25,t)*rSmooth(0.,.10,coverage));
       }
-      let v=rContinuous(gi,gj,lod,rTerms(f));
       if(kind>4.5){
-        var density=0.;let bg=mix(neutral,vec3<f32>(.353,.231,.110)*light,.55*v);
-        return rDeposits(gi,gj,lod,r,max(f.valley,f.river),bg,&density);
+        var density=0.;
+        return rDeposits(gi,gj,lod,r,max(f.valley,f.river),neutral,&density);
       }
+      let v=rContinuous(gi,gj,lod,rTerms(f));
       if(kind>2.5){
         let c=select(select(select(select(select(0,1,v>0.),2,v>=.2),3,v>=.4),4,v>=.6),5,v>=.8);
         return select(res.palette[c].rgb*light,neutral,c==0);
@@ -368,13 +374,13 @@
     const [i0,j0,W,H]=header.lattice;f.set([i0,j0,W,H],0);
     f.set([header.kind,header.layers,header.classes,header.seasonal?1:0],4);
     f.set([header.range[0],header.range[1],header.bounded?1:0,season],8);
-    f.set(header.coef.slice(0,4),12);f.set([header.coef[4],header.coef[5],header.sigma,header.scale||0],16);
+    f.set(header.coef.slice(0,4),12);f.set([header.coef[4],header.coef[5],header.sigma,header.screen_mpp||0],16);
     f.set([header.realized?3:0,...(header.beta||[0,0]),header.max_footprint||12000],20);
-    f.set([0,header.deposits?1:0,active?(marine?2:1):0,Math.min(20,header.palette.length)],24);
+    f.set([0,header.deposits?1:0,active?(marine?2:1):0,Math.min(32,header.palette.length)],24);
     u.set([header.seed32>>>0,header.layer>>>0],28);f.set(header.bounds||header.range.slice(0,2),30);
     (header.order||[]).slice(0,12).forEach((v,i)=>{u[32+i]=v;});
-    header.palette.slice(0,20).forEach((c,i)=>f.set([c[0],c[1],c[2],1],44+i*4));
-    if(header.world_bounds)f.set(header.world_bounds.map(v=>v/30720),124);
+    header.palette.slice(0,32).forEach((c,i)=>f.set([c[0],c[1],c[2],1],44+i*4));
+    if(header.world_bounds)f.set(header.world_bounds.map(v=>v/30720),172);
     return buffer;
   }
   // Binary package: field (f16), thresholds (f16), deposits (12 words each), buckets (2 u32 per cell).

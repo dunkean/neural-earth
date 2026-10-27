@@ -61,13 +61,14 @@ window.TerrainToolbar=(()=>{
       // Informative resource layers (terrain_resource_layers.py), grouped by prefix.
       ...[['geo','Ressources · géologie'],['dep','Ressources · gisements'],['agri','Ressources · agriculture et élevage'],
           ['bio','Ressources · forêt, faune, pêche, eau'],['mat','Ressources · matériaux, sel, tourbe'],['season','Ressources · saisons']]
-        .map(([group,name])=>[name,[...select.options].map(option=>option.value).filter(value=>value.startsWith('resources-'+group+'-'))])
+        .map(([group,name])=>[name,[...select.options].map(option=>option.value).filter(value=>value.startsWith('resources-'+group+'-')&&!/-potential-|-prospect-/.test(value))]),
+      ['Diagnostic',[...select.options].map(option=>option.value).filter(value=>value.startsWith('resources-')&&/-potential-|-prospect-/.test(value))]
     ];
     const options=new Map();
     // V2 diagnostics belong to its own settings, not separate visible layers.
     for(const option of select.options){if(option.value==='biomes'||option.value.startsWith('snr-')||option.value.startsWith('render-v2-')){option.hidden=true;continue;}options.set(option.value,option);}
     const assigned=new Set(sections.flatMap(([,modes])=>modes)),remaining=[...options.keys()].filter(mode=>!assigned.has(mode));
-    if(remaining.length)sections.push(['Other layers',remaining]);
+    if(remaining.length)sections.splice(sections.length-1,0,['Other layers',remaining]);
     for(const [name,modes]of sections){
       const available=modes.filter(mode=>options.has(mode));if(!available.length)continue;
       const section=document.createElement('fieldset'),heading=document.createElement('legend'),choices=document.createElement('div');

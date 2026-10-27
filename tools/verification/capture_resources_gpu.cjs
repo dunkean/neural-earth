@@ -3,12 +3,16 @@
 // node tools/verification/capture_resources_gpu.cjs [--port 8775]
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {loadPlaywright,browserExecutable}=require('../platform.cjs');
-const root=path.resolve(__dirname,'../..'),out=path.join(root,'output/resources-gpu/r3g-captures');
+const root=path.resolve(__dirname,'../..'),out=path.join(root,'output/resources-gpu/r3h-captures');
 const arg=(n,d)=>process.argv.includes(n)?process.argv[process.argv.indexOf(n)+1]:d;
 const base=`http://127.0.0.1:${arg('--port',8775)}`;
 const width=410,height=260,lods=[10,7,4,2,0];
+const metals=arg('--resources','copper,iron,salt,gypsum,points').split(',');
 require(path.join(root,'web/terrain_resources_gpu.js'));
-const report={seed:'42',worldDiameterKm:4000,frames:[],errors:[],responses:[]};
+const report=process.argv.includes('--append')&&fs.existsSync(path.join(out,'report.json'))
+  ?JSON.parse(fs.readFileSync(path.join(out,'report.json'),'utf8'))
+  :{seed:'42',worldDiameterKm:4000,frames:[],errors:[],responses:[]};
+report.frames=report.frames.filter(f=>!metals.includes(f.metal));
 const save=()=>fs.writeFileSync(path.join(out,'report.json'),JSON.stringify(report,null,2));
 (async()=>{
   fs.mkdirSync(out,{recursive:true});
@@ -43,28 +47,28 @@ const save=()=>fs.writeFileSync(path.join(out,'report.json'),JSON.stringify(repo
       report.frames.push({metal,mode,lod,center,file,state});save();
       console.log(JSON.stringify({metal,mode,lod,sources:state.rendered.sources,pending:state.visible.pending}));
     }
-    for(const metal of ['copper','iron','tin']){
-      const p=await pkg('resources-dep-stock-'+metal),words=new Float32Array(p.data.deposits.buffer),ints=new Int32Array(p.data.deposits.buffer);
+    for(const metal of metals){
+      const p=await pkg('resources-dep-'+metal),words=new Float32Array(p.data.deposits.buffer),ints=new Int32Array(p.data.deposits.buffer);
       let best=-1,bestMass=-1;
-      for(let k=0;k<p.header.deposits;k++){const y=(ints[k*12+1]+.5)*30;if(Math.abs(y)<2.5e6&&words[k*12+11]>bestMass){best=k;bestMass=words[k*12+11];}}
+      for(let k=0;k<p.header.deposits;k++){const y=(ints[k*12+1]+.5)*30;if(Math.abs(y)<2.5e6&&words[k*12+11]>bestMass&&words[k*12+4]<2500){best=k;bestMass=words[k*12+11];}}
       assert(best>=0);const center=[(ints[best*12]+.5)*30,(ints[best*12+1]+.5)*30];
       report[metal]={center,mass:bestMass,footprint:[words[best*12+4],words[best*12+5]]};
       for(const lod of lods){
         await page.evaluate(({lod,center})=>{[cx,cy]=lod===10?[0,0]:center;mpp=30*2**lod;clampCamera();$('forcedLod').value=String(lod);forcedView={lod,signature:viewSignature()};draw();schedule();},{lod,center});
         await capture(metal,'render-v2',lod,center,'render');
-        await capture(metal,'resources-dep-potential-'+metal,lod,center,'potential');
-        if(metal!=='tin')await capture(metal,'resources-dep-stock-'+metal,lod,center,'stock');
+        await capture(metal,'resources-dep-'+metal,lod,center,'sites');
       }
     }
     // Assemble actual screenshots, using the existing HTML contact-sheet method.
     const sheet=await browser.newPage({viewport:{width:width*5,height:height*2+100}});
-    for(const metal of ['copper','iron','tin'])for(const kind of (metal==='tin'?['potential']:['potential','stock'])){
-      const unit='t/kmÃ‚²',title=`${kind==='potential'?'Potentiel (zones)':'Stock contenu (gisements)'} Ã‚· ${metal==='copper'?'cuivre':metal==='iron'?'fer':'étain'} Ã‚· ${unit}`;
+    for(const metal of metals){
+      const kind='sites',title={copper:'Cuivre',iron:'Fer',salt:'Sel',gypsum:'Gypse',points:'Tous les gisements'}[metal];
       const img=(tag,lod)=>`<img src="data:image/png;base64,${fs.readFileSync(path.join(out,`${metal}-${tag}-${lod}.png`)).toString('base64')}">`;
-      await sheet.setContent(`<meta charset="utf-8"><style>body{margin:0;background:#14212b;color:#dce6eb;font:13px system-ui}h3,p{margin:8px}main{display:grid;grid-template-columns:repeat(5,${width}px)}img{display:block;width:${width}px;height:${height}px}small{display:block;padding:3px}</style><h3>${title}</h3><p>Orogen Ã‚· graine 42 Ã‚· diamètre 4 000 km Ã‚· Render v2 en haut, ressource en bas Ã‚· juillet</p><main>${lods.map(l=>`<div><small>LOD ${l} Ã‚· ${30*2**l} m/pixel</small>${img('render',l)}${img(kind,l)}</div>`).join('')}</main>`);
+      await sheet.setContent(`<meta charset="utf-8"><style>body{margin:0;background:#14212b;color:#dce6eb;font:13px system-ui}h3,p{margin:8px}main{display:grid;grid-template-columns:repeat(5,${width}px)}img{display:block;width:${width}px;height:${height}px}small{display:block;padding:3px}</style><h3>${title}</h3><p>Orogen · graine 42 · diamètre 4 000 km · Render v2 en haut, ressource en bas · juillet</p><main>${lods.map(l=>`<div><small>LOD ${l} · ${30*2**l} m/pixel</small>${img('render',l)}${img(kind,l)}</div>`).join('')}</main>`);
       await sheet.waitForFunction(()=>[...document.images].every(i=>i.complete&&i.naturalWidth));
       await sheet.locator('body').screenshot({path:path.join(root,`docs/images/resources-gpu-${kind}-${metal}.jpg`),type:'jpeg',quality:90});
     }
-    report.ok=report.errors.length===0&&report.frames.length===40;save();
+    report.resources=[...new Set([...(report.resources||[]),...metals])];
+    report.ok=report.errors.length===0&&report.frames.length===report.resources.length*10;save();
   }finally{await browser.close();}
 })().catch(error=>{report.failure=error.stack;save();console.error(error);process.exitCode=1;});

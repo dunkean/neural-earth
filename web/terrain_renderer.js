@@ -1473,6 +1473,17 @@
       const w=Math.max(1,Math.round(width*dpr)),h=Math.max(1,Math.round(height*dpr));
       if(this.canvas.width!==w||this.canvas.height!==h){this.canvas.width=w;this.canvas.height=h;}
       let visible=rects.filter(r=>this.tiles.has(r.key)&&r.width>0&&r.height>0);
+      // Resource symbols are sized in CSS pixels, including when finer cached
+      // tiles or native blocks are drawn at a different camera scale.
+      if(this.res?.header?.kind===5&&visible.length){
+        const r=visible[0],tile=this.tiles.get(r.key),uv=r.uv||[0,0,1,1];
+        const screenMpp=tile.resolution*(tile.params[0]-2*(tile.halo||0))*uv[2]/r.width;
+        if(Number.isFinite(screenMpp)&&screenMpp>0&&this.res.screenMpp!==screenMpp){
+          this.res.screenMpp=screenMpp;
+          this.device.queue.writeBuffer(this.res.params,19*4,new Float32Array([screenMpp]));
+          for(const t of this.tiles.values())if(!t.native&&rg.isNumber(t.params[2]))t.shadedMode=null;
+        }
+      }
       const stride=this.device.limits.minUniformBufferOffsetAlignment;
       if(visible.length>this.capacity) {
         this.uniform?.destroy();this.capacity=Math.max(16,2**Math.ceil(Math.log2(visible.length)));

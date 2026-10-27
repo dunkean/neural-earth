@@ -31,7 +31,7 @@ NATIVE_M = 30.0
 # colours) must not bump it. V2_INPUTS_VERSION names the inputs given to the
 # Render v2 evaluator (sampling of the atlas); its cached environment also
 # depends on the source of terrain_render_v2.py, an external module.
-COMPILER_VERSION = 'resources-compiler-7'
+COMPILER_VERSION = 'resources-compiler-12'
 V2_INPUTS_VERSION = 'v2-inputs-1'
 WORLD_LOD = 10           # authority grid, 30.72 km
 BUDGET_LOD = 3           # 240 m: last level allocated from world information only
@@ -112,10 +112,36 @@ FAMILIES = {
     'coal':             dict(contexts=dict(platform=.6, passive=.4, backarc=.4, collision=.2), hosts=dict(sandstone=1., marl=1.),
                              metals=dict(coal=.9), density=.1, tonnage=(5e7, .8), depth=60, sulfide=False, climate='humid'),
 }
+# Shallow local workings: densities / 10,000 km2 of fully permissive land.
+# All numerical calibrations are provisional; historical anchors and ranges: doc §20.
+FAMILIES.update({
+    'bog_iron': dict(contexts=dict(platform=.8, passive=.7, craton=.6, collision=.3),
+        hosts=dict(marl=1., sandstone=.8, metamorphic=.3), metals=dict(iron=.25),
+        density=25., tonnage=(3000., .65), depth=1., sulfide=False, climate='humid'),
+    'local_ironstone': dict(contexts=dict(platform=.9, passive=.8, backarc=.5, rift=.4),
+        hosts=dict(marl=1., sandstone=.8, limestone=.6), metals=dict(iron=.30),
+        density=30., tonnage=(10000., .7), depth=3., sulfide=False),
+    'small_pb_ag': dict(contexts=dict(collision=.8, arc=.6, rift=.4, craton=.3),
+        hosts=dict(metamorphic=1., granite=.8, sandstone=.6, limestone=.5),
+        metals=dict(lead=.06, zinc=.04, silver=.0003, copper=.002),
+        density=35., tonnage=(5000., .75), depth=4., sulfide=True),
+    'salt_spring': dict(contexts=dict(platform=.8, rift=.8, passive=.6, backarc=.5),
+        hosts=dict(evaporite=1., marl=.5, sandstone=.2), metals=dict(salt=.25),
+        density=20., tonnage=(30000., .7), depth=1., sulfide=False, requires='evaporite'),
+    'gypsum_quarry': dict(contexts=dict(platform=.8, rift=.8, passive=.6, backarc=.5),
+        hosts=dict(evaporite=1., marl=.5), metals=dict(gypsum=.85),
+        density=100., tonnage=(20000., .7), depth=2., sulfide=False, requires='evaporite'),
+    'small_sn': dict(contexts=dict(collision=1., craton=.4, arc=.2),
+        hosts=dict(granite=1., metamorphic=.5), metals=dict(tin=.013, tungsten=.003),
+        density=25., tonnage=(6000., .7), depth=3., sulfide=False),
+    'small_coal': dict(contexts=dict(platform=.8, passive=.6, backarc=.5, collision=.3),
+        hosts=dict(sandstone=1., marl=.8), metals=dict(coal=.9),
+        density=20., tonnage=(8000., .7), depth=3., sulfide=False, climate='humid'),
+})
 # Placers are fed by eroded primary sources upstream, never by a new province.
 PLACERS = {
-    'placer_au': dict(source=('epithermal_au_ag', 'orogenic_au', 'porphyry_cu'), metals=dict(gold=2e-7), density=.8, tonnage=(1.1e6, .7), depth=2),
-    'placer_sn': dict(source=('sn_w_granite',), metals=dict(tin=3e-3), density=.6, tonnage=(3e5, .7), depth=3),
+    'placer_au': dict(source=('epithermal_au_ag', 'orogenic_au', 'porphyry_cu'), metals=dict(gold=2e-7), density=30., tonnage=(25000., .7), depth=2),
+    'placer_sn': dict(source=('sn_w_granite', 'small_sn'), metals=dict(tin=3e-3), density=25., tonnage=(15000., .7), depth=3),
 }
 FANTASY = {
     # Isolated optional extension: own key domain, never alters a non-fantasy layer.
@@ -139,13 +165,14 @@ DISTRICT_LOD = 12
 DISTRICTS_PER_BLOCK = 1
 DISTRICT_OCCUPANCY = .02    # sparse active camps inside permissive provinces; provisional
 DISTRICT_BACKGROUND = .05
-DISTRICT_SHAPE = dict(porphyry_cu=(15e3, 5e3), epithermal_au_ag=(12e3, 5e3), sn_w_granite=(15e3, 6e3),
+DISTRICT_SHAPE = dict(small_coal=(30e3, 15e3), bog_iron=(20e3, 15e3), local_ironstone=(25e3, 15e3), small_pb_ag=(15e3, 4e3),
+                      salt_spring=(30e3, 30e3), gypsum_quarry=(30e3, 30e3), small_sn=(15e3, 6e3), porphyry_cu=(15e3, 5e3), epithermal_au_ag=(12e3, 5e3), sn_w_granite=(15e3, 6e3),
                       polymetallic_vein=(15e3, 4e3), vms=(15e3, 4e3), orogenic_au=(20e3, 4e3), skarn_fe_cu=(10e3, 5e3),
                       mvt_pb_zn=(20e3, 20e3), sediment_cu=(25e3, 10e3), bif_iron=(25e3, 8e3), ironstone=(25e3, 15e3),
                       laterite_fe=(15e3, 15e3), evaporite_salt=(30e3, 30e3), coal=(30e3, 15e3),
                       fantasy_star_metal=(10e3, 10e3), placer_au=(12e3, 4e3), placer_sn=(12e3, 4e3))
-MEDIEVAL_RECOVERY = dict(gold=.8, silver=.7, copper=.6, lead=.75, zinc=0., tin=.7, tungsten=0., iron=.5,
-                         salt=.9, gypsum=.9, coal=.8, star_metal=.5)  # zinc/tungsten: no medieval metal
+MEDIEVAL_RECOVERY = dict(gold=.8, silver=.7, copper=.6, lead=.75, zinc=.3, tin=.7, tungsten=.25, iron=.5,
+                         salt=.9, gypsum=.9, coal=.8, star_metal=.5)  # Zn/W: sorted mineral equivalents, not smelted metal (doc §20)
 
 FNV_OFFSET, FNV_PRIME, MASK = 0xcbf29ce484222325, 0x100000001b3, (1 << 64) - 1
 
@@ -456,7 +483,7 @@ def _classes(field, grid, cells, side, lod, seed32, parallel, chunks=16):
     return np.concatenate(parallel(tasks))
 
 
-def calibrate_rock_bias(expected, strike, land, grid, seed, parallel=None, iterations=6, stride=8):
+def calibrate_rock_bias(expected, strike, land, grid, seed, parallel=None, iterations=12, stride=4):
     """Per-class bias of the realized geology so that world shares follow the
     expected ones: log-ratio iterations on one sample (LOD 10) in every
     `stride`-th land cell. Cheap: the display needs only this, not the shares."""
@@ -472,7 +499,7 @@ def calibrate_rock_bias(expected, strike, land, grid, seed, parallel=None, itera
         # Serial: a few tens of thousands of samples, cheaper than starting workers.
         cls = realized_classes(realized_rock_field(expected, strike, bias), grid.i[0], grid.j[0], cells, 1, WORLD_LOD, seed32, getattr(grid, 'bounds', None))[:, 0]
         got = np.bincount(cls, weights=area, minlength=kcls) / area.sum()
-        bias += np.log(np.maximum(target, 1e-6) / np.maximum(got, 1e-6)) * (target > 0)
+        bias += .5 * np.log(np.maximum(target, 1e-6) / np.maximum(got, 1e-6)) * (target > 0)
     return bias
 
 
@@ -873,9 +900,13 @@ def prospectivity(f, spec):
     # not a claim that the exposed rock everywhere in a tract contains ore.
     host = sum(w * (.5*f['rock_' + r] + .5*f.get('rock_expected_' + r, f['rock_' + r]))
                for r, w in spec['hosts'].items())
+    if spec.get('requires') == 'evaporite':
+        # Four outcrop samples per authority cell must not become square
+        # basin/no-basin gates for shallow quarries and brine occurrences.
+        host = sum(w*f.get('rock_expected_' + r, f['rock_' + r]) for r,w in spec['hosts'].items())
     p = smoothstep(.08, .75, ctx) ** 2 * np.minimum(1, 1.5 * host)
     if 'requires' in spec:   # a necessary host: no salt deposit without evaporites
-        p = p * smoothstep(0, .01, f['rock_' + spec['requires']])
+        p = p * smoothstep(0, .003, f.get('rock_expected_' + spec['requires'], f['rock_' + spec['requires']]))
     climate = spec.get('climate')
     if climate == 'tropical':
         p = p * smoothstep(18, 24, f['temperature_c'].mean(axis=0)) * smoothstep(1000, 1600, f['precipitation_mm'].sum(axis=0))
@@ -910,7 +941,13 @@ def _poisson(lam, u, kmax=40):
     """Inverse CDF of Poisson(lam) at u, vectorised, float64 recurrence."""
     lam = np.asarray(lam, np.float64)
     out = np.zeros(lam.shape, np.int64)
-    live = lam > 0                         # lam = 0 gives 0 (cdf starts at 1): same result
+    # The recurrence is cheap for world cells. Coarse regression/export grids
+    # can have large means with dense local workings: never truncate their tail.
+    high = lam > 20
+    if high.any():
+        from scipy.stats import poisson
+        out[high] = poisson.ppf(np.broadcast_to(u, out.shape)[high], lam[high]).astype(np.int64)
+    live = (lam > 0) & ~high               # lam = 0 gives 0
     lam, u = lam[live], np.broadcast_to(u, out.shape)[live]
     term = np.exp(-lam)
     cdf = term.copy()
@@ -1079,16 +1116,26 @@ def world_deposits(grid, f, seed, *, fantasy=False, parallel=None):
         by_name.setdefault(job[1], []).append(n)
     tasks, owners = [], []
     for name, idx in by_name.items():
-        for a in range(0, len(idx), 512):
-            part = idx[a:a + 512]
+        for a in range(0, len(idx), 2048):
+            part = idx[a:a + 2048]
             tasks.append(('terrain_resources', 'place_positions',
-                          dict(seed=seed, domain=jobs[part[0]][0], lod=grid.lod, field=f['prospect_' + name],
+                          dict(seed=seed, domain=jobs[part[0]][0], domains=[jobs[n][0] for n in part], lod=grid.lod, field=f['prospect_' + name],
                                jj=np.array([jobs[n][3] for n in part]), ii=np.array([jobs[n][4] for n in part]),
                                kk=np.array([jobs[n][5] for n in part]), bounds=grid.bounds, name=name, centres=centres.get(name),
                                strike=f['structural_strike'] if name in centres else None)))
             owners.append(part)
-    results = [place_positions(**t[2]) for t in tasks] if parallel is None else parallel(tasks)
+    # Cached CDFs make these tasks short. Starting NumPy workers costs more
+    # than placement now; keep the existing parallel stages for geology/V2.
+    results = [place_positions(**t[2]) for t in tasks]
     positions = {n: pos for part, res in zip(owners, results) for n, pos in zip(part, res)}
+    # Only active district centres can win. Cache their structural angles once
+    # per family instead of allocating the complete candidate grid per site.
+    district_metadata = {}
+    for name, (cx, cy, bi0, bj0, active) in centres.items():
+        rows, cols = np.nonzero(active[..., 0])
+        px, py = cx[rows, cols, 0], cy[rows, cols, 0]
+        theta = strike_at(f['structural_strike'], grid, px, py)
+        district_metadata[name] = (px, py, np.cos(theta), np.sin(theta), rows, cols, bi0, bj0)
     out = []
     for n, (job, mark) in enumerate(zip(jobs, marks)):
         _, name, spec, j, i, k = job
@@ -1096,22 +1143,21 @@ def world_deposits(grid, f, seed, *, fantasy=False, parallel=None):
         mark.update(source_cell=mark['owner_cell'], owner_cell=int(grid.ids[j, i]), index=k,
                     position_cell=int(positions[n]), position_lod=int(plod), position_i=int(pi), position_j=int(pj))
         if name in centres:
-            cx, cy, bi0, bj0, active = centres[name]
+            cx, cy, cosine, sine, rows, cols, bi0, bj0 = district_metadata[name]
             x, y = (int(pi) + .5) * cell_size(int(plod)), (int(pj) + .5) * cell_size(int(plod))
             width = grid.bounds[2] - grid.bounds[0]
-            dx = (cx[..., 0] - x + width / 2) % width - width / 2
-            dy = cy[..., 0] - y
-            theta = strike_at(f['structural_strike'], grid, cx[..., 0], cy[..., 0])
+            dx = (cx - x + width / 2) % width - width / 2
+            dy = cy - y
             sa, sc = DISTRICT_SHAPE[name]
-            q = ((dx * np.cos(theta) + dy * np.sin(theta)) / sa) ** 2 + ((-dx * np.sin(theta) + dy * np.cos(theta)) / sc) ** 2
-            q = np.where(active[..., 0], q, np.inf)
-            dj, di = np.unravel_index(int(np.argmin(q)), q.shape)
+            q = ((dx * cosine + dy * sine) / sa) ** 2 + ((-dx * sine + dy * cosine) / sc) ** 2
+            nearest = int(np.argmin(q))
+            dj, di = int(rows[nearest]), int(cols[nearest])
             mark['district_id'] = f"{name}:{int(cell_id(DISTRICT_LOD, bi0 + di, bj0 + dj)):016x}:0"
-            mark['district_center_m'] = [float(cx[dj, di, 0]), float(cy[dj, di, 0])]
+            mark['district_center_m'] = [float(cx[nearest]), float(cy[nearest])]
         # Grade, ore and depth remain the addressed source marks. Access uses
         # the new owner's relief; recoverable stocks are then exact integers.
         extent = max(20., (mark['ore_t'] / 2.7) ** (1 / 3))
-        accessible = float(np.clip((40 + .5 * f['rugged_m'][j, i] - mark['depth_top_m']) / extent, 0, 1))
+        accessible = float(min(1., max(0., (40 + .5 * f['rugged_m'][j, i] - mark['depth_top_m']) / extent)))
         mark['medieval_accessible_share'] = round(accessible, 4)
         mark['medieval_recoverable'] = {m: int(v * accessible * MEDIEVAL_RECOVERY.get(m, .5)) for m, v in mark['contained'].items()}
         out.append(mark)
@@ -1121,10 +1167,13 @@ def world_deposits(grid, f, seed, *, fantasy=False, parallel=None):
 
 def _deposit(seed, domain, name, spec, grid, f, j, i, k, position=None):
     cid = int(grid.ids[j, i])
-    draw = lambda what: float(to_unit(cell_keys(seed, domain + (what, f'lod{grid.lod}'), np.uint64(cid), draw=k + 1)))
+    draw = lambda what: (splitmix(splitmix(key(seed, domain + (what, f'lod{grid.lod}')) ^ cid) ^ (k+1)) >> 11) / float(1 << 53)
     median, sigma = spec['tonnage']
     ore = median * 10 ** (sigma * float(ndtri(min(max(draw('tonnage'), 1e-9), 1 - 1e-9))))
     grade = 10 ** (.25 * float(ndtri(min(max(draw('grade'), 1e-9), 1 - 1e-9))))   # shared grade factor
+    # Industrial minerals have high nominal grades: an unbounded multiplier
+    # could otherwise report >100% salt/gypsum/coal in the inspector.
+    grade = min(grade, 1. / sum(spec['metals'].values()))
     depth = spec['depth'] * 10 ** (.4 * float(ndtri(min(max(draw('depth'), 1e-9), 1 - 1e-9))))
     contained = {}
     for metal, frac in spec['metals'].items():
@@ -1134,7 +1183,7 @@ def _deposit(seed, domain, name, spec, grid, f, j, i, k, position=None):
     # shafts. Vertical extent scales with the cube root of the body volume.
     extent = max(20., (ore / 2.7) ** (1 / 3))
     reach = 40 + .5 * f['rugged_m'][j, i]
-    accessible = float(np.clip((reach - depth) / extent, 0, 1))
+    accessible = float(min(1., max(0., (reach - depth) / extent)))
     outcrop = depth < 5
     if position is None:
         position = _place_in_cell(seed, domain, grid, f, name, j, i, k)
@@ -1149,7 +1198,7 @@ def _deposit(seed, domain, name, spec, grid, f, j, i, k, position=None):
                 status='synthetic' if name in FANTASY else 'derived')
 
 
-def _place_in_cell(seed, domain, grid, f, name, j, i, k, districts=None):
+def _placement_distribution(grid, field, j, i, districts=None):
     """LOD-10 -> LOD-3 position: keyed weighted choice on interpolated
     prospectivity, times the district intensity when `districts` = (family,
     centres, strike) is given (deposits gather in their districts)."""
@@ -1158,7 +1207,7 @@ def _place_in_cell(seed, domain, grid, f, name, j, i, k, districts=None):
     sub_i = ci * n + np.arange(n)
     sub_j = cj * n + np.arange(n)
     plod = placement_lod(grid.lod)
-    weights = descend_weights(grid, f['prospect_' + name], j, i, sub_i, sub_j)
+    weights = descend_weights(grid, field, j, i, sub_i, sub_j)
     child = grid.size / n
     x, y = (sub_i + .5) * child, (sub_j + .5) * child
     inside = ((x >= grid.bounds[0]) & (x < grid.bounds[2]))[None, :] & ((y >= grid.bounds[1]) & (y < grid.bounds[3]))[:, None]
@@ -1167,23 +1216,39 @@ def _place_in_cell(seed, domain, grid, f, name, j, i, k, districts=None):
         child = grid.size / n
         X, Y = np.meshgrid((sub_i + .5) * child, (sub_j + .5) * child)
         weights = weights * district_intensity(X, Y, districts[0], districts[1], districts[2], grid)
-    ids = cell_id(plod, sub_i[None, :], sub_j[:, None])
-    keys = to_unit(cell_keys(seed, domain + ('position', f'lod{plod}'), ids, draw=k + 1))
-    # Exponential race: argmin(-ln u / w) is a weighted choice independent of order.
     if not (weights > 0).any():
         weights = inside.astype(np.float64)
-    with np.errstate(divide='ignore'):
-        race = np.where(weights > 0, -np.log(np.maximum(keys, 1e-300)) / np.maximum(weights, 1e-300), np.inf)
-    flat = int(np.argmin(race))
-    return ids.ravel()[flat]
+    return np.cumsum(weights.ravel()), sub_i, sub_j
 
 
-def place_positions(seed, domain, lod, field, jj, ii, kk, bounds=BOUNDS, name=None, centres=None, strike=None):
+def _draw_position(seed, domain, grid, j, i, k, distribution):
+    cdf, sub_i, sub_j = distribution
+    plod = placement_lod(grid.lod)
+    u = (splitmix(splitmix(key(seed, domain + ('position', f'lod{plod}')) ^ int(grid.ids[j, i])) ^ (k+1)) >> 11) / float(1 << 53)
+    flat = min(int(np.searchsorted(cdf, u*cdf[-1], side='right')), len(cdf)-1)
+    i, j = int(sub_i[flat % len(sub_i)]), int(sub_j[flat // len(sub_i)])
+    return ((plod+16) << 59) | ((i+(1 << 29)) << 29) | (j+(1 << 28))
+
+
+def _place_in_cell(seed, domain, grid, f, name, j, i, k, districts=None):
+    """Addressed inverse CDF on canonical child order; independent of queries."""
+    return _draw_position(seed, domain, grid, j, i, k,
+                          _placement_distribution(grid, f['prospect_' + name], j, i, districts))
+
+
+def place_positions(seed, domain, lod, field, jj, ii, kk, bounds=BOUNDS, name=None, centres=None, strike=None, domains=None):
     """_place_in_cell for deposits of one family (pure; run in worker processes)."""
     grid = Lattice(lod, bounds=bounds)
-    f = {'prospect_': field}
     districts = (name, centres, strike) if centres is not None else None
-    return [int(_place_in_cell(seed, domain, grid, f, '', int(j), int(i), int(k), districts)) for j, i, k in zip(jj, ii, kk)]
+    cached, out = {}, []
+    for n, (j, i, k) in enumerate(zip(jj, ii, kk)):
+        j, i, k = int(j), int(i), int(k)
+        if (j, i) not in cached:
+            if len(cached) >= 32:
+                cached.clear()  # bounded scratch; allocation order never changes the draws
+            cached[j, i] = _placement_distribution(grid, field, j, i, districts)
+        out.append(int(_draw_position(seed, domains[n] if domains else domain, grid, j, i, k, cached[j, i])))
+    return out
 
 
 def placement_lod(lod):

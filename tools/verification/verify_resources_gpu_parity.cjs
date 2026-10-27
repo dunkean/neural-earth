@@ -20,7 +20,7 @@ struct Case { g:vec4<i32>, a:vec4<f32>, b:vec4<f32>, c:vec4<f32> }
   else if(k.g.w==4){out[o]=rStock(gi,gj,lod,30.*exp2(f32(lod)));}
   else {out[o]=rTerms(rFeatures(k.a.x,k.b.xy,k.b.zw,k.a.y,k.a.z,k.a.w,k.c.x));}
 }`;
-const kinds={positive:0,bounded:0,seasonal:0,'potential-copper':0,'potential-iron':0,geology:1,cyclic:2,points:3,stock:4};
+const kinds={positive:0,bounded:0,seasonal:0,'potential-copper':0,'potential-iron':0,geology:1,cyclic:2,points:3,'points-screen':3,stock:4};
 (async()=>{
   const server=http.createServer((_,res)=>res.end('<!doctype html><title>Resources WGSL parity</title>'));
   await new Promise(ok=>server.listen(0,'127.0.0.1',ok));
@@ -74,7 +74,7 @@ const kinds={positive:0,bounded:0,seasonal:0,'potential-copper':0,'potential-iro
         const got=r.values.slice(i*4,i*4+4);
         if(r.name==='geology'){if(got[0]!==c.expected||got[1]!==c.dominant)mismatches++;return;}
         if(r.name==='cyclic'){if(got[0]!==c.expected)mismatches++;return;}
-        if(r.name==='points'){c.expected.forEach((x,k)=>{const e=Math.abs(got[k]-x);maxError=Math.max(maxError,e);if(e>.004)mismatches++;});return;}
+        if(r.name.startsWith('points')){c.expected.forEach((x,k)=>{const e=Math.abs(got[k]-x);maxError=Math.max(maxError,e);if(e>.004)mismatches++;});return;}
         const e=Math.abs(got[0]-c.expected)/Math.max(1,Math.abs(c.expected));maxError=Math.max(maxError,e);if(e>2e-3)mismatches++;
       });
       summary.push({name:r.name,cases:cases.length,maxError,mismatches});failures+=mismatches;

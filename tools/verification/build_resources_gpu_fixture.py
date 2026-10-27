@@ -136,13 +136,15 @@ def build():
         buckets.reshape(-1, 2)[c, 1] += 1
     palette = [[(c * 37 % 100) / 100, (c * 59 % 100) / 100, (c * 83 % 100) / 100] for c in range(20)]
     far = np.zeros((1, H, W), np.float32)       # stocks use deposit kernels at every LOD
-    for kind in ('points', 'stock'):
-        h = header(kind, 1, palette=palette, deposits=len(deps), range=[1e-3, 1e5], max_footprint=max(max(d['a'], d['b']) * 2 for d in deps))
+    for kind in ('points', 'points-screen', 'stock'):
+        screen_mpp = 600. if kind == 'points-screen' else 0.
+        h = header('points' if kind.startswith('points') else kind, 1, screen_mpp=screen_mpp,
+                   palette=palette, deposits=len(deps), range=[1e-3, 1e5], max_footprint=max(max(d['a'], d['b']) * 2 for d in deps))
         stock_pkg = dict(field=G.Field(far, i0, j0, world_bounds))
         cases = []
         for n in range(36):
             d = deps[n % len(deps)]
-            lod = ([10, 7, 6, 5, 4, 3, 2, 0, -2] if kind == 'stock' else [7, 3, 0, -2])[n % (9 if kind == 'stock' else 4)]
+            lod = ([10, 7, 6, 5, 4, 3, 2, 0, -2] if kind == 'stock' else [10, 7, 4, 2, 0, -2])[n % (9 if kind == 'stock' else 6)]
             r = 30. * 2. ** lod
             off = rng.normal(0, max(d['a'], 3 * r) * .6, 2)
             gi = int(np.floor((d['di'] * 30. + 15 + off[0]) / r))
@@ -152,20 +154,7 @@ def build():
                 expected = float(G.stock_display(stock_pkg, deps, np.array(gi), np.array(gj), lod))
                 cases.append(dict(gi=gi, gj=gj, lod=lod, valley=valley, expected=expected))
             else:
-                rgb = np.full(3, .5, np.float32)
-                for dd in deps:
-                    body, halo, rim = G.deposit_contribution(dd, np.array(gi), np.array(gj), lod, np.float32(valley), world_bounds)
-                    color = np.asarray(palette[min(dd['color'], 19)], np.float32) * np.float32(.45 + .55 * dd['access'])
-                    small = (min(dd['a'], dd['b']) * 2 / r < 1.5 and dd['shape'] != 3) or dd['a'] * 2 / r < 1.5
-                    if small and not (dd['shape'] == 0 and dd['a'] * 2 / r >= 3):
-                        rgb = rgb * (1 - body) + color * body
-                        rgb = rgb * (1 - rim)
-                    elif small:
-                        rgb = rgb * (1 - body) + color * body
-                    else:
-                        rgb = rgb * (1 - halo) + np.array([.788, .651, .290], np.float32) * halo
-                        rgb = rgb * (1 - .7 * rim) + np.array([.710, .325, .165], np.float32) * (.7 * rim)
-                        rgb = rgb * (1 - body) + color * body
+                rgb = G.deposit_color(deps, np.array(gi), np.array(gj), lod, np.float32(valley), palette, world_bounds, screen_mpp=screen_mpp)
                 cases.append(dict(gi=gi, gj=gj, lod=lod, valley=valley, expected=[float(x) for x in rgb]))
         configs.append(dict(name=kind, header=dict(h, field_shape=[1, H, W]), field=_bits(far), deposits=words.view(np.uint32).ravel().tolist(),
                             buckets=buckets.ravel().tolist(), cases=cases))

@@ -56,7 +56,10 @@ class ResourceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.layers, cls.height = atlas()
-        cls.grid, cls.f, cls.deposits = R.compile_world(cls.layers, cls.height, 42, lod=14, balance=False)
+        # A 1,000 km sphere keeps repeated population/determinism tests bounded;
+        # the live captures and benchmark validate the full 4,000 km world.
+        cls.bounds = (-np.pi*5e5, -np.pi*2.5e5, np.pi*5e5, np.pi*2.5e5)
+        cls.grid, cls.f, cls.deposits = R.compile_world(cls.layers, cls.height, 42, lod=12, balance=False, bounds=cls.bounds)
 
     def test_keys_match_chronos_rust(self):
         # Values printed by chronos-core keys.rs (rustc 1.99) for the same inputs.
@@ -118,9 +121,9 @@ class ResourceTests(unittest.TestCase):
         np.testing.assert_array_equal(R.apportion(0, w, ids), 0)
 
     def test_world_is_deterministic_and_seed_addressed(self):
-        g, f, d = R.compile_world(self.layers, self.height, 42, lod=14, balance=False)
+        g, f, d = R.compile_world(self.layers, self.height, 42, lod=12, balance=False, bounds=self.bounds)
         self.assertEqual(digest(f, d), digest(self.f, self.deposits))
-        _, f2, d2 = R.compile_world(self.layers, self.height, 43, lod=14, balance=False)
+        _, f2, d2 = R.compile_world(self.layers, self.height, 43, lod=12, balance=False, bounds=self.bounds)
         self.assertNotEqual([x['id'] for x in d2], [x['id'] for x in self.deposits])
         # Seed only drives keyed parts: climate-derived layers do not move.
         np.testing.assert_array_equal(f2['npp_g_m2'], self.f['npp_g_m2'])
@@ -129,14 +132,14 @@ class ResourceTests(unittest.TestCase):
         # Worker processes (Render v2 months, deposit placement) change nothing.
         import terrain_resource_workers as W
         stages = []
-        g, f, d = R.compile_world(self.layers, self.height, 42, lod=14, balance=False, parallel=W.parallel_map,
+        g, f, d = R.compile_world(self.layers, self.height, 42, lod=12, balance=False, bounds=self.bounds, parallel=W.parallel_map,
                                   progress=lambda stage, fields: stages.append((stage, 'land' in fields)))
         self.assertEqual(digest(f, d), digest(self.f, self.deposits))
         self.assertEqual(stages, [('tectonics', True), ('environment', True), ('geology', True), ('deposits', True)])
 
     def test_cached_render_v2_environment_gives_the_same_world(self):
         v2 = {k: self.f[k] for k in R.V2_FIELDS}
-        g, f, d = R.compile_world(self.layers, self.height, 42, lod=14, balance=False, v2_fields=v2)
+        g, f, d = R.compile_world(self.layers, self.height, 42, lod=12, balance=False, bounds=self.bounds, v2_fields=v2)
         self.assertEqual(digest(f, d), digest(self.f, self.deposits))
 
     def test_bounds_and_partitions(self):
@@ -215,7 +218,7 @@ class ResourceTests(unittest.TestCase):
         self.assertEqual(sum(len(v['deposits']) for v in summary.values()), len(self.deposits))
 
     def test_fantasy_is_isolated(self):
-        _, f, d = R.compile_world(self.layers, self.height, 42, lod=14, balance=False, fantasy=True)
+        _, f, d = R.compile_world(self.layers, self.height, 42, lod=12, balance=False, bounds=self.bounds, fantasy=True)
         plain = [x for x in d if not x['family'].startswith('fantasy')]
         self.assertEqual(plain, self.deposits)
         for name, value in self.f.items():
@@ -271,6 +274,22 @@ class ResourceDistrictTests(unittest.TestCase):
         cls.bounds = (-np.pi * 5e5, -np.pi * 2.5e5, np.pi * 5e5, np.pi * 2.5e5)
         layers, height = atlas()
         cls.grid, cls.fields, cls.deposits = R.compile_world(layers, height, 42, bounds=cls.bounds, balance=False)
+
+    def test_inspector_keeps_the_selected_resource_after_diagnostic_values(self):
+        import terrain_resource_layers as L
+        from unittest.mock import patch
+        state=L._World(self.grid,self.fields,self.deposits,42,'inspector-test')
+        n=next(i for i,d in enumerate(self.deposits) if d['medieval_recoverable'].get('iron',0)>0)
+        x,y=(state.dep_di[n]+.5)*30,(state.dep_dj[n]+.5)*30
+        # Put an unrelated diagnostic last, as in the real menu.
+        spec=dict(kind='ramp',value=lambda f,g:np.zeros(g.shape),label='Diagnostic',unit='indice',status='derived',proxy=False)
+        with patch.object(L,'world_resources',return_value=(self.grid,self.fields,self.deposits,0,'fixture')), \
+             patch.object(L,'world_state',return_value=state), \
+             patch.object(L,'specs',return_value={'resources-dep-potential-tungsten':spec}):
+            data=L.inspect(object(),x,y,radius_m=1000,mode='resources-dep-iron')
+        self.assertTrue(data['deposits'])
+        self.assertEqual(data['deposits'][0]['distance_m'],0)
+        self.assertTrue(all(d['medieval_recoverable'].get('iron',0)>0 for d in data['deposits']))
 
     def test_district_marks_preserve_counts_and_tonnage(self):
         g, f = self.grid, self.fields
@@ -389,6 +408,75 @@ class ResourceDistrictTests(unittest.TestCase):
                 errors.append(abs(integral-1))
                 self.assertAlmostEqual(integral, 1, delta=2e-4)
         print('organic stock max integral relative error:', max(errors), flush=True)
+
+
+class ResourcePresentationTests(unittest.TestCase):
+    def test_partial_deposit_stage_is_not_served_as_an_empty_map(self):
+        import terrain_resource_layers as L
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        partial=SimpleNamespace(deposits=[])
+        with patch.object(L,'world_state',return_value=partial), patch.object(L,'compile_status',return_value={'state':'compiling'}):
+            with self.assertRaises(L.ResourcesPending):
+                L.gpu_package(object(),'resources-dep-copper')
+
+    def test_menu_contains_resources_and_diagnostics_without_stock_views(self):
+        import terrain_resource_layers as L
+        from unittest.mock import patch
+        with patch.object(L, 'fantasy_enabled', return_value=False):
+            specs = dict(L._specs())
+        self.assertEqual({m.removeprefix('resources-dep-') for m, s in specs.items() if s['kind']=='points'},
+                         {*R.METALS, 'points'})
+        self.assertFalse(any('-stock-' in m or '-recoverable-' in m for m in specs if m.startswith('resources-dep-')))
+        diagnostic = [s['group']=='diagnostic' for s in specs.values()]
+        self.assertEqual(diagnostic, sorted(diagnostic))
+        self.assertTrue(all(s['group']=='diagnostic' for m,s in specs.items() if '-potential-' in m or '-prospect-' in m))
+        with patch.object(L, 'fantasy_enabled', return_value=True):
+            self.assertIn('resources-dep-star-metal', dict(L._specs()))
+
+    def test_symbols_use_recoverable_physical_mass_and_buckets(self):
+        import terrain_resource_layers as L
+        from types import SimpleNamespace
+        grid = R.Lattice(10, bounds=(-30720., -30720., 30720., 30720.))
+        state = SimpleNamespace(grid=grid, dep_ore=np.array([1e9,1e9,1e9]), dep_di=np.array([-1,1,2]), dep_dj=np.array([-1,1,2]),
+            dep_shape=np.zeros(3),dep_color=np.zeros(3),dep_a=np.full(3,10.),dep_b=np.full(3,2.),dep_theta=np.zeros(3),
+            dep_bend=np.zeros(3),dep_access=np.ones(3),dep_gossan=np.zeros(3),
+            dep_mass={('medieval_recoverable','copper'):np.array([0,1,1e8]),
+                      ('medieval_recoverable','gold'):np.array([0,1000,1e11])})
+        cu, buckets = L._deposit_buffers(state,'resources-dep-copper','points')
+        au, _ = L._deposit_buffers(state,'resources-dep-gold','points')
+        self.assertEqual(len(cu),2)
+        self.assertEqual(int(buckets[...,1].sum()),2)
+        np.testing.assert_array_equal(cu[:,9], au[:,9])  # kilograms are converted to physical tonnes
+        np.testing.assert_allclose(cu[:,9]**2,[9,49],rtol=1e-6)
+        np.testing.assert_array_equal(cu[:,11],[1,1e8])
+
+    def test_symbol_overlap_and_crossfade_are_order_independent(self):
+        import terrain_resource_gpu as G
+        small=dict(di=0,dj=0,shape=1,color=0,a=1.,b=1.,theta=0.,symbol=3.,mass=1)
+        large=dict(small,color=1,mass=100,symbol=5.)
+        palette=[(.8,.2,.1),(.1,.8,.3)]
+        for lod in (10,7,4,2,0):
+            a=G.deposit_color([small,large],np.array(0),np.array(0),lod,np.float32(0),palette)
+            b=G.deposit_color([large,small],np.array(0),np.array(0),lod,np.float32(0),palette)
+            np.testing.assert_array_equal(a,b)
+        # Moving the footprint across the symbol transition cannot cause a pop.
+        d=dict(small,a=120.,b=120.)
+        a=G.deposit_contribution(d,np.array(3),np.array(0),0,np.float32(0))[0]
+        b=G.deposit_contribution(dict(d,a=120.01,b=120.01),np.array(3),np.array(0),0,np.float32(0))[0]
+        self.assertLess(abs(float(a-b)),.002)
+
+    def test_dense_coarse_poisson_is_not_capped(self):
+        self.assertGreater(int(R._poisson(np.array(100.),np.array(.5))),40)
+
+    def test_industrial_mineral_grades_cannot_exceed_the_ore(self):
+        from types import SimpleNamespace
+        grid=SimpleNamespace(ids=np.array([[R.cell_id(10,0,0)]]),lod=10)
+        f={'rugged_m':np.zeros((1,1)), 'temperature_c':np.zeros((12,1,1))}
+        for name in ('gypsum_quarry','salt_spring','coal','evaporite_salt'):
+            for k in range(20):
+                d=R._deposit(42,('resources','deposit',name),name,R.FAMILIES[name],grid,f,0,0,k,position=R.cell_id(3,0,0))
+                self.assertLessEqual(sum(d['contained'].values()), d['ore_t']+len(d['contained']))
 
 
 class ResourceGpuMirrorTests(unittest.TestCase):

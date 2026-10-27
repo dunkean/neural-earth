@@ -468,7 +468,7 @@ def evaluate_cyclic(pkg, gi, gj, lod):
 # ---------------------------------------------------------------------------
 # Deposits (shapes and kernels)
 
-def deposit_contribution(dep, gi, gj, lod, valley, bounds=None):
+def deposit_contribution(dep, gi, gj, lod, valley, bounds=None, screen_mpp=0.):
     """Alpha of the body, halo and gossan rim, and colour index, of one deposit.
 
     dep: dict(di, dj (LOD-0 cell indices), a, b (m), theta, shape, gossan).
@@ -488,25 +488,35 @@ def deposit_contribution(dep, gi, gj, lod, valley, bounds=None):
     c, s_ = F32(math.cos(dep['theta'])), F32(math.sin(dep['theta']))
     u, v = dx * c + dy * s_, -dx * s_ + dy * c
     dist = np.sqrt(dx * dx + dy * dy)
-    if min(float(a), float(b)) * 2 / float(r) < 1.5 and dep['shape'] != SHAPES['placer'] or float(a) * 2 / float(r) < 1.5:
-        rpx = F32(dep['symbol']) * F32(2.5) * F32(min(1., max(.4, 4000. / float(r)))) + F32(1.5)
-        if dep['shape'] == SHAPES['vein'] and float(a) * 2 / float(r) >= 3:
-            body = np.clip(F32(1.2) - np.abs(v) / r, 0, 1) * np.clip((a - np.abs(u)) / r, 0, 1)
-            return body.astype(F32), np.zeros_like(body), np.zeros_like(body)
-        d = dist / r
-        return (np.clip(rpx + F32(.5) - d, 0, 1).astype(F32), np.zeros_like(d),
-                (np.clip(rpx + F32(1.5) - d, 0, 1) - np.clip(rpx + F32(.5) - d, 0, 1)).astype(F32))
-    q = np.sqrt((u / a) ** 2 + (v / b) ** 2)
+    rpx = F32(np.clip(dep['symbol'], 3., 7.)) * F32(max(1., screen_mpp/float(r)))
+    disc = np.clip(rpx + F32(.5) - dist/r, 0, 1)
+    disc_outer = np.clip(rpx + F32(1.5) - dist/r, 0, 1)
+    curved_v = v - b * F32(.28) * np.sin(F32(3) * u / np.maximum(a, F32(1)))
+    q = np.sqrt((u/a)**2 + (curved_v/b)**2)
+    body = np.clip((F32(1)-q)*b/r + F32(.5), 0, 1)
+    outer = np.clip((F32(1)-q)*b/r + F32(1.5), 0, 1)
     if dep['shape'] == SHAPES['vein']:
-        body = np.clip((b + F32(.5) * r - np.abs(v)) / r, 0, 1) * np.clip((a - np.abs(u)) / (r + F32(.05) * a), 0, 1)
+        body = np.clip((b+F32(.5)*r-np.abs(curved_v))/r, 0, 1)*np.clip((a+F32(.5)*r-np.abs(u))/r, 0, 1)
+        outer = np.clip((b+F32(1.5)*r-np.abs(curved_v))/r, 0, 1)*np.clip((a+F32(1.5)*r-np.abs(u))/r, 0, 1)
     elif dep['shape'] == SHAPES['placer']:
-        body = F32(.8) * np.clip(F32(1.2) - dist / a, 0, 1) * valley
-    else:
-        body = np.clip((F32(1) - q) * b / r, 0, 1)
-    halo_r = F32(min(max(float(a), 2 * float(r)), 4000.))
-    halo = F32(.2) * np.exp(-(dist / halo_r) ** 2)
-    rim = np.clip((F32(1.6) - q) / F32(.6), 0, 1) * (F32(1) - body) * F32(dep['gossan'])
-    return body.astype(F32), halo.astype(F32), rim.astype(F32)
+        body = body * np.clip(F32(.6)+F32(.4)*valley, F32(.4), F32(1))
+    fade = smoothstep(rpx, F32(2)*rpx, np.sqrt(a*b)/r)
+    body = disc*(F32(1)-fade)+body*fade
+    outer = disc_outer*(F32(1)-fade)+outer*fade
+    return body.astype(F32), np.zeros_like(body), np.maximum(F32(0),outer-body).astype(F32)
+
+
+def deposit_color(deps, gi, gj, lod, valley, palette, bounds=None, base=(.5,.5,.5), screen_mpp=0.):
+    """Mass-priority composite, independent of the spatial bucket traversal."""
+    rgb = np.array(base, np.float32)
+    mass = -1.
+    for d in deps:
+        body, _, ring = deposit_contribution(d, gi, gj, lod, valley, bounds, screen_mpp)
+        if float(body+ring) > 0 and d['mass'] > mass:
+            mass = d['mass']
+            rgb = np.asarray(base, np.float32)*(1-ring)+np.array([.035,.045,.055], np.float32)*ring
+            rgb = rgb*(1-body)+np.asarray(palette[min(d['color'],31)], np.float32)*body
+    return rgb
 
 
 def stock_radii(a, b, lod):
