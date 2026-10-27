@@ -64,7 +64,8 @@ const save=()=>fs.writeFileSync(path.join(out,'report.json'),JSON.stringify(repo
     for(const metal of metals){
       const p=await pkg('resources-dep-'+metal),words=new Float32Array(p.data.deposits.buffer),ints=new Int32Array(p.data.deposits.buffer);
       let best=-1,bestMass=-1;
-      for(let k=0;k<p.header.deposits;k++){const y=(ints[k*12+1]+.5)*30;if(Math.abs(y)<2.5e6&&words[k*12+11]>bestMass&&words[k*12+4]<2500){best=k;bestMass=words[k*12+11];}}
+      const solar=metal==='salt'?p.header.palette.findIndex(c=>c.every((v,i)=>Math.abs(v-[255,211,92][i]/255)<1e-5)):-1;
+      for(let k=0;k<p.header.deposits;k++){const y=(ints[k*12+1]+.5)*30;if((solar<0||ints[k*12+3]===solar)&&Math.abs(y)<2.5e6&&words[k*12+11]>bestMass&&words[k*12+4]<2500){best=k;bestMass=words[k*12+11];}}
       assert(best>=0);const center=[(ints[best*12]+.5)*30,(ints[best*12+1]+.5)*30];
       report[metal]={center,mass:bestMass,footprint:[words[best*12+4],words[best*12+5]]};
       for(const lod of lods){

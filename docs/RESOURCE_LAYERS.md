@@ -6,7 +6,7 @@ Date : 27 octobre 2026. Branche locale `resources-layers` de Neural Earth, rebas
 
 **R3i, 27 octobre 2026 : la présentation courante est décrite au §21 ; le §20 archive R3h.** Une couche par ressource indique les gisements récupérables avec les techniques fixes du scénario. Les anciens écrans « Stock contenu » et « Récupérable médiéval » des §1–19 sont des descriptions historiques et des contrats internes, plus des choix du menu. Les potentiels/prospectivités sont regroupés en bas sous **Diagnostic** : intensité servant au placement, pas inventaire de ressources.
 
-**Performance courante : §22, compilateur 13.** Le §21 conserve le bilan du premier essai et son ancien contrat d'identité binaire ; ses snapshots ont été remplacés par le contrat statistique, la reproductibilité et la parité CPU/CUDA décrits au §22.
+**État courant : R3k, compilateur 14, sel côtier au §24. Performance : §23.** Le §21 conserve le bilan du premier essai et son ancien contrat d'identité binaire ; ses snapshots ont été remplacés par le contrat statistique, la reproductibilité et la parité CPU/CUDA décrits aux §22–23.
 
 
 Ce document distingue trois statuts :
@@ -1281,3 +1281,92 @@ node tools/benchmarks/benchmark_resources_first_pixel.cjs --port 8776 --seed 42 
 Validation : **60 tests Python réussis**, parité NumPy/WGSL **252 cas / 11 configurations, zéro désaccord**, erreur maximale normalisée **2,35·10⁻⁶**. Aucun push ; bundle incrémental basé sur `e2046f9`, fichiers suivis égaux à son tip.
 
 **Limites conservées :** stretch <0,5 s non atteint ; préchauffage CUDA/Numba et imports toujours payés au lancement du serveur ; fallback CPU plus lent ; capture CUDA spécialisée pour la taille de référence, autres formes en eager ; stockage disque accru ; regroupement fin des positions simplifié. L'ouverture totale du viewer inclut toujours modèles, hydrologie et tuiles et ne devient pas une ouverture en une seconde. La seed fraîche est validée en compilation/statistiques/parité, mais son parcours navigateur avait expiré avant ouverture au premier essai (§21) ; aucune garantie « premier pixel » n'en est déduite. Les statistiques sur ces trois mondes ne constituent pas une validation géologique ou archéologique générale.
+
+## 24. R3k — le sel côtier médiéval dans « Sel » (27 octobre 2026)
+
+### 24.1 Implémenté : sites, quantités et saisons
+
+Le compilateur **14** ajoute `sea_salt_solar` (**Marais salant solaire**, jaune `#ffd35c`) et `sea_salt_boiled` (**Saline à sel bouilli (sel ignigène)**, rose `#ed86ac`) à `resources-dep-salt`. Les familles géologiques `evaporite_salt` et `salt_spring` restent inchangées. Les deux couches continues `resources-mat-sea-salt` et `resources-season-salt` conservent leurs identifiants, mais passent au groupe **Diagnostic** ; elles ne s'ajoutent pas à la production des sites.
+
+`backend/terrain_resource_salt.py` extrait les passages terre/mer de l'atlas Orogen natif, avant son sous-échantillonnage à 30,72 km. Un site peut donc appartenir à une cellule d'autorité dont le centre est en mer. Le pied de côte est positionné à 90 m du passage du zéro, côté terre, puis adressé au LOD 0. Le proxy de côte basse combine la hauteur du nœud terrestre (décroissance entre 100 et 350 m) et la pente du segment (décroissance entre 1,5 et 8 %). Ces seuils sont **provisoires**. L'érosion neuronale peut déplacer le rivage fin par rapport à cette autorité ; aucune nouvelle position n'est tirée au zoom.
+
+Le hasard suit `cell_keys(seed, ('resources', 'coastal-salt', domaine), cell_id(0,i,j))`. Une sélection adressée par boîte de 12 km sur les coordonnées cartésiennes de la sphère, puis une exclusion de voisins à moins de 6 km par priorité, donne des clusters côtiers espacés. Les distances sont des cordes sphériques, périodiques à l'antiméridien. Les dimensions 12/6 km sont **provisoires**, choisies pour des ensembles de petits ateliers à quelques kilomètres ou dizaines de kilomètres, pas comme restitution d'un réseau médiéval observé.
+
+- **Solaire** : au moins deux mois avec `T ≥ 15 °C` et `P < PET`, et proxy de bassin `plat × (0,5 + 0,5 × max(argile, sable)) ≥ 0,25`. Ce proxy représente des estrans/lagunes aménageables ; il n'existe pas de calcul des marées, de fermeture des lagunes ou de perméabilité. L'aire engagée reprend la base des pans existants : **10⁻⁴ de l'aire du propriétaire**, partagée entre ses candidats, puis pondérée par le proxy de bassin. Rendement **provisoire : 2,5 t/ha par mois chaud et sec**, soit 5–15 t/ha pour 2–6 mois, jusqu'à 30 t/ha pour douze mois. La couche continue passe elle aussi de l'ancien coefficient non calibré 500 à 2,5 t/ha/mois (division par 200), avec sa logique d'aire et de climat conservée.
+- **Ignigène** : autres côtes basses ; saison avec `T > 0 °C`, glace Render v2 < 0,5, hors mois de récolte agricole. Capacité de travail **provisoire : 1,5–4,5 t/mois** par cluster, adressée par site. Le plafond de combustible utilise les densités de **stock** de bois et de tourbe dans le voisinage 3 × 3 des propriétaires, partagé entre les candidats d'un même propriétaire. Hypothèses annuelles **provisoires** : bois mobilisable = 0,2 % du stock, tourbe mobilisable = 0,02 % ; besoins = **12 m³ de bois ou 20 m³ de tourbe par tonne de sel**. La production est le minimum du plafond combustible et du plafond travail. La tourbe peut représenter le combustible et la filière de tourbe salée lessivée ; la salinité de la tourbe n'est pas simulée. Ni stock ni flux forestier ne sont retirés ici : cette capacité initiale n'est pas un rendement durable garanti. Chronos doit porter les prélèvements, les usages concurrents et l'épuisement de la tourbe.
+
+Les sites de moins de 1 t/an ou sans mois productif sont omis. Ce seuil est **provisoire**. La production est arrondie en **kg/an entiers** dans `annual_kg` ; `season_mask` encode les douze mois. L'API expose `quantity_kind='annual_flow'`, `annual_production_t`, `production_months` (1 = janvier) et `calibration='provisoire'`. Le budget `coastal_salt_kg_year` est exactement la somme des sites par propriétaire, quantum 1 kg/an ; il suit les allocations/agrégations entières habituelles. Les colonnes `contained` et `recoverable` des sites côtiers restent nulles : aucun flux n'est ajouté à `stock_salt` ou `recoverable_salt`. Les tests historiques des gisements vérifient toujours les familles géologiques ; les sites côtiers ont des tests séparés.
+
+**Affichage implémenté.** Le paquet GPU et le fallback CPU utilisent la même équivalence graphique : **1 t/an côtier = 100 t de stock pour la taille seulement**. `M = tonnes récupérables` pour un gisement, `M = 100 × t/an` pour une saline ; rayon `sqrt(9 + 5 log10(clamp(M, 1, 10⁸)))` pixels, plus contour. Les diamètres côtiers arrondis sont 9/10/11/12 px pour 1/10/100/1 000 t/an. Ce n'est ni une conversion économique ni un stock de cent ans. Au zoom proche, l'emprise solaire vient de l'aire des pans ; celle d'un atelier ignigène est de 2 000 m² (**provisoire**). Les groupes de 22 px restent de même famille dans « Sel » et « Tous les gisements » : aucun mélange de dimensions dans une somme de cluster. L'inspecteur donne type, t/an et mois pour les sites côtiers ; il conserve les tonnes récupérables, teneur et profondeur des gisements géologiques. Libellés, légende, unités, saison et inspecteur sont disponibles en fr/en/zh/es/pt.
+
+### 24.2 Sources relues et calibration proposée
+
+Les pages ci-dessous ont été relues le 27 octobre 2026, sauf le PDF Brière dont seul l'extrait indexé a pu être consulté (lien direct HTTP 410). Les observations historiques justifient les filières, mais ne suffisent pas à vérifier tous les coefficients de cette planète procédurale.
+
+| Source | Observation vérifiée | Usage et limite |
+|---|---|---|
+| [CNES, La Baule et la presqu'île de Guérande](https://cnes.fr/geoimage/pays-de-loire-baule-presquile-de-guerande-developper-proteger-amenager-un-espace-littoral) | Environ 2 000 ha entretenus et 10 000 t/an ; exploitation de 3–4 ha par paludier ; récolte estivale. | Quotient indicatif d'environ **5 t/ha/an**, calculé ici sur l'ensemble du marais entretenu, pas seulement les cristallisoirs. Référence artisanale actuelle, pas rendement médiéval mesuré. Le modèle 5–15 t/ha/saison reste **provisoire**. |
+| [PNR de Brière, fiches pédagogiques, diffusées par l'office de tourisme](https://www.labaule-guerande.com/medias/documents/1_TIPHAINE/Centre_de_documentation/PNR_Briere_-_fiches_pedagogiques.pdf) | Extrait indexé : 1,3 t de gros sel par œillet et par saison, documents du IXe siècle et aménagements des XIVe–XVe siècles cités. **Provisoire : PDF intégral inaccessible (410).** | Contrôle indicatif par unité de récolte ; un œillet n'est pas un hectare de marais complet. Aucun rendement surfacique n'en est déduit sans connaître les bassins associés. |
+| [Historic England, Canvey Island, entrée 1019038](https://historicengland.org.uk/listing/the-list/list-entry/1019038) | Continuité des techniques médiévales : saumure collectée ou sédiments salés filtrés, évaporation chauffée au bois/tourbe, occupation saisonnière, salterns largement répartis sur les côtes anglaises dès la fin du XIe siècle. | Justifie le sel ignigène sur côtes humides et sa saison de travail. L'entrée traite aussi les red hills romains : ne pas les dater tous du Moyen Âge. **Aucun tonnage par atelier ni rapport combustible/sel vérifié dans cette source.** |
+| [Griffin et al., UCL/Archaeology South-East, 2024, Newhaven](https://discovery.ucl.ac.uk/id/eprint/10187407/) | Saltern des XIe–XIIe siècles, monticule d'environ 75 × 50 m, jusqu'à quatre foyers réutilisés, fosses/réservoirs. | Échelle spatiale d'un petit ensemble d'ateliers ; les 2 000 m² affichés sont **provisoires**, non une reconstitution de ce site. |
+| [Museum Lüneburg, Siedepfanne der Lüneburger Saline](https://museumlueneburg.de/siedepfanne-der-lueneburger-saline/) | 54 maisons, quatre poêles chacune, travail continu ; plus de 20 000 t/an possibles aux XVe–XVIe siècles et grand besoin de bois importé. | Environ **370 t/maison/an**, quotient calculé ici et borne d'échelle d'une saline de saumure concentrée, pas rendement d'une salterne côtière saisonnière. Les **12 m³/t** de bois de notre modèle restent **provisoires** ; aucun chiffre de combustible par tonne vérifié sur cette page. |
+| [Van Geel & Borger, Netherlands Journal of Geosciences 84, 2005, DOI 10.1017/S0016774600022897](https://njgjournal.nl/index.php/njg/article/view/11578) | Exploitation de tourbe salée et indices archéologiques de sel à partir de zostère médiévale dans le nord-ouest des Pays-Bas ; substitution à la tourbe proposée par les auteurs. | Justifie la filière néerlandaise de sel ignigène et le caractère épuisable de la matière. Ne fournit pas de rendement quantitatif généralisable à la Frise ou à la Zélande. |
+
+**Proposé, non implémenté :** vrais estrans/lagunes, salinité des tourbes, préconcentration de la saumure et rendement énergétique par procédé, recrutement de main-d'œuvre, affectation exclusive des bassins de combustible entre propriétaires, calendriers agronomiques plus fins, données quantitatives médiévales pour l'Angleterre/Frise/Zélande et calibrations comparables de Setúbal/salins méditerranéens. Ne pas lire les constantes provisoires comme des chiffres historiques vérifiés. Les marais très productifs devraient à terme être distingués de simples petits ateliers.
+
+### 24.3 Mesuré : mondes, couverture et production
+
+Sphère de 4 000 km, seed 42. Deux atlas sont conservés explicitement : **benchmark pur**, profil Orogen par défaut du §23 ; **viewer réel**, profil effectif `orogen--g2d683499c4cc36059bc4305c`. Les réglages GPU de génération expliquent les différences, déjà connues au §23. Les stocks géologiques ne sont jamais sommés avec les productions ci-dessous.
+
+| Type | Sites benchmark pur | t/an benchmark pur | Sites viewer | t/an viewer |
+|---|---:|---:|---:|---:|
+| Sel gemme / évaporites | 0 | sans objet | 1, non récupérable | sans objet |
+| Source salée / saumure | 376 | sans objet | 386 | sans objet |
+| Marais salant solaire | **1 390** | **54 696,111** | **1 365** | **54 159,289** |
+| Saline à sel bouilli | **3 256** | **93 929,834** | **3 503** | **100 027,323** |
+| Total côtier | **4 646** | **148 625,945** | **4 868** | **154 186,612** |
+
+Les sources salées représentent respectivement **9 578 689 t** et **9 292 387 t** récupérables dans le contrat géologique existant ; le site évaporitique du viewer a zéro tonne récupérable et n'apparaît donc pas comme symbole exploitable.
+
+Sur 13 595 / 14 737 échantillons de côte basse native, la part à moins de **25 km** d'un site est **88,78 % / 88,14 %**. Ce sont des parts d'échantillons natifs, pas des pourcentages de longueur littorale ni de côtes universellement exploitables. Le plus proche voisin des sites a une distance minimale **6,002 / 6,001 km**, médiane **8,144 / 7,975 km**, P90 **14,008 / 14,121 km**. Des côtes isolées/glacées/sans combustible gardent des lacunes : maximum du plus proche voisin **126,1 / 95,1 km**. La présence sur la majorité des basses côtes est donc mesurée, pas une promesse de couverture intégrale. Les sommes exactes sont **148 625 945 / 154 186 612 kg/an**, égales aux budgets.
+
+![Sel, seed 42, LOD 10, 7, 4, 2 et 0 ; terrain en haut, sites en bas](images/resources-gpu-sites-salt.jpg)
+
+Capture réellement inspectée : points côtiers jaunes/roses visibles aux LOD 10/7/4, marais solaire sur une côte chaude et sèche, séparation des ateliers aux LOD 2/0. Terrain grossier `conditioning-preview` aux LOD 10/7/4 ; vraies tuiles `decoder` aux LOD 2/0, sans requête visible en attente. Dix vues, zéro erreur JavaScript et zéro réponse HTTP en erreur dans le rapport final. Le symbole proche reste parfois en retrait du rivage neuronal : limite d'autorité explicitée au §24.1, non corrigée artificiellement pour la capture. Le fond gris indique les terres sans symbole, pas un désert physique.
+
+### 24.4 Mesuré : compilation, invariants et reproduction
+
+Même protocole que §23 : runtime préparé, compilation complète sans cache monde, threads BLAS/OMP à 1, deux seeds, même Python/RTX 3090. Le viewer est resté inactif pendant le dernier benchmark ; aucune suite de tests concurrente. L'import du module côtier et de SciPy spatial est payé dans l'initialisation du processus, comme les autres imports, pas dans une compilation tardive. Le premier essai après édition (`salt-after`) incluait cet import dans le calcul : 1,147 / 1,157 s ; le relevé final ci-dessous le prépare au chargement du runtime. Le relevé `salt-final`, concurrent d'autres contrôles, est exclu.
+
+| Durée (s), avant → après | Seed 42 | Seed 20261027 |
+|---|---:|---:|
+| Première compilation pure, runtime préparé | **1,078 → 1,075** (−0,24 %) | **1,062 → 1,094** (+3,06 %) |
+| Recompilation complète dans le processus | **1,042 → 1,023** (−1,85 %) | **1,053 → 1,063** (+0,95 %) |
+| Initialisation et lecture des entrées | 6,407 → 4,022 | 3,814 → 3,811 |
+| Exécutable neuf jusqu'au résultat, Python compris | 7,575 → 5,184 | 4,972 → 4,996 |
+| Lecture cache durable | 0,031 → 0,047 | 0,040 → 0,052 |
+
+Le premier avant/seed 42 a payé des caches de code/import plus froids ; son temps de démarrage n'est pas attribué à une amélioration de R3k. La régression de compilation pure reste **inférieure à 10 %** dans les deux comparaisons. La compilation sous viewer, communication/publication comprises, a pris **1,412 s**, dont **1,287 s** de calcul worker ; ce n'est pas un benchmark d'ouverture totale. Les rapports complets sont dans `output/resources-perf/salt-before*.json`, `salt-isolated*.json` ; statistiques côtières dans `output/resources-salt/{pure,viewer}-42.json`, captures dans `output/resources-gpu/resources-fix-captures/fr/report.json`.
+
+Validation : **54 tests Python ressources + 11 tests monde/serveur réussis**, sans skip ; ils incluent CPU/CUDA sur les atlas complets, répétabilité binaire, inversion des familles et requêtes, budgets, transport partagé et cache. Les nouveaux cas couvrent froid/humidité, bois nul, tourbe seule, absence de saison, falaises, ordre inversé des candidats, espacement et séparation des flux/stocks. **6 tests navigateur réussis**, dont **110 specs / 190 libellés dans les cinq langues**, inspection côtière et géologique dans ces langues et conservation des clusters par famille. Parité NumPy/WGSL : **280 cas ressources / 11 configurations + 8 cas de relief**, **zéro désaccord**, erreur normalisée maximale **2,35·10⁻⁶** ; le schéma des symboles n'a pas changé, l'équivalence est appliquée lors de l'empaquetage commun.
+
+```powershell
+$py = 'D:/Workspace/Self/RPG/infinite_map/.venv/Scripts/python.exe'
+$env:TERRAIN_PYTHON = $py
+$env:OPENBLAS_NUM_THREADS = $env:OMP_NUM_THREADS = $env:MKL_NUM_THREADS = '1'
+$env:NUMBA_CACHE_DIR = 'E:/TerrainDiffusionRuntime/numba-cache/resources-perf'
+& $py -m unittest discover -s tests/python -p '*resource*.py'
+& $py -m unittest discover -s tests/python -p 'test_terrain_server_world.py'
+node --test tests/browser/test_terrain_resources_locale.cjs tests/browser/test_terrain_resources_ui.cjs tests/browser/test_terrain_resources_gpu.cjs tests/browser/test_terrain_resources_clusters.cjs
+# Arrêter uniquement le serveur 8775 pour la parité, jamais celui de 8765.
+node tools/verification/verify_resources_gpu_parity.cjs
+& $py tools/benchmarks/benchmark_resources_compile.py --label salt-isolated
+& $py tools/verification/measure_resources_salt.py --cache output/resources-perf/cache/salt-isolated/42 --output output/resources-salt/pure-42.json
+$env:TERRAIN_PRELOAD_MODELS = '0'
+& $py -u backend/terrain_server.py --port 8775
+# Autre terminal :
+node tools/verification/capture_resources_gpu.cjs --port 8775 --resources salt
+& $py tools/verification/measure_resources_salt.py --cache E:/TerrainDiffusionRuntime/resources --key 1381c9e27e0d698ea8048adaaafa1ffe5f8c922d7ecf9567088a69586e26448e --output output/resources-salt/viewer-42.json
+```
+
+Livraison sans push : bundle incrémental `output/resources-delivery/resources-salt.bundle`, préalable `72919d9`. Le dépôt Git auxiliaire de construction est dans `output/resources-delivery/` ; le `.git` du worktree et le sous-module/junction `terrain-diffusion` ne sont pas modifiés. Serveur propre à ce worktree sur **8775**, seed 42 Orogen réchauffée en fin de livraison.
