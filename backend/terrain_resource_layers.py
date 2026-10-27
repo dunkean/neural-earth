@@ -109,9 +109,11 @@ def _specs():
 
     for m in metals:
         unit = 'kg/km²' if m in R.GRAM_METALS else 't/km²'
-        lo, hi = POTENTIAL_RANGE.get(m, (1e-4, 1.))
+        # Linear metal-specific scale: weak permissive background should not
+        # look as important as a fertile belt after four decades of log gain.
+        lo, hi = 0., .12 * sum(R.metal_potential_weights(m, fantasy_enabled()).values())
         add('dep', 'potential-' + m.replace('_', '-'), f'Potentiel · {METAL_LABELS[m]} (zones)', unit, lo, hi, WARM,
-            (lambda metal: (lambda f, g: R.metal_potential(f, metal, fantasy_enabled())))(m), log=True,
+            (lambda metal: (lambda f, g: R.metal_potential(f, metal, fantasy_enabled())))(m),
             physical_bounds=(0., sum(R.metal_potential_weights(m, fantasy_enabled()).values())),
             status='synthetic' if m == 'star_metal' else 'derived')
         add('dep', 'stock-' + m.replace('_', '-'), f'Stock contenu · {METAL_LABELS[m]} (gisements)', unit, 1e-3, 1e5, WARM,
@@ -645,6 +647,12 @@ class _World:
         ci = (self.dep_di >> 10) - grid.i[0]
         cj = np.clip((self.dep_dj >> 10) - grid.j[0], 0, len(grid.j) - 1)
         self.dep_theta = self.strike[cj, ci % len(grid.i)] + .5 * jit if n else np.zeros(0)
+        # Canonical regional relief bends the lobe chain. Placer axes follow
+        # descent; primary veins retain the structural strike. Fine relief is
+        # read by the shader for appearance, without multiplying stock density.
+        gy, gx = np.gradient(np.asarray(fields['height_m'], np.float64))
+        self.dep_bend = np.tanh((gx[cj, ci % len(grid.i)] * np.cos(self.dep_theta)
+                                + gy[cj, ci % len(grid.i)] * np.sin(self.dep_theta)) / 300.)
         fam = self.dep_family
         thick = np.array([AMAS.get(f, STRATA.get(f, 30.)) for f in fam]) if n else np.zeros(0)
         strata = np.isin(fam, list(STRATA))
@@ -652,6 +660,7 @@ class _World:
         a = np.sqrt(self.dep_ore / 2.7 / np.maximum(thick, 1) * aspect / np.pi)
         b = a / aspect
         vein, placer = np.isin(fam, VEIN), np.isin(fam, PLACER)
+        self.dep_theta = np.where(placer, np.arctan2(gy[cj, ci % len(grid.i)], gx[cj, ci % len(grid.i)]), self.dep_theta)
         self.dep_a = np.where(placer, np.clip(400 * (self.dep_ore / 1e5) ** .5, 200, 4000) / 2,
                               np.where(vein, np.clip(120 * (self.dep_ore / 1e4) ** .45, 60, 5000) / 2, a))
         self.dep_b = np.where(placer, 60., np.where(vein, np.clip(1.5 * (self.dep_ore / 1e4) ** .25, 1, 15) / 2, b))
@@ -810,7 +819,7 @@ def _gpu_package(state, mode):
                   world_bounds=list(grid.bounds), layers=int(field.shape[0]), classes=classes, seasonal=pkg['seasonal'], range=list(spec['range']),
                   bounded=pkg['bounded'], bounds=list(pkg['bounds']), log=bool(spec['log']), profile=G.PROFILE_NAMES.index(profile_of(mode)),
                   coef=list(coef), sigma=sigma, seed32=int(state.seed32), layer=layer,
-                  groups=[], realized=realized, beta=list(G.REALIZED_BETA) if realized else [0, 0], order=order, thresholds=0, scale=0., max_footprint=float(np.max(deposits[:, 4:6], initial=0) * 2) if deposits is not None else 0.,
+                  groups=[], realized=realized, beta=list(G.REALIZED_BETA) if realized else [0, 0], order=order, thresholds=0, scale=0., max_footprint=float(np.max(deposits[:, 4:6], initial=0) * 2.4) if deposits is not None else 0.,
                   palette=[[c / 255 for c in rgb] for rgb in palette], deposits=0 if deposits is None else int(len(deposits)),
                   field_shape=list(field.shape))
     parts = [field.astype(np.float16).tobytes()]
@@ -847,7 +856,7 @@ def _deposit_buffers(state, mode, kind):
     ints[:, 0], ints[:, 1] = state.dep_di[idx], state.dep_dj[idx]
     ints[:, 2], ints[:, 3] = state.dep_shape[idx], state.dep_color[idx]
     words[:, 4], words[:, 5], words[:, 6] = state.dep_a[idx], state.dep_b[idx], state.dep_theta[idx]
-    words[:, 7] = state.dep_access[idx]
+    words[:, 7] = state.dep_bend[idx] if kind == 'stock' else state.dep_access[idx]
     words[:, 8] = state.dep_gossan[idx]
     words[:, 9] = 1.2 + .8 * np.maximum(0, np.log10(np.maximum(state.dep_ore[idx], 1)) - 4)
     words[:, 10] = np.sqrt(state.dep_ore[idx] / 2.7 / 30.) / 2

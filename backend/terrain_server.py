@@ -428,7 +428,11 @@ def conditioning_preview(seed, world_profile, xs_metres, ys_metres, *, polar=Fal
 
 def clip_world_axes(xs, ys, profile):
     x0, y0, x1, y1 = profile_bounds(profile)
-    return np.clip(xs, x0/NATIVE, x1/NATIVE), np.clip(ys, y0/NATIVE, y1/NATIVE)
+    # Keep longitude halo coordinates unwrapped and uniformly spaced. The
+    # spherical source samples periodically; clamping makes a false flat wall
+    # and also compresses the climate lattice derived from these endpoints.
+    sphere = resolve_generation(profile).settings.get('world_topology', 'sphere') == 'sphere'
+    return (xs if sphere else np.clip(xs, x0/NATIVE, x1/NATIVE)), np.clip(ys, y0/NATIVE, y1/NATIVE)
 
 
 def _create_world(seed, world_profile, cache_limit, *, polar=False):
@@ -1020,6 +1024,14 @@ def sample_physical(world, seed, world_profile, lod, tx, ty, *, preview_only=Fal
         else:
             elevation,stage=sample_elevation(world,lod,tx,ty,xs=xs,ys=ys,
                 **({'amplify':amplify,'amplify_mode':amplify_mode,'surface_out':surface_out} if amplify and lod<0 else {}))
+    # Finite learned charts have independent end-strip noise. Join their DEM
+    # in physical longitude before any filtering or lighting, at every LOD.
+    # Atlas previews already evaluate a periodic geographic source.
+    if stage not in ('conditioning-preview', 'final-dem-mip') and not polar and resolve_generation(world_profile).settings.get('world_topology', 'sphere') == 'sphere':
+        from terrain_longitude import stitch
+        elevation = stitch(elevation, xs*NATIVE, profile_bounds(world_profile), lod, tx,
+                           lambda col: sample_elevation(world, lod, col, ty,
+                               coarse_interpolation=coarse_interpolation, amplify=amplify, amplify_mode=amplify_mode)[0])
     # The physical height, rather than display color, is filtered. The same
     # halo and globally aligned sample centres prevent tile-edge discontinuity.
     if lod>=3:
@@ -2658,7 +2670,11 @@ def native_coarse_tile(seed, tx, ty):
         learned = request.args.get('learned', '0') == '1'
         key = native_coarse_key(seed, tx, ty, wp, learned)
         cache_key = (wp, seed, tx, ty, identity)
-        xs, ys = native_coarse.sample_axes(tx, ty, profile_bounds(wp))
+        # Preview atlas sampling is periodic. Learned chart cells retain their
+        # finite addressing; they cannot be wrapped by rounding a nonintegral
+        # world circumference to a cell count.
+        periodic = not learned and resolve_generation(wp).settings.get('world_topology', 'sphere') == 'sphere'
+        xs, ys = native_coarse.sample_axes(tx, ty, profile_bounds(wp), periodic=periodic)
         ready = native_coarse_ready(seed, wp, xs, ys)
         with native_coarse_cache_lock:
             cached = native_coarse_cache.get(cache_key)
@@ -2674,7 +2690,7 @@ def native_coarse_tile(seed, tx, ty):
                 with (nullcontext() if preview_only else measured_lock(current_runtime().lock, 'coarse.gpu_lock_wait')), torch.inference_mode():
                     started = time.perf_counter()
                     jobs.check_current_interest()
-                    cx, cy = native_coarse.climate_axes(tx, ty, profile_bounds(wp))
+                    cx, cy = native_coarse.climate_axes(tx, ty, profile_bounds(wp), periodic=periodic)
                     if preview_only:
                         root = native_coarse.encode_height(conditioning_preview(seed, wp, xs*NATIVE, ys*NATIVE)['elev'])
                         climate = conditioning_preview(seed, wp, cx*NATIVE, cy*NATIVE)['climate']
@@ -2716,7 +2732,7 @@ def native_coarse_tile(seed, tx, ty):
             job = jobs.submit(key, compute, finalize, session=_session(session) if session else None,
                 epoch=int(request.args.get('epoch', 0)), lane='cpu' if preview_only else 'gpu', role='coarse')
             root, climate, report = job.wait()
-        cx, cy = native_coarse.climate_axes(tx, ty, profile_bounds(wp))
+        cx, cy = native_coarse.climate_axes(tx, ty, profile_bounds(wp), periodic=periodic)
         climate = transport_climate(seed,wp,cx*NATIVE,cy*NATIVE,climate)
         payload = root.astype('<f4', copy=False).tobytes() + climate.astype('<f4', copy=False).tobytes()
         response = Response(payload, mimetype='application/octet-stream')

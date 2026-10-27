@@ -31,7 +31,7 @@ NATIVE_M = 30.0
 # colours) must not bump it. V2_INPUTS_VERSION names the inputs given to the
 # Render v2 evaluator (sampling of the atlas); its cached environment also
 # depends on the source of terrain_render_v2.py, an external module.
-COMPILER_VERSION = 'resources-compiler-6'
+COMPILER_VERSION = 'resources-compiler-7'
 V2_INPUTS_VERSION = 'v2-inputs-1'
 WORLD_LOD = 10           # authority grid, 30.72 km
 BUDGET_LOD = 3           # 240 m: last level allocated from world information only
@@ -351,7 +351,7 @@ def value_noise(seed, name, lod, x, y, bounds=BOUNDS):
 # ---------------------------------------------------------------------------
 # World authority (LOD 10)
 
-def tectonic_contexts(layers, height, bounds=BOUNDS):
+def tectonic_contexts(layers, height, bounds=BOUNDS, *, with_tracts=False):
     """Soft context fractions at atlas resolution from Orogen plate fields."""
     h, w = height.shape
     spacing = (bounds[2] - bounds[0]) / w / 1000
@@ -385,7 +385,18 @@ def tectonic_contexts(layers, height, bounds=BOUNDS):
     oceanic = ocean_plate * (1 - land) + .02
     weights = np.stack((3 * arc, 3 * col, 3 * rif, 3 * hot, 1.5 * back, 2.5 * ophi,
                         3 * craton, 1.5 * passive, platform, oceanic))
-    return weights / weights.sum(axis=0), d['sea']
+    contexts = weights / weights.sum(axis=0)
+    if not with_tracts:
+        return contexts, d['sea']
+    # Metallogenic tracts have physical widths, independent of planet size.
+    # Do not sharpen the lithology's broad, normalized context memberships:
+    # an arc is permissive because of its boundary, not its rank among contexts.
+    tracts = dict(arc=np.maximum(np.exp(-(d['sub']/110)**2)*(1-ocean_plate),
+                                np.exp(-(d['io']/90)**2)*ocean_plate),
+                  collision=np.exp(-(d['col']/120)**2), rift=np.exp(-(d['rift']/100)**2),
+                  hotspot=hot**2, backarc=back, ophiolite=ophi,
+                  craton=craton, passive=passive, platform=(1-ocean_plate)*(1-np.maximum(arc,col)))
+    return contexts, d['sea'], tracts
 
 
 def _atlas_xy(shape, bounds=BOUNDS):
@@ -547,7 +558,7 @@ def compile_world(layers, height, seed, *, lod=WORLD_LOD, fantasy=False, params=
     height = np.asarray(height, np.float32)
     grid = Lattice(lod, bounds=bounds)
     ax, ay = _atlas_xy(height.shape, bounds)
-    contexts_atlas, sea_km = tectonic_contexts(layers, height, bounds)
+    contexts_atlas, sea_km, tracts = tectonic_contexts(layers, height, bounds, with_tracts=True)
     ts = -45 + 90 * np.asarray(layers['temperature_summer'], np.float64)
     tw = -45 + 90 * np.asarray(layers['temperature_winter'], np.float64)
     ps = 1000 * np.maximum(np.asarray(layers['precip_summer'], np.float64), 0)
@@ -568,6 +579,8 @@ def compile_world(layers, height, seed, *, lod=WORLD_LOD, fantasy=False, params=
     f['sea_km'] = S(sea_km)
     for k, name in enumerate(CONTEXTS):
         f['context_' + name] = S(contexts_atlas[k])
+    for name, tract in tracts.items():
+        f['tract_' + name] = S(tract)
     expected = np.stack([S(rocks_atlas[k]) for k in range(len(ROCKS))])
     expected /= np.maximum(expected.sum(axis=0), 1e-12)
     f['structural_strike'] = structural_strike(f)
@@ -851,9 +864,16 @@ def _materials(f):
 # Discrete deposits: count, tonnage, grade and position from keyed draws
 
 def prospectivity(f, spec):
-    ctx = sum(w * f['context_' + c] for c, w in spec['contexts'].items())
-    host = sum(w * f['rock_' + r] for r, w in spec['hosts'].items())
-    p = ctx * np.minimum(1, 1.5 * host)
+    # A weighted union, rather than addition of many weak memberships. Broad
+    # basin/craton tracts are further partitioned into coherent provinces below.
+    ctx = np.maximum.reduce([w * f.get('tract_' + c, f['context_' + c])
+                             for c, w in spec['contexts'].items()])
+    # A 30-km dominant outcrop cannot rule out buried intrusions/strata.
+    # Keep both the realized host and its tectonic prior; this is prospectivity,
+    # not a claim that the exposed rock everywhere in a tract contains ore.
+    host = sum(w * (.5*f['rock_' + r] + .5*f.get('rock_expected_' + r, f['rock_' + r]))
+               for r, w in spec['hosts'].items())
+    p = smoothstep(.08, .75, ctx) ** 2 * np.minimum(1, 1.5 * host)
     if 'requires' in spec:   # a necessary host: no salt deposit without evaporites
         p = p * smoothstep(0, .01, f['rock_' + spec['requires']])
     climate = spec.get('climate')
@@ -861,7 +881,29 @@ def prospectivity(f, spec):
         p = p * smoothstep(18, 24, f['temperature_c'].mean(axis=0)) * smoothstep(1000, 1600, f['precipitation_mm'].sum(axis=0))
     elif climate == 'humid':   # coal-forming swamps: a keyed paleoclimate would be better (doc §5.3)
         p = p * (.3 + .7 * smoothstep(500, 1200, f['precipitation_mm'].sum(axis=0)))
-    return p
+    return np.clip(p, 0, 1)
+
+
+def family_prospectivities(grid, f, seed, fantasy=False):
+    """Boundary tracts x host rock x fertile provinces, used by sites and maps.
+
+    The addressed 123/246-km province field is deliberately independent of the
+    sparse mining-district lottery. No per-world quantile or seed calibration.
+    """
+    X, Y = np.meshgrid(grid.x, grid.y)
+    out = {}
+    for name, spec in dict(FAMILIES, **(FANTASY if fantasy else {})).items():
+        n = (.7 * value_noise(seed, 'fertility-' + name, 13, X, Y, grid.bounds)
+             + .3 * value_noise(seed, 'fertility-' + name, 14, X, Y, grid.bounds))
+        fertile = smoothstep(-.15, .45, n) ** 2
+        out[name] = prospectivity(f, spec) * fertile * f['land']
+    for name, spec in PLACERS.items():
+        src = np.maximum.reduce([out[s] for s in spec['source']])
+        spread = gaussian_filter(src, 1, mode=('nearest', 'wrap'))
+        runoff = f['runoff_mm'].sum(axis=0)
+        out[name] = np.clip(spread * smoothstep(100, 600, runoff)
+                            * (1 - smoothstep(200, 900, f['rugged_m'])) * f['land'], 0, 1)
+    return out
 
 
 def _poisson(lam, u, kmax=40):
@@ -998,12 +1040,7 @@ def strike_at(strike, grid, x, y):
 def world_deposits(grid, f, seed, *, fantasy=False, parallel=None):
     """Discrete deposits owned by their LOD-10 cell. List of dicts, id-sorted."""
     families = dict(FAMILIES, **(FANTASY if fantasy else {}))
-    prosp = {name: prospectivity(f, spec) * f['land'] for name, spec in families.items()}
-    for name, spec in PLACERS.items():
-        src = sum(prosp[s] for s in spec['source'])
-        spread = gaussian_filter(src, 2, mode=('nearest', 'wrap'))     # downstream reach ~60 km
-        runoff = f['runoff_mm'].sum(axis=0)
-        prosp[name] = spread * smoothstep(100, 600, runoff) * (1 - smoothstep(200, 900, f['rugged_m'])) * f['land']
+    prosp = family_prospectivities(grid, f, seed, fantasy)
     f.update({'prospect_' + k: v.astype(np.float32) for k, v in prosp.items()})
     centres = {name: district_centres(seed, name, grid.lod, grid.bounds) for name in prosp
                if name in DISTRICT_SHAPE and grid.lod == WORLD_LOD}
@@ -1018,14 +1055,17 @@ def world_deposits(grid, f, seed, *, fantasy=False, parallel=None):
         count = original
         if name in centres and grid.lod == WORLD_LOD and source:
             X, Y = np.meshgrid(grid.x, grid.y)
-            live = lam > 0
+            # Districts may concentrate sites only inside the family's fertile
+            # belt. Keep the original Poisson count, reroute its marks into the
+            # upper part of the *same* prospectivity, never into a noise-only camp.
+            live = p >= max(float(p.max()) * .15, 1e-10)
             intensity = np.zeros(grid.shape)
             intensity[live] = district_intensity(X[live], Y[live], name, centres[name], f['structural_strike'], grid,
                                                  widen=grid.size / math.sqrt(12))
             # Move the same addressed deposit marks into districts. Largest
             # remainders preserves the family's original count exactly, while
             # every grade/tonnage draw keeps its original source address.
-            count = apportion(len(source), quantize((lam * intensity).ravel()), grid.ids.ravel()).reshape(grid.shape)
+            count = apportion(len(source), quantize((lam * intensity * live).ravel()), grid.ids.ravel()).reshape(grid.shape)
             source.sort(key=lambda v: key(seed, domain + ('district-route', str(int(grid.ids[v[0], v[1]])), str(v[2]))))
         targets = [(int(j), int(i), k) for j, i in zip(*np.nonzero(count)) for k in range(int(count[j, i]))]
         for (sj, si, sk), (j, i, k) in zip(source, targets):

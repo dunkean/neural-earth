@@ -47,7 +47,7 @@ PROFILES = {
     'cold':    ((1 / 30, 0., .3, .5, .012, 0.), .10),
     'season':  ((0., 0., 0., -.2, -.006, 0.), .08),
     'runoff':  ((1 / 15, .5, 0., 0., 0., .5), .15),
-    'mineral': ((1 / 25, -.3, .6, 0., 0., 0.), .45),
+    'mineral': ((1 / 25, -.3, .6, 0., 0., 0.), .08),
     'marine':  ((0., 0., 0., 0., 0., 0.), .25),
 }
 # Finest octave shown at a LOD: wavelength >= 4 samples (2 would alias into pixel grain).
@@ -516,7 +516,7 @@ def stock_radii(a, b, lod):
     return max(F32(2) * F32(a), F32(3) * r, district), max(F32(2) * F32(b), F32(3) * r, district / F32(3))
 
 
-def stock_normalization(dj, theta, su, sv, bounds=None):
+def stock_normalization(dj, theta, su, sv, bounds=None, offset_y=0.):
     """Integral against spherical area, including clipped polar support.
 
     The planar kernel is 3/(pi*a*b)*(1-q^2)^2 on q<1; its y marginal is
@@ -525,7 +525,7 @@ def stock_normalization(dj, theta, su, sv, bounds=None):
     """
     if bounds is None:
         return F32(1)
-    y = F32(dj) * F32(30) + F32(15)
+    y = F32(dj) * F32(30) + F32(15) + F32(offset_y)
     radius = F32(bounds[2] - bounds[0]) / F32(6.2831853)
     cy = F32(bounds[1] + bounds[3]) * F32(.5)
     sy = np.sqrt((su * F32(math.sin(theta))) ** 2 + (sv * F32(math.cos(theta))) ** 2).astype(F32)
@@ -540,11 +540,33 @@ def stock_normalization(dj, theta, su, sv, bounds=None):
     return max(F32(1e-8), out * half * F32(16 / (5 * math.pi)))
 
 
+def stock_lobes(d, lod, bounds=None):
+    """Positive partition of one mass into curved, overlapping soft lobes.
+
+    Offsets and widths are keyed by the site, along its structural azimuth.
+    Each lobe integrates to its fixed mass share, including polar clipping.
+    """
+    su, sv = stock_radii(d['a'], d['b'], lod)
+    phase = node_value(d['di'], d['dj'], 1709) * F32(3)
+    bend = F32(np.clip(d.get('access', 0), -1, 1))
+    c, s = F32(math.cos(d['theta'])), F32(math.sin(d['theta']))
+    for k, weight in enumerate((.13, .23, .28, .23, .13)):
+        t = F32(k - 2) * F32(.33)
+        u = t * su
+        v = sv * (F32(.45)*np.sin(phase+F32(2.2)*F32(k)) + bend*t*t)
+        ox, oy = u*c-v*s, u*s+v*c
+        if bounds is not None:
+            center = F32(d['dj'])*F32(30)+F32(15)
+            oy = np.clip(center+oy, F32(bounds[1])+F32(1), F32(bounds[3])-F32(1))-center
+        a, b = su*F32(.40), sv*(F32(.50)+F32(.15)*np.cos(phase+F32(k)))
+        yield F32(ox), F32(oy), F32(a), F32(b), F32(weight)
+
+
 def stock_density(deps, gi, gj, lod, bounds=None):
     """Stock per spherical km2: sum of smooth, normalized compact kernels.
 
-    No field interpolation, cutoff Gaussian tail, terrain modulation or stock
-    creation. Canonical masses remain integers; quadrature tolerance is tested.
+    Positive lobes partition the mass exactly; their quadrature normalization
+    includes spherical area. Fine relief affects appearance, never this density.
     """
     r = F32(30. * 2. ** lod)
     out = np.zeros(np.broadcast(gi, gj).shape, F32)
@@ -556,11 +578,12 @@ def stock_density(deps, gi, gj, lod, bounds=None):
             span = F32(bounds[2] - bounds[0])
             dx -= np.floor(dx / span + F32(.5)) * span
         c, s = F32(math.cos(d['theta'])), F32(math.sin(d['theta']))
-        u, v = dx * c + dy * s, -dx * s + dy * c
-        su, sv = stock_radii(d['a'], d['b'], lod)
-        q = np.maximum(F32(0), F32(1) - u * u / (su * su) - v * v / (sv * sv))
-        norm = stock_normalization(d['dj'], d['theta'], su, sv, bounds)
-        out += F32(d['mass']) * F32(1e6) * F32(3 / math.pi) / (su * sv * norm) * q * q
+        for ox, oy, su, sv, weight in stock_lobes(d, lod, bounds):
+            lx, ly = dx-ox, dy-oy
+            u, v = lx*c+ly*s, -lx*s+ly*c
+            q = np.maximum(F32(0), F32(1) - u*u/(su*su) - v*v/(sv*sv))
+            norm = stock_normalization(d['dj'], d['theta'], su, sv, bounds, oy)
+            out += F32(d['mass']) * weight * F32(1e6) * F32(3 / math.pi) / (su * sv * norm) * q * q
     return out.astype(F32)
 
 

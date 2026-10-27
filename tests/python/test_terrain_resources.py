@@ -168,7 +168,8 @@ class ResourceTests(unittest.TestCase):
             self.assertTrue(f['land'][j, i])
             self.assertGreater(f['prospect_' + d['family']][j, i], 0)
             if 'hosts' in spec:
-                self.assertGreater(sum(f['rock_' + r][j, i] for r in spec['hosts']), 0)
+                self.assertGreater(sum(f['rock_' + r][j, i] + f['rock_expected_' + r][j, i]
+                                       for r in spec['hosts']), 0)
             # The position cell is a descendant of the owner cell.
             lod, ci, cj = R.decode_id(np.uint64(d['owner_cell']))
             self.assertEqual(d['position_lod'], R.placement_lod(int(lod)))
@@ -316,6 +317,22 @@ class ResourceDistrictTests(unittest.TestCase):
         intensity = R.district_intensity(a[0][row, col, 0], a[1][row, col, 0], family, a, f['structural_strike'], g)
         self.assertGreater(float(intensity), 1.)
 
+    def test_sites_stay_in_fertile_family_tracts(self):
+        index = {int(cid): ij for ij, cid in np.ndenumerate(self.grid.ids)}
+        for d in self.deposits:
+            p = self.fields['prospect_' + d['family']]
+            self.assertGreaterEqual(p[index[d['owner_cell']]], .15*float(p.max())-1e-8)
+
+    def test_family_potential_requires_its_tectonic_tract(self):
+        f = dict(self.fields)
+        f['tract_arc'] = np.zeros(self.grid.shape)
+        f['tract_backarc'] = np.zeros(self.grid.shape)
+        f['tract_collision'] = np.zeros(self.grid.shape)
+        p = R.prospectivity(f, R.FAMILIES['porphyry_cu'])
+        np.testing.assert_array_equal(p, 0)
+        f['tract_arc'] = np.ones(self.grid.shape)
+        self.assertGreater(float(R.prospectivity(f, R.FAMILIES['porphyry_cu']).max()), 0)
+
     def test_every_metal_potential_is_bounded_and_fantasy_isolated(self):
         import terrain_resource_gpu as G
         rng = np.random.default_rng(18)
@@ -352,6 +369,26 @@ class ResourceDistrictTests(unittest.TestCase):
                 integral = 16 / (5 * np.pi) * quad(lambda t: max(0, 1 - t*t)**2.5 * np.cos((center + sy*t) / radius), lo, hi, epsabs=1e-12)[0]
                 norm = G.stock_normalization(dj, theta, su, sv, bounds)
                 self.assertAlmostEqual(integral / float(norm), 1, delta=2e-4)
+
+    def test_organic_stock_integral_at_every_lod_and_polar_clip(self):
+        from scipy.integrate import quad
+        import terrain_resource_gpu as G
+        radius = 2e6
+        bounds = (-np.pi*radius, -np.pi*radius/2, np.pi*radius, np.pi*radius/2)
+        errors = []
+        for lod in (10, 7, 6, 5, 4, 3, 2, 0, -2):
+            for y in (0, radius*1.1, bounds[3]-300):
+                d = dict(di=100, dj=int(y/30), theta=.83, a=1200, b=35, access=-.7, mass=123456)
+                integral = 0.
+                for ox, oy, a, b, weight in G.stock_lobes(d, lod, bounds):
+                    cy = (d['dj']+.5)*30+float(oy)
+                    sy = np.hypot(float(a)*np.sin(d['theta']), float(b)*np.cos(d['theta']))
+                    lo, hi = max(-1, (bounds[1]-cy)/sy), min(1, (bounds[3]-cy)/sy)
+                    exact = 16/(5*np.pi)*quad(lambda t: max(0,1-t*t)**2.5*np.cos((cy+sy*t)/radius), lo, hi, epsabs=1e-13)[0]
+                    integral += float(weight)*exact/float(G.stock_normalization(d['dj'], d['theta'], a, b, bounds, oy))
+                errors.append(abs(integral-1))
+                self.assertAlmostEqual(integral, 1, delta=2e-4)
+        print('organic stock max integral relative error:', max(errors), flush=True)
 
 
 class ResourceGpuMirrorTests(unittest.TestCase):

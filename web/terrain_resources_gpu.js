@@ -213,9 +213,9 @@
       let district=135000.*rSmooth(2.,6.,f32(lod));
       return max(vec2<f32>(2.*a,2.*b),max(vec2<f32>(3.*r),vec2<f32>(district,district/3.)));
     }
-    fn rStockNorm(dj:i32,theta:f32,su:f32,sv:f32)->f32{
+    fn rStockNorm(dj:i32,theta:f32,su:f32,sv:f32,offsetY:f32)->f32{
       if(res.world.z<=res.world.x){return 1.;}
-      let wb=res.world*30720.;let y=f32(dj)*30.+15.;let radius=(wb.z-wb.x)/6.2831853;
+      let wb=res.world*30720.;let y=f32(dj)*30.+15.+offsetY;let radius=(wb.z-wb.x)/6.2831853;
       let sy=length(vec2<f32>(su*sin(theta),sv*cos(theta)));
       let lo=max(-1.,(wb.y-y)/sy);let hi=min(1.,(wb.w-y)/sy);
       let mid=(lo+hi)*.5;let half=(hi-lo)*.5;var total=0.;
@@ -235,7 +235,7 @@
       if(res.zones2.y<.5){return rgb;}
       var cx:i32;var cy:i32;
       if(lod<=10){cx=gi>>u32(10-lod);cy=gj>>u32(10-lod);}else{cx=i32(floor((f32(gi)+.5)*exp2(f32(lod-10))));cy=i32(floor((f32(gj)+.5)*exp2(f32(lod-10))));}
-      let R=i32(ceil(max(max(12000.,res.zones.w),max(135000.*rSmooth(2.,6.,f32(lod)),select(9.,3.,res.info.x>5.5)*r))/30720.))+1;
+      let R=i32(ceil(max(max(12000.,res.zones.w),max(162000.*rSmooth(2.,6.,f32(lod)),select(9.,3.,res.info.x>5.5)*r))/30720.))+1;
       let W=i32(res.grid.z);let stock=res.info.x>5.5;
       for(var oy=-R;oy<=R;oy++){for(var col=0;col<min(2*R+1,W);col++){let ox=col-R;
         if(cy+oy<i32(res.grid.y)||cy+oy>=i32(res.grid.y+res.grid.w)){continue;}
@@ -247,9 +247,26 @@
           let a=d.dim.x;let b=d.dim.y;let c=cos(d.dim.z);let s=sin(d.dim.z);
           let u=dx*c+dy*s;let v=-dx*s+dy*c;
           if(stock){
-            let size=rStockRadii(a,b,lod,r);let su=size.x;let sv=size.y;
-            let q=max(0.,1.-u*u/(su*su)-v*v/(sv*sv));
-            if(q>0.){*density+=d.extra.w*1e6*.95492966/(su*sv*rStockNorm(d.ij.y,d.dim.z,su,sv))*q*q;rgb.x+=q*q;}
+            let size=rStockRadii(a,b,lod,r);
+            let phase=rNode(d.ij.x,d.ij.y,1709u)*3.;let bend=clamp(d.dim.w,-1.,1.);
+            var weights=array<f32,5>(.13,.23,.28,.23,.13);
+            for(var l=0;l<5;l++){
+              let t=f32(l-2)*.33;let du=t*size.x;
+              let dv=size.y*(.45*sin(phase+2.2*f32(l))+bend*t*t);
+              let ox=du*c-dv*s;var oy=du*s+dv*c;
+              let center=f32(d.ij.y)*30.+15.;
+              if(res.world.z>res.world.x){oy=clamp(center+oy,res.world.y*30720.+1.,res.world.w*30720.-1.)-center;}
+              let su=size.x*.40;let sv=size.y*(.50+.15*cos(phase+f32(l)));
+              let lx=dx-ox;let ly=dy-oy;let lu=lx*c+ly*s;let lv=-lx*s+ly*c;
+              let q=max(0.,1.-lu*lu/(su*su)-lv*lv/(sv*sv));
+              if(q>0.){
+                *density+=d.extra.w*weights[l]*1e6*.95492966/(su*sv*rStockNorm(d.ij.y,d.dim.z,su,sv,oy))*q*q;
+                rgb.x+=weights[l]*q*q;
+                // Local landform controls visible emphasis only. Multiplying
+                // density here would destroy its normalized mass integral.
+                rgb.y+=weights[l]*q*q*select(-valley,valley,d.ij.z==3);
+              }
+            }
             continue;
           }
           let color=res.palette[min(d.ij.w,19)].rgb*(.45+.55*d.dim.w);
@@ -293,12 +310,13 @@
         return (.5+.5*cos(6.2831853*(v/12.+vec3<f32>(0.,1./3.,2./3.))))*.9*light;
       }
       if(kind>5.5){
-        var density=0.;let coverage=rDeposits(gi,gj,lod,r,0.,vec3<f32>(0.),&density).x;
+        var density=0.;let body=rDeposits(gi,gj,lod,r,max(f.valley,f.river)-f.ridge,vec3<f32>(0.),&density);
+        let coverage=body.x;
         let lo=res.range.x;let hi=res.range.y;
         if(density<=lo){return neutral;}
-        let t=(log(max(density,lo))-log(lo))/(log(hi)-log(lo));
+        let t=(log(max(density,lo))-log(lo))/(log(hi)-log(lo))+.14*body.y/max(coverage,1e-6);
         // Long fade (a quarter of the log range): a kernel tail never ends in a hard edge.
-        return mix(neutral,rRamp(t)*light,rSmooth(0.,.25,t)*rSmooth(0.,.20,coverage));
+        return mix(neutral,rRamp(t)*light,rSmooth(0.,.25,t)*rSmooth(0.,.10,coverage));
       }
       let v=rContinuous(gi,gj,lod,rTerms(f));
       if(kind>4.5){

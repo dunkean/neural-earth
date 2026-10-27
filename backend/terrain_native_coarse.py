@@ -15,7 +15,7 @@ CLIMATE_STRIDE = 4
 CLIMATE_SIZE = WIDTH // CLIMATE_STRIDE + 1
 
 
-def sample_axes(tx, ty, bounds):
+def sample_axes(tx, ty, bounds, *, periodic=False):
     offsets = np.arange(-HALO, CELLS + HALO, dtype=np.float64) + .5
     # Clamp to the nearest *cell centre*, including partial world-edge cells.
     def axis(tile, low, high):
@@ -23,17 +23,19 @@ def sample_axes(tx, ty, bounds):
         first = np.floor(low / RESOLUTION) + .5
         last = np.ceil(high / RESOLUTION) - .5
         return np.clip(indices, first, last) * STRIDE
-    return axis(tx, bounds[0], bounds[2]), axis(ty, bounds[1], bounds[3])
+    x = (tx * CELLS + offsets) * STRIDE if periodic else axis(tx, bounds[0], bounds[2])
+    return x, axis(ty, bounds[1], bounds[3])
 
 
-def climate_axes(tx, ty, bounds):
+def climate_axes(tx, ty, bounds, *, periodic=False):
     # Include one endpoint beyond the height array. This keeps the compact
     # climate lattice globally aligned across blocks, including their halos.
     offsets = np.arange(CLIMATE_SIZE) * CLIMATE_STRIDE - HALO + .5
     def axis(tile, low, high):
         return np.clip(tile * CELLS + offsets, np.floor(low/RESOLUTION)+.5,
                        np.ceil(high/RESOLUTION)-.5) * STRIDE
-    return axis(tx, bounds[0], bounds[2]), axis(ty, bounds[1], bounds[3])
+    x = (tx * CELLS + offsets) * STRIDE if periodic else axis(tx, bounds[0], bounds[2])
+    return x, axis(ty, bounds[1], bounds[3])
 
 
 def read_native(world, xs, ys, read_rect, check):
