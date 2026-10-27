@@ -26,3 +26,11 @@ test('clustering crosses physical longitude and LOD-10 bucket boundaries',()=>{
   assert.equal(a.symbols,2);assert.equal(a.clusters,2);
   assert.deepEqual(a.groups.map(g=>g.members.length),[2,2]);
 });
+test('salt clusters keep families and stock/flow dimensions separate',()=>{
+  const {header,data}=fixture([[0,0,100],[1,0,200],[2,0,300]]);
+  header.annual_equivalence=100;
+  const a=RG.aggregate(header,data,30);
+  assert.equal(a.symbols,2);
+  assert.deepEqual(a.groups.map(g=>g.mass).sort((a,b)=>a-b),[200,400]);
+  for(const g of a.groups)assert(g.members.every(i=>i%2===g.index%2));
+});

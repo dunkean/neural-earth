@@ -48,6 +48,10 @@ class DepositTable:
                 if a['district'][n]:
                     d.update(district_id=f"{family}:{int(a['district'][n]):016x}:0",
                              district_center_m=a['district_xy'][n].tolist())
+                if 'annual_kg' in a and a['annual_kg'][n]:
+                    d.update(quantity_kind='annual_flow', annual_production_t=int(a['annual_kg'][n])/1000,
+                             production_months=[m+1 for m in range(12) if int(a['season_mask'][n]) & (1 << m)],
+                             pan_area_m2=int(a['pan_m2'][n]), calibration='provisoire')
                 result.append(d)
             result.sort(key=lambda d:d['id'])
             self._records=result
@@ -194,7 +198,15 @@ def compile_deposits(grid,f,seed,fantasy=False):
             access=np.round(access,4),outcrop=outcrop,gossan=outcrop&bool(spec.get('sulfide'))&(f['temperature_c'].max(axis=0).ravel()[src]>0),
             fantasy=np.full(len(src),name in R.FANTASY,bool),district=district,district_xy=dxy))
     if not parts:
-        return []
+        # A coast needs no mineral deposit in order to support a saltern.
+        arrays={k:np.zeros(0,dtype) for k,dtype in dict(family=np.int16,source=np.uint64,source_index=np.int64,
+            owner=np.uint64,index=np.int64,position=np.uint64,lod=np.int8,i=np.int64,j=np.int64,ore=np.int64,
+            grade=np.float64,depth=np.float64,access=np.float64,outcrop=bool,gossan=bool,fantasy=bool,district=np.uint64).items()}
+        arrays.update(contained=np.zeros((0,len(metals)),np.int64),recoverable=np.zeros((0,len(metals)),np.int64),
+                      district_xy=np.zeros((0,2)),present=present)
+        from terrain_resource_salt import append_sites
+        return append_sites(DepositTable(arrays,names,metals),grid,f,seed)
     arrays={k:np.concatenate([part[k] for part in parts]) for k in parts[0]}
     arrays['present']=present
-    return DepositTable(arrays,names,metals)
+    from terrain_resource_salt import append_sites
+    return append_sites(DepositTable(arrays,names,metals),grid,f,seed)

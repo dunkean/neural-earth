@@ -22,6 +22,7 @@ import os
 import numpy as np
 from scipy.ndimage import distance_transform_edt, gaussian_filter, gaussian_filter1d, maximum_filter, minimum_filter
 from scipy.special import ndtri
+from terrain_resource_salt import coast_candidates
 
 VERSION = 'resources-v1-prototype'
 NATIVE_M = 30.0
@@ -31,7 +32,7 @@ NATIVE_M = 30.0
 # colours) must not bump it. V2_INPUTS_VERSION names the inputs given to the
 # Render v2 evaluator (sampling of the atlas); its cached environment also
 # depends on the source of terrain_render_v2.py, an external module.
-COMPILER_VERSION = 'resources-compiler-13'
+COMPILER_VERSION = 'resources-compiler-14'
 V2_INPUTS_VERSION = 'v2-inputs-1'
 WORLD_LOD = 10           # authority grid, 30.72 km
 BUDGET_LOD = 3           # 240 m: last level allocated from world information only
@@ -618,7 +619,7 @@ PARAMS = dict(
     game_harvest_rate=.15,       # sustainable annual take of standing number
     floodplain_fish_kg_ha=42.,   # 4.23 t/km2 floodplain (Crul 1992, after Welcomme 1985)
     shelf_fish_t_km2=2.,         # coastal shelf, per km2 per year (provisional, not verified)
-    salt_pan_t_m2=.05,           # solar salt per m2 of pan per dry warm month (provisional)
+    salt_pan_t_m2=.00025,        # 2.5 t/ha per warm dry month (provisional; §24)
     peat_m=1.5,                  # mean accumulated peat thickness (provisional)
     peat_growth_m_yr=.0004,      # ~0.4 mm/yr derived from Loisel et al. 2014 C rate and density
     bog_iron_t_km2_yr=.4,        # bog iron renewal in iron-rich wetlands (provisional)
@@ -725,6 +726,7 @@ def compile_world(layers, height, seed, *, lod=WORLD_LOD, fantasy=False, params=
         f['rock_' + name] = realized[k]
     _bog_iron(f, p)
     _materials(f)
+    coast_candidates(grid, f, height)
     report('geology', f)
     deposits = world_deposits(grid, f, seed, fantasy=fantasy, parallel=parallel)
     stock_layers(grid, f, deposits)
@@ -934,6 +936,7 @@ def _biology(f, p):
     coast = land * np.exp(-f['sea_km'] / 15) * (1 - smoothstep(30, 300, f['rugged_m']))
     dry = (T >= 15) & (P < pet)
     pan_m2 = coast * area * 1e-4
+    f['_salt_pan_t_m2'] = p['salt_pan_t_m2']
     f['sea_salt_month_t'] = (pan_m2 * dry * p['salt_pan_t_m2']).astype(np.float32)
     # Peat: cold-humid waterlogged lowlands (organic pedology), slow regeneration.
     wet = smoothstep(.8, 1.2, P.sum(axis=0) / np.maximum(pet.sum(axis=0), 1))
@@ -1317,8 +1320,8 @@ def stock_layers(grid, f, deposits):
 
 EXTENSIVE = ('arable_area_m2', 'cereal_net_t_year', 'wood_stock_m3', 'wood_flux_m3_year',
              'game_harvest_kg_year', 'water_yield_m3', 'fish_marine_t_year', 'peat_area_m2',
-             'peat_stock_m3', 'bog_iron_t_year')
-QUANTUM = dict(arable_area_m2=1., cereal_net_t_year=.001, wood_stock_m3=1., wood_flux_m3_year=.01,
+             'peat_stock_m3', 'bog_iron_t_year', 'coastal_salt_kg_year')
+QUANTUM = dict(coastal_salt_kg_year=1., arable_area_m2=1., cereal_net_t_year=.001, wood_stock_m3=1., wood_flux_m3_year=.01,
                game_harvest_kg_year=1., water_yield_m3=1000., fish_marine_t_year=.001,
                peat_area_m2=1., peat_stock_m3=1., bog_iron_t_year=.001)
 
@@ -1412,7 +1415,7 @@ UNITS = dict(area_m2='m2', arable_area_m2='m2', cereal_yield_t_ha='t/ha/an (brut
              wood_increment_m3_ha='m3/ha/an', wood_stock_m3='m3', wood_flux_m3_year='m3/an',
              game_per_km2='ind./km2', game_harvest_kg_year='kg/an', water_yield_m3='m3/an',
              runoff_mm='mm/mois', fish_inland_month_t='t/mois', fish_marine_t_year='t/an',
-             sea_salt_month_t='t/mois', peat_area_m2='m2', peat_stock_m3='m3', bog_iron_t_year='t Fe/an',
+             sea_salt_month_t='t/mois', coastal_salt_kg_year='kg/an', peat_area_m2='m2', peat_stock_m3='m3', bog_iron_t_year='t Fe/an',
              temperature_c='degC', precipitation_mm='mm/mois', growing_months='mois', harvest_month='mois (0=janvier)')
 
 

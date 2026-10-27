@@ -166,6 +166,8 @@ class ResourceTests(unittest.TestCase):
         f = self.f
         index = {int(c): (j, i) for (j, i), c in np.ndenumerate(self.grid.ids)}
         for d in self.deposits:
+            if d.get('quantity_kind') == 'annual_flow':
+                continue  # coastal flows have their own relief/climate/fuel tests
             j, i = index[d['owner_cell']]
             spec = {**R.FAMILIES, **R.PLACERS}[d['family']]
             self.assertTrue(f['land'][j, i])
@@ -308,7 +310,7 @@ class ResourceDistrictTests(unittest.TestCase):
 
     def test_district_marks_preserve_counts_and_tonnage(self):
         g, f = self.grid, self.fields
-        actual = {d['id']: d for d in self.deposits}
+        actual = {d['id']: d for d in self.deposits if d.get('quantity_kind') != 'annual_flow'}
         expected = {}
         for name, spec in {**R.FAMILIES, **R.PLACERS}.items():
             domain = ('resources', 'deposit', name)
@@ -354,6 +356,8 @@ class ResourceDistrictTests(unittest.TestCase):
     def test_sites_stay_in_fertile_family_tracts(self):
         index = {int(cid): ij for ij, cid in np.ndenumerate(self.grid.ids)}
         for d in self.deposits:
+            if d.get('quantity_kind') == 'annual_flow':
+                continue
             p = self.fields['prospect_' + d['family']]
             self.assertGreaterEqual(p[index[d['owner_cell']]], .15*float(p.max())-1e-8)
 

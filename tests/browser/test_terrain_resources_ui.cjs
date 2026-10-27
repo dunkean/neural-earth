@@ -38,7 +38,18 @@ const specs=JSON.parse(execFileSync(pythonExecutable(),['-c',"import sys,json;sy
    TerrainResources.setRenderer({res:{header:{site_indices:true,world_bounds:[-100,-100,100,100]},source:{deposits:source},aggregation:{groups:[{x:15,y:15,mass:30,members:[0,1]}]}}});
    const deposits=[41,42,43].map((site_index,i)=>({site_index,symbol_cell:[0,0],label:'Petits filons Pb–Ag',distance_m:0,medieval_recoverable:{copper:10*(i+1)},contained:{copper:100},contained_units:{copper:'t'},ore_t:10000,depth_top_m:2,footprint_m:[20,10]}));
    await TerrainResources.inspect({x:15,y:15,seed:42,profile:'fixture',mpp:30,fetchJSON:async()=>({ok:true,status:200,json:async()=>({cell:{lod:10,i:0,j:0,area_km2:1},dominant:{context:'Craton',rock:'Calcaire'},values:{},deposits})})});
-   return {failures,inspection:TerrainResources.state().inspection,text:document.querySelector('[data-resource-inspector]').textContent,specs:Object.keys(specs).length};
+   const copperText=document.querySelector('[data-resource-inspector]').textContent;
+   const copperInspection=TerrainResources.state().inspection;
+   select.value='resources-dep-salt';TerrainResources.sync(select.value);TerrainResources.setRenderer({});
+   for(const lang of ['fr','en','zh','es','pt']){
+    localStorage.setItem('neural-earth-locale-v1',lang);
+    const coastal={...deposits[0],label:'Saline à sel bouilli (sel ignigène)',medieval_recoverable:{},contained:{},quantity_kind:'annual_flow',annual_production_t:12.5,production_months:[3,4,5]};
+    const rock={...deposits[1],label:'Sel et gypse évaporitiques (35a)',medieval_recoverable:{salt:25},contained:{salt:100},contained_units:{salt:'t'}};
+    await TerrainResources.inspect({x:0,y:0,seed:42,profile:'fixture',fetchJSON:async()=>({ok:true,status:200,json:async()=>({cell:{lod:10,i:0,j:0,area_km2:1},dominant:{context:'Craton',rock:'Calcaire'},values:{},deposits:[coastal,rock]})})});
+    const text=document.querySelector('[data-resource-inspector]').textContent;
+    if(!text.includes(TerrainResources.label(coastal.label))||!text.includes(TerrainResources.label(rock.label))||text.includes('NaN'))failures.push([lang,'salt inspector']);
+   }
+   return {failures,inspection:copperInspection,text:copperText,specs:Object.keys(specs).length};
   },specs);
   assert.deepEqual(errors,[]);assert.deepEqual(report.failures,[]);
   assert.equal(report.inspection.members,2,'coincident unrelated sites must not enter the cluster inspector');

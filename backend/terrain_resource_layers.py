@@ -41,7 +41,8 @@ FAMILY_COLORS = {
     'porphyry_cu': 'e07b39', 'epithermal_au_ag': 'ffd84d', 'sn_w_granite': 'c0c0d8', 'polymetallic_vein': '9aa5b1',
     'vms': 'd9534f', 'orogenic_au': 'f4c430', 'mvt_pb_zn': '7f8c8d', 'sediment_cu': 'c46a2b', 'skarn_fe_cu': 'a0522d',
     'bif_iron': '8b3a3a', 'ironstone': 'b5651d', 'laterite_fe': 'cd5c5c', 'evaporite_salt': 'ffffff', 'coal': '303030',
-    'placer_au': 'ffe680', 'placer_sn': 'dfe4f0', 'fantasy_star_metal': '9b5de5'}
+    'placer_au': 'ffe680', 'placer_sn': 'dfe4f0', 'fantasy_star_metal': '9b5de5',
+    'sea_salt_solar': 'ffd35c', 'sea_salt_boiled': 'ed86ac'}
 FAMILY_LABELS = {
     'small_coal': 'Petit affleurement de charbon',
     'bog_iron': 'Fer des marais', 'local_ironstone': 'Petit fer sédimentaire', 'small_pb_ag': 'Petits filons Pb–Ag',
@@ -53,7 +54,8 @@ FAMILY_LABELS = {
     'skarn_fe_cu': 'Skarn Fe-Cu (18b)', 'bif_iron': 'Fer rubané Superior/Algoma (34a, 28b)',
     'ironstone': 'Fer oolithique (34f)', 'laterite_fe': 'Fer latéritique', 'evaporite_salt': 'Sel et gypse évaporitiques (35a)',
     'coal': 'Charbon', 'placer_au': 'Placers aurifères (39a)', 'placer_sn': 'Placers stannifères (39e)',
-    'fantasy_star_metal': 'Fantasy · métal stellaire'}
+    'fantasy_star_metal': 'Fantasy · métal stellaire',
+    'sea_salt_solar': 'Marais salant solaire', 'sea_salt_boiled': 'Saline à sel bouilli (sel ignigène)'}
 # Provisional display ranges of per-metal potentials (t or kg per km2).
 # These colour ranges are not physical bounds or measured quantiles.
 POTENTIAL_RANGE = dict(iron=(.05, 500.), copper=(5e-4, 5.), tin=(1e-5, .1), lead=(1e-4, 1.), zinc=(2e-4, 2.),
@@ -125,7 +127,12 @@ def _specs():
             status='synthetic' if m == 'star_metal' else 'derived')
         add('dep', m.replace('_', '-'), METAL_LABELS[m].capitalize(), 'tonnes récupérables', 0, 1, SEQ,
             None, kind='points', classes=[(FAMILY_LABELS[k], FAMILY_COLORS[k]) for k in families
-                if m in {**R.FAMILIES, **R.PLACERS, **R.FANTASY}[k]['metals']])
+                if m in {**R.FAMILIES, **R.PLACERS, **R.FANTASY}[k]['metals']] +
+                ([(FAMILY_LABELS[k], FAMILY_COLORS[k]) for k in ('sea_salt_solar','sea_salt_boiled')] if m == 'salt' else []))
+        if m == 'salt':
+            out[-1][1].update(unit='t récupérables ou t/an', annual_equivalence=100.)
+    out_dict = dict(out)
+    out_dict[PREFIX+'dep-points']['annual_equivalence'] = 100.
     # Agriculture and herding
     add('agri', 'cereal-suitability', 'Céréales · aptitude (Ecocrop × sols × relief)', 'indice 0–1', 0, 1, GREEN, field('cereal_suitability'))
     add('agri', 'cereal-class', 'Céréales · classes GAEZ (NS, vmS, mS, MS, S, VS)', 'classe', 0, 5,
@@ -186,7 +193,8 @@ def _specs():
         proxy=True, seasonal=True)
     add('season', 'runoff', 'Écoulement du mois', 'mm/mois', 0, 150, BLUE, month('runoff_mm'), seasonal=True)
     # Diagnostic maps are placement inputs, not inventories. Keep stable mode IDs.
-    diagnostic = [item for item in out if '-potential-' in item[0] or '-prospect-' in item[0]]
+    diagnostic = [item for item in out if '-potential-' in item[0] or '-prospect-' in item[0]
+                  or item[0] in (PREFIX+'mat-sea-salt', PREFIX+'season-salt')]
     for _, spec in diagnostic:
         spec['group'] = 'diagnostic'
     return [item for item in out if item not in diagnostic] + diagnostic
@@ -207,6 +215,8 @@ def legend_text(spec):
     lo, hi = spec['range']
     scale = ' (log)' if spec['log'] else ''
     if spec['kind'] == 'points':
+        if spec.get('annual_equivalence'):
+            return f"Ressources · {spec['label']} · stocks récupérables (t) / production côtière (t/an) · équivalence graphique 1 t/an = 100 t · calibration provisoire"
         return f"Ressources · {spec['label']} · aire logarithmique du tonnage récupérable · diamètre 6–14 px + contour"
     diagnostic = ' · intensité de placement, pas une carte des ressources' if spec['group'] == 'diagnostic' else ''
     return f"Ressources · {spec['label']} · {lo:g}–{hi:g} {spec['unit']}{scale} · {spec['status']}{proxy}{diagnostic}"
@@ -577,8 +587,9 @@ def draw_deposits(grid, deposits, xs, ys, base, metal='points'):
     """CPU overview fallback: recoverable-mass symbols, filtered by resource."""
     import terrain_resources as R
     rgb = base.copy()
-    mass_of = lambda d: (sum(v/(1000 if m in R.GRAM_METALS else 1) for m,v in d['medieval_recoverable'].items())
+    mass_of = lambda d: ((sum(v/(1000 if m in R.GRAM_METALS else 1) for m,v in d['medieval_recoverable'].items())
                          if metal == 'points' else d['medieval_recoverable'].get(metal,0)/(1000 if metal in R.GRAM_METALS else 1))
+                        + (100*d.get('annual_production_t',0) if metal in ('salt','points') else 0))
     deposits = [d for d in deposits if mass_of(d)>0]
     xs, ys = np.asarray(xs, np.float64), np.asarray(ys, np.float64)
     dx = abs(xs[1] - xs[0]) if len(xs) > 1 else 1.
@@ -645,7 +656,8 @@ def inspect(atlas, x, y, radius_m=60000., mode=None, *, all_members=False):
                              footprint_m=[round(2*state.dep_a[n], 1), round(2*state.dep_b[n], 1)]))
     if mode and mode.startswith(PREFIX + 'dep-') and mode != PREFIX + 'dep-points':
         metal = mode.removeprefix(PREFIX + 'dep-').replace('-', '_')
-        near = [d for d in near if d['medieval_recoverable'].get(metal, 0) > 0]
+        near = [d for d in near if d['medieval_recoverable'].get(metal, 0) > 0
+                or (metal == 'salt' and d.get('annual_production_t', 0) > 0)]
     near.sort(key=lambda d: d['distance_m'])
     return dict(cell=dict(lod=grid.lod, i=int(grid.i[i]), j=int(grid.j[j]), id=str(int(grid.ids[j, i])),
                           area_km2=round(float(grid.area_m2[j, i]) / 1e6, 1)),
@@ -708,6 +720,8 @@ class _World:
             self.dep_ore=data['ore'].astype(np.float64)
             self.dep_access=data['access']
             self.dep_gossan=data['gossan']
+            self.dep_annual = data.get('annual_kg', np.zeros(n))/1000
+            self.dep_pan = data.get('pan_m2', np.zeros(n))
         else:
             self.dep_family = np.array([d['family'] for d in deposits]) if n else np.array([], str)
             offs = np.array([R.key(seed, ['resources', 'deposit-lod0', d['id']]) for d in deposits],np.uint64)
@@ -717,6 +731,8 @@ class _World:
             self.dep_ore = np.array([d['ore_t'] for d in deposits], np.float64) if n else np.zeros(0)
             self.dep_access = np.array([d['medieval_accessible_share'] for d in deposits]) if n else np.zeros(0)
             self.dep_gossan = np.array([d['gossan'] for d in deposits], bool) if n else np.zeros(0, bool)
+            self.dep_annual = np.array([d.get('annual_production_t',0) for d in deposits])
+            self.dep_pan = np.array([d.get('pan_area_m2',0) for d in deposits])
         # LOD-0 cell inside the deposit's LOD-3 cell (keyed, never re-drawn).
         self.dep_di=pi+(offs % np.uint64(997)).astype(np.int64)*span//997
         self.dep_dj=pj+((offs >> np.uint64(20)) % np.uint64(991)).astype(np.int64)*span//991
@@ -741,6 +757,8 @@ class _World:
         self.dep_a = np.where(placer, np.clip(400 * (self.dep_ore / 1e5) ** .5, 200, 4000) / 2,
                               np.where(vein, np.clip(120 * (self.dep_ore / 1e4) ** .45, 60, 5000) / 2, a))
         self.dep_b = np.where(placer, 60., np.where(vein, np.clip(1.5 * (self.dep_ore / 1e4) ** .25, 1, 15) / 2, b))
+        self.dep_a = np.where(self.dep_annual > 0, np.sqrt(self.dep_pan*1.6/np.pi), self.dep_a)
+        self.dep_b = np.where(self.dep_annual > 0, self.dep_a/1.6, self.dep_b)
         self.dep_shape = np.where(vein, 0, np.where(placer, 3, np.where(strata, 2, 1)))
         names = list(FAMILY_LABELS)
         self.dep_color = np.array([names.index(f) if f in names else 0 for f in fam], np.int32)
@@ -914,7 +932,8 @@ def _gpu_package(state, mode):
                   coef=list(coef), sigma=sigma, seed32=int(state.seed32), layer=layer,
                   groups=[], realized=realized, beta=list(G.REALIZED_BETA) if realized else [0, 0], order=order, thresholds=0, scale=0., max_footprint=float(np.max(deposits[:, 4:6], initial=0) * 2.4) if deposits is not None else 0.,
                   palette=[[c / 255 for c in rgb] for rgb in palette], deposits=0 if deposits is None else int(len(deposits)),
-                  field_shape=list(field.shape), site_indices=kind == 'points')
+                  field_shape=list(field.shape), site_indices=kind == 'points',
+                  annual_equivalence=spec.get('annual_equivalence',0))
     parts = [field.astype(np.float16).tobytes()]
     if deposits is not None:
         size = sum(len(x) for x in parts)
@@ -945,6 +964,8 @@ def _deposit_buffers(state, mode, kind):
             mass = state.dep_mass.get(('medieval_recoverable', metal), np.zeros(len(state.dep_ore)))
             if metal in R.GRAM_METALS:
                 mass = mass / 1000  # common physical tonnes for symbol scale
+        if metal in ('salt','points'):
+            mass = mass + getattr(state,'dep_annual',np.zeros(len(mass)))*100.
         keep = mass > 0
     idx = np.flatnonzero(keep)
     ci = ((state.dep_di[idx] >> 10) - grid.i[0]) % len(grid.i)

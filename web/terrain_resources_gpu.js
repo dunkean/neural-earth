@@ -423,6 +423,7 @@
         const bx=Math.floor((x+shift)/distance),by=Math.floor(y/distance);
         for(let j=-1;j<=1;j++)for(let i=-1;i<=1;i++)for(const g of bins.get(`${bx+i},${by+j}`)||[]){
           const d=delta(x-g.x)**2+(y-g.y)**2;
+          if(header.annual_equivalence&&ints[at+3]!==ints[g.index*12+3])continue;
           if(d<bestDistance||(d===bestDistance&&g.rank<(best?.rank??Infinity))){best=g;bestDistance=d;}
         }
       }
