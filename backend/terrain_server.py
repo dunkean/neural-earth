@@ -36,6 +36,20 @@ from terrain_priority import land_mask, tile_relief_stats
 from terrain_disk_cache import TerrainDiskCache
 from terrain_climate import CLIMATE_SIZE, MODES, sample_coarse_climate, colorize
 from terrain_orogen_layers import MODES as OROGEN_MODES, LEGENDS as OROGEN_LEGENDS, render as render_orogen_layer
+from terrain_resource_layers import legends as resource_legends, legend_specs as resource_legend_specs, ResourcesPending
+# Informative resource layers: GPU-evaluated on physical tiles (like Render v2),
+# with the source-diagnostic PNG path only as overview and no-WebGPU fallback.
+# terrain_orogen_layers is untouched (part of the Orogen atlas identity).
+RESOURCE_LEGENDS = resource_legends()
+RESOURCE_MODES = tuple(RESOURCE_LEGENDS)
+OROGEN_LEGENDS = {**OROGEN_LEGENDS, **RESOURCE_LEGENDS}
+
+
+def render_orogen_layer(atlas, mode, xs, ys, _source_layer=render_orogen_layer):
+    if mode in RESOURCE_LEGENDS:
+        from terrain_resource_layers import render as render_resource_layer
+        return render_resource_layer(atlas, mode, xs, ys)
+    return _source_layer(atlas, mode, xs, ys)
 from terrain_snr_layer import MODES as SNR_MODES, render as render_snr_layer
 from terrain_styles import STYLES, MODES as STYLE_MODES, render_style, apply_contours, parse_contours
 from terrain_biomes import colorize_biomes, sample_biome_fields, sample_biome_transport, parse_rock_slope
@@ -44,7 +58,7 @@ from terrain_soil import sample_soil_transport
 from terrain_render import colorize_surface, parse_settings as parse_render_settings, appearance_identity
 from terrain_surface_modes import RENDER_V2_MODES, RENDER_V2_LEGENDS
 APPEARANCE_IDENTITY=appearance_identity()
-MODES = MODES + STYLE_MODES + OROGEN_MODES + SNR_MODES + RENDER_V2_MODES
+MODES = MODES + STYLE_MODES + OROGEN_MODES + SNR_MODES + RENDER_V2_MODES + RESOURCE_MODES
 from terrain_conditioning import sample_conditioning_preview, WORLD_PROFILES
 from terrain_generation import resolve_generation, register_generation, generator_schema
 from terrain_bootstrap import RASTER_WIDTH, RASTER_HEIGHT
@@ -349,7 +363,7 @@ def display_mode():
     mode=request.args.get('mode','biomes')
     if mode not in MODES:
         raise ValueError('Invalid map mode')
-    if mode in OROGEN_MODES + RENDER_V2_MODES and resolve_generation(generation_profile()).bootstrap_generator != 'orogen':
+    if mode in OROGEN_MODES + RENDER_V2_MODES + RESOURCE_MODES and resolve_generation(generation_profile()).bootstrap_generator != 'orogen':
         raise ValueError('Orogen diagnostic layers require an Orogen pipeline')
     return mode
 
@@ -414,7 +428,11 @@ def conditioning_preview(seed, world_profile, xs_metres, ys_metres, *, polar=Fal
 
 def clip_world_axes(xs, ys, profile):
     x0, y0, x1, y1 = profile_bounds(profile)
-    return np.clip(xs, x0/NATIVE, x1/NATIVE), np.clip(ys, y0/NATIVE, y1/NATIVE)
+    # Keep longitude halo coordinates unwrapped and uniformly spaced. The
+    # spherical source samples periodically; clamping makes a false flat wall
+    # and also compresses the climate lattice derived from these endpoints.
+    sphere = resolve_generation(profile).settings.get('world_topology', 'sphere') == 'sphere'
+    return (xs if sphere else np.clip(xs, x0/NATIVE, x1/NATIVE)), np.clip(ys, y0/NATIVE, y1/NATIVE)
 
 
 def _create_world(seed, world_profile, cache_limit, *, polar=False):
@@ -1006,6 +1024,14 @@ def sample_physical(world, seed, world_profile, lod, tx, ty, *, preview_only=Fal
         else:
             elevation,stage=sample_elevation(world,lod,tx,ty,xs=xs,ys=ys,
                 **({'amplify':amplify,'amplify_mode':amplify_mode,'surface_out':surface_out} if amplify and lod<0 else {}))
+    # Finite learned charts have independent end-strip noise. Join their DEM
+    # in physical longitude before any filtering or lighting, at every LOD.
+    # Atlas previews already evaluate a periodic geographic source.
+    if stage not in ('conditioning-preview', 'final-dem-mip') and not polar and resolve_generation(world_profile).settings.get('world_topology', 'sphere') == 'sphere':
+        from terrain_longitude import stitch
+        elevation = stitch(elevation, xs*NATIVE, profile_bounds(world_profile), lod, tx,
+                           lambda col: sample_elevation(world, lod, col, ty,
+                               coarse_interpolation=coarse_interpolation, amplify=amplify, amplify_mode=amplify_mode)[0])
     # The physical height, rather than display color, is filtered. The same
     # halo and globally aligned sample centres prevent tile-edge discontinuity.
     if lod>=3:
@@ -1248,6 +1274,7 @@ def metadata(seed, world_profile=None):
             'generation_schema':generator_schema(),
             'conditioning_noise':manifest['conditioning']['cond_snr'],
             'orogen_layers': {**OROGEN_LEGENDS, **RENDER_V2_LEGENDS} if descriptor.bootstrap_generator == 'orogen' else {},
+            'resource_layers': resource_legend_specs() if descriptor.bootstrap_generator == 'orogen' else {},
             'world_identity':world_identity(manifest),'world_manifest':manifest,
             'generation_stages':manifest.get('bootstrap',{}).get('stage_state',{}) if manifest.get('bootstrap') else {},
             'scheduling_land_mask':scheduling_land_mask(seed,world_profile),
@@ -1605,6 +1632,11 @@ def rendering_design_note(name):
     return send_from_directory(ROOT / 'docs' / 'design', name)
 
 
+@app.get('/docs/RESOURCE_LAYERS.md')
+def resource_design_note():
+    return send_from_directory(ROOT / 'docs', 'RESOURCE_LAYERS.md')
+
+
 @app.get('/terrain_transport.js')
 def transport_script():
     return send_from_directory(WEB_ROOT, 'terrain_transport.js')
@@ -1691,6 +1723,80 @@ def share_script():
 @app.get('/terrain_pins.js')
 def pins_script():
     return send_from_directory(WEB_ROOT, 'terrain_pins.js')
+
+
+@app.get('/terrain_resources.js')
+def resources_script():
+    return send_from_directory(WEB_ROOT, 'terrain_resources.js')
+
+
+@app.get('/terrain_resources_gpu.js')
+def resources_gpu_script():
+    return send_from_directory(WEB_ROOT, 'terrain_resources_gpu.js')
+
+
+@app.get('/api/resources/<int:seed>/gpu')
+def resources_gpu_package(seed):
+    """One package per world and mode for the WGSL evaluator: JSON header, then binary."""
+    try:
+        descriptor = resolve_generation(generation_profile())
+        if descriptor.bootstrap_generator != 'orogen':
+            raise ValueError('Resource layers require an Orogen pipeline')
+        mode = request.args['mode']
+        if mode not in RESOURCE_LEGENDS:
+            raise ValueError('Unknown resource layer')
+        from terrain_orogen import get_heightmap
+        from terrain_resource_layers import gpu_package
+        atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options),
+                                   descriptor.settings)
+        started = time.perf_counter()
+        try:
+            header, _, payload = gpu_package(atlas, mode)
+        except ResourcesPending as pending:
+            # Compiling in the background: the viewer polls and shows progress.
+            return jsonify(pending.status), 202
+        head = json.dumps(header).encode()
+        head += b' ' * (-(len(head) + 4) % 4)
+        response = Response(len(head).to_bytes(4, 'little') + head + payload, mimetype='application/octet-stream')
+        response.headers['X-Terrain-Resource-Seconds'] = f'{time.perf_counter()-started:.3f}'
+        response.cache_control.max_age = 3600
+        return response
+    except (ValueError, TypeError, KeyError) as exc:
+        return jsonify(error=str(exc)), 400
+
+
+@app.get('/api/resources/<int:seed>/inspect')
+def resources_inspect(seed):
+    """Resource values of the LOD-10 cell under a map point, and nearby deposits."""
+    try:
+        descriptor = resolve_generation(generation_profile())
+        if descriptor.bootstrap_generator != 'orogen':
+            raise ValueError('Resource layers require an Orogen pipeline')
+        from terrain_orogen import get_heightmap
+        from terrain_resource_layers import inspect as inspect_resources
+        atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options),
+                                   descriptor.settings)
+        return jsonify(inspect_resources(atlas, float(request.args['x']), float(request.args['y'])))
+    except ResourcesPending as pending:
+        return jsonify(pending.status), 202
+    except (ValueError, TypeError, KeyError) as exc:
+        return jsonify(error=str(exc)), 400
+
+
+@app.get('/api/resources/<int:seed>/status')
+def resources_status(seed):
+    """Start the world's resource compile in the background (once) and report its progress."""
+    try:
+        descriptor = resolve_generation(generation_profile())
+        if descriptor.bootstrap_generator != 'orogen':
+            raise ValueError('Resource layers require an Orogen pipeline')
+        from terrain_orogen import get_heightmap
+        from terrain_resource_layers import compile_status
+        atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options),
+                                   descriptor.settings)
+        return jsonify(compile_status(atlas))
+    except (ValueError, TypeError, KeyError) as exc:
+        return jsonify(error=str(exc)), 400
 
 
 @app.get('/terrain_inference_controls.js')
@@ -2569,7 +2675,11 @@ def native_coarse_tile(seed, tx, ty):
         learned = request.args.get('learned', '0') == '1'
         key = native_coarse_key(seed, tx, ty, wp, learned)
         cache_key = (wp, seed, tx, ty, identity)
-        xs, ys = native_coarse.sample_axes(tx, ty, profile_bounds(wp))
+        # Preview atlas sampling is periodic. Learned chart cells retain their
+        # finite addressing; they cannot be wrapped by rounding a nonintegral
+        # world circumference to a cell count.
+        periodic = not learned and resolve_generation(wp).settings.get('world_topology', 'sphere') == 'sphere'
+        xs, ys = native_coarse.sample_axes(tx, ty, profile_bounds(wp), periodic=periodic)
         ready = native_coarse_ready(seed, wp, xs, ys)
         with native_coarse_cache_lock:
             cached = native_coarse_cache.get(cache_key)
@@ -2585,7 +2695,7 @@ def native_coarse_tile(seed, tx, ty):
                 with (nullcontext() if preview_only else measured_lock(current_runtime().lock, 'coarse.gpu_lock_wait')), torch.inference_mode():
                     started = time.perf_counter()
                     jobs.check_current_interest()
-                    cx, cy = native_coarse.climate_axes(tx, ty, profile_bounds(wp))
+                    cx, cy = native_coarse.climate_axes(tx, ty, profile_bounds(wp), periodic=periodic)
                     if preview_only:
                         root = native_coarse.encode_height(conditioning_preview(seed, wp, xs*NATIVE, ys*NATIVE)['elev'])
                         climate = conditioning_preview(seed, wp, cx*NATIVE, cy*NATIVE)['climate']
@@ -2627,7 +2737,7 @@ def native_coarse_tile(seed, tx, ty):
             job = jobs.submit(key, compute, finalize, session=_session(session) if session else None,
                 epoch=int(request.args.get('epoch', 0)), lane='cpu' if preview_only else 'gpu', role='coarse')
             root, climate, report = job.wait()
-        cx, cy = native_coarse.climate_axes(tx, ty, profile_bounds(wp))
+        cx, cy = native_coarse.climate_axes(tx, ty, profile_bounds(wp), periodic=periodic)
         climate = transport_climate(seed,wp,cx*NATIVE,cy*NATIVE,climate)
         payload = root.astype('<f4', copy=False).tobytes() + climate.astype('<f4', copy=False).tobytes()
         response = Response(payload, mimetype='application/octet-stream')
@@ -2714,6 +2824,9 @@ def tile(seed, lod, tx, ty):
         render_settings = parse_render_settings(request.args.get('render_settings')) if mode=='render' or mode in RENDER_V2_MODES else None
         if mode in SNR_MODES:
             return snr_diagnostic_tile(seed, lod, tx, ty, wp, mode)
+        if mode in RESOURCE_LEGENDS:
+            # Fallback without WebGPU: LOD-10 authority, bilinear (no fine detail).
+            return orogen_diagnostic_tile(seed, lod, tx, ty, wp, mode)
         if mode in OROGEN_MODES and mode not in ('orogen-biomes','orogen-koppen','render','soil'):
             return orogen_diagnostic_tile(seed, lod, tx, ty, wp, mode)
         if request.args.get('profile', PROFILE) != PROFILE:
@@ -2957,7 +3070,7 @@ def overview(seed):
         if mode in SNR_MODES:
             manifest = world_manifest(seed, wp)
             return render_snr_layer(seed, wp, manifest['conditioning']['cond_snr'], mode, xs, ys), None, (x1-x0)/width
-        if mode in OROGEN_MODES and mode not in ('orogen-biomes','orogen-koppen','render','soil'):
+        if (mode in OROGEN_MODES and mode not in ('orogen-biomes','orogen-koppen','render','soil')) or mode in RESOURCE_MODES:
             from terrain_orogen import get_heightmap
             descriptor = resolve_generation(wp)
             atlas = geometry_heightmap(get_heightmap(seed, descriptor.bootstrap_style, options=descriptor.bootstrap_options), descriptor.settings)
@@ -2970,8 +3083,10 @@ def overview(seed):
     def finalize(value):
         jobs.check_current_interest()
         elevation, climate,resolution = value
-        if mode in OROGEN_MODES + SNR_MODES and mode not in ('orogen-biomes','orogen-koppen','render','soil'):
+        if (mode in OROGEN_MODES + SNR_MODES and mode not in ('orogen-biomes','orogen-koppen','render','soil')) or mode in RESOURCE_MODES:
             rgb=elevation
+            if rgb.dtype!=np.uint8:
+                rgb=(np.clip(rgb,0,1)*255).astype(np.uint8)
         elif mode in ('orogen-biomes','orogen-koppen','render','soil')+RENDER_V2_MODES:
             x0,y0,x1,y1=metadata_snapshot['overview_bounds']
             xs=x0+(np.arange(2048)+.5)*(x1-x0)/2048
@@ -3008,10 +3123,10 @@ def overview(seed):
         else:
             x0,y0,x1,y1=metadata_snapshot['overview_bounds']
             rgb=render_relief(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting)
-        if mode not in OROGEN_MODES+SNR_MODES or mode in ('orogen-biomes','orogen-koppen','render','soil')+RENDER_V2_MODES:
+        if (mode not in OROGEN_MODES+SNR_MODES+RESOURCE_MODES) or mode in ('orogen-biomes','orogen-koppen','render','soil')+RENDER_V2_MODES:
             rgb=apply_contours(rgb,elevation,contours,mode)
         buffer = io.BytesIO()
-        Image.fromarray((np.clip(rgb, 0, 1)*255).astype(np.uint8)).save(buffer, format='PNG')
+        Image.fromarray(rgb if rgb.dtype==np.uint8 else (np.clip(rgb, 0, 1)*255).astype(np.uint8)).save(buffer, format='PNG')
         if display_variant:
             _remember_overview(memory_key,buffer.getvalue())
             # The last few display variants also persist, so reopening the

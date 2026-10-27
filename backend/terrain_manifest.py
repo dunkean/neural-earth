@@ -101,7 +101,7 @@ def _files(model_root: Path, world_profile: str = 'natural'):
     upstream_root = ROOT / "terrain-diffusion" / "terrain_diffusion"
     upstream_sources = sorted(p for p in upstream_root.rglob("*.py") if p.is_file())
     implementation_names = (
-        "terrain_paths.py", "terrain_manifest.py", "terrain_geometry.py", "terrain_polar.py", "terrain_generation.py", "terrain_bootstrap.py", "terrain_conditioning.py", "terrain_world.py", "terrain_inference.py",
+        "terrain_paths.py", "terrain_manifest.py", "terrain_geometry.py", "terrain_polar.py", "terrain_longitude.py", "terrain_generation.py", "terrain_bootstrap.py", "terrain_conditioning.py", "terrain_world.py", "terrain_inference.py",
         # Request ordering determines BF16 batch composition and physical bytes.
         "index.html", "terrain_lod.js", "terrain_generation_controls.js", "terrain_toolbar.js",
         "terrain_server.py", "terrain_app.py", "terrain_final_mips.py", "terrain_refinement.py",

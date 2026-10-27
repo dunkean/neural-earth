@@ -44,6 +44,22 @@ class NativeCoarseTests(unittest.TestCase):
         x, _ = native.sample_axes(20, 0, self.bounds)
         self.assertEqual(x[-1]/256, np.ceil(self.bounds[2]/7680)-.5)
 
+    def test_spherical_wrap_keeps_height_and_climate_halos_uniform(self):
+        # 4,000-km circumference is not an integer number of 7,680-m cells.
+        # Clipping either lattice flattened relief and moved climate features.
+        radius = 2e6
+        bounds = (-np.pi*radius, -np.pi*radius/2, np.pi*radius, np.pi*radius/2)
+        for tile in (-7, 6):
+            x, _ = native.sample_axes(tile, 2, bounds, periodic=True)
+            cx, _ = native.climate_axes(tile, 2, bounds, periodic=True)
+            np.testing.assert_array_equal(np.diff(x), native.STRIDE)
+            np.testing.assert_array_equal(cx[:-1], x[::native.CLIMATE_STRIDE])
+            self.assertEqual(cx[-1]-cx[-2], native.STRIDE*native.CLIMATE_STRIDE)
+            # The source evaluator wraps physical coordinates, not cell indices.
+            h = np.sin(x*30/radius)
+            wrapped = (x*30-bounds[0]) % (bounds[2]-bounds[0])+bounds[0]
+            np.testing.assert_allclose(h, np.sin(wrapped/radius), atol=1e-14)
+
     def test_fused_native_cells_are_not_interpolated_or_squared(self):
         x, y = native.sample_axes(-1, 0, self.bounds)
         def read(world, source, y0, x0, y1, x1, check):
@@ -71,6 +87,7 @@ class NativeCoarseTests(unittest.TestCase):
         ns=dict(app=app,np=np,torch=torch,Response=Response,jsonify=jsonify,request=request,
             native_coarse=native,VERSION='natural-v1',PROFILE='test',NATIVE=30,CLIMATE_SIZE=33,
             WORLD_BOUNDS=self.bounds,profile_bounds=lambda profile:self.bounds,generation_profile=lambda:'natural',
+            resolve_generation=lambda profile:SimpleNamespace(settings={'world_topology':'sphere'}),
             world_manifest=lambda *args:{},world_identity=lambda m:'identity',
             _tile_coordinates=lambda seed,lod,tx,ty:(seed,lod,int(tx),int(ty)),
             native_coarse_ready=lambda *args:state['ready'],

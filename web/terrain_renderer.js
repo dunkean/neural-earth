@@ -34,8 +34,9 @@
       for (var i=-5;i<=5;i++) { b+=textureLoad(source,location(p+vec2<i32>(0,i)),0).g*SMALL[u32(i+5)]; }
       textureStore(destination,p,vec4<f32>(a,b,0,0));
     }`;
-  const city=window.TerrainStyleRendering,r3=window.TerrainRender3D,v2=window.TerrainRenderV2;
-  const modeNumber=mode=>v2?.isStyle(mode)?v2.number(mode):r3?.isStyle(mode)?r3.number(mode):mode==='render'?-3:mode==='soil'?-4:mode==='pedology'?-5:mode==='orogen-biomes'?-1:mode==='orogen-koppen'?-2:city?.number(mode)??({relief:0,biomes:1,temperature:2,precipitation:3}[mode]??0);
+  const city=window.TerrainStyleRendering,r3=window.TerrainRender3D,v2=window.TerrainRenderV2,rg=window.TerrainResourcesGPU;
+  // Resource layers (terrain_resources_gpu.js) take numbers <= -100.
+  const modeNumber=mode=>rg?.isMode(mode)?rg.number(mode):v2?.isStyle(mode)?v2.number(mode):r3?.isStyle(mode)?r3.number(mode):mode==='render'?-3:mode==='soil'?-4:mode==='pedology'?-5:mode==='orogen-biomes'?-1:mode==='orogen-koppen'?-2:city?.number(mode)??({relief:0,biomes:1,temperature:2,precipitation:3}[mode]??0);
   // The fine compute path and the coarse bake compile this SAME material,
   // mirrored operation for operation by terrain_render.py. It uses continuous
   // climate (no class IDs, hence no hard biome borders), terrain derivatives and
@@ -446,6 +447,7 @@
         vec3<f32>(clim(p,36),clim(p,37),clim(p,38)),surfacePedology(p),vec3<f32>(clim(p,39),clim(p,40),clim(p,41)),clim(p,42),
         clim(p,21),clim(p,22),clim(p,23),clim(p,24),clim(p,25),clim(p,26),params.mode == -4.,shore,shoreOpenness(p,shore,r),erosionAt(p));
     }
+    ${rg?.wgsl||''}
     fn shade(d:vec2<f32>) -> f32 {
       // Same directional light/vertical exaggeration as upstream relief_map.py.
       let normal=normalize(vec3<f32>(d.x*params.lighting.w,d.y*params.lighting.w,1.));
@@ -512,7 +514,7 @@
         climateClass=koppen(clamp(clim(p,21)-clim(p,23)*max(height,0.),-45.,45.),clamp(clim(p,24)-clim(p,26)*max(height,0.),-45.,45.),max(clim(p,22),0.),max(clim(p,25),0.));
         if(height<0.){climateClass=0;}
       }
-      ${v2?`if(params.mode<=-8. && textureNumLayers(climate)>=46u){
+      ${rg?`/*resources*/if(params.mode<=-100.){if(res.zones2.z>.5&&(height>=0.||res.zones2.z>1.5)){rgb=resourceColor(p,height,reliefLight);}} else /*end-resources*/`:''}${v2?`if(params.mode<=-8. && textureNumLayers(climate)>=46u){
         var g=vec2<f32>(textureLoad(elevation,p+vec2<i32>(1,0),0).r-textureLoad(elevation,p-vec2<i32>(1,0),0).r,textureLoad(elevation,p+vec2<i32>(0,1),0).r-textureLoad(elevation,p-vec2<i32>(0,1),0).r)*.5/params.resolution;
         /*fine-gradient*/if(params.pad1>0.){g=textureLoad(fineGradient,p,0).rg;}/*end-fine-gradient*/
         let b=textureLoad(blurred,p,0).rg;
@@ -736,7 +738,7 @@
       textureStore(dest,vec2<i32>(id.xy),vec4<f32>(sign(h)*sqrt(abs(h)),0,0,0));
     }`;
   const coarsePalette=shadeShader.slice(shadeShader.indexOf('    fn shade('),shadeShader.indexOf('    @compute'));
-  const coarseColor=shadeShader.slice(shadeShader.indexOf('      let temp='),shadeShader.indexOf('      textureStore(color')).replace(/\/\*fine-gradient\*\/[\s\S]*?\/\*end-fine-gradient\*\//g,'')
+  const coarseColor=shadeShader.slice(shadeShader.indexOf('      let temp='),shadeShader.indexOf('      textureStore(color')).replace(/\/\*resources\*\/[\s\S]*?\/\*end-resources\*\//g,rg?'if(params.mode<=-100.){if(res.zones2.z>.5&&(height>=0.||res.zones2.z>1.5)){rgb=resourceCoarseColor(p,height,reliefLight,footprint);}} else ':'').replace(/\/\*fine-gradient\*\/[\s\S]*?\/\*end-fine-gradient\*\//g,'')
     .replaceAll('params.mode','params.field.z')
     .replace('var g=vec2<f32>(textureLoad(elevation,p+vec2<i32>(1,0),0).r-textureLoad(elevation,p-vec2<i32>(1,0),0).r,textureLoad(elevation,p+vec2<i32>(0,1),0).r-textureLoad(elevation,p-vec2<i32>(0,1),0).r)*.5/params.resolution;', 'let g=vec2<f32>(heightAt(p+vec2<f32>(1,0),0.)-heightAt(p-vec2<f32>(1,0),0.),heightAt(p+vec2<f32>(0,1),0.)-heightAt(p-vec2<f32>(0,1),0.))*.5/params.viewport.w;')
     .replace('let b=textureLoad(blurred,p,0).rg;', 'let b=vec2<f32>(heightAt(p,3.),height);')
@@ -821,6 +823,7 @@
       return surfaceWater(-height,baked.a);
     }
     ${coarsePalette}
+    ${rg?.coarse||''}
     ${city?.paperShader||''}
     @fragment fn fragment(input:Vertex)->@location(0) vec4<f32>{
       let p=input.uv*(params.field.xy-2.*params.viewport.z)+params.viewport.z-.5;
@@ -957,6 +960,7 @@
       this.noRiverDisplay=this.device.createTexture({size:[1,1],format:'rgba16float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});
       device.queue.writeTexture({texture:this.noRiverDisplay},new Uint16Array(4),{bytesPerRow:8},[1,1]);
       this.noHydrology=this.makeTexture(1,1,'rgba32float',GPUTextureUsage.COPY_DST);
+      if(rg)this.resetResources();
       device.queue.writeTexture({texture:this.noHydrology},new Float32Array(4),{bytesPerRow:16},[1,1]);
       this.context=this.canvas.getContext('webgpu');
       if (!this.context) throw Error('Canvas WebGPU indisponible');
@@ -989,6 +993,11 @@
         {binding:9,visibility:GPUShaderStage.COMPUTE,texture:{}},
         {binding:5,visibility:GPUShaderStage.COMPUTE,texture:{sampleType:'unfilterable-float'}},
         {binding:8,visibility:GPUShaderStage.COMPUTE,texture:{sampleType:'unfilterable-float'}},
+        ...(rg?[{binding:11,visibility:GPUShaderStage.COMPUTE,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},
+          {binding:12,visibility:GPUShaderStage.COMPUTE,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},
+          {binding:13,visibility:GPUShaderStage.COMPUTE,buffer:{type:'uniform'}},
+          {binding:14,visibility:GPUShaderStage.COMPUTE,buffer:{type:'read-only-storage'}},
+          {binding:15,visibility:GPUShaderStage.COMPUTE,buffer:{type:'read-only-storage'}}]:[]),
       ]});
       this.renderLayout=device.createBindGroupLayout({entries:[
         {binding:0,visibility:GPUShaderStage.VERTEX|GPUShaderStage.FRAGMENT,buffer:{type:'uniform',hasDynamicOffset:true,minBindingSize:208}},
@@ -1003,6 +1012,11 @@
         {binding:2,visibility:GPUShaderStage.FRAGMENT,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},
         {binding:3,visibility:GPUShaderStage.FRAGMENT,texture:{}},
         {binding:4,visibility:GPUShaderStage.FRAGMENT,sampler:{type:'filtering'}},
+        ...(rg?[{binding:11,visibility:GPUShaderStage.FRAGMENT,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},
+          {binding:12,visibility:GPUShaderStage.FRAGMENT,texture:{sampleType:'unfilterable-float',viewDimension:'2d-array'}},
+          {binding:13,visibility:GPUShaderStage.FRAGMENT,buffer:{type:'uniform'}},
+          {binding:14,visibility:GPUShaderStage.FRAGMENT,buffer:{type:'read-only-storage'}},
+          {binding:15,visibility:GPUShaderStage.FRAGMENT,buffer:{type:'read-only-storage'}}]:[]),
       ]});
       this.bakeLayout=device.createBindGroupLayout({entries:[
         {binding:0,visibility:GPUShaderStage.COMPUTE,buffer:{type:'uniform'}},
@@ -1129,12 +1143,15 @@
       }
       // One parameter buffer: each shade writes it, then submits before the next write.
       const params=this.shadeParams??=this.device.createBuffer({size:160,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
-      this.device.queue.writeBuffer(params,0,new Float32Array([metresPerSample,halo,innerWidth,innerHeight,selectedMode,Number(!!window.TerrainHydrology?.regionalRiverDisplayEnabled?.()),tile.gradient?1:0,0,...(window.TerrainLighting?.vectors(lod)||[1,.35,1,1,-.5,-.5,.70710678,0]),...origin,0,0,...this.renderVectors(selectedMode)]));
+      const values=new Float32Array([metresPerSample,halo,innerWidth,innerHeight,selectedMode,Number(!!window.TerrainHydrology?.regionalRiverDisplayEnabled?.()),tile.gradient?1:0,0,...(window.TerrainLighting?.vectors(lod)||[1,.35,1,1,-.5,-.5,.70710678,0]),...origin,0,0,...this.renderVectors(selectedMode)]);
+      // Global index of the first sample (halo included), as int bits: f32 loses it below LOD -2.
+      new Int32Array(values.buffer,18*4,2).set([Math.round(origin[0]/metresPerSample),Math.round(origin[1]/metresPerSample)]);
+      this.device.queue.writeBuffer(params,0,values);
       // Only Render, Soil and Render3D read shore distances.
       const shore=selectedMode===-3||selectedMode===-4||render3d;
       // Bind groups and views persist per tile: reshading after a settings change only records dispatches.
       const v2Aux=render3d&&auxFormat==='rgba16float',bakeLayout=v2Aux?this.v2BakeLayout:this.r3BakeLayout,mipPipeline=v2Aux?this.v2MipPipeline:this.r3MipPipeline;
-      const key=this.scratchGeneration+'|'+(render3d?'render3d-'+auxFormat:'shade');
+      const key=this.scratchGeneration+'|'+(render3d?'render3d-'+auxFormat:'shade|'+(this.resGeneration||0));
       if(tile.shadeKey!==key){
         const view=(texture,level,dimension)=>texture.createView({baseMipLevel:level,mipLevelCount:1,...(dimension?{dimension}:{})});
         const entries=[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchB.createView()},{binding:2,resource:view(color,0)},{binding:3,resource:{buffer:params}},{binding:4,resource:climateTexture.createView({dimension:'2d-array'})},{binding:5,resource:this.scratchA.createView()},{binding:10,resource:(tile.gradient||this.noGradient).createView()},{binding:9,resource:(tile.surface||this.noSurface).createView()},{binding:8,resource:(tile.hydrology||this.noHydrology).createView()}];
@@ -1143,7 +1160,7 @@
           // After the vertical blur has consumed scratch A, it holds the shore rows.
           rows:this.device.createBindGroup({layout:this.shoreRowPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:elevation.createView()},{binding:1,resource:this.scratchA.createView()},{binding:2,resource:{buffer:params,size:16}},{binding:8,resource:(tile.hydrology||this.noHydrology).createView()}]}),
           shade:render3d?this.device.createBindGroup({layout:bakeLayout,entries:[...entries,{binding:6,resource:view(tile.aux,0,'2d-array')},{binding:7,resource:{buffer:tile.r3Buffer}}]})
-            :this.device.createBindGroup({layout:this.shadeLayout,entries}),
+            :this.device.createBindGroup({layout:this.shadeLayout,entries:[...entries,...(rg?this.resourceEntries():[])]}),
           colorMips:Array.from({length:color.mipLevelCount-1},(_,i)=>this.device.createBindGroup({layout:this.colorMipPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:view(color,i)},{binding:1,resource:view(color,i+1)}]})),
           auxMips:render3d?Array.from({length:tile.aux.mipLevelCount-1},(_,i)=>this.device.createBindGroup({layout:mipPipeline.getBindGroupLayout(0),entries:[{binding:0,resource:view(tile.aux,i,'2d-array')},{binding:1,resource:view(tile.aux,i+1,'2d-array')}]})):[],
         };
@@ -1259,6 +1276,44 @@
       const signature=JSON.stringify(r3?.get()??null);if(signature===this.forestSignature)return;
       this.forestSignature=signature;this.styleRevision++;
       for(const tile of this.tiles.values())if(isRender3d(tile.shadedMode))tile.shadedMode=null;
+    }
+    // Resource layers: one package per world and mode (fields, zone thresholds, deposits).
+    resetResources() {
+      const d=this.device,f16=new Uint16Array(4);
+      const tex=()=>{const t=d.createTexture({size:[1,1,1],format:'r16float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});d.queue.writeTexture({texture:t},f16,{bytesPerRow:2,rowsPerImage:1},[1,1,1]);return t;};
+      const buffer=(size,usage)=>d.createBuffer({size,usage:usage|GPUBufferUsage.COPY_DST});
+      this.res={field:tex(),tau:tex(),params:buffer(rg.PARAM_BYTES,GPUBufferUsage.UNIFORM),deposits:buffer(48,GPUBufferUsage.STORAGE),buckets:buffer(16,GPUBufferUsage.STORAGE),header:null,season:.5};
+      this.resGeneration=(this.resGeneration||0)+1;
+      if(this.tiles)this.markResourceTiles();
+    }
+    markResourceTiles() {
+      // Physical tiles re-shade; native coarse blocks rebind the new package.
+      for(const tile of this.tiles.values()){if(tile.native)tile.group=null;else if(rg?.isNumber(tile.params[2]))tile.shadedMode=null;}
+    }
+    resourceEntries() {
+      const r=this.res;
+      return [{binding:11,resource:r.field.createView({dimension:'2d-array'})},{binding:12,resource:r.tau.createView({dimension:'2d-array'})},
+        {binding:13,resource:{buffer:r.params}},{binding:14,resource:{buffer:r.deposits}},{binding:15,resource:{buffer:r.buckets}}];
+    }
+    setResources(header,data,{season=.5}={}) {
+      if(!rg||!this.available)return false;
+      const d=this.device,old=this.res,started=performance.now();
+      const upload=(values,[w,h,k])=>{const t=d.createTexture({size:[w,h,k],format:'r16float',usage:GPUTextureUsage.TEXTURE_BINDING|GPUTextureUsage.COPY_DST});d.queue.writeTexture({texture:t},values,{bytesPerRow:w*2,rowsPerImage:h},[w,h,k]);return t;};
+      const storage=(values,min)=>{const b=d.createBuffer({size:Math.max(min,Math.ceil(values.byteLength/4)*4),usage:GPUBufferUsage.STORAGE|GPUBufferUsage.COPY_DST});d.queue.writeBuffer(b,0,values);return b;};
+      const [W,H,K]=data.fieldShape;
+      this.res={field:upload(data.field,[W,H,K]),tau:data.tau?upload(data.tau,[W,H,header.thresholds]):old.tau,
+        params:old.params,deposits:data.deposits?storage(data.deposits,48):old.deposits,buckets:data.buckets?storage(data.buckets,16):old.buckets,header,season};
+      d.queue.writeBuffer(this.res.params,0,rg.pack(header,{season,active:true,marine:header.mode.includes('fish-marine')||header.mode.includes('season-fish')}));
+      for(const key of ['field','tau','deposits','buckets'])if(old[key]!==this.res[key]&&old[key]!==this.res.params)setTimeout(()=>old[key].destroy(),2000);
+      this.resGeneration++;this.lastResourceUploadMs=performance.now()-started;
+      this.markResourceTiles();
+      return true;
+    }
+    setResourceSeason(season) {
+      if(!rg||!this.res?.header)return;
+      this.res.season=season;
+      const h=this.res.header;this.device.queue.writeBuffer(this.res.params,0,rg.pack(h,{season,active:true,marine:h.mode.includes('fish-marine')||h.mode.includes('season-fish')}));
+      for(const tile of this.tiles.values())if(!tile.native&&rg.isNumber(tile.params[2]))tile.shadedMode=null;
     }
     setMode(mode) {
       if(this.mode===mode)return;this.mode=mode;this.styleRevision++;
@@ -1455,7 +1510,7 @@
         if(tile.groupKind!==kind){tile.group=null;tile.groupKind=kind;}
         const pipeline=kind==='coarse'?this.coarsePipeline:kind==='render3d'?this.r3Pipeline:this.pipeline;
         if(pipeline!==current){pass.setPipeline(pipeline);current=pipeline;}
-        tile.group??=this.device.createBindGroup(kind==='coarse'?{layout:this.coarseLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:208}},{binding:1,resource:tile.elevation.createView()},{binding:2,resource:tile.climate.createView({dimension:'2d-array'})},{binding:3,resource:(tile.albedo||this.noAlbedo).createView()},{binding:4,resource:this.sampler}]}
+        tile.group??=this.device.createBindGroup(kind==='coarse'?{layout:this.coarseLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:208}},{binding:1,resource:tile.elevation.createView()},{binding:2,resource:tile.climate.createView({dimension:'2d-array'})},{binding:3,resource:(tile.albedo||this.noAlbedo).createView()},{binding:4,resource:this.sampler},...(rg?this.resourceEntries():[])]}
           :kind==='render3d'?{layout:this.r3DrawLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:208}},{binding:1,resource:tile.color.createView()},{binding:2,resource:this.sampler},{binding:3,resource:tile.elevation.createView()},{binding:4,resource:tile.aux.createView({dimension:'2d-array'})},{binding:5,resource:{buffer:tile.r3Buffer}},{binding:6,resource:this.brushes.createView({dimension:'2d-array'})},{binding:8,resource:(tile.hydrology||this.noHydrology).createView()},{binding:9,resource:(tile.surface||this.noSurface).createView()},{binding:10,resource:(tile.gradient||this.noGradient).createView()},{binding:11,resource:(this.riverMask||this.noRiverDisplay).createView()}]}
           :{layout:this.renderLayout,entries:[{binding:0,resource:{buffer:this.uniform,size:208}},{binding:1,resource:tile.color.createView()},{binding:2,resource:this.sampler},{binding:3,resource:tile.elevation.createView()},{binding:8,resource:(tile.hydrology||this.noHydrology).createView()}]});
         pass.setBindGroup(0,tile.group,[i*stride]);pass.draw(6);

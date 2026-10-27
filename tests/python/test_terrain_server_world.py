@@ -103,7 +103,7 @@ class ServerWorldConstructionTests(unittest.TestCase):
             share_windows=lambda world, kind: world,
             app=self.app, jsonify=jsonify, Response=Response, request=request,
             MODES=MODES+OROGEN_MODES+SNR_MODES+RENDER_V2_MODES,
-            RENDER_V2_MODES=RENDER_V2_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=OROGEN_MODES,
+            RENDER_V2_MODES=RENDER_V2_MODES, SNR_MODES=SNR_MODES, OROGEN_MODES=OROGEN_MODES, RESOURCE_MODES=(), RESOURCE_LEGENDS={},
             has_request_context=has_request_context, subprocess=subprocess,
             GenerationCancelled=GenerationCancelled, jobs=SimpleNamespace(paused=False), finish_generation=lambda token:None,
             pin_cache_io=lambda key:lambda function:function, TILE=256, NATIVE=30, MIN_LOD=-2,

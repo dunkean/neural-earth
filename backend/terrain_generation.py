@@ -77,7 +77,7 @@ def _defaults(base):
     if base not in BASE_PROFILES:
         raise ValueError(f"Unknown base profile: {base}")
     natural = base == "natural"
-    settings = dict(world_diameter_km=DEFAULT_DIAMETER_KM, world_topology='sphere',
+    settings = dict(world_diameter_km=4000. if base == "orogen" else DEFAULT_DIAMETER_KM, world_topology='sphere',
                 height_source="natural" if natural else "orogen" if base == "orogen" else "native",
                 climate_source="orogen" if base == "orogen" else "natural" if natural else "native",
                 relief_pipeline="orogen" if base == "orogen" else "original",
