@@ -4,7 +4,8 @@ import {readFile, writeFile, mkdir} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {twoStepBase} from './base-solver.mjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const source = `${root}native/magna-urbis/rust/crates/neural/src/`;
+// The live sibling Magna Urbis checkout: one maintained copy, no pinned snapshot.
+const source = `${root}../magna-urbis/rust/crates/neural/src/`;
 const output = `${root}native/neural-earth/generated-engine/`;
 await mkdir(output, {recursive:true});
 function replace(text, from, to) {
@@ -28,6 +29,8 @@ for (const name of ['noise','pipeline','plan','reconstruct','sketch','weights'])
   }
   if (name === 'sketch') {
     code = replace(code,'pub enum Sketch {','pub enum Sketch {\n    Planet(std::sync::Arc<crate::atlas::Atlas>),');
+    // Operation-mask relief constraints (an `impl Sketch`) live beside the sketch upstream.
+    code += '\n' + (await readFile(`${source}zone_profile.rs`,'utf8')).replace(/\r\n/g,'\n');
     code = replace(code,'Sketch::Validation(case) => validation(*case, x, y),','Sketch::Planet(atlas) => atlas.sample(x, y)[0] as f64,\n            Sketch::Validation(case) => validation(*case, x, y),');
     code = replace(code,'Sketch::Validation(_) => Climate::REFERENCE,','Sketch::Planet(_) => Climate::REFERENCE,\n            Sketch::Validation(_) => Climate::REFERENCE,');
     code = replace(code,'        let plane = size * size;\n        let climate = self.climate();','        if let Sketch::Planet(atlas) = self { return atlas.conditioning(y0, x0, size); }\n        let plane = size * size;\n        let climate = self.climate();');
