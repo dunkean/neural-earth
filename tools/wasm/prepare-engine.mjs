@@ -24,8 +24,12 @@ for (const name of ['noise','pipeline','plan','reconstruct','sketch','weights'])
     // Six cells leak its truncated edge weights into the first/last 4 samples.
     code = replace(code,'pub const ELEVATION_PAD: i64 = 6 * LATENT;','pub const ELEVATION_PAD: i64 = 7 * LATENT;');
     // Refinement's initial windows extend one stride on both sides.
-    code = replace(code,'start: base.start - 1,','start: base.start - 2,');
-    code = replace(code,'end: base.end - 1 + 3,','end: base.end - 1 + 4,');
+    code = replace(code,'Self::with_context(origin, size, exact, ELEVATION_PAD, 1, 3)',
+      'Self::with_context(origin, size, exact, ELEVATION_PAD, 2, 4)');
+    // The regional contract uses the original full-context dependency graph;
+    // the additional viewer halo must not force a second coarse window.
+    code = replace(code,'            ELEVATION_PAD,\n            1,\n            3,\n        );\n        if plan.coarse.len() != 1',
+      '            6 * LATENT,\n            1,\n            3,\n        );\n        if plan.coarse.len() != 1');
   }
   if (name === 'sketch') {
     code = replace(code,'pub enum Sketch {','pub enum Sketch {\n    Planet(std::sync::Arc<crate::atlas::Atlas>),');
@@ -66,7 +70,8 @@ for (const name of ['noise','pipeline','plan','reconstruct','sketch','weights'])
     code = replace(code,'            gpu,\n        })','            gpu,\n            cache: Default::default(),\n        })');
     code = replace(code,'    pub origin: Option<i64>,','    pub origin: Option<i64>,\n    pub origin_x: Option<i64>,\n    pub output_stage: u8,');
     code = replace(code,'            origin: None,','            origin: None,\n            origin_x: None,\n            output_stage: 0,');
-    code = replace(code,'let plan = Plan::new(origin, size, request.exact);','let plan = Plan::new(origin, size, request.exact);\n        let plan_x = Plan::new(request.origin_x.unwrap_or(origin), size, request.exact);');
+    code = replace(code,'        let mut timings = Timings::default();',
+      '        let plan_x = if regional { plan.clone() } else { Plan::new(request.origin_x.unwrap_or(origin), size, request.exact) };\n        let mut timings = Timings::default();');
     code = replace(code,'self.coarse_stage(request, &plan)', 'self.coarse_stage(request, &plan, &plan_x)');
     code = replace(code,'Self::tune_relief(request, &plan, size, &mut coarse)', 'Self::tune_relief(request, &plan, size, &mut coarse)');
     // Planetary tuning is applied only with the default relief scale. Diagnostic means aren't used.
