@@ -30,6 +30,10 @@ for (const name of ['noise','pipeline','plan','reconstruct','sketch','weights'])
     // the additional viewer halo must not force a second coarse window.
     code = replace(code,'            ELEVATION_PAD,\n            1,\n            3,\n        );\n        if plan.coarse.len() != 1',
       '            6 * LATENT,\n            1,\n            3,\n        );\n        if plan.coarse.len() != 1');
+    // Two-pass base also evaluates the neighbouring windows. Their extra coarse
+    // cells already lie inside the single coarse tile: widen the field, not the tiles.
+    code = replace(code,'let plan = Self::with_context(','let mut plan = Self::with_context(');
+    code = replace(code,'        Ok(plan)\n','        plan.coarse_cells.start -= 1;\n        plan.coarse_cells.end += 1;\n        Ok(plan)\n');
   }
   if (name === 'sketch') {
     code = replace(code,'pub enum Sketch {','pub enum Sketch {\n    Planet(std::sync::Arc<crate::atlas::Atlas>),');
