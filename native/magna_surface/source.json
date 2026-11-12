@@ -1,0 +1,21 @@
+{
+  "repository": "https://github.com/dunkean/magna-urbis",
+  "revision": "b72defb4ee5c355b5de895a2735a6c8dc56abff8",
+  "sources": {
+    "web/src/ui/terrainWgsl.generated.ts": "fdaeac2ed8069b83a2595112fb172a48caca9d2d81cc13559570479fd76ab1bd",
+    "rust/bridge/terrainRenderV2.ts": "528b75f0c9aae2d3c0a6e8710a497f4c3df138f610f369ed5cd43602fbb5240f",
+    "rust/bridge/terrainGround.ts": "e501e50379fd4cc2f1d87cfb6497c9681d128dfdd56e71822f7c58f5ec6b05e1",
+    "web/src/ui/terrain3dNoise.ts": "76f9b0bb590b5c4b45661c956f19be0ac02273167f6625c03ab5c3754b75724c"
+  },
+  "entry_points": [
+    "v2GroundEnv",
+    "v2ShadeGround",
+    "v2DisplayShoulder"
+  ],
+  "functions": 54,
+  "dirty_sources": [
+    "web/src/ui/terrainWgsl.generated.ts",
+    "web/src/ui/terrain3dNoise.ts"
+  ],
+  "snapshot_id": "50bf0371f2f772a4a41b0c011b2a878510c2a7937556d6852a5e287e0fa1227d"
+}

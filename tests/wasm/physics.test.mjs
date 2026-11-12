@@ -1,15 +1,10 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {physicalFields,orogenRequest,orogenSeed} from '../../wasm/physics.mjs';
-test('Orogen physical units: sea level, land peaks, harmonic BIO4 and half-year BIO12/BIO15',()=>{
-  const result={numRegions:4,r_elevation:[-1,0,.5,1],r_temperature_summer:[1,.5,.7,0],r_temperature_winter:[0,.5,.3,1],r_precip_summer:[1,0,2,.2],r_precip_winter:[1,0,1,.8]};
+test('Orogen v3 physical km and monthly BIO fields are passed without remapping',()=>{
+  const result={numRegions:4,r_elevation:[-10,0,.01,8.5],r_bio1:[0,1,2,3],r_bio4:[100,200,300,400],r_bio12:[0,1000,3000,8000],r_bio15:[0,10,50,150]};
   const f=physicalFields(result);
-  assert.deepEqual(Array.from(f.slice(0,4)),[-10000,0,1156.25,6000]);
-  assert.equal(f[4],0);assert.equal(f[5],0);assert.equal(f[9],0);
-  assert.ok(Math.abs(f[8]-90*100*Math.sqrt(12/11)/(2*Math.sqrt(2)))<.001);
-  assert.equal(f[12],2000);assert.equal(f[13],0);assert.equal(f[14],3000);
-  assert.equal(f[16],0);assert.equal(f[17],0);
-  assert.ok(Math.abs(f[18]-1000*100*Math.sqrt(12/11)/3012)<.00001);
+  assert.deepEqual(Array.from(f),[-10000,0,10,8500,0,1,2,3,100,200,300,400,0,1000,3000,8000,0,10,50,150]);
 });
 test('All u64 seed bits enter Orogen through the same SHA-256 mixing as Python',async()=>{
   const {createHash}=await import('node:crypto');

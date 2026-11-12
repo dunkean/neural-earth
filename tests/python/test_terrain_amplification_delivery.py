@@ -35,20 +35,20 @@ def load(namespace,names):
 
 
 def stub(mode='mse'):
-    module=ModuleType({'mse':'terrain_amplification','phasor':'terrain_phasor','hybrid':'terrain_hybrid'}[mode]);module.VERSION=mode+'-test'
+    module=ModuleType({'mse':'terrain_amplification','phasor':'terrain_phasor','hybrid':'terrain_hybrid','magna':'terrain_magna'}[mode]);module.VERSION=mode+'-test'
     def parse(raw):return round(min(2.,max(0.,float(raw))),2)
     def sample(world,level,i0,j0,i1,j1,*,intensity=1.,check=None):
-        h=np.full((i1-i0,j1-j0),{'mse':100,'phasor':200,'hybrid':300}[mode]+intensity*level,np.float32)
+        h=np.full((i1-i0,j1-j0),{'mse':100,'phasor':200,'hybrid':300,'magna':400}[mode]+intensity*level,np.float32)
         surface=np.zeros((4,*h.shape),np.float32);surface[0]=.25;surface[1]=.5;surface[2]=.75;surface[3]=1
         return h,surface
     if mode=='mse':module.parse_intensity=Mock(side_effect=parse)
-    setattr(module,{'mse':'sample_amplified','phasor':'sample_phasor','hybrid':'sample_hybrid'}[mode],Mock(side_effect=sample))
+    setattr(module,{'mse':'sample_amplified','phasor':'sample_phasor','hybrid':'sample_hybrid','magna':'sample_magna'}[mode],Mock(side_effect=sample))
     return module
 
 
 class AmplificationDeliveryTests(unittest.TestCase):
     def setUp(self):
-        self.module=stub();self.phasor=stub('phasor');self.hybrid=stub('hybrid');self.patch=patch.dict(sys.modules,terrain_amplification=self.module,terrain_phasor=self.phasor,terrain_hybrid=self.hybrid);self.patch.start();self.addCleanup(self.patch.stop)
+        self.module=stub();self.phasor=stub('phasor');self.hybrid=stub('hybrid');self.magna=stub('magna');self.patch=patch.dict(sys.modules,terrain_amplification=self.module,terrain_phasor=self.phasor,terrain_hybrid=self.hybrid,terrain_magna=self.magna);self.patch.start();self.addCleanup(self.patch.stop)
         self.fixture=tile_fixture.BiomeTileRenderingTests('runTest');self.fixture.setUp();self.addCleanup(self.fixture.doCleanups)
         self.ns=self.fixture.namespace;self.app=self.fixture.app
         self.ns.update(math=math,hydrology_display=lambda seed,wp,lod,tx,ty,h,r:(h,None,r))
@@ -164,7 +164,14 @@ class AmplificationDeliveryTests(unittest.TestCase):
         capability=self.ns['amplification_capability']()
         self.assertTrue(capability['available'])
         self.assertEqual(capability['modes']['phasor'],dict(available=True,version='phasor-test'))
+        self.assertEqual(capability['modes']['magna'],dict(available=True,version='magna-test'))
         client=self.app.test_client();url='/height/natural-v1/42/-1/0/0.bin?amplify=1'
+        magna=client.get(url+'&amplify_mode=magna')
+        self.assertEqual(magna.status_code,200)
+        self.assertEqual(magna.headers['X-Terrain-Amplification-Mode'],'magna')
+        self.assertEqual(magna.headers['X-Terrain-Amplification'],'magna-noise-ground')
+        self.assertEqual(magna.headers['X-Terrain-Source-Kind'],'experimental-magna-relief')
+        self.assertIn('/amp-magna-magna-test-1.00',self.ns['tile_key'](42,-2,0,0,amplify=1,amplify_mode='magna'))
         mse=client.get(url+'&amplify_mode=mse');phasor=client.get(url+'&amplify_mode=phasor')
         self.assertEqual(mse.headers['X-Terrain-Amplification-Mode'],'mse')
         self.assertEqual(phasor.headers['X-Terrain-Amplification'],'phasor-noise')
@@ -192,7 +199,7 @@ class AmplificationDeliveryTests(unittest.TestCase):
         self.hybrid.VERSION='hybrid-test+phasor-test+mse-test'
         self.hybrid.RAVINE_WAVELENGTHS=(60.,20.,20/3)
         capability=self.ns['amplification_capability']()
-        self.assertEqual(list(capability['modes']),['hybrid','phasor','mse'])
+        self.assertEqual(list(capability['modes']),['hybrid','phasor','mse','magna'])
         self.assertEqual(capability['modes']['hybrid']['version'],self.hybrid.VERSION)
         client=self.app.test_client();url='/height/natural-v1/42/-1/0/0.bin?amplify=1'
         default=client.get(url);explicit=client.get(url+'&amplify_mode=hybrid')
@@ -207,7 +214,7 @@ class AmplificationDeliveryTests(unittest.TestCase):
         keys=[self.ns['tile_key'](42,-4,0,0,amplify=1,amplify_mode=mode) for mode in ('hybrid','phasor','mse')]
         self.assertEqual(len(set(keys)),3);self.assertTrue(keys[0].endswith('/amp-hybrid-'+self.hybrid.VERSION+'-1.00'))
         for endpoint,extension in (('height','bin'),('tiles','png')):
-            with patch.dict(sys.modules,terrain_hybrid=None):
+            with patch.dict(sys.modules,terrain_hybrid=None,terrain_magna=None):
                 self.assertEqual(client.get(f'/{endpoint}/natural-v1/42/-1/0/0.{extension}?amplify=1').status_code,400)
                 self.assertEqual(client.get(f'/{endpoint}/natural-v1/42/-1/0/0.{extension}?amplify=0').status_code,200)
         with patch('importlib.import_module',side_effect=RuntimeError('hybrid dependency missing')):
@@ -247,7 +254,7 @@ class AmplificationDeliveryTests(unittest.TestCase):
         np.testing.assert_array_equal(raw['base_height'],np.full((2,2),240,np.float32))
 
     def test_missing_module_keeps_disabled_paths_available(self):
-        with patch.dict(sys.modules,terrain_amplification=None,terrain_phasor=None,terrain_hybrid=None):
+        with patch.dict(sys.modules,terrain_amplification=None,terrain_phasor=None,terrain_hybrid=None,terrain_magna=None):
             with self.app.test_request_context('/?amplify=0'):
                 self.assertEqual(self.ns['selected_amplification'](),0)
                 self.assertFalse(self.ns['amplification_capability']()['available'])
@@ -297,7 +304,7 @@ class PhysicalAmplificationTests(unittest.TestCase):
             sample_refined=Mock(side_effect=AssertionError('selected sampler was bypassed')))
         load(ns,{'sample_elevation','sample_tile','sample_physical'})
         render=Mock(return_value=np.zeros((256,256,3),np.uint8));ns['render_elevation']=render
-        ns.update(existing_final_mip=lambda *a:None,resolve_generation=lambda wp:SimpleNamespace(settings={}),
+        ns.update(existing_final_mip=lambda *a:None,resolve_generation=lambda wp:SimpleNamespace(settings={'world_topology':'plane'}),
             sample_coarse_climate=lambda *a,**kw:np.zeros((5,33,33),np.float32))
         world=SimpleNamespace()
         with patch.dict(sys.modules,terrain_amplification=mse,terrain_phasor=phasor,terrain_hybrid=hybrid):

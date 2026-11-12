@@ -2,7 +2,7 @@
 
 ## Source world and geometry
 
-`backend/terrain_generation.py` normalizes settings. `backend/terrain_orogen_stages.py` retains relief, erosion and climate as immutable stage artifacts. Orogen's bundled graph algorithms run through Node; CUDA rasterizes spherical triangles into a 2,048 × 1,024 atlas. Optional CUDA acceleration and City wgpu erosion are separate choices.
+`backend/terrain_generation.py` normalizes settings. `backend/terrain_orogen_stages.py` retains relief, erosion and climate as immutable stage artifacts. Orogen v3's pinned geological generator, common finish and monthly climate run through Node; CUDA rasterizes spherical triangles into a 2,048 × 1,024 atlas. Optional CUDA spatial search and City wgpu erosion are separate choices; the v3 generation stages run on CPU.
 
 A stage's raster projection, hashing and saving run on a worker while Node computes the next stage. The server writes stage and atlas files after responding (`backend/terrain_array_io.py`), serves them from memory meanwhile, and flushes before exiting. Recent stage artifacts stay in memory while their files are unchanged.
 
@@ -12,7 +12,7 @@ The optional World Builder bridge samples a native cube-sphere CPU atlas, then p
 
 ## Conditioning and networks
 
-The five physical inputs are elevation, BIO1 temperature, BIO4 temperature variability, BIO12 rainfall and BIO15 rainfall variability. `backend/terrain_conditioning.py` adapts each source; checkpoint normalization constants remain unchanged. For Orogen, two seasonal temperature proxies define a 12-month harmonic. Seasonal rainfall totals are split equally across six months each. Sample standard deviations use the `sqrt(12/11)` correction; BIO15 uses the monthly-rain convention documented in the adapter. This matches a statistic contract without recovering actual monthly weather.
+The five physical inputs are elevation, BIO1 temperature, BIO4 temperature variability, BIO12 rainfall and BIO15 rainfall variability. `backend/terrain_conditioning.py` adapts each source; checkpoint normalization constants remain unchanged. Orogen v3 derives them from all twelve monthly temperature/rain fields: BIO1 is mean temperature, BIO4 is sample temperature SD × 100, BIO12 is annual rain, and BIO15 is sample monthly rain SD / (mean monthly rain + 1 mm) × 100. The two-season approximation remains only for external seasonal fixtures. Physical heights are converted linearly from kilometres to metres, without the former coastal quartic curve or a 6 km ceiling.
 
 The pretrained `EDMUnet2D` hierarchy runs on CUDA in BF16: coarse statistics at 7,680 m, base latents at 240 m, and the Laplacian decoder at 30 m. Coarse sampling retains 20 solver steps; the base stage retains two fusion steps. `backend/terrain_inference.py` adds cached constants, preparation, batching and exact kernels around the unchanged networks. CUDA Graphs reduce launch overhead and fall back when admission fails.
 

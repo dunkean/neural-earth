@@ -1,4 +1,4 @@
-"""Independent, immutabrelief -> erosion -> climate generation artifacts.
+"""Independent, immutable relief -> erosion -> climate generation artifacts.
 
 Stage commands restore the original graph, rather than generating it again.
 Composition retains untouched raster fields, even when their inputs are stale.
@@ -27,27 +27,25 @@ import terrain_array_io as array_io
 from terrain_generation import (OROGEN_PARAMETERS, OROGEN_CLIMATE_PARAMETERS,
     OROGEN_GPU_PARAMETERS, OROGEN_STAGE_PARAMETERS, CITY_EROSION_PARAMETERS)
 
-VERSION = 'orogen-independent-stages-v1'
+VERSION = 'orogen-v3-independent-stages-v1'
 # One FIFO worker: a stage's projection follows its parent's.
 _PROJECTION = ThreadPoolExecutor(max_workers=1, thread_name_prefix='orogen-projection')
 EROSION_KEYS = {'relief_pipeline', 'orogen_warp', 'orogen_smoothing',
-    'orogen_hydraulic', 'orogen_thermal', 'orogen_glacial', 'orogen_sharpening',
-    'orogen_gpu_post', 'orogen_gpu_erosion'} | set(CITY_EROSION_PARAMETERS)
+    'orogen_hydraulic', 'orogen_thermal', 'orogen_glacial', 'orogen_sharpening'} | set(CITY_EROSION_PARAMETERS)
 CLIMATE_KEYS = set(OROGEN_CLIMATE_PARAMETERS) | {'climate_source',
-    'orogen_temperature_offset', 'orogen_precipitation_offset', 'orogen_gpu_climate'}
+    'orogen_temperature_offset', 'orogen_precipitation_offset'}
 RELIEF_KEYS = (set(OROGEN_PARAMETERS)-EROSION_KEYS-CLIMATE_KEYS) | {
     'world_diameter_km', 'world_topology',
     'height_source', 'continental_style', 'continental_strength', 'macro_scale_km',
-    'frequency_mult', 'octaves', 'drop_water_pct', 'orogen_gpu_relief',
-    'orogen_gpu_propagation', 'orogen_gpu_raster'}
+    'frequency_mult', 'octaves', 'drop_water_pct', 'orogen_gpu_raster'}
 STAGE_KEYS = dict(relief=RELIEF_KEYS, erosion=EROSION_KEYS, climate=CLIMATE_KEYS)
-EROSION_FIELDS = {'erosionDelta', 'city_erosion_delta_m'}
+EROSION_FIELDS = {'erosionDelta', 'city_erosion_delta_m', 'ocean_mask', 'lake_mask', 'lake_level_m', 'geology_rock'}
 CLIMATE_FIELDS = {'koppen', 'pressureSummer', 'pressureWinter', 'continentality',
                   'rainShadowSummer', 'rainShadowWinter'}
 
 
 def is_climate_field(name):
-    return name in CLIMATE_FIELDS or name.startswith(('temperature_', 'precip_',
+    return name in CLIMATE_FIELDS or name in ('bio1', 'bio4', 'bio12', 'bio15') or name.startswith(('temperature_', 'precip_',
         'wind_', 'ocean_', 'biome_', 'koppen_color_'))
 
 
@@ -186,7 +184,6 @@ def _request(seed,config):
         smoothing=config['smoothing'],terrainWarp=config['warp'],hydraulicErosion=config['hydraulic'],
         thermalErosion=config['thermal'],glacialErosion=config['glacial'],ridgeSharpening=config['sharpening'],
         temperatureOffset=config['temperature_offset'],precipitationOffset=config['precipitation_offset'],
-        threshold=config['convergence_threshold'],motion=config['motion_strength'],spread=config['spread'],
         climateSettings={k.removeprefix('orogen_'):config[k.removeprefix('orogen_')]
                          for k in OROGEN_CLIMATE_PARAMETERS})
 
@@ -221,9 +218,6 @@ def _native(stage, seed, style, config, width, height, parent, relief):
     begun=time.perf_counter()
     identity=core.implementation_identity()
     request=_request(seed,config)
-    flags={key:False for key in ('relief','propagation','post','erosion','climate')}
-    for key in {'relief':('relief','propagation'),'erosion':('post','erosion'),'climate':('climate',)}[stage]:
-        flags[key]=config['orogen_gpu_'+key]
     gpu=None
     temporary=tempfile.TemporaryDirectory(prefix='orogen-'+stage+'-')
     try:
@@ -241,7 +235,6 @@ def _native(stage, seed, style, config, width, height, parent, relief):
             retained=directory/'retained.bin'
             retained.write_bytes(parent['arrays']['snapshot'].tobytes())
             request.update(resumeFile=str(retained),resumeCommand=stage,
-                           legacyHeightConvention=parent['metadata'].get('height_convention')!=core.HYPSOMETRY_RULE,
                            imported=relief['metadata']['namespace']['settings']['height_source']!='orogen',
                            skipPost=config['relief_pipeline']!='orogen',skipClimate=stage=='erosion')
         city=stage=='erosion' and config['relief_pipeline']=='city-gpu' and config['city_erosion_strength']>0
@@ -258,29 +251,21 @@ def _native(stage, seed, style, config, width, height, parent, relief):
             city_result.update(height=eroded,metadata=meta)
             return dict(elevationFile=str(directory/'external.f32')),meta
         if city:request['externalErosion']=True
-        if config.get('orogen_gpu_identity',{}).get('available') and any(flags.values()):
-            from terrain_orogen_gpu import run
-            gpu,_=run(shutil.which('node'),directory,request,flags,city_callback if city else None)
-        elif city:
-            # Reuse the existing framed bridge even with no adapted CUDA loops.
-            # It is only orchestration here; City remains the WGSL engine.
-            if config.get('orogen_gpu_identity',{}).get('available'):
-                from terrain_orogen_gpu import run
-                gpu,_=run(shutil.which('node'),directory,request,flags,city_callback)
-            else:
-                request_path=directory/'request.json';request_path.write_bytes(_json(request))
-                with (directory/'node.log').open('w+b') as log:
-                    with cancellable_process([shutil.which('node'),str(core.NATIVE/'pipeline.mjs'),str(request_path),str(directory)],
-                         stdin=subprocess.PIPE,stdout=log,stderr=log) as process:
-                        while not (directory/'relief.ready').exists():
-                            if process.poll() is not None or time.perf_counter()-begun>600:
-                                process.kill();log.seek(0)
-                                raise RuntimeError('Retained City preparation failed: '+log.read().decode(errors='replace')[-4000:])
-                            time.sleep(.02)
-                        reply,_=city_callback()
-                        process.communicate(_json(reply),timeout=600)
-                        if process.returncode:
-                            log.seek(0);raise RuntimeError(log.read().decode(errors='replace')[-4000:])
+        if city:
+            request_path=directory/'request.json';request_path.write_bytes(_json(request))
+            with (directory/'node.log').open('w+b') as log:
+                with cancellable_process([shutil.which('node'),str(core.NATIVE/'pipeline.mjs'),str(request_path),str(directory)],
+                     stdin=subprocess.PIPE,stdout=log,stderr=log) as process:
+                    while not (directory/'relief.ready').exists():
+                        check_generation()
+                        if process.poll() is not None or time.perf_counter()-begun>600:
+                            process.kill();log.seek(0)
+                            raise RuntimeError('Retained City preparation failed: '+log.read().decode(errors='replace')[-4000:])
+                        time.sleep(.02)
+                    reply,_=city_callback()
+                    process.communicate(_json(reply),timeout=600)
+                    if process.returncode:
+                        log.seek(0);raise RuntimeError(log.read().decode(errors='replace')[-4000:])
         else:
             request_path=directory/'request.json';request_path.write_bytes(_json(request))
             result=run_process([shutil.which('node'),str(core.NATIVE/'pipeline.mjs'),str(request_path),str(directory)],
@@ -314,8 +299,8 @@ def _project(context):
     else:xyz=core.sphere_raster(width,height);nearest=geometry['nearest'].copy()
     selected={k:v for k,v in fields.items() if
         (is_climate_field(k) if stage=='climate' else
-         k in EROSION_FIELDS or k=='elevation' if stage=='erosion' else
-         not is_climate_field(k) and k not in EROSION_FIELDS)}
+         k in EROSION_FIELDS or k.startswith('farming_') or k=='elevation' if stage=='erosion' else
+         not is_climate_field(k) and k not in EROSION_FIELDS and not k.startswith('farming_'))}
     projected,fallback=rasterize(points,triangles,nearest,xyz,selected,device)
     layers={k:v.reshape(height,width) for k,v in projected.items()}
     if stage=='relief':
@@ -343,9 +328,11 @@ def build_stage(stage,seed,style,config,width,height,parent=None,relief=None,*,d
     check_generation()
     settings=_settings(config,style)
     runtime={}
-    gpu_keys={'relief':('relief','propagation','raster'),'erosion':('post','erosion'),'climate':('climate',)}[stage]
+    gpu_keys=('raster',) if stage=='relief' else ()
     if any(config['orogen_gpu_'+k] for k in gpu_keys):runtime['gpu']=config.get('orogen_gpu_identity')
-    if stage=='erosion' and config['relief_pipeline']=='city-gpu':runtime['city']=config.get('city_erosion_identity')
+    if stage=='erosion':
+        runtime['finish_climate']={k:settings[k] for k in sorted(CLIMATE_KEYS)}
+        if config['relief_pipeline']=='city-gpu':runtime['city']=config.get('city_erosion_identity')
     namespace=dict(version=VERSION,implementation=core.implementation_identity(),stage=stage,
         seed=seed,style=style if stage=='relief' else None,width=width,height=height,
         parent=parent['id'] if parent else None,
@@ -399,14 +386,17 @@ def compose(seed,style,config,width,height,stages,height_stage):
     for name,artifact in stages.items():
         ns=artifact['metadata']['namespace'];wanted={k:settings[k] for k in sorted(STAGE_KEYS[name])}
         dependency=relief['id'] if name=='erosion' else active['id'] if name=='climate' else None
+        finish_climate=ns.get('runtime',{}).get('finish_climate')
+        climate_pending=(name=='erosion' and finish_climate is not None and
+                         finish_climate!={k:settings[k] for k in sorted(CLIMATE_KEYS)})
         state[name]=dict(id=artifact['id'],parent=ns['parent'],
-                         stale=ns['parent']!=dependency,settings_pending=ns['settings']!=wanted)
+                         stale=ns['parent']!=dependency,settings_pending=ns['settings']!=wanted or climate_pending)
     metadata=dict(requested_seed_u64=str(seed),selected_seed_u64=str(seed),selected_attempt=0,
-        style=style,generator_version=core.VERSION,native_config=dict(config,backend='original-Orogen; independent cached stages'),
+        style=style,generator_version=core.VERSION,native_config=dict(config,backend='Orogen-v3-CPU; CUDA projection; independent cached stages'),
         attempts=[],raster=dict(width=width,height=height,dtype='<f4',projection='equirectangular',samples='pixel-centres',
         y_axis='south',sea_level_m=0,longitude_axis='atan2(z,x)',reconstruction='spherical-bilinear-at-read'),
         hypsometry=dict(rule=active['metadata'].get('height_convention',
-            'original Orogen: ocean 10000*e; land 6000*t^4*(5-4*t)')),sign_preserved=True,
+            core.HYPSOMETRY_RULE)),sign_preserved=True,
         substrate=dict(version=SOIL_VERSION,composition=['sand','clay','humus'],
                        interpretation='procedural appearance; not surveyed geology'),
         pedology=dict(version=PEDOLOGY_VERSION,cell_metres=cell_metres(raw.shape,world_bounds(settings)),
@@ -420,7 +410,8 @@ def compose(seed,style,config,width,height,stages,height_stage):
     for artifact in reversed(list(stages.values())):
         for name in ('gpu_pipeline','erosion'):
             if artifact['metadata'].get(name):metadata.setdefault(name,artifact['metadata'][name])
-    return raw,raw<0,metadata,layers['uplift'],layers
+    ocean=(raw<0) & (layers.get('ocean_mask',np.ones_like(raw))>.5)
+    return raw,ocean,metadata,layers['uplift'],layers
 
 
 def generate_staged_atlas(seed,style='earthlike',*,width,height,include_layers=False,options=None):

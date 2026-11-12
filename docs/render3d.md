@@ -1,5 +1,8 @@
 # Render3D and Render3D Brush
 
+The default desktop layer is now [Satellite · Magna Urbis](methods/magna-satellite.md).
+The legacy Render3D layers described below remain selectable.
+
 **Render3D** keeps the [Render](materials.md) material as its distant appearance and resolves a physical ground and a canonical forest as the pixel footprint shrinks. **Render3D Brush** draws the same forest with painted overhead crowns and shrubs. Both are display layers: they never change heights, climate, neural inference or server caches, and the server still renders `render` for PNG fallbacks and overviews.
 
 They adapt the Render3D and Render3DBrush styles of Magna Urbis (`rust/bridge/terrainGround.ts`, `terrainForest.ts`, GPL-3.0), whose own Render material is a port of this repository's. The shader code is not shared: Magna Urbis renders one finite map with WebGL2 and a CPU forest raster for a single climate preset, while Neural Earth streams planetary WebGPU tiles with a spatial seasonal climate. The overhead brush atlas is shared unchanged (see [Assets](#assets)).

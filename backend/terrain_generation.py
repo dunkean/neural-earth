@@ -27,18 +27,15 @@ OROGEN_PARAMETERS = {
     'orogen_continent_count': {'minimum':1, 'maximum':10, 'integer':True, 'default':4},
     'orogen_land_coverage': {'minimum':.05, 'maximum':.9, 'default':.30},
     'orogen_continent_variety': {'minimum':0., 'maximum':1., 'default':.85},
-    'orogen_motion_strength': {'minimum':0., 'maximum':4., 'default':1.},
-    'orogen_convergence_threshold': {'minimum':.05, 'maximum':4., 'default':.75},
     'orogen_detail': {'minimum':20000, 'maximum':1000000, 'integer':True, 'default':100000},
-    'orogen_spread': {'minimum':1., 'maximum':12., 'default':5.},
-    'orogen_roughness': {'minimum':0., 'maximum':1., 'default':.4},
+    'orogen_roughness': {'minimum':0., 'maximum':.5, 'default':.4},
     'orogen_warp': {'minimum':0., 'maximum':1., 'default':.75},
     'orogen_smoothing': {'minimum':0., 'maximum':1., 'default':.1},
     'orogen_hydraulic': {'minimum':0., 'maximum':1., 'default':.5},
     'orogen_thermal': {'minimum':0., 'maximum':1., 'default':.1},
     'orogen_glacial': {'minimum':0., 'maximum':1., 'default':.5},
     'orogen_sharpening': {'minimum':0., 'maximum':1., 'default':.5},
-    'orogen_temperature_offset': {'minimum':-15., 'maximum':15., 'default':0.},
+    'orogen_temperature_offset': {'minimum':-30., 'maximum':30., 'default':0., 'description':'Radiative forcing in W/m²'},
     'orogen_precipitation_offset': {'minimum':-1., 'maximum':1., 'default':0.},
 }
 OROGEN_CLIMATE_PARAMETERS = json.loads((REPO_ROOT / 'native' / 'orogen' / 'climate-parameters.json').read_text(encoding='utf-8'))
@@ -50,11 +47,6 @@ CITY_EROSION_PARAMETERS = {
     'city_erosion_motif_km': {'minimum': 10., 'maximum': 5000., 'default': 300.},
 }
 OROGEN_GPU_PARAMETERS = {
-    'orogen_gpu_relief': {'type': 'boolean', 'default': False},
-    'orogen_gpu_propagation': {'type': 'boolean', 'default': False},
-    'orogen_gpu_post': {'type': 'boolean', 'default': False},
-    'orogen_gpu_climate': {'type': 'boolean', 'default': False},
-    'orogen_gpu_erosion': {'type': 'boolean', 'default': False},
     'orogen_gpu_raster': {'type': 'boolean', 'default': False},
 }
 OROGEN_STAGE_PARAMETERS = {

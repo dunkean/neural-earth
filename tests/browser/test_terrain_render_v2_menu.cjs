@@ -32,7 +32,7 @@ const root=path.resolve(__dirname,'../..');
   assert.equal(await layer.evaluate(e=>e.closest('fieldset').querySelector('legend').textContent),'Main maps');
   await layer.click();
   await page.waitForFunction(()=>terrainDebug.snapshot().mode==='render-v2');
-  assert.equal(await page.locator('#layerPanel .selectedLayer').textContent(),'Render v2');
+  assert.equal(await page.locator('#layerPanel .selectedLayer').textContent(),'Satellite');
   await page.locator('#renderPanel > summary').click();await page.locator('#tabRendering').click();
   assert.equal(await page.locator('#renderV2Season').isVisible(),true);
   assert.equal(await page.locator('#renderV2Diagnostic').isVisible(),true);
@@ -85,7 +85,7 @@ const root=path.resolve(__dirname,'../..');
   }
   await page.evaluate(()=>{window.__localeHydroFixture.viewer.dispose();window.__localeHydroFixture.parent.remove();delete window.__localeHydroFixture});
   await page.locator('#ui-language').selectOption('en');
-  assert.equal(await page.locator('#layerPanel .selectedLayer').textContent(),'Render v2');
+  assert.equal(await page.locator('#layerPanel .selectedLayer').textContent(),'Satellite');
   assert.equal(await layer.getAttribute('aria-pressed'),'true');
   // Existing diagnostic deep links remain valid after removing their buttons.
   const legacy=new URL(page.url());legacy.searchParams.set('mode','render-v2-moisture');await page.goto(legacy.href);

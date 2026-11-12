@@ -48,7 +48,7 @@ class IndependentStages(unittest.TestCase):
 
     def test_individual_stages_retain_others_and_climate_uses_active_height(self):
         profile,initial,_=self.run_stage(self.settings,'all')
-        options=dict(self.settings,orogen_temperature_equator=33.,orogen_hydraulic=.1)
+        options=dict(self.settings,orogen_temperature_offset=10.,orogen_hydraulic=.1)
         with patch.object(stages,'_execute',wraps=stages._execute) as execute, \
              patch.object(core,'initial_raster',side_effect=AssertionError('relief regenerated')):
             climate_profile,climate,execution=self.run_stage(options,'climate',profile)
@@ -78,7 +78,7 @@ class IndependentStages(unittest.TestCase):
         for name,value in climate.layers.items():
             if stages.is_climate_field(name):np.testing.assert_array_equal(eroded.layers[name],value)
         self.assertTrue(eroded.metadata['stage_state']['climate']['stale'])
-        options=dict(resolve_generation(erosion_profile).settings,orogen_roughness=.9)
+        options=dict(resolve_generation(erosion_profile).settings,orogen_roughness=.45)
         with patch.object(stages,'_execute',wraps=stages._execute) as execute:
             relief_profile,relief,_=self.run_stage(options,'relief',erosion_profile)
         self.assertEqual([call.args[0] for call in execute.call_args_list],['relief'])
@@ -114,10 +114,14 @@ class IndependentStages(unittest.TestCase):
         if not implementation_identity()['available']:self.skipTest('Optional CUDA runtime unavailable')
         for engine in ('orogen','city-gpu'):
             with self.subTest(engine=engine):
+                if engine=='city-gpu':
+                    import importlib.util
+                    if importlib.util.find_spec('wgpu') is None:
+                        self.skipTest('Optional City wgpu runtime unavailable')
                 settings=dict(self.settings,relief_pipeline=engine,city_erosion_iterations=2,
                     **{key:True for key in OROGEN_GPU_PARAMETERS})
                 profile,first,_=self.run_stage(settings,'all')
-                changed=dict(resolve_generation(profile).settings,orogen_temperature_equator=32.)
+                changed=dict(resolve_generation(profile).settings,orogen_temperature_offset=8.)
                 with patch.object(stages,'_execute',wraps=stages._execute) as execute:
                     _,second,_=self.run_stage(changed,'climate',profile)
                 self.assertEqual([call.args[0] for call in execute.call_args_list],['climate'])

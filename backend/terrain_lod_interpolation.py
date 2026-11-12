@@ -17,7 +17,7 @@ import numpy as np
 MIN_LOD = -12
 VERSION = 'v1'
 # Measured in tmp/e2e/interp/diagnosis; -6 is also the generators' current limit.
-RELIEF_FLOOR = {'classic': -6, 'hybrid': -6, 'phasor': -6, 'mse': -6}
+RELIEF_FLOOR = {'classic': -6, 'hybrid': -6, 'phasor': -6, 'mse': -6, 'magna': -6}
 BLOCK = 128
 _lock = threading.RLock()
 _limiter_kernel = None

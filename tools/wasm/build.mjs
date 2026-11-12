@@ -44,14 +44,16 @@ const input=globeSource.slice(globeSource.indexOf("    canvas.addEventListener('
 const coordinates=globeSource.slice(globeSource.indexOf('      screenToWorld('),globeSource.indexOf('      setImage('));
 if(!camera.includes('function camera')||!input.includes('pointermove')||!coordinates.includes('worldToScreen'))throw Error('Globe integration does not match shared source');
 await writeFile(join(out,'runtime/globe.mjs'),(await readFile(join(root,'wasm/globe.mjs'),'utf8')).replace('/* SHARED_CAMERA */',camera).replace('/* SHARED_INPUT */',input).replace('/* SHARED_COORDINATES */',coordinates));
-await cp(join(root,'native/orogen/vendor'),join(out,'runtime/orogen'),{recursive:true});
+for(const name of ['vendor','upstream'])await cp(join(root,'native/orogen',name),join(out,'runtime/orogen',name),{recursive:true});
+await cp(join(root,'native/orogen/climate.mjs'),join(out,'runtime/orogen/climate.mjs'));
+await cp(join(root,'native/orogen/climate-parameters.json'),join(out,'runtime/orogen/climate-parameters.json'));
 await cp(join(root,'native/orogen/climate-parameters.json'),join(out,'runtime/climate-parameters.json'));
-let delaunator=(await readFile(join(out,'runtime/orogen/delaunator.cjs'),'utf8')).replace(/\r\n/g,'\n');
+let delaunator=(await readFile(join(out,'runtime/orogen/vendor/delaunator.cjs'),'utf8')).replace(/\r\n/g,'\n');
 const start=delaunator.indexOf("const epsilon"),end=delaunator.lastIndexOf('return Delaunator;');
 if(start<0||end<start)throw Error('Unrecognized Delaunator bundle');
-await writeFile(join(out,'runtime/orogen/delaunator.js'),delaunator.slice(start,end)+'\nexport default Delaunator;\n');
-const worker=join(out,'runtime/orogen/planet-worker.js');
-await writeFile(worker,(await readFile(worker,'utf8')).replace("'./delaunator.cjs'","'./delaunator.js'"));
+await writeFile(join(out,'runtime/orogen/vendor/delaunator.js'),delaunator.slice(start,end)+'\nexport default Delaunator;\n');
+const worker=join(out,'runtime/orogen/upstream/js/planet-worker.js');
+await writeFile(worker,(await readFile(worker,'utf8')).replace("'../../vendor/delaunator.cjs'","'../../vendor/delaunator.js'"));
 let html=(await readFile(join(root,'web/index.html'),'utf8')).replace(/\r\n/g,'\n');
 // Parser-blocking ES modules ensure the local transport exists before the shared UI starts.
 html=html.replace('<script src="/terrain_transport.js"></script>','<script>window.NeuralEarthRuntime={kind:"wasm",minLOD:0,renderLabel:"WASM",preferencesKey:"neural-earth-wasm-preferences-v1"};</script>');

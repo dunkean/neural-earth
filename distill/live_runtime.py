@@ -9,6 +9,7 @@ from pathlib import Path
 import threading
 
 from distill.common import DATA, REPO, REVISION, atomic_json
+from backend.terrain_model_loading import MODEL_LOAD_LOCK
 
 STAGES = ('coarse', 'base', 'decoder')
 DEFAULT_SELECTION = dict(coarse='solver8', base='teacher', decoder='distilled200k')
@@ -128,7 +129,7 @@ class LiveModels:
                     payload = Path(option['path']).read_bytes()
                     if hashlib.sha256(payload).hexdigest() != option['sha256']:
                         raise ValueError('Model export changed since server startup; restart the review server.')
-                    with torch.inference_mode(False):
+                    with MODEL_LOAD_LOCK, torch.inference_mode(False):
                         if option.get('format') == 'native3-packed':
                             from distill.native3_release import load
                             model = load(option['directory'], device)

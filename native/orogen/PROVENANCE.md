@@ -1,69 +1,69 @@
-# Original Orogen pipeline
+# Orogen v3 integration
 
-The JavaScript modules in `vendor/` were copied from the local
-`../world_builder/orogen/js` snapshot on 2026-10-08. That checkout has no HEAD
-commit; no upstream revision is claimed. The upstream GPL-3.0 license is
-retained as `vendor/OROGEN-LICENSE`. `sphere-mesh.js` credits Red Blob Games.
-Delaunator 5.0.1 and its ISC license are bundled for offline execution.
+The active generator is World Orogen v3.0.1, vendored from
+[raguilar011095/planet_heightmap_generation](https://github.com/raguilar011095/planet_heightmap_generation)
+at commit `ed466f9db71292e912d8d0160e689a67a994f2d9` (2026-11-09).
+The source dependency closure of `js/planet-worker.js` is in `upstream/`.
+Its GPL-3.0 license and COPYRIGHT are retained there. No upstream render shaders,
+application UI, model weights or generated worlds are used by this integration.
 
-`pipeline.mjs` runs the original worker headlessly with Node.js. Original
-superplates, Euler-pole collisions, stress propagation, uplift, hotspots,
-terrain processing, wind, ocean currents, precipitation, temperature,
-Koppen classification and biome colors are retained.
+## Upstream adaptations
 
-Adaptations in `planet-worker.js`: local Delaunator import; optional bypass
-of all postprocessing; direct float32 metre heightmap import using the inverse
-of the calibrated elevation curve; pixel-centre coordinates and the
-application's atan2(z,x) longitude convention; configurable propagation and
-plate angular-speed multiplier (original defaults 5 and 1).
-`elevation.js` exposes boundary types and makes the original 0.75 collision
-threshold configurable. `color-map.js` adds a finite coastal slope to the
-original quartic physical-altitude mapping (see below).
+`upstream/js/planet-worker.js` has two local changes: the CDN Delaunator import
+uses the existing ISC-licensed bundle in `vendor/`, and `retainedTerrain()`
+exports the graph triangles and ground-shaping inputs for independent stages.
+`upstream/package.json` declares ES modules for headless Node execution.
+`upstream/v2/js/present/belts.js` additionally records the actual back-arc
+footprint while the existing algorithm builds it. This adds a data channel,
+without changing random draws, terrain calculations or crust evolution.
+The terrain, finish, climate, geological and agricultural algorithms are upstream.
+The remaining files in `vendor/` preserve our configurable biome palette and the
+existing two-season display classifier. Their original local snapshot revision
+was unknown; they are not presented as part of the pinned v3 upstream source.
 
-For seed 42, a 20K mesh, and original defaults, graph elevation, both temperature
-seasons, both precipitation seasons, and Koppen classes were compared against
-a separately executed original worker: all six arrays were bit-identical.
-That comparison describes the historical mapping; `coastal-slope-v1` deliberately changes
-physical coastal altitudes and consequently climate. Dense spherical triangle interpolation is performed with CUDA in
-`terrain_orogen_cuda.py`; it is an adaptation of the representation, not a
-replacement tectonic formula. Categorical fields use the nearest graph vertex.
-Source hashes and runtime identity participate in persistent atlas identity.
+## Data adapter
 
-The optional City GPU engine adds a deferred-climate adapter hook,
-`setExternalElevation`, to the worker. The headless adapter exports unprocessed
-relief, waits while Python applies City WebGPU erosion, then resumes climate
-on the same retained spherical mesh, original plates and noise state.
-Eroded metre heights use the matching calibrated inverse convention. The source
-atlas remains the GPU engine's exact output; graph climate samples are limited
-by mesh/raster resolution and the original 6000 m climate altitude ceiling.
-The original Orogen postprocessing path remains the default.
+`pipeline.mjs` runs Generate, retains its geological frame, reapplies sculpting
+to that frame, and runs the common Evolution finish. Climate-only commands run
+the new monthly climate on the retained final heights without reshaping land.
+The finish itself depends on climate (runoff, ice and sediment); its stage
+identity includes those climate settings. A later climate-only edit marks those
+erosion settings pending, while keeping the explicit independent-stage behavior.
 
-With `coastal-slope-v1`, positive elevation `t=min(e,1)` maps to
-`6000*t^4*(5-4*t)+1000*t*(1-t)^4` metres. The added bounded term provides a
-1000 m/unit slope at sea level (about 9.6 m at t=0.01), rather than making
-large terrestrial regions sub-metre plains. It adds at most 81.92 m and leaves
-the 6 km peak unchanged. This is an explicit coastal calibration, not an
-empirical DEM distribution. Ocean depth stays `10000*e`, retaining the existing
-bathymetry and exact zero crossing; the land/ocean slope discontinuity already
-existed and is now smaller. Python, Node climate/import and CUDA helpers share
-the law. Imported physical metres use its inverse, so imports are not raised.
-No smoothing, coastline mask, height floor or neural-noise suppression is used.
-Stage artifacts record the physical-height convention. Historical snapshots
-without that annotation have their retained pre/post graph elevations rebased
-through the old physical metres before resuming, keeping climate-only commands
-consistent with the visible historical height; immutable old bytes are retained.
+The upstream z-north coordinates `(x,y,z)` become application y-north `(x,z,y)`;
+longitude remains `atan2(z,x)` in the application. Heights are physical kilometres
+converted linearly to metres, with no 6 km cap. Imported metre rasters use
+pixel-centre bilinear sampling and longitude wrapping, with no nonlinear inverse.
+The original imported raster remains exact when erosion is disabled.
 
-The optional CUDA adapter under `gpu/` creates temporary module copies; it
-never modifies these reference modules in place. All GPU switches default to
-off. Its experimental graph/erosion algorithms, retained CPU stages, bundled
-Acorn license and runtime fallback are detailed in `gpu/PROVENANCE.md`.
+The old `coastal-slope-v1` correction compensated for the former quartic
+normalized-height conversion. V3's generated heights already have physical units;
+applying that curve again would distort them. The new conversion has constant
+slope through sea level and preserves centimetre inputs and high mountains.
+The upstream coast morphology is otherwise retained, including its known high
+coastal ranges; this integration does not smooth or lower those ranges.
 
-The independent-stage adapter adds worker exports `exportRetainedState`,
-`restoreRetainedState` and `applyRetainedErosion`. Snapshots retain the original
-mesh/halfedges, plate state and raw/final elevations. The noise generator is
-recreated from its original seed; wind/current caches are cleared before each
-climate command. Retained erosion invokes the original postprocessing with the
-original hotspot field. Imported sources rederive synthetic regions after
-erosion, matching the original import pipeline. These exports avoid rebuilding
-relief for climate-only or erosion-only commands. The original CPU full pipeline
-remains the numerical reference and is checked against the staged CPU chain.
+`climate.mjs` exports all twelve monthly temperature/rain fields and physical
+BIO1, BIO4, BIO12 and BIO15. BIO4 uses sample SD × 100 and BIO15 uses sample SD
+divided by mean monthly rain + 1 mm, × 100. Seasonal fields remain available to
+the existing diagnostics. All neural inputs are finite, including over water.
+The v3 temperature control is radiative forcing (W/m²), not a Celsius offset.
+Climate parameters are mapped explicitly to upstream PARAMS; the old physical
+climate tuning knobs and V1 graph GPU transformations have been removed.
+
+Existing resource inputs receive volcanic relief (`volcWornKm / 6`) as `hotspot`
+and the recorded back-arc footprint as `backArc` (`-0.06` for full membership).
+The latter is a compatibility scale for resource-context membership, not a v1
+elevation contribution. The unscaled `geology_backarc` field is also retained.
+Imported heightmaps have no invented tectonic history: these context fields
+are zero and crust follows the input's land/ocean mask.
+
+CUDA still rasterizes the graph's original triangles. Categories use the nearest
+vertex, continuous physical fields use barycentric weights. Optional exact CUDA
+spatial search and external City WebGPU erosion remain separate choices.
+Source and Node-runtime hashes participate in atlas/stage identities. V3 uses a
+fresh cache namespace and rejects V1 binary snapshots; no old-world migration
+or parallel legacy generator is provided.
+
+The WASM build uses the same vendored v3 engine and monthly-climate adapter;
+its existing inference and rendering shaders are unchanged.

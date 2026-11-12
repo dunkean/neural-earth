@@ -23,6 +23,18 @@ from test_terrain_conditioning import HeightStub, source_fixture
 
 
 class OrogenRoutingTests(unittest.TestCase):
+    def test_v3_monthly_bioclim_is_used_without_two_season_reconstruction(self):
+        provider=HeightStub()
+        provider.bounds=(-20e6,-10e6,20e6,10e6);provider.width=4;provider.height=2
+        provider.layers={name:np.full((2,4),value,np.float32) for name,value in
+                         [('bio1',17.25),('bio4',1250.),('bio12',3210.),('bio15',143.)]}
+        with patch('terrain_orogen.get_heightmap',return_value=provider), \
+             patch.object(conditioning,'orogen_bioclim',side_effect=AssertionError('seasonal approximation used')):
+            factory=conditioning.GenerationConditioning(7,generation.resolve_generation('orogen'))
+            fields=factory.sample([0.,500.],[0.,200.])
+        for channel,value in enumerate((17.25,1250.,3210.,143.),1):
+            np.testing.assert_allclose(fields[channel],value)
+
     def test_profile_and_custom_source_replay_without_native_rust(self):
         default = generation.resolve_generation('orogen')
         self.assertEqual(default.settings['height_source'], 'orogen')
@@ -98,9 +110,9 @@ class OrogenRoutingTests(unittest.TestCase):
 class OrogenCudaTests(unittest.TestCase):
     def test_climate_and_biome_controls_change_fields_without_changing_relief(self):
         from terrain_orogen import generate_atlas
-        baseline=generate_atlas(42,width=128,height=64,options={'detail':20000},include_layers=True)
+        baseline=generate_atlas(42,width=128,height=64,options={'detail':20000,'relief_pipeline':'original'},include_layers=True)
         variant=generate_atlas(42,width=128,height=64,options={
-            'detail':20000,'temperature_equator':33.,'biome_tropical_snow':1.,
+            'detail':20000,'relief_pipeline':'original','temperature_offset':10.,'biome_tropical_snow':1.,
             'biome_color_af':[.9,.1,.1]},include_layers=True)
         np.testing.assert_array_equal(baseline[0],variant[0])
         self.assertGreater(float(variant[4]['temperature_summer'].mean()),float(baseline[4]['temperature_summer'].mean()))
@@ -133,14 +145,19 @@ class OrogenCudaTests(unittest.TestCase):
         np.testing.assert_array_equal(height,source)
         self.assertIn('koppen',layers)
         self.assertIn('precip_summer',layers)
+        self.assertTrue({'plates','crust','hotspot','backArc'} <= set(layers))
         self.assertEqual(receipt['projection_fallback_pixels'],0)
 
-    def test_stationary_plates_have_no_convergence_or_positive_uplift(self):
+    def test_v3_preserves_monthly_climate_and_geological_history(self):
         from terrain_orogen import generate_atlas
-        _,_,_,_,layers=generate_atlas(42,width=128,height=64,
-            options={'detail':20000,'motion_strength':0},include_layers=True)
-        self.assertEqual(float(layers['convergence'].max()),0.)
-        self.assertLessEqual(float(layers['tectonic'].max()),0.)
+        height,_,_,_,layers=generate_atlas(42,width=128,height=64,options={'detail':20000},include_layers=True)
+        self.assertTrue({'bio1','bio4','bio12','bio15','geology_belt_kind','geology_craton','geology_rock'} <= set(layers))
+        self.assertTrue((layers['geology_belt_kind']>0).any())
+        self.assertTrue((layers['geology_craton']>0).any())
+        self.assertTrue(all('temperature_month_'+str(m) in layers and 'precip_month_'+str(m) in layers for m in range(1,13)))
+        from terrain_resources import tectonic_contexts
+        contexts,_=tectonic_contexts(layers,height)
+        self.assertTrue(np.isfinite(contexts).all())
 
     def test_real_u64_seed_persistence_and_periodic_sampling(self):
         import terrain_orogen as orogen

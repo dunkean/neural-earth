@@ -89,7 +89,7 @@ no Python. Weights and generated builds are ignored by Git.
   matrix-unit kernels), which made a 30 m tile take minutes. The GEMM tile can
   change without changing outputs: the accumulation order is fixed.
 * **World generation:** the browser runs the same maintained
-  `native/orogen/vendor/` sources as Python's Node adapter. The static build only
+  `native/orogen/upstream/` v3 engine and `climate.mjs` monthly-data adapter as Python's Node adapter. The static build only
   converts the existing Delaunator UMD wrapper to an ES module. Raster projection
   is Rust/WASM, with a spherical spatial index and bilinear atlas reads.
 * **Control schema:** `wasm/generation-schema.json` is an export of Python's

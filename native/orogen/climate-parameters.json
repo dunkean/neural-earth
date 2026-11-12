@@ -1,311 +1,1124 @@
 {
-  "orogen_itcz_ocean_lat": {
-    "default": 5.0,
-    "minimum": 0.0,
-    "maximum": 25.0,
-    "label": "ITCZ ocean latitude (\u00b0)",
-    "group": "wind",
-    "step": 0.01
+  "orogen_v3_temp_olr_a": {
+    "default": 203.3,
+    "minimum": 195,
+    "maximum": 215,
+    "label": "Temp olr a",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_OLR_A",
+    "description": "North & Coakley 1979, satellite OLR fit"
   },
-  "orogen_itcz_land_pull": {
-    "default": 15.0,
-    "minimum": 0.0,
-    "maximum": 40.0,
-    "label": "ITCZ land displacement (\u00b0)",
-    "group": "wind",
-    "step": 0.01
+  "orogen_v3_temp_olr_b": {
+    "default": 2.09,
+    "minimum": 1.6,
+    "maximum": 2.4,
+    "label": "Temp olr b",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_OLR_B",
+    "description": "North & Coakley 1979; Graves et al. 1993 (1.5\u20132.2)"
   },
-  "orogen_itcz_elevation_pull": {
-    "default": 1.5,
-    "minimum": 0.0,
-    "maximum": 10.0,
-    "label": "ITCZ elevation displacement (\u00b0/km)",
-    "group": "wind",
-    "step": 0.01
+  "orogen_v3_temp_diffusivity": {
+    "default": 0.65,
+    "minimum": 0.3,
+    "maximum": 1,
+    "label": "Temp diffusivity",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_DIFFUSIVITY",
+    "description": "North 1981 (0.649); North, Mengel & Short 1983 (\u22480.67)"
   },
-  "orogen_itcz_land_saturation": {
-    "default": 2.0,
-    "minimum": 0.1,
-    "maximum": 10.0,
-    "label": "ITCZ land saturation",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_itcz_min_lat": {
-    "default": 5.0,
-    "minimum": 0.0,
-    "maximum": 30.0,
-    "label": "ITCZ minimum latitude (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_itcz_max_lat": {
-    "default": 20.0,
-    "minimum": 1.0,
-    "maximum": 60.0,
-    "label": "ITCZ maximum latitude (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_itcz_strength": {
-    "default": 15.0,
-    "minimum": 0.0,
-    "maximum": 60.0,
-    "label": "ITCZ low pressure (hPa)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_itcz_width": {
-    "default": 8.0,
-    "minimum": 1.0,
-    "maximum": 30.0,
-    "label": "ITCZ pressure width (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_seasonal_shift": {
-    "default": 5.0,
-    "minimum": 0.0,
-    "maximum": 30.0,
-    "label": "Seasonal belt displacement (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_subtropical_strength": {
-    "default": 12.0,
-    "minimum": 0.0,
-    "maximum": 60.0,
-    "label": "Subtropical high pressure (hPa)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_land_weakening": {
+  "orogen_v3_temp_albedo": {
     "default": 0.3,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "High pressure land weakening",
-    "group": "wind",
-    "step": 0.01
+    "minimum": 0.25,
+    "maximum": 0.35,
+    "label": "Temp albedo",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_ALBEDO",
+    "description": "Earth's planetary albedo \u2248 0.30"
   },
-  "orogen_pressure_subpolar_strength": {
-    "default": 10.0,
-    "minimum": 0.0,
-    "maximum": 60.0,
-    "label": "Subpolar low pressure (hPa)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_polar_strength": {
-    "default": 8.0,
-    "minimum": 0.0,
-    "maximum": 60.0,
-    "label": "Polar high pressure (hPa)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_summer_land": {
-    "default": 10.0,
-    "minimum": 0.0,
-    "maximum": 60.0,
-    "label": "Summer continental low (hPa)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_winter_land": {
-    "default": 14.0,
-    "minimum": 0.0,
-    "maximum": 60.0,
-    "label": "Winter continental high (hPa)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_elevation": {
-    "default": 3.0,
-    "minimum": 0.0,
-    "maximum": 15.0,
-    "label": "Pressure altitude effect (hPa/km)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_noise": {
-    "default": 2.0,
-    "minimum": 0.0,
-    "maximum": 15.0,
-    "label": "Pressure noise (hPa)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_geostrophic_angle": {
-    "default": 70.0,
-    "minimum": 0.0,
-    "maximum": 90.0,
-    "label": "Geostrophic deflection (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_friction_angle": {
-    "default": 20.0,
-    "minimum": 0.0,
-    "maximum": 90.0,
-    "label": "Surface friction angle (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_continentality_km": {
-    "default": 2000.0,
-    "minimum": 100.0,
-    "maximum": 10000.0,
-    "label": "Continentality range (km)",
-    "group": "wind",
-    "step": 50
-  },
-  "orogen_continentality_smoothing_km": {
-    "default": 100.0,
-    "minimum": 0.0,
-    "maximum": 500.0,
-    "label": "Continentality smoothing (km)",
-    "group": "wind",
-    "step": 10
-  },
-  "orogen_pressure_smoothing_km": {
-    "default": 75.0,
-    "minimum": 0.0,
-    "maximum": 500.0,
-    "label": "Pressure smoothing (km)",
-    "group": "wind",
-    "step": 5
-  },
-  "orogen_ocean_coast_range": {
-    "default": 0.035,
-    "minimum": 0.005,
-    "maximum": 0.15,
-    "label": "Current coastal range",
-    "group": "ocean",
-    "step": 0.001
-  },
-  "orogen_ocean_warmth_range": {
-    "default": 2.0,
-    "minimum": 0.1,
-    "maximum": 8.0,
-    "label": "Coastal warmth range multiplier",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_west_strength": {
-    "default": 2.0,
-    "minimum": 0.0,
-    "maximum": 5.0,
-    "label": "Western boundary current strength",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_east_strength": {
-    "default": 0.8,
-    "minimum": 0.0,
-    "maximum": 5.0,
-    "label": "Eastern boundary current strength",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_west_deflection": {
-    "default": 0.7,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Western zonal attenuation",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_east_deflection": {
-    "default": 0.5,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Eastern zonal attenuation",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_circumpolar_strength": {
-    "default": 1.5,
-    "minimum": 0.0,
-    "maximum": 5.0,
-    "label": "Circumpolar current strength",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_smoothing_km": {
-    "default": 125.0,
-    "minimum": 0.0,
-    "maximum": 1000.0,
-    "label": "Current smoothing (km)",
-    "group": "ocean",
-    "step": 5
-  },
-  "orogen_ocean_warmth_smoothing_km": {
-    "default": 900.0,
-    "minimum": 0.0,
-    "maximum": 3000.0,
-    "label": "Ocean warmth smoothing (km)",
-    "group": "ocean",
-    "step": 25
-  },
-  "orogen_temperature_smoothing": {
-    "default": 1,
+  "orogen_v3_temp_albedo_lat": {
+    "default": 0.15,
     "minimum": 0,
+    "maximum": 0.25,
+    "label": "Temp albedo lat",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_ALBEDO_LAT",
+    "description": "North 1975 P2 albedo term (0.2 incl. ice)"
+  },
+  "orogen_v3_temp_albedo_ice": {
+    "default": 0.6,
+    "minimum": 0.45,
+    "maximum": 0.7,
+    "label": "Temp albedo ice",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_ALBEDO_ICE",
+    "description": "North 1975 ice-cap albedo 0.62"
+  },
+  "orogen_v3_temp_albedo_snow": {
+    "default": 0.325,
+    "minimum": 0.3,
+    "maximum": 0.6,
+    "label": "Temp albedo snow",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_ALBEDO_SNOW",
+    "description": "snow-covered forest \u2248 0.2\u20130.35, open snow 0.6\u20130.8; seasonal snow is patchy"
+  },
+  "orogen_v3_temp_land_heat_cap": {
+    "default": 8930000.0,
+    "minimum": 3000000,
+    "maximum": 20000000,
+    "label": "Temp land heat cap",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_LAND_HEAT_CAP",
+    "description": "\u2248 2 m water equivalent (air column + top soil)"
+  },
+  "orogen_v3_temp_ocean_mix_m": {
+    "default": 50.0,
+    "minimum": 25,
+    "maximum": 100,
+    "label": "Temp ocean mix m",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_OCEAN_MIX_M",
+    "description": "ocean mixed layer, 30\u2013100 m"
+  },
+  "orogen_v3_temp_diffusivity_ew": {
+    "default": 0.3,
+    "minimum": 0.05,
+    "maximum": 1,
+    "label": "Temp diffusivity ew",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_DIFFUSIVITY_EW",
+    "description": "eddy heat flux is mainly meridional (v\u2032T\u2032 \u226b u\u2032T\u2032); east\u2013west exchange by the mean winds"
+  },
+  "orogen_v3_temp_wind_carry": {
+    "default": 0.068,
+    "minimum": 0,
+    "maximum": 0.3,
+    "label": "Temp wind carry",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_WIND_CARRY",
+    "description": "share of the air column's heat the (near-surface) wind carries; no direct literature value \u2014 bounded by the whole column moving at about the surface wind"
+  },
+  "orogen_v3_temp_inversion_c": {
+    "default": 10.0,
+    "minimum": 5,
+    "maximum": 15,
+    "label": "Temp inversion c",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_INVERSION_C",
+    "description": "Arctic winter surface inversions \u2248 10\u201315 K (Serreze et al. 1992); strongest in the dark over snow"
+  },
+  "orogen_v3_temp_inversion_wind": {
+    "default": 4.69,
+    "minimum": 3,
+    "maximum": 8,
+    "label": "Temp inversion wind",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_INVERSION_WIND",
+    "description": "stable boundary layers break down above \u2248 5\u20137 m/s near-surface wind"
+  },
+  "orogen_v3_temp_plateau_lapse": {
+    "default": 4.84,
+    "minimum": 4,
+    "maximum": 6.5,
+    "label": "Temp plateau lapse",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_PLATEAU_LAPSE",
+    "description": "near-surface lapse rates over large elevated terrain \u2248 4.5\u20135.5 \u00b0C/km (elevated heating)"
+  },
+  "orogen_v3_temp_block_km": {
+    "default": 1.5,
+    "minimum": 0.8,
+    "maximum": 3,
+    "label": "Temp block km",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_BLOCK_KM",
+    "description": "the marine / boundary layer a range must lift the air out of is \u2248 1\u20132 km deep; cold-air damming and blocked flow below ridge height (Froude < 1)"
+  },
+  "orogen_v3_temp_local_k": {
+    "default": 11.0,
+    "minimum": 3,
+    "maximum": 15,
+    "label": "Temp local k",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_LOCAL_K",
+    "description": "advective exchange of a ~1.5 km boundary layer at ~5 m/s over ~1000 km: \u03c1 c_p H U / L \u2248 9 W/m\u00b2/K"
+  },
+  "orogen_v3_temp_current_memory": {
+    "default": 0.6,
+    "minimum": 0.2,
+    "maximum": 1,
+    "label": "Temp current memory",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_CURRENT_MEMORY",
+    "description": "western boundary currents run \u2248 2\u20135 \u00b0C warmer and eastern boundary currents \u2248 2\u20134 \u00b0C colder than their latitude (OISST) \u2014 against \u2248 6\u201310 \u00b0C of latitude temperature change along \u2248 1500 km of their path"
+  },
+  "orogen_v3_temp_coast_carry": {
+    "default": 0.6,
+    "minimum": 0.2,
+    "maximum": 1,
+    "label": "Temp coast carry",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_COAST_CARRY",
+    "description": "onshore winds carry the sea's warmth or cold a few hundred km inland (the maritime west coasts; the cool coastal deserts beside cold currents)"
+  },
+  "orogen_v3_temp_air_sea_days": {
+    "default": 1.0,
+    "minimum": 0.3,
+    "maximum": 2,
+    "label": "Temp air sea days",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_AIR_SEA_DAYS",
+    "description": "air-mass transformation over the sea: cold-air outbreaks warm \u2248 5\u201310 K within a day over open water (heat fluxes of 200\u2013500 W/m\u00b2 into a \u2248 1 km boundary layer)"
+  },
+  "orogen_v3_temp_air_sun_days": {
+    "default": 0.5,
+    "minimum": 0.5,
+    "maximum": 2,
+    "label": "Temp air sun days",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_AIR_SUN_DAYS",
+    "description": "a sunlit convective boundary layer (1\u20132 km) takes on its surface's heating within a day or two (sensible heat 100\u2013300 W/m\u00b2)"
+  },
+  "orogen_v3_temp_air_dark_days": {
+    "default": 3.0,
+    "minimum": 3,
+    "maximum": 12,
+    "label": "Temp air dark days",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_AIR_DARK_DAYS",
+    "description": "maritime air over snowy winter continents cools \u2248 1\u20132 K/day (radiative loss from a stable boundary layer): a 10\u201320 K contrast lasts about a week \u2014 Atlantic air keeps Europe mild 2000\u20133000 km inland"
+  },
+  "orogen_v3_temp_local_km": {
+    "default": 1925.0,
+    "minimum": 800,
+    "maximum": 2500,
+    "label": "Temp local km",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_LOCAL_KM",
+    "description": "the scale of the weather systems whose heat transport the diffusion stands for (\u2248 1000\u20132000 km)"
+  },
+  "orogen_v3_temp_evap_damping": {
+    "default": 15.0,
+    "minimum": 5,
+    "maximum": 30,
+    "label": "Temp evap damping",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_EVAP_DAMPING",
+    "description": "sensitivity of the surface latent heat flux to temperature \u2248 10\u201320 W/m\u00b2/K over tropical oceans and wet land (e.g. Hartmann 2016; Zhang & McPhaden 1995)"
+  },
+  "orogen_v3_temp_wet_cool_c": {
+    "default": 2.0,
+    "minimum": 1,
+    "maximum": 8,
+    "label": "Temp wet cool c",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_WET_COOL_C",
+    "description": "soil-moisture\u2013temperature coupling: dry soils raise monthly mean temperature by several K (Seneviratne et al. 2010); Sahel pre-monsoon vs monsoon months \u2248 5\u20136 K; tropical deforestation +1\u20133 K"
+  },
+  "orogen_v3_temp_sea_swing": {
+    "default": 0.3,
+    "minimum": 0.15,
+    "maximum": 0.5,
+    "label": "Temp sea swing",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_SEA_SWING",
+    "description": "mid-latitude sea-surface seasonal range \u2248 5\u201310 \u00b0C vs \u2248 20\u201340 \u00b0C over continents"
+  },
+  "orogen_v3_temp_albedo_vary": {
+    "default": 0.025,
+    "minimum": 0,
+    "maximum": 0.05,
+    "label": "Temp albedo vary",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_ALBEDO_VARY",
+    "description": "regional variation of surface and cloud albedo about the zonal mean \u2248 \u00b10.02\u20130.05 (ERBE / CERES clear-sky and all-sky maps)"
+  },
+  "orogen_v3_temp_albedo_vary_km": {
+    "default": 900.0,
+    "minimum": 400,
+    "maximum": 2000,
+    "label": "Temp albedo vary km",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_ALBEDO_VARY_KM",
+    "description": "the size of regional albedo anomalies (deserts, forests, cloud decks) \u2248 500\u20132000 km"
+  },
+  "orogen_v3_temp_cloud_albedo": {
+    "default": 0.262,
+    "minimum": 0,
+    "maximum": 0.3,
+    "label": "Temp cloud albedo",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_CLOUD_ALBEDO",
+    "description": "shortwave cloud forcing over land \u2248 \u221250 to \u2212100 W/m\u00b2 under persistent rain clouds, \u2248 0 over deserts (CERES): an albedo contrast \u2248 0.1\u20130.25"
+  },
+  "orogen_v3_temp_cloud_lw_cancel": {
+    "default": 0.8,
+    "minimum": 0.5,
+    "maximum": 1,
+    "label": "Temp cloud lw cancel",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_CLOUD_LW_CANCEL",
+    "description": "deep tropical convection: shortwave cloud forcing \u2248 \u2212100 W/m\u00b2 nearly cancelled by longwave \u2248 +90 W/m\u00b2 (Kiehl 1994; Hartmann et al. 2001; ERBE/CERES)"
+  },
+  "orogen_v3_temp_ice_lapse": {
+    "default": 8.0,
+    "minimum": 6.5,
     "maximum": 10,
-    "label": "Temperature smoothing passes",
+    "label": "Temp ice lapse",
     "group": "temperature",
-    "step": 1,
-    "integer": true
+    "step": 0.001,
+    "upstream": "TEMP_ICE_LAPSE",
+    "description": "Antarctic ice-sheet surface temperature vs height \u2248 8 K/km (Fortuin & Oerlemans 1990)"
   },
-  "orogen_temperature_ocean_diffusion_km": {
-    "default": 1400.0,
-    "minimum": 0.0,
-    "maximum": 5000.0,
-    "label": "Coastal heat diffusion (km)",
+  "orogen_v3_temp_ice_dome_km": {
+    "default": 1.5,
+    "minimum": 0.5,
+    "maximum": 3,
+    "label": "Temp ice dome km",
     "group": "temperature",
-    "step": 50
+    "step": 0.001,
+    "upstream": "TEMP_ICE_DOME_KM",
+    "description": "mean surface elevation of ice sheets \u2248 2.1 km (Greenland) and 2.3 km (Antarctica); small ice caps less"
   },
-  "orogen_temperature_tropical_width": {
-    "default": 13.0,
-    "minimum": 0.0,
-    "maximum": 40.0,
-    "label": "Tropical plateau width (\u00b0)",
+  "orogen_v3_temp_sea_ice_grow": {
+    "default": 0.002,
+    "minimum": 0.001,
+    "maximum": 0.004,
+    "label": "Temp sea ice grow",
     "group": "temperature",
-    "step": 0.01
+    "step": 0.001,
+    "upstream": "TEMP_SEA_ICE_GROW",
+    "description": "thin sea ice grows \u2248 1\u20133 cm/day at \u221210 \u00b0C (Stefan / Lebedev: h \u2248 1.33\u00b7FDD^0.58 cm)"
   },
-  "orogen_temperature_equator": {
-    "default": 28.0,
-    "minimum": -10.0,
-    "maximum": 60.0,
-    "label": "Equatorial temperature (\u00b0C)",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_polar_drop": {
-    "default": 47.0,
-    "minimum": 0.0,
-    "maximum": 100.0,
-    "label": "Pole temperature drop (\u00b0C)",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_latitude_power": {
-    "default": 1.4,
+  "orogen_v3_temp_sea_ice_stefan_m": {
+    "default": 0.2,
     "minimum": 0.1,
-    "maximum": 4.0,
-    "label": "Latitude falloff exponent",
+    "maximum": 0.4,
+    "label": "Temp sea ice stefan m",
     "group": "temperature",
-    "step": 0.01
+    "step": 0.001,
+    "upstream": "TEMP_SEA_ICE_STEFAN_M",
+    "description": "first-year ice reaches \u2248 1\u20132 m after a winter of 2000\u20135000 \u00b0C\u00b7days (Lebedev 1938; Maykut 1986)"
   },
-  "orogen_temperature_reference_itcz": {
+  "orogen_v3_temp_sea_ice_melt": {
+    "default": 0.003,
+    "minimum": 0.002,
+    "maximum": 0.006,
+    "label": "Temp sea ice melt",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_SEA_ICE_MELT",
+    "description": "summer surface melt \u2248 0.5\u20131.5 m over a season of a few hundred positive degree-days (Perovich et al. 2003)"
+  },
+  "orogen_v3_temp_sea_ice_h0": {
+    "default": 0.5,
+    "minimum": 0.3,
+    "maximum": 1,
+    "label": "Temp sea ice h0",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_SEA_ICE_H0",
+    "description": "ice \u2248 0.3\u20131 m thick closes the sea (consolidated pack vs new ice and leads)"
+  },
+  "orogen_v3_temp_sea_ice_spread_km": {
+    "default": 700.0,
+    "minimum": 300,
+    "maximum": 1200,
+    "label": "Temp sea ice spread km",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_SEA_ICE_SPREAD_KM",
+    "description": "sea-ice drift \u2248 5\u201310 km/day \u2014 a few hundred to a thousand km over a season (IABP buoys)"
+  },
+  "orogen_v3_temp_polar_summer_damp": {
+    "default": 0.5,
+    "minimum": 0.2,
+    "maximum": 0.7,
+    "label": "Temp polar summer damp",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_POLAR_SUMMER_DAMP",
+    "description": "Arctic summers: the surface stays near 0 \u00b0C while snow and sea ice melt, and the July 10 \u00b0C isotherm (the tree line) lies near 65\u201372\u00b0N on every continent; land poleward of 75\u00b0 is tundra or ice everywhere on Earth (Beck et al. 2023). No direct value \u2014 set so the model's 66\u201380\u00b0N summers match, winters untouched"
+  },
+  "orogen_v3_temp_ice_start_c": {
+    "default": -30.0,
+    "minimum": -40,
+    "maximum": -20,
+    "label": "Temp ice start c",
+    "group": "temperature",
+    "step": 0.001,
+    "upstream": "TEMP_ICE_START_C",
+    "description": "ice-sheet hysteresis: once grown, polar ice sheets persist under climates that would not grow them (e.g. DeConto & Pollard 2003; Abe-Ouchi et al. 2013)"
+  },
+  "orogen_v3_circ_hadley_scale": {
+    "default": 1.44,
+    "minimum": 0.9,
+    "maximum": 1.5,
+    "label": "Circ hadley scale",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_HADLEY_SCALE",
+    "description": "Held & Hou 1980 underestimates the observed Hadley edge by ~20 % (e.g. Frierson et al. 2007)"
+  },
+  "orogen_v3_circ_hadley_seasonal": {
+    "default": 0.5,
+    "minimum": 0,
+    "maximum": 1,
+    "label": "Circ hadley seasonal",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_HADLEY_SEASONAL",
+    "description": "observed subtropical highs migrate \u2248 10\u00b0 with the rain belt (NCEP); Held & Hou per month would cancel it; seasonal Hadley cells are not in equilibrium with each month (Lindzen & Hou 1988)"
+  },
+  "orogen_v3_circ_ferrel_deg": {
+    "default": 35.0,
+    "minimum": 20,
+    "maximum": 35,
+    "label": "Circ ferrel deg",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_FERREL_DEG",
+    "description": "subtropical highs \u2248 30\u00b0, subpolar lows \u2248 60\u00b0 (three-cell circulation)"
+  },
+  "orogen_v3_circ_tropical_hpa": {
+    "default": 10.13,
+    "minimum": 5,
+    "maximum": 14,
+    "label": "Circ tropical hpa",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_TROPICAL_HPA",
+    "description": "zonal-mean sea-level pressure \u2248 1009 hPa in the rain belt vs \u2248 1018 in the subtropical highs"
+  },
+  "orogen_v3_circ_midlat_hpa": {
+    "default": 35.0,
+    "minimum": 25,
+    "maximum": 45,
+    "label": "Circ midlat hpa",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_MIDLAT_HPA",
+    "description": "zonal-mean sea-level pressure over the Southern Ocean: \u2248 1018 hPa at 35\u00b0S to \u2248 987 at 65\u00b0S, both seasons (NCEP)"
+  },
+  "orogen_v3_circ_open_sea_power": {
+    "default": 1.36,
+    "minimum": 1,
+    "maximum": 3.5,
+    "label": "Circ open sea power",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_OPEN_SEA_POWER",
+    "description": "the land-broken northern belt (\u2248 45 % sea) has a zonal-mean trough of only \u2248 6 hPa in both seasons vs \u2248 30 over the \u2248 93 % sea south (NCEP): (0.45/0.93)^p \u2248 1/5"
+  },
+  "orogen_v3_circ_polar_hpa": {
+    "default": 4.75,
+    "minimum": 2,
+    "maximum": 12,
+    "label": "Circ polar hpa",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_POLAR_HPA",
+    "description": "polar highs a few hPa above the subpolar troughs"
+  },
+  "orogen_v3_circ_heat_low_mild": {
+    "default": 0.963,
+    "minimum": 0.1,
+    "maximum": 1,
+    "label": "Circ heat low mild",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_HEAT_LOW_MILD",
+    "description": "heat lows are deep (\u2248 10 hPa) over hot, dry interiors with a 3\u20135 km boundary layer and weak over mild, moist land (summer Europe: the Azores ridge, not a low; NCEP)"
+  },
+  "orogen_v3_circ_heat_low_tropics": {
+    "default": 1.0,
+    "minimum": 0,
+    "maximum": 1,
+    "label": "Circ heat low tropics",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_HEAT_LOW_TROPICS",
+    "description": "the deep heat lows sit in the dry subtropics (Sahara \u2248 25\u00b0N, Pakistan \u2248 30\u00b0N, Pilbara \u2248 21\u00b0S, Kalahari \u2248 20\u00b0S), not over the convective wet tropics (NCEP)"
+  },
+  "orogen_v3_circ_ocean_high_hpa": {
+    "default": 2.0,
+    "minimum": 0,
+    "maximum": 16,
+    "label": "Circ ocean high hpa",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_OCEAN_HIGH_HPA",
+    "description": "winter subtropical highs over the oceans (Azores \u2248 1024 hPa at 35\u00b0N) vs the land beside them (Sahara \u2248 1018): \u2248 6\u20138 hPa across \u2248 \u00b10.5 of sea share (NCEP)"
+  },
+  "orogen_v3_circ_heat_low_hot": {
+    "default": 1.0,
+    "minimum": 0,
+    "maximum": 1.5,
+    "label": "Circ heat low hot",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_HEAT_LOW_HOT",
+    "description": "heat lows over hot deserts reach 10\u201320 hPa below the latitude mean (Pakistan \u2248 996 hPa in July): the heated boundary layer is 3\u20135 km deep, several times that over mild land or sea (NCEP)"
+  },
+  "orogen_v3_circ_cold_high_boost": {
+    "default": 0.685,
+    "minimum": 0,
+    "maximum": 1.5,
+    "label": "Circ cold high boost",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_COLD_HIGH_BOOST",
+    "description": "cold anticyclones strengthen as the surface inversion deepens over very cold snow (Siberian high \u2248 1035 hPa at \u221230 \u00b0C)"
+  },
+  "orogen_v3_circ_thermal_hpa_per_k": {
+    "default": 1.0,
+    "minimum": 0.4,
+    "maximum": 1.6,
+    "label": "Circ thermal hpa per k",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_THERMAL_HPA_PER_K",
+    "description": "hydrostatic: warming the lowest 2\u20133 km by 1 K lowers surface pressure \u2248 0.9\u20131.3 hPa"
+  },
+  "orogen_v3_circ_trough_max_lat": {
+    "default": 35.0,
+    "minimum": 28,
+    "maximum": 40,
+    "label": "Circ trough max lat",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_TROUGH_MAX_LAT",
+    "description": "the summer monsoon trough joins the heat lows of Pakistan and Tibet (\u2248 28\u201335\u00b0N), the Sahara (\u2248 20\u201325\u00b0N), Arizona (\u2248 33\u00b0N), the Pilbara (\u2248 22\u00b0S) (NCEP)"
+  },
+  "orogen_v3_circ_trough_high_deg": {
+    "default": 6.0,
+    "minimum": 4,
+    "maximum": 12,
+    "label": "Circ trough high deg",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_TROUGH_HIGH_DEG",
+    "description": "over a summer continent the subtropical ridge lies poleward of the heat low (the Tibetan High aloft and the westerlies beyond \u2248 40\u00b0N in July)"
+  },
+  "orogen_v3_circ_monsoon_hpa_per_k": {
+    "default": 1.0,
+    "minimum": 0.5,
+    "maximum": 2,
+    "label": "Circ monsoon hpa per k",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_MONSOON_HPA_PER_K",
+    "description": "summer monsoon troughs below the rain belt (\u2248 1010 hPa): South Asia \u2248 996\u20131000 hPa over a \u2248 10 K heat low (Tibet heating the air aloft), the Sahara \u2248 1008 over \u2248 3 K (NCEP July)"
+  },
+  "orogen_v3_circ_rossby_km": {
+    "default": 812.0,
+    "minimum": 500,
+    "maximum": 2000,
+    "label": "Circ rossby km",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_ROSSBY_KM",
+    "description": "Rossby radius of deformation \u2248 1000 km in midlatitudes"
+  },
+  "orogen_v3_circ_turn_ocean_deg": {
+    "default": 12.5,
+    "minimum": 10,
+    "maximum": 30,
+    "label": "Circ turn ocean deg",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_TURN_OCEAN_DEG",
+    "description": "surface wind crosses isobars at \u2248 10\u201320\u00b0 over the sea"
+  },
+  "orogen_v3_circ_turn_land_deg": {
+    "default": 30.0,
+    "minimum": 25,
+    "maximum": 45,
+    "label": "Circ turn land deg",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_TURN_LAND_DEG",
+    "description": "\u2026 and \u2248 30\u201345\u00b0 over land"
+  },
+  "orogen_v3_circ_surface_wind": {
+    "default": 0.75,
+    "minimum": 0.5,
+    "maximum": 0.9,
+    "label": "Circ surface wind",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_SURFACE_WIND",
+    "description": "near-surface wind \u2248 0.6\u20130.8 of the geostrophic wind over the sea"
+  },
+  "orogen_v3_circ_surface_wind_land": {
+    "default": 0.55,
+    "minimum": 0.3,
+    "maximum": 0.7,
+    "label": "Circ surface wind land",
+    "group": "wind",
+    "step": 0.001,
+    "upstream": "CIRC_SURFACE_WIND_LAND",
+    "description": "10 m wind over land \u2248 0.4\u20130.6 of the geostrophic wind (roughness)"
+  },
+  "orogen_v3_ocean_friction": {
+    "default": 6e-06,
+    "minimum": 3e-06,
+    "maximum": 1.5e-05,
+    "label": "Ocean friction",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_FRICTION",
+    "description": "Stommel layer width r/\u03b2 should span \u2248 2 grid cells (MITgcm guidance); \u2248 300 km at 2\u00b0"
+  },
+  "orogen_v3_ocean_gust_ms": {
+    "default": 4.26,
+    "minimum": 3,
+    "maximum": 9,
+    "label": "Ocean gust ms",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_GUST_MS",
+    "description": "bulk formulas on climatological winds add a gustiness / synoptic speed of a few m/s"
+  },
+  "orogen_v3_ocean_channel_drag": {
+    "default": 7.3e-07,
+    "minimum": 1e-07,
+    "maximum": 2e-06,
+    "label": "Ocean channel drag",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_CHANNEL_DRAG",
+    "description": "sets a circumpolar current of \u2248 100\u2013150 Sv on Earth (the ACC)"
+  },
+  "orogen_v3_ocean_heat_share": {
+    "default": 0.073,
+    "minimum": 0.01,
+    "maximum": 0.2,
+    "label": "Ocean heat share",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_HEAT_SHARE",
+    "description": "scaled to the ocean's \u2248 1\u20132 PW poleward heat transport; no direct literature value"
+  },
+  "orogen_v3_ocean_overturn_pw": {
+    "default": 0.6,
+    "minimum": 0.4,
+    "maximum": 1.5,
+    "label": "Ocean overturn pw",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_OVERTURN_PW",
+    "description": "Atlantic meridional overturning heat transport \u2248 1.2 PW at 26\u00b0N (RAPID array), released in the subpolar and Nordic seas"
+  },
+  "orogen_v3_ocean_merid_share": {
+    "default": 0.03,
+    "minimum": 0.03,
+    "maximum": 0.4,
+    "label": "Ocean merid share",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_MERID_SHARE",
+    "description": "western boundary currents release \u2248 100\u2013200 W/m\u00b2 (Gulf Stream, Kuroshio), eastern boundary currents take up \u2248 20\u201350 W/m\u00b2 plus upwelling (Yu & Weller 2007 OAFlux); the gyres carry \u2248 1 PW poleward"
+  },
+  "orogen_v3_ocean_upwell_dt": {
+    "default": 6.0,
+    "minimum": 3,
+    "maximum": 10,
+    "label": "Ocean upwell dt",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_UPWELL_DT",
+    "description": "upwelling under a shallow thermocline cools the surface 5\u201310 \u00b0C below its latitude (Peru, Benguela, the east Pacific cold tongue)"
+  },
+  "orogen_v3_ocean_thermo_east_m": {
+    "default": 50.0,
+    "minimum": 30,
+    "maximum": 80,
+    "label": "Ocean thermo east m",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_THERMO_EAST_M",
+    "description": "the thermocline at the eastern ocean margins \u2248 30\u201360 m deep (east Pacific, Benguela)"
+  },
+  "orogen_v3_ocean_thermo_scale_m": {
+    "default": 70.0,
+    "minimum": 40,
+    "maximum": 120,
+    "label": "Ocean thermo scale m",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_THERMO_SCALE_M",
+    "description": "the warm pool's thermocline \u2248 150\u2013200 m deep: upwelling there barely cools the surface (Bjerknes; McPhaden & Picaut 1990)"
+  },
+  "orogen_v3_ocean_thermo_eq_m": {
+    "default": 100.0,
+    "minimum": 70,
+    "maximum": 150,
+    "label": "Ocean thermo eq m",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_THERMO_EQ_M",
+    "description": "the equatorial thermocline (20 \u00b0C isotherm) \u2248 150\u2013200 m deep in the west Pacific, \u2248 50 m in the east: a mean \u2248 100\u2013120 m"
+  },
+  "orogen_v3_ocean_shore_km": {
+    "default": 600.0,
+    "minimum": 300,
+    "maximum": 1500,
+    "label": "Ocean shore km",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_SHORE_KM",
+    "description": "islands smaller than a few deformation radii (\u2248 100\u2013300 km) barely block the planetary waves that set the thermocline"
+  },
+  "orogen_v3_ocean_gprime": {
+    "default": 0.03,
+    "minimum": 0.02,
+    "maximum": 0.05,
+    "label": "Ocean gprime",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_GPRIME",
+    "description": "reduced gravity of the tropical thermocline \u2248 0.02\u20130.04 m/s\u00b2 (\u0394\u03c1/\u03c1 \u2248 0.002\u20130.004)"
+  },
+  "orogen_v3_ocean_eq_deg": {
+    "default": 6.0,
+    "minimum": 3,
+    "maximum": 10,
+    "label": "Ocean eq deg",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_EQ_DEG",
+    "description": "the equatorial Rossby radius \u2248 300 km \u2248 3\u00b0; the zonal tilt holds within \u2248 5\u20138\u00b0 of the equator"
+  },
+  "orogen_v3_ocean_ekman_tauy_deg": {
     "default": 5.0,
+    "minimum": 3,
+    "maximum": 8,
+    "label": "Ocean ekman tauy deg",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_EKMAN_TAUY_DEG",
+    "description": "Ekman balance fails within \u2248 3\u20135\u00b0 of the equator; there a meridional stress drives a downwind, not a zonal, drift (Zebiak & Cane 1987; Philander & Pacanowski 1981)"
+  },
+  "orogen_v3_ocean_coast_land_share": {
+    "default": 0.35,
+    "minimum": 0.2,
+    "maximum": 0.5,
+    "label": "Ocean coast land share",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_COAST_LAND_SHARE",
+    "description": "coastal upwelling needs a coast long compared with the deformation radius (Allen 1980; island wakes and island upwelling are weak and local)"
+  },
+  "orogen_v3_ocean_coast_km": {
+    "default": 300.0,
+    "minimum": 100,
+    "maximum": 400,
+    "label": "Ocean coast km",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_COAST_KM",
+    "description": "coastal upwelling zones and their filaments reach \u2248 100\u2013300 km offshore (California, Peru, Benguela)"
+  },
+  "orogen_v3_ocean_season_scale": {
+    "default": 1.0,
+    "minimum": 0,
+    "maximum": 1,
+    "label": "Ocean season scale",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_SEASON_SCALE",
+    "description": "the wind-driven gyres' seasonal cycle: large in the tropics (the Somali Current reverses with the monsoon; the equatorial countercurrent swells and ebbs), small in the subtropical gyres (Schott & McCreary 2001)"
+  },
+  "orogen_v3_ocean_season_full_deg": {
+    "default": 10.0,
+    "minimum": 5,
+    "maximum": 20,
+    "label": "Ocean season full deg",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_SEASON_FULL_DEG",
+    "description": "equatorial Kelvin and Rossby waves cross a basin in weeks to months: the tropical ocean follows the seasons"
+  },
+  "orogen_v3_ocean_season_zero_deg": {
+    "default": 60.0,
+    "minimum": 30,
+    "maximum": 70,
+    "label": "Ocean season zero deg",
+    "group": "ocean",
+    "step": 0.001,
+    "upstream": "OCEAN_SEASON_ZERO_DEG",
+    "description": "midlatitude Rossby waves take years to cross a basin, so the gyres there hold their annual-mean state (developer: fade out by \u2248 60\u00b0)"
+  },
+  "orogen_v3_rain_evap_coeff": {
+    "default": 0.0013,
+    "minimum": 0.001,
+    "maximum": 0.0018,
+    "label": "Rain evap coeff",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_EVAP_COEFF",
+    "description": "bulk transfer coefficient C_E \u2248 1.1\u20131.5 \u00d7 10\u207b\u00b3 (Large & Pond 1982; COARE)"
+  },
+  "orogen_v3_rain_surface_rh": {
+    "default": 0.8,
+    "minimum": 0.7,
+    "maximum": 0.85,
+    "label": "Rain surface rh",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_SURFACE_RH",
+    "description": "near-surface relative humidity over the oceans \u2248 75\u201380 %"
+  },
+  "orogen_v3_rain_terrain_height_km": {
+    "default": 4.0,
+    "minimum": 2.5,
+    "maximum": 5,
+    "label": "Rain terrain height km",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_TERRAIN_HEIGHT_KM",
+    "description": "precipitable water over the Tibetan Plateau (h \u2248 4.5\u20135 km) \u2248 20\u201325 % of the Indian lowlands\u2019 in summer: e-folding \u2248 3\u20133.5 km averaged over the plateau, more where it is most heated (the elevated heated surface keeps a deep moist boundary layer)"
+  },
+  "orogen_v3_rain_timescale_h": {
+    "default": 1.86,
+    "minimum": 1,
+    "maximum": 12,
+    "label": "Rain timescale h",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_TIMESCALE_H",
+    "description": "Bretherton et al. 2004: P = exp(15.6 (r \u2212 0.603)) mm/day \u21d2 a saturated tropical column rains out in \u2248 3 h"
+  },
+  "orogen_v3_rain_rh_steepness": {
+    "default": 12.4,
+    "minimum": 8,
+    "maximum": 20,
+    "label": "Rain rh steepness",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_RH_STEEPNESS",
+    "description": "Bretherton et al. 2004 (15.6), from satellite column water and rain over the tropical oceans"
+  },
+  "orogen_v3_rain_eddy_diff": {
+    "default": 600000.0,
+    "minimum": 100000,
+    "maximum": 1500000,
+    "label": "Rain eddy diff",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_EDDY_DIFF",
+    "description": "tropical transients (easterly waves, convection) mix far less than mid-latitude storms; no direct literature value"
+  },
+  "orogen_v3_rain_eddy_length_km": {
+    "default": 1100.0,
+    "minimum": 400,
+    "maximum": 1200,
+    "label": "Rain eddy length km",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_EDDY_LENGTH_KM",
+    "description": "mixing length \u2248 the size of the storms (Rossby radius \u2248 1000 km); gives K \u2248 1\u20133 \u00d7 10\u2076 m\u00b2/s in the storm belts (Frierson et al. 2007: 1.06 \u00d7 10\u2076 m\u00b2/s for moist static energy)"
+  },
+  "orogen_v3_rain_tropical_rh": {
+    "default": 0.3,
+    "minimum": 0,
+    "maximum": 1,
+    "label": "Rain tropical rh",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_TROPICAL_RH",
+    "description": "monsoon depressions and easterly waves form in the monsoon troughs' cyclonic shear (\u2248 1\u20133 \u00d7 10\u207b\u2075 s\u207b\u00b9) and bring \u2248 40\u201350 % of central and north India's monsoon rain (Hurley & Boos 2015); no direct value for the humidity spread; the derived winds are smooth, their cyclonic vorticity \u2248 5 \u00d7 10\u207b\u2076 s\u207b\u00b9, so the coefficient is larger than the shear alone would give"
+  },
+  "orogen_v3_rain_tropical_km": {
+    "default": 600.0,
+    "minimum": 300,
+    "maximum": 1200,
+    "label": "Rain tropical km",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_TROPICAL_KM",
+    "description": "monsoon depressions and easterly waves \u2248 1000\u20132000 km across"
+  },
+  "orogen_v3_rain_storm_rh": {
+    "default": 0.263,
+    "minimum": 0.1,
+    "maximum": 0.35,
+    "label": "Rain storm rh",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_STORM_RH",
+    "description": "sub-monthly spread of column relative humidity \u2248 0.1\u20130.2 in the storm belts, where the Eady growth rate is \u2248 0.6\u20130.8 per day; no direct literature value"
+  },
+  "orogen_v3_rain_wind_rot": {
+    "default": 0.757,
+    "minimum": 0.6,
+    "maximum": 1.2,
+    "label": "Rain wind rot",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_WIND_ROT",
+    "description": "the moisture-weighted wind (\u2248 900 hPa) is close to the wind above the friction layer"
+  },
+  "orogen_v3_rain_wind_div_dry": {
+    "default": 0.3,
+    "minimum": 0.15,
+    "maximum": 0.5,
+    "label": "Rain wind div dry",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_WIND_DIV_DRY",
+    "description": "shallow (\u2248 1 km) convergence of heat lows and trade-wind divergence: \u2248 30\u201340 % of the column\u2019s water (scale height \u2248 2.5 km)"
+  },
+  "orogen_v3_rain_wind_div_moist": {
+    "default": 0.6,
+    "minimum": 0.4,
+    "maximum": 0.9,
+    "label": "Rain wind div moist",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_WIND_DIV_MOIST",
+    "description": "rain-belt inflow \u2248 1.5\u20133 km deep: moisture convergence \u2248 0.5\u20130.7 \u00d7 W \u00d7 surface convergence (P \u2212 E \u2248 5\u201310 mm/day)"
+  },
+  "orogen_v3_rain_stability": {
+    "default": 0.0225,
+    "minimum": 0,
+    "maximum": 0.03,
+    "label": "Rain stability",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_STABILITY",
+    "description": "rain is suppressed under strong low inversions (cold upwelling, stratocumulus decks; Klein & Hartmann 1993: low cloud +6 %/K of stability); no direct literature value"
+  },
+  "orogen_v3_rain_terrain_heat_k": {
+    "default": 6.0,
+    "minimum": 3,
+    "maximum": 10,
+    "label": "Rain terrain heat k",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_TERRAIN_HEAT_K",
+    "description": "a deep convective boundary layer (2\u20134 km) forms over strongly heated high ground (Tibet, pre-monsoon and monsoon); over cold or snowy high ground the boundary layer is shallow and stable"
+  },
+  "orogen_v3_rain_high_k_per_hpa": {
+    "default": 0.6,
+    "minimum": 0,
+    "maximum": 1.5,
+    "label": "Rain high k per hpa",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_HIGH_K_PER_HPA",
+    "description": "subsidence under the subtropical highs warms the air above the marine layer by several K (a trade-wind / stratocumulus inversion of 5\u201310 K under +5\u201310 hPa highs)"
+  },
+  "orogen_v3_rain_instability": {
+    "default": 0.0187,
+    "minimum": 0,
+    "maximum": 0.03,
+    "label": "Rain instability",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_INSTABILITY",
+    "description": "convection over surfaces warmer than their surroundings (heated plateaus, warm currents such as the Gulf Stream and Kuroshio) raises rain for the same humidity; no direct literature value \u2014 kept to the scale of the stable-air term"
+  },
+  "orogen_v3_rain_stable_ref_km": {
+    "default": 1500.0,
+    "minimum": 800,
+    "maximum": 3000,
+    "label": "Rain stable ref km",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_STABLE_REF_KM",
+    "description": "the free troposphere over a surface is set by its air mass over \u2248 1000\u20132000 km (the Rossby radius), not by the latitude circle: Siberian winter air is cold aloft too"
+  },
+  "orogen_v3_rain_front_mm": {
+    "default": 10.0,
+    "minimum": 0,
+    "maximum": 25,
+    "label": "Rain front mm",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_FRONT_MM",
+    "description": "frontal cyclones bring 30\u201360 mm/month to mid-latitude continental interiors at 45\u201360\u00b0 (eastern Europe, the Canadian prairies, the Russian plain) well beyond the reach of the mean flow; the polar-front band of Worldbuilding Pasta"
+  },
+  "orogen_v3_rain_front_pos": {
+    "default": 0.5,
+    "minimum": 0.4,
+    "maximum": 0.7,
+    "label": "Rain front pos",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_FRONT_POS",
+    "description": "the polar-front jet and storm track \u2248 40\u00b0N in winter and 50\u201355\u00b0N in summer, about midway between the subtropical high and the subpolar low"
+  },
+  "orogen_v3_rain_front_deg": {
+    "default": 10.0,
+    "minimum": 6,
+    "maximum": 14,
+    "label": "Rain front deg",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_FRONT_DEG",
+    "description": "the storm track \u2248 15\u201325\u00b0 of latitude wide"
+  },
+  "orogen_v3_rain_front_high_hpa": {
+    "default": 4.0,
+    "minimum": 2,
+    "maximum": 8,
+    "label": "Rain front high hpa",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_FRONT_HIGH_HPA",
+    "description": "fronts steer around blocking and subtropical highs (a few hPa above the zonal mean)"
+  },
+  "orogen_v3_rain_soil_mm": {
+    "default": 87.5,
+    "minimum": 50,
+    "maximum": 300,
+    "label": "Rain soil mm",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_SOIL_MM",
+    "description": "plant-available soil water capacity \u2248 100\u2013200 mm (e.g. Manabe 1969 bucket: 150 mm)"
+  },
+  "orogen_v3_rain_land_convection": {
+    "default": 0.065,
+    "minimum": 0,
+    "maximum": 0.12,
+    "label": "Rain land convection",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_LAND_CONVECTION",
+    "description": "daytime convection over wet land: rain over land peaks in the afternoon and picks up at \u2248 5\u201310 % lower column humidity than over the sea (Schiro et al. 2016; Bergemann & Jakob 2016); soil-moisture\u2013precipitation coupling in monsoon regions (Koster et al. 2004)"
+  },
+  "orogen_v3_rain_column_local": {
+    "default": 0.2,
+    "minimum": 0.2,
+    "maximum": 0.9,
+    "label": "Rain column local",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_COLUMN_LOCAL",
+    "description": "lower-tropospheric temperature anomalies over continents are \u2248 40\u201360 % of the surface anomaly"
+  },
+  "orogen_v3_rain_orog_storm": {
+    "default": 1.0,
+    "minimum": 0.5,
+    "maximum": 1,
+    "label": "Rain orog storm",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_OROG_STORM",
+    "description": "orographic precipitation is concentrated in storms with strong cross-barrier flow (\u2248 10\u201320 m/s), not the weak monthly-mean wind (Roe 2005)"
+  },
+  "orogen_v3_rain_lee_per_km": {
+    "default": 1.0,
+    "minimum": 0.3,
+    "maximum": 2,
+    "label": "Rain lee per km",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_LEE_PER_KM",
+    "description": "lee-side rain falls \u2248 \u00d70.2\u20130.5 of windward within a few hundred km behind 1\u20132 km of relief (Cascades, Andes, Southern Alps; Roe 2005)"
+  },
+  "orogen_v3_rain_lee_recover_km": {
+    "default": 400.0,
+    "minimum": 200,
+    "maximum": 800,
+    "label": "Rain lee recover km",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_LEE_RECOVER_KM",
+    "description": "rain shadows extend a few hundred km downwind of major ranges (Great Basin, Patagonia, Tarim; Roe 2005)"
+  },
+  "orogen_v3_rain_rise_per_km": {
+    "default": 0.5,
+    "minimum": 0,
+    "maximum": 1,
+    "label": "Rain rise per km",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_RISE_PER_KM",
+    "description": "windward precipitation grows \u2248 5\u201310 % per 100 m of elevation up to near the crest of mid-latitude ranges (Alps, Cascades, Sierra Nevada; Roe 2005)"
+  },
+  "orogen_v3_rain_island_boost": {
+    "default": 2.0,
+    "minimum": 0,
+    "maximum": 2,
+    "label": "Rain island boost",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_ISLAND_BOOST",
+    "description": "tropical islands receive \u2248 1.5\u20133\u00d7 the rain of the surrounding ocean (sea-breeze convergence and orography; e.g. the Maritime Continent, Hawaii, the Caribbean)"
+  },
+  "orogen_v3_rain_orog_spread_km": {
+    "default": 600.0,
+    "minimum": 300,
+    "maximum": 1000,
+    "label": "Rain orog spread km",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_OROG_SPREAD_KM",
+    "description": "water wrung out on the windward side is missing downwind \u2014 the rain-shadow budget closes over a few hundred km"
+  },
+  "orogen_v3_rain_slope_factor": {
+    "default": 1.2,
+    "minimum": 0.3,
+    "maximum": 1.5,
+    "label": "Rain slope factor",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_SLOPE_FACTOR",
+    "description": "orographic enhancement \u2248 \u00d72\u20133 on windward slopes, \u00d70.3\u20130.6 in the lee at \u2248 0.1\u20130.2 m/s of forced ascent in storms (Roe 2005; Smith & Barstad 2004); moved within the spread distance, not made"
+  },
+  "orogen_v3_rain_orographic": {
+    "default": 0.6,
+    "minimum": 0.1,
+    "maximum": 1,
+    "label": "Rain orographic",
+    "group": "precipitation",
+    "step": 0.001,
+    "upstream": "RAIN_OROGRAPHIC",
+    "description": "precipitation efficiency of orographic clouds \u2248 20\u201350 % (Jiang & Smith 2003)"
+  },
+  "orogen_tilt_deg": {
+    "default": 23.44,
     "minimum": 0.0,
-    "maximum": 30.0,
-    "label": "Thermal reference latitude (\u00b0)",
+    "maximum": 90.0,
+    "label": "Axial tilt (degrees)",
     "group": "temperature",
     "step": 0.01
   },
   "orogen_temperature_wet_lapse": {
-    "default": 4.5,
+    "default": 6.5,
     "minimum": 0.0,
     "maximum": 15.0,
     "label": "Wet lapse rate (\u00b0C/km)",
@@ -313,483 +1126,11 @@
     "step": 0.01
   },
   "orogen_temperature_dry_lapse_extra": {
-    "default": 4.8,
+    "default": 0.0,
     "minimum": 0.0,
     "maximum": 15.0,
     "label": "Dry lapse increment (\u00b0C/km)",
     "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_ocean_effect": {
-    "default": 16.0,
-    "minimum": 0.0,
-    "maximum": 50.0,
-    "label": "Ocean heat influence (\u00b0C)",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_coastal_effect": {
-    "default": 20.0,
-    "minimum": 0.0,
-    "maximum": 50.0,
-    "label": "Coastal heat influence (\u00b0C)",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_cloud_moderation": {
-    "default": 0.15,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Cloud moderation",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_clear_amplification": {
-    "default": 0.15,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Clear sky amplification",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_seasonal_boost": {
-    "default": 12.0,
-    "minimum": 0.0,
-    "maximum": 40.0,
-    "label": "Seasonal temperature boost (\u00b0C)",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_maritime_factor": {
-    "default": 0.5,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Maritime seasonal factor",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_continental_extra": {
-    "default": 0.7,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Continental seasonal increment",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_precip_advection_km": {
-    "default": 2000.0,
-    "minimum": 100.0,
-    "maximum": 6000.0,
-    "label": "Moisture advection reach (km)",
-    "group": "precipitation",
-    "step": 50
-  },
-  "orogen_precip_elevation_smoothing_km": {
-    "default": 200.0,
-    "minimum": 0.0,
-    "maximum": 1000.0,
-    "label": "Orographic smoothing (km)",
-    "group": "precipitation",
-    "step": 10
-  },
-  "orogen_precip_convergence_smoothing_km": {
-    "default": 400.0,
-    "minimum": 0.0,
-    "maximum": 2000.0,
-    "label": "Frontal smoothing (km)",
-    "group": "precipitation",
-    "step": 25
-  },
-  "orogen_precip_ocean_moisture": {
-    "default": 0.4,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Ocean baseline moisture",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_ocean_warmth": {
-    "default": 0.35,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Warm water moisture contribution",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_offshore_moisture": {
-    "default": 0.25,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Offshore coastal moisture",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_retention": {
-    "default": 0.78,
-    "minimum": 0.01,
-    "maximum": 1.0,
-    "label": "Flat terrain moisture retention",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_elevation_depletion": {
-    "default": 0.55,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Altitude moisture depletion",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_itcz_width": {
-    "default": 15.0,
-    "minimum": 1.0,
-    "maximum": 40.0,
-    "label": "ITCZ rain width (\u00b0)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_itcz_core_boost": {
-    "default": 1.5,
-    "minimum": 0.0,
-    "maximum": 5.0,
-    "label": "ITCZ core rain boost",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_itcz_add": {
-    "default": 0.3,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "ITCZ rain addition",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_frontal_scale": {
-    "default": 0.055,
-    "minimum": 0.0,
-    "maximum": 0.5,
-    "label": "Convergence sensitivity",
-    "group": "precipitation",
-    "step": 0.001
-  },
-  "orogen_precip_frontal_boost": {
-    "default": 1.2,
-    "minimum": 0.0,
-    "maximum": 5.0,
-    "label": "Frontal rain boost",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_frontal_add": {
-    "default": 0.4,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Frontal moisture contribution",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_uplift_scale": {
-    "default": 15.0,
-    "minimum": 0.0,
-    "maximum": 60.0,
-    "label": "Windward gradient sensitivity",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_uplift_add": {
-    "default": 1.0,
-    "minimum": 0.0,
-    "maximum": 5.0,
-    "label": "Windward local rain boost",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_shadow_scale": {
-    "default": 18.0,
-    "minimum": 0.0,
-    "maximum": 60.0,
-    "label": "Leeward gradient sensitivity",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_shadow_local": {
-    "default": 0.95,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Local rain shadow strength",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_subtrop_summer": {
-    "default": 0.5,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Summer subtropical suppression",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_subtrop_winter": {
-    "default": 0.3,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Winter subtropical suppression",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_monsoon_relief": {
-    "default": 0.7,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Coastal monsoon relief",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_high_pressure": {
-    "default": 0.25,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "High pressure rain reduction",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_low_pressure": {
-    "default": 0.2,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Low pressure rain relief",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_polar_base": {
-    "default": 0.1,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Polar rain baseline",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_polar_coastal": {
-    "default": 0.2,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Polar coastal rain",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_polar_boost": {
-    "default": 0.15,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Polar rain multiplier",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_continental_dryness": {
-    "default": 0.55,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Continental drying",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_lee_add": {
-    "default": 0.15,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Lee cyclogenesis rain",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_ocean_base": {
-    "default": 0.15,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Ocean rain baseline",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_cutoff_start_km": {
-    "default": 2000.0,
-    "minimum": 100.0,
-    "maximum": 10000.0,
-    "label": "Dry interior starts (km)",
-    "group": "precipitation",
-    "step": 50
-  },
-  "orogen_precip_cutoff_end_km": {
-    "default": 3000.0,
-    "minimum": 100.0,
-    "maximum": 15000.0,
-    "label": "Dry interior ends (km)",
-    "group": "precipitation",
-    "step": 50
-  },
-  "orogen_precip_land_drying": {
-    "default": 0.98,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "High land coverage drying",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_shadow_min_height": {
-    "default": 0.8,
-    "minimum": 0.0,
-    "maximum": 6.0,
-    "label": "Rain shadow minimum height (km)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_shadow_reach_km": {
-    "default": 2500.0,
-    "minimum": 100.0,
-    "maximum": 6000.0,
-    "label": "Downwind rain shadow (km)",
-    "group": "precipitation",
-    "step": 50
-  },
-  "orogen_precip_shadow_retention": {
-    "default": 0.15,
-    "minimum": 0.01,
-    "maximum": 1.0,
-    "label": "Downwind shadow retention",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_windward_reach_km": {
-    "default": 1500.0,
-    "minimum": 100.0,
-    "maximum": 5000.0,
-    "label": "Upwind rain reach (km)",
-    "group": "precipitation",
-    "step": 50
-  },
-  "orogen_precip_windward_retention": {
-    "default": 0.25,
-    "minimum": 0.01,
-    "maximum": 1.0,
-    "label": "Upwind rain retention",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_shadow_propagated": {
-    "default": 0.92,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Propagated shadow reduction",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_windward_propagated": {
-    "default": 1.2,
-    "minimum": 0.0,
-    "maximum": 5.0,
-    "label": "Propagated windward rain",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_smoothing_km": {
-    "default": 100.0,
-    "minimum": 0.0,
-    "maximum": 1000.0,
-    "label": "Rain smoothing (km)",
-    "group": "precipitation",
-    "step": 10
-  },
-  "orogen_precip_heuristic_blend": {
-    "default": 0.5,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Heuristic rain proportion",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_heuristic_wind_blend": {
-    "default": 0.5,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Heuristic wind proportion",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_interior_cap": {
-    "default": 0.8,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Interior rain cap reduction",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_heuristic_itcz_shift": {
-    "default": 0.3,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Heuristic ITCZ displacement",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_summer": {
-    "default": 1.1,
-    "minimum": 0.0,
-    "maximum": 3.0,
-    "label": "Heuristic summer rain factor",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_winter": {
-    "default": 0.9,
-    "minimum": 0.0,
-    "maximum": 3.0,
-    "label": "Heuristic winter rain factor",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_med_drying": {
-    "default": 0.15,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Mediterranean interior drying",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_med_coast": {
-    "default": 0.2,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Mediterranean west coast drying",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_continental": {
-    "default": 0.65,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Heuristic continental drying",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_uplift": {
-    "default": 0.6,
-    "minimum": 0.0,
-    "maximum": 3.0,
-    "label": "Heuristic windward enhancement",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_shadow": {
-    "default": 0.7,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Heuristic shadow reduction",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_shadow_height": {
-    "default": 3.0,
-    "minimum": 0.1,
-    "maximum": 8.0,
-    "label": "Full shadow height (km)",
-    "group": "heuristic-precip",
     "step": 0.01
   },
   "orogen_koppen_ice": {
@@ -1503,702 +1844,6 @@
     "label": "Snow color",
     "group": "biome-rendering",
     "color": true
-  },
-  "orogen_itcz_sample_radius": {
-    "default": 20.0,
-    "minimum": 1.0,
-    "maximum": 60.0,
-    "label": "ITCZ sampling radius (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_baseline": {
-    "default": 1013.0,
-    "minimum": 800.0,
-    "maximum": 1200.0,
-    "label": "Baseline pressure (hPa)",
-    "group": "wind",
-    "step": 1
-  },
-  "orogen_pressure_subtropical_lat": {
-    "default": 30.0,
-    "minimum": 0.01,
-    "maximum": 90.0,
-    "label": "Subtropical high latitude (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_subtropical_width": {
-    "default": 10.0,
-    "minimum": 0.01,
-    "maximum": 90.0,
-    "label": "Pressure belt width (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_subpolar_lat": {
-    "default": 60.0,
-    "minimum": 0.01,
-    "maximum": 90.0,
-    "label": "Subpolar low latitude (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_polar_lat": {
-    "default": 85.0,
-    "minimum": 0.01,
-    "maximum": 90.0,
-    "label": "Polar high latitude (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_polar_width": {
-    "default": 8.0,
-    "minimum": 0.01,
-    "maximum": 90.0,
-    "label": "Polar pressure width (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_geostrophic_lat": {
-    "default": 5.0,
-    "minimum": 0.01,
-    "maximum": 90.0,
-    "label": "Deflection full at latitude (\u00b0)",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_wind_friction_speed": {
-    "default": 0.6,
-    "minimum": 0.01,
-    "maximum": 10.0,
-    "label": "Surface wind speed factor",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_noise_frequency": {
-    "default": 2.0,
-    "minimum": 0.01,
-    "maximum": 10.0,
-    "label": "Pressure noise frequency",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_continental_start": {
-    "default": 0.2,
-    "minimum": 0.0,
-    "maximum": 0.9,
-    "label": "Thermal continentality starts",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_pressure_continental_full": {
-    "default": 0.5,
-    "minimum": 0.01,
-    "maximum": 1.0,
-    "label": "Thermal continentality full",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_ocean_itcz_width": {
-    "default": 3.0,
-    "minimum": 0.1,
-    "maximum": 89.0,
-    "label": "Countercurrent width (\u00b0)",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_trade_lat": {
-    "default": 30.0,
-    "minimum": 0.1,
-    "maximum": 89.0,
-    "label": "Trade current ends (\u00b0)",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_westerly_start": {
-    "default": 35.0,
-    "minimum": 0.1,
-    "maximum": 89.0,
-    "label": "Westerly current starts (\u00b0)",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_westerly_end": {
-    "default": 58.0,
-    "minimum": 0.1,
-    "maximum": 89.0,
-    "label": "Westerly current ends (\u00b0)",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_polar_lat": {
-    "default": 65.0,
-    "minimum": 0.1,
-    "maximum": 89.0,
-    "label": "Polar current starts (\u00b0)",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_warm_trade_end": {
-    "default": 28.0,
-    "minimum": 0.1,
-    "maximum": 89.0,
-    "label": "Warm trade belt ends (\u00b0)",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_warm_westerly_end": {
-    "default": 55.0,
-    "minimum": 0.1,
-    "maximum": 89.0,
-    "label": "Warm westerly belt ends (\u00b0)",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_circumpolar_min": {
-    "default": 55.0,
-    "minimum": 0.1,
-    "maximum": 89.0,
-    "label": "Circumpolar belt starts (\u00b0)",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_circumpolar_max": {
-    "default": 75.0,
-    "minimum": 0.1,
-    "maximum": 89.0,
-    "label": "Circumpolar belt ends (\u00b0)",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_circumpolar_center": {
-    "default": 65.0,
-    "minimum": 0.1,
-    "maximum": 89.0,
-    "label": "Circumpolar center (\u00b0)",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_polar_speed": {
-    "default": 0.5,
-    "minimum": 0.0,
-    "maximum": 3.0,
-    "label": "Polar current speed",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_polar_transition": {
-    "default": 1.5,
-    "minimum": 0.0,
-    "maximum": 4.0,
-    "label": "Polar current transition strength",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_circumpolar_width": {
-    "default": 10.0,
-    "minimum": 1.0,
-    "maximum": 30.0,
-    "label": "Circumpolar half width (\u00b0)",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_ocean_circumpolar_deflection": {
-    "default": 0.8,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Circumpolar meridional attenuation",
-    "group": "ocean",
-    "step": 0.01
-  },
-  "orogen_temperature_blend_start": {
-    "default": 45.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Thermal latitude blending starts (\u00b0)",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_cloud_threshold": {
-    "default": 0.5,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Cloud moderation starts at rain",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_clear_threshold": {
-    "default": 0.3,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Clear sky amplification below rain",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_seasonal_start": {
-    "default": 10.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Seasonal boost starts (\u00b0)",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_seasonal_peak": {
-    "default": 55.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Seasonal boost peak (\u00b0)",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_seasonal_fade": {
-    "default": 75.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Seasonal boost fades from (\u00b0)",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_ocean_speed": {
-    "default": 2.0,
-    "minimum": 0.0,
-    "maximum": 5.0,
-    "label": "Ocean heat speed sensitivity",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_temperature_coast_limit": {
-    "default": 0.95,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Coastal continentality cutoff",
-    "group": "temperature",
-    "step": 0.01
-  },
-  "orogen_precip_subtrop_summer_lat": {
-    "default": 30.0,
-    "minimum": 0.0,
-    "maximum": 70.0,
-    "label": "Summer subtropical center (\u00b0)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_subtrop_winter_lat": {
-    "default": 24.0,
-    "minimum": 0.0,
-    "maximum": 70.0,
-    "label": "Winter subtropical center (\u00b0)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_subtrop_summer_width": {
-    "default": 16.0,
-    "minimum": 1.0,
-    "maximum": 40.0,
-    "label": "Summer subtropical width (\u00b0)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_subtrop_winter_width": {
-    "default": 12.0,
-    "minimum": 1.0,
-    "maximum": 40.0,
-    "label": "Winter subtropical width (\u00b0)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_itcz_core_width": {
-    "default": 5.0,
-    "minimum": 0.1,
-    "maximum": 30.0,
-    "label": "ITCZ core width (\u00b0)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_itcz_outer_boost": {
-    "default": 1.0,
-    "minimum": 0.0,
-    "maximum": 5.0,
-    "label": "ITCZ outer rain boost",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_monsoon_reach": {
-    "default": 0.4,
-    "minimum": 0.01,
-    "maximum": 1.0,
-    "label": "Monsoon coastal reach fraction",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_monsoon_wind": {
-    "default": 0.15,
-    "minimum": 0.01,
-    "maximum": 1.0,
-    "label": "Monsoon wind threshold",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_high_pressure_threshold": {
-    "default": 12.0,
-    "minimum": 0.1,
-    "maximum": 60.0,
-    "label": "High pressure rain threshold (hPa)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_low_pressure_threshold": {
-    "default": 15.0,
-    "minimum": 0.1,
-    "maximum": 60.0,
-    "label": "Low pressure rain threshold (hPa)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_polar_start": {
-    "default": 40.0,
-    "minimum": 0.0,
-    "maximum": 80.0,
-    "label": "Polar rain starts (\u00b0)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_polar_full": {
-    "default": 70.0,
-    "minimum": 1.0,
-    "maximum": 90.0,
-    "label": "Polar rain full at (\u00b0)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_lee_height": {
-    "default": 1.5,
-    "minimum": 0.0,
-    "maximum": 6.0,
-    "label": "Lee cyclone minimum height (km)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_lee_height_full": {
-    "default": 5.0,
-    "minimum": 0.1,
-    "maximum": 10.0,
-    "label": "Lee cyclone full height (km)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_lee_gradient": {
-    "default": 0.01,
-    "minimum": 0.0,
-    "maximum": 0.5,
-    "label": "Lee cyclone slope threshold",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_shadow_height_start": {
-    "default": 0.5,
-    "minimum": 0.0,
-    "maximum": 5.0,
-    "label": "Shadow height ramp starts (km)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_shadow_height_range": {
-    "default": 2.5,
-    "minimum": 0.1,
-    "maximum": 10.0,
-    "label": "Shadow height ramp range (km)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_shadow_smoothing_km": {
-    "default": 150.0,
-    "minimum": 0.0,
-    "maximum": 1000.0,
-    "label": "Rain shadow smoothing (km)",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_shadow_propagated_scale": {
-    "default": 2.25,
-    "minimum": 0.0,
-    "maximum": 10.0,
-    "label": "Propagated shadow sensitivity",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_elevation_depletion_max": {
-    "default": 0.8,
-    "minimum": 0.0,
-    "maximum": 1.0,
-    "label": "Maximum altitude moisture loss",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_ocean_warmth_min": {
-    "default": -0.8,
-    "minimum": -1.0,
-    "maximum": 0.0,
-    "label": "Minimum moisture warmth",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_land_drying_start": {
-    "default": 0.4,
-    "minimum": 0.0,
-    "maximum": 0.95,
-    "label": "Land drying starts at coverage",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_land_drying_range": {
-    "default": 0.6,
-    "minimum": 0.01,
-    "maximum": 1.0,
-    "label": "Land drying coverage range",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_interior_cap_start": {
-    "default": 0.5,
-    "minimum": 0.0,
-    "maximum": 0.99,
-    "label": "Interior rain cap starts",
-    "group": "precipitation",
-    "step": 0.01
-  },
-  "orogen_precip_lee_reach_km": {
-    "default": 200.0,
-    "minimum": 0.0,
-    "maximum": 1000.0,
-    "label": "Lee cyclone coastal reach (km)",
-    "group": "precipitation",
-    "step": 10
-  },
-  "orogen_heuristic_core_lat": {
-    "default": 5.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Heuristic core lat",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_outer_lat": {
-    "default": 10.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Heuristic outer lat",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_desert_end_lat": {
-    "default": 33.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Heuristic desert end lat",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_desert_core_lat": {
-    "default": 28.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Heuristic desert core lat",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_wet_mid_lat": {
-    "default": 55.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Heuristic wet mid lat",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_polar_lat": {
-    "default": 70.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Heuristic polar lat",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_core_rain": {
-    "default": 1.0,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Heuristic core rain",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_outer_drop": {
-    "default": 0.65,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Heuristic outer drop",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_desert_rain": {
-    "default": 0.35,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Heuristic desert rain",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_desert_drop": {
-    "default": 0.33,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Heuristic desert drop",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_mid_base": {
-    "default": 0.02,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Heuristic mid base",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_mid_gain": {
-    "default": 0.48,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Heuristic mid gain",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_subpolar_base": {
-    "default": 0.5,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Heuristic subpolar base",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_subpolar_drop": {
-    "default": 0.2,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Heuristic subpolar drop",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_polar_base": {
-    "default": 0.3,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Heuristic polar base",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_polar_drop": {
-    "default": 0.2,
-    "minimum": 0.0,
-    "maximum": 2.0,
-    "label": "Heuristic polar drop",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_coastal_smoothing_km": {
-    "default": 300.0,
-    "minimum": 0.0,
-    "maximum": 2000.0,
-    "label": "Mediterranean coast influence (km)",
-    "group": "heuristic-precip",
-    "step": 10
-  },
-  "orogen_heuristic_med_start": {
-    "default": 22.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Heuristic med start",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_med_full": {
-    "default": 30.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Heuristic med full",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_med_fade": {
-    "default": 38.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Heuristic med fade",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_med_end": {
-    "default": 45.0,
-    "minimum": 0.0,
-    "maximum": 89.0,
-    "label": "Heuristic med end",
-    "group": "heuristic-precip",
-    "step": 0.01
-  },
-  "orogen_heuristic_wind_itcz": {
-    "default": 0.1,
-    "minimum": 0.0,
-    "maximum": 3.0,
-    "label": "Heuristic wind itcz",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_heuristic_wind_trade_east": {
-    "default": 0.8,
-    "minimum": 0.0,
-    "maximum": 3.0,
-    "label": "Heuristic wind trade east",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_heuristic_wind_trade_north": {
-    "default": 0.3,
-    "minimum": 0.0,
-    "maximum": 3.0,
-    "label": "Heuristic wind trade north",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_heuristic_wind_westerly_east": {
-    "default": 0.9,
-    "minimum": 0.0,
-    "maximum": 3.0,
-    "label": "Heuristic wind westerly east",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_heuristic_wind_westerly_north": {
-    "default": 0.25,
-    "minimum": 0.0,
-    "maximum": 3.0,
-    "label": "Heuristic wind westerly north",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_heuristic_wind_polar_east": {
-    "default": 0.4,
-    "minimum": 0.0,
-    "maximum": 3.0,
-    "label": "Heuristic wind polar east",
-    "group": "wind",
-    "step": 0.01
-  },
-  "orogen_heuristic_wind_polar_north": {
-    "default": 0.15,
-    "minimum": 0.0,
-    "maximum": 3.0,
-    "label": "Heuristic wind polar north",
-    "group": "wind",
-    "step": 0.01
   },
   "orogen_koppen_shoulder_fraction": {
     "default": 0.3333333333333333,

@@ -11,7 +11,7 @@
   if(typeof location!=='undefined') {const x=new URLSearchParams(location.search).get('v2season');if(x!==null)season=normalize(x);}
   function mount(container,onChange,onDiagnostic=()=>{}){
     changed=onChange;const field=document.createElement('fieldset');field.id='renderV2Settings';field.hidden=true;
-    field.innerHTML='<legend>Render v2 · satellite landscape</legend><label>Saison <input id="renderV2Season" type="range" min="0" max="1" step="0.0025" aria-label="Render v2 season"><output id="renderV2Date"></output></label><label>Diagnostic <select id="renderV2Diagnostic" aria-label="Render v2 diagnostic"><option value="render-v2">None · satellite landscape</option><option value="render-v2-substrate">Substrate</option><option value="render-v2-moisture">Local moisture</option><option value="render-v2-vegetation">Vegetation</option><option value="render-v2-snow">Snow and ice</option></select></label><small>One annual calendar for foliage, ground, snow and ice. Appearance model; no terrain regeneration. <a href="./docs/design/render-v2-implementation.md" target="_blank">Method and limitations</a></small>';
+    field.innerHTML='<legend>Satellite · Magna Urbis</legend><label>Saison <input id="renderV2Season" type="range" min="0" max="1" step="0.0025" aria-label="Render v2 season"><output id="renderV2Date"></output></label><label>Diagnostic <select id="renderV2Diagnostic" aria-label="Render v2 diagnostic"><option value="render-v2">None · satellite landscape</option><option value="render-v2-substrate">Substrate</option><option value="render-v2-moisture">Local moisture</option><option value="render-v2-vegetation">Vegetation</option><option value="render-v2-snow">Snow and ice</option></select></label><small>One annual calendar for foliage, ground, snow and ice. Appearance model; no terrain regeneration. <a href="./docs/methods/magna-satellite.md" target="_blank">Method and limitations</a></small>';
     container.prepend(field);const input=field.querySelector('input'),output=field.querySelector('output'),diagnostic=field.querySelector('select');
     sync=()=>{input.value=season;output.textContent=new Intl.DateTimeFormat(root.NeuralEarthLocale?.locale()||'en',{month:'long',timeZone:'UTC'}).format(new Date(Date.UTC(2024,0,1+Math.floor(season*365))));};
     const translate=()=>{
@@ -21,7 +21,7 @@
       labels[0].firstChild.textContent=t('season')+' ';input.setAttribute('aria-label',t('season'));
       labels[1].firstChild.textContent=t('diagnostic')+' ';diagnostic.setAttribute('aria-label',t('diagnostic'));
       for(const [value,name] of [['render-v2','none'],['render-v2-substrate','substrate'],['render-v2-moisture','moisture'],['render-v2-vegetation','vegetation'],['render-v2-snow','snow']])diagnostic.querySelector('option[value="'+value+'"]').textContent=t(name);
-      const hint=field.querySelector('small');hint.firstChild.textContent=t('hint');const method=hint.querySelector('a');method.textContent=t('method');method.href='./docs/design/render-v2-implementation.'+(locale.locale()==='fr'?'fr':'en')+'.md';sync();
+      const hint=field.querySelector('small');hint.firstChild.textContent=t('hint');const method=hint.querySelector('a');method.textContent=t('method');method.href='./docs/methods/magna-satellite.md';sync();
     };
     root.addEventListener('neural-locale-change',translate);input.oninput=()=>{season=normalize(input.value);sync();changed();};diagnostic.onchange=()=>onDiagnostic(diagnostic.value);sync();translate();return {show:(yes,mode='render-v2')=>{field.hidden=!yes;diagnostic.value=isStyle(mode)?mode:'render-v2';}};
   }
@@ -597,6 +597,11 @@
     hook('(*material).roughness=mix((*material).roughness,roughness,reveal);',
       '(*material).roughness=mix((*material).roughness,roughness,reveal);if(params.field.z<=-8.){v2ReferenceRoughness=mix(v2ReferenceRoughness,referenceRoughness,reveal);}');
     code=code.replace('      let canopy=clamp(mask*d,0.,1.);', '      var canopy=clamp(mask*d,0.,1.);if(params.field.z<=-8.){canopy*=v2At(p,vec3<f32>(0.),0.).leaf;}');
+    if(root.TerrainMagnaSatellite){
+      hook('fn v2Fragment(s:vec3<f32>,p:vec2<f32>,fp:f32,macroColor:vec3<f32>,macroLight:f32)->vec4<f32>{',
+        'fn v2Fragment(s:vec3<f32>,p:vec2<f32>,fp:f32,macroColor:vec3<f32>,macroLight:f32)->vec4<f32>{\n        if(params.field.z== -8.){return magnaSatelliteFragment(s,p,fp,macroColor,macroLight);}');
+      code+='\n'+root.TerrainMagnaSatellite.shader;
+    }
     return code;
   }
   root.TerrainRenderV2={MODES,isStyle,number:s=>MODES[s]??-8,environment,canopyMeanShader,drawShader,mount,get:()=>({season}),set:v=>{season=normalize(v?.season);sync();},season:()=>season,writeParams:p=>p.set('v2season',String(season)),diagnostic:n=>Math.max(0,-n-8)};

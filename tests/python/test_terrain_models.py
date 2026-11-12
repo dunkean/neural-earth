@@ -18,6 +18,30 @@ from distill.live_runtime import LiveModels,DEFAULT_SELECTION
 
 
 class ModelRouteTests(unittest.TestCase):
+    def test_student_construction_waits_for_teacher_meta_context(self):
+        from concurrent.futures import ThreadPoolExecutor
+        from backend.terrain_model_loading import MODEL_LOAD_LOCK
+        from distill.live_runtime import LiveModels
+        import hashlib
+        temporary=tempfile.TemporaryDirectory();self.addCleanup(temporary.cleanup)
+        export=Path(temporary.name)/'student.pt';export.write_bytes(b'fixture')
+        options={stage:{'teacher':dict(label='Original',path=None)} for stage in ('coarse','base','decoder')}
+        options['decoder']['fixture']=dict(label='Fixture',path=str(export),sha256=hashlib.sha256(b'fixture').hexdigest())
+        config=Path(temporary.name)/'models.json';config.write_text(json.dumps(dict(selection=dict(coarse='teacher',base='teacher',decoder='fixture'),revision='fixture')))
+        models=LiveModels(config,options)
+        model=Mock();model.config.stage='decoder';model.requires_grad_.return_value=model
+        started=threading.Event()
+        def construct():
+            started.set()
+            return models.students('cpu')
+        with patch('distill.student.load_student',return_value=(model,{})) as load,ThreadPoolExecutor(max_workers=1) as pool:
+            with MODEL_LOAD_LOCK:
+                result=pool.submit(construct)
+                self.assertTrue(started.wait(2))
+                load.assert_not_called()
+            self.assertIs(result.result(timeout=5)['decoder'],model)
+            load.assert_called_once()
+
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory();self.addCleanup(self.temp.cleanup)
         self.path=Path(self.temp.name)/'config.json'

@@ -4,7 +4,7 @@ const fs=require('node:fs'),path=require('node:path'),http=require('node:http'),
 const {loadPlaywright,browserExecutable}=require('../../tools/platform.cjs');
 const root=path.resolve(__dirname,'../..');
 (async()=>{
- const html='<canvas id="map"></canvas>'+['terrain_render_controls.js','terrain_forest_brushes.js','terrain_render3d.js','terrain_render_v2.js','terrain_renderer.js'].map(f=>`<script src="/${f}"></script>`).join('');
+ const html='<canvas id="map"></canvas>'+['terrain_render_controls.js','terrain_forest_brushes.js','terrain_render3d.js','terrain_magna_satellite.js','terrain_render_v2.js','terrain_renderer.js'].map(f=>`<script src="/${f}"></script>`).join('');
  const server=http.createServer((q,s)=>{const f=new URL(q.url,'http://local').pathname.slice(1);s.setHeader('Content-Type',f.endsWith('.js')?'application/javascript':'text/html');s.end(f.endsWith('.js')?fs.readFileSync(path.join(root,'web',f)):html);});await new Promise(ok=>server.listen(0,'127.0.0.1',ok));
  const browser=await loadPlaywright().chromium.launch({executablePath:browserExecutable(),headless:true,args:['--enable-unsafe-webgpu']});
  try{

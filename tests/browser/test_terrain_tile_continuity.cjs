@@ -47,8 +47,9 @@ const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4n
   await page.goto('https://continuity.test/?seed=42&profile=natural&mode=relief&prepare_world=1');
   await page.waitForFunction(()=>window.terrainDebug?.snapshot().world&&terrainDebug.snapshot().rendererReady);
   while(!releaseOverview.length)await page.waitForTimeout(20);
-  await page.waitForTimeout(150);
-  assert.equal(requests.length,0,'Layer overview loads before tile/NN work');
+  await page.waitForFunction(()=>terrainDebug.snapshot().rendered.lods.some(l=>l>=9));
+  assert(requests.length>0,'Terrain tiles render while the CPU overview is still held');
+  assert.equal(await page.evaluate(()=>!!overview),false,'Visible terrain does not require an overview');
   assert.equal(preparations.length,0,'Background coarse waits for displayed layer');
   holdOverview=false;for(const release of releaseOverview.splice(0))release();
   // Macro view starts with complete parent geometry, rather than hundreds of

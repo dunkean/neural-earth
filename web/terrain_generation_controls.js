@@ -3,8 +3,8 @@ window.TerrainGenerationControls=(()=>{
   const clone=value=>value==null?null:JSON.parse(JSON.stringify(value));
   const channels=['Elevation','Temperature','Temperature variation','Precipitation','Precipitation variation'];
   const cityFields=[['city_erosion_strength','Dose',0,2,.01,1],['city_erosion_iterations','Iterations',1,64,1,12],['city_erosion_talus','Talus slope',.01,4,.01,.6],['city_erosion_motif_km','Drainage scale (km)',10,5000,10,300]];
-  const gpuFields=[['orogen_gpu_relief','Relief · plates, collisions, noise'],['orogen_gpu_propagation','Propagation · stress and distances'],['orogen_gpu_post','Orogen postprocessing · local passes'],['orogen_gpu_climate','Climate · winds, currents, rain, temperature'],['orogen_gpu_raster','Projection · GPU spatial search']];
-  const tectonicFields=[["orogen_plate_count", "Plate count", 4, 120, true], ["orogen_continent_count", "Continent count", 1, 10, true], ["orogen_land_coverage", "Land coverage", 0.05, 0.9, false], ["orogen_continent_variety", "Continent variety", 0.0, 1.0, false], ["orogen_motion_strength", "Motion strength", 0.0, 4.0, false], ["orogen_convergence_threshold", "Convergence threshold", 0.05, 4.0, false], ["orogen_detail", "Mesh vertices", 20000, 1000000, true], ["orogen_spread", "Orogen propagation", 1.0, 12.0, false], ["orogen_roughness", "Roughness", 0.0, 1.0, false], ["orogen_warp", "Terrain warp", 0.0, 1.0, false], ["orogen_smoothing", "Smoothing", 0.0, 1.0, false], ["orogen_hydraulic", "Hydraulic erosion", 0.0, 1.0, false], ["orogen_thermal", "Thermal erosion", 0.0, 1.0, false], ["orogen_glacial", "Glacial erosion", 0.0, 1.0, false], ["orogen_sharpening", "Ridge sharpening", 0.0, 1.0, false], ["orogen_temperature_offset", "Temperature offset (C)", -15.0, 15.0, false], ["orogen_precipitation_offset", "Precipitation offset", -1.0, 1.0, false]];
+  const gpuFields=[['orogen_gpu_raster','Projection · GPU spatial search']];
+  const tectonicFields=[["orogen_plate_count", "Plate count", 4, 120, true], ["orogen_continent_count", "Continent count", 1, 10, true], ["orogen_land_coverage", "Land coverage", 0.05, 0.9, false], ["orogen_continent_variety", "Continent variety", 0.0, 1.0, false], ["orogen_detail", "Mesh vertices", 20000, 1000000, true], ["orogen_roughness", "Roughness", 0.0, 0.5, false], ["orogen_warp", "Terrain warp", 0.0, 1.0, false], ["orogen_smoothing", "Smoothing", 0.0, 1.0, false], ["orogen_hydraulic", "Hydraulic erosion", 0.0, 1.0, false], ["orogen_thermal", "Thermal erosion", 0.0, 1.0, false], ["orogen_glacial", "Glacial erosion", 0.0, 1.0, false], ["orogen_sharpening", "Ridge sharpening", 0.0, 1.0, false], ["orogen_temperature_offset", "Greenhouse forcing (W/m²)", -30.0, 30.0, false], ["orogen_precipitation_offset", "Precipitation offset", -1.0, 1.0, false]];
   let schema=null;
   const preferencesKey=window.NeuralEarthRuntime?.preferencesKey||'neural-earth-preferences-v1';
   function localPreferences(){
@@ -24,27 +24,27 @@ window.TerrainGenerationControls=(()=>{
     savePreferences({lastWorld:{profile,seed:String(seed),settings:local}});
   }
   function withGpu(settings,enabled){
-    return {...settings,relief_pipeline:'orogen',...Object.fromEntries([...gpuFields.map(([key])=>key),'orogen_gpu_erosion'].map(key=>[key,enabled]))};
+    return {...settings,relief_pipeline:'orogen',...Object.fromEntries(gpuFields.map(([key])=>key).map(key=>[key,enabled]))};
   }
   async function initializePreferences(defaultGpu){
     let preferences=localPreferences();
     if(typeof preferences.gpuAcceleration==='boolean'){
-      const resetErosion=preferences.erosionDefaultsVersion!==1;
+      const resetErosion=preferences.erosionDefaultsVersion!==2;
       if(resetErosion){
-        preferences={...preferences,erosionDefaultsVersion:1};
-        if(preferences.generation)preferences.generation={...preferences.generation,settings:{...preferences.generation.settings,relief_pipeline:'orogen',orogen_gpu_erosion:preferences.gpuAcceleration}};
+        preferences={...preferences,erosionDefaultsVersion:2};
+        if(preferences.generation)preferences.generation={...preferences.generation,settings:{...preferences.generation.settings,relief_pipeline:'orogen',orogen_gpu_raster:preferences.gpuAcceleration}};
         savePreferences(preferences);
       }
       return {preferences,firstLaunch:false,resetErosion};
     }
     // The launcher's --gpu/--cpu answers the first-launch question.
     if(typeof defaultGpu==='boolean'){
-      preferences={...preferences,gpuAcceleration:defaultGpu,erosionDefaultsVersion:1,rendering:{gpuRender:defaultGpu,coarseGpu:defaultGpu}};
+      preferences={...preferences,gpuAcceleration:defaultGpu,erosionDefaultsVersion:2,rendering:{gpuRender:defaultGpu,coarseGpu:defaultGpu}};
       savePreferences(preferences);
       return {preferences,firstLaunch:true};
     }
     const dialog=document.createElement('dialog');dialog.id='gpuWelcome';
-    dialog.innerHTML='<form method="dialog"><h2>Enable GPU acceleration?</h2><p>Enable all GPU options for Orogen relief, propagation, erosion, climate and projection, plus map rendering?</p><p>Orogen acceleration uses NVIDIA CUDA. Map rendering uses WebGPU. You can adjust each option later in Settings and Rendering. Your choices are saved on this browser.</p><div class="panelActions"><button value="no" autofocus>Use CPU options</button><button value="yes">Enable GPU acceleration</button></div></form>';
+    dialog.innerHTML='<form method="dialog"><h2>Enable GPU acceleration?</h2><p>Enable GPU projection and map rendering? Orogen v3 generation and climate run on CPU.</p><p>Orogen acceleration uses NVIDIA CUDA. Map rendering uses WebGPU. You can adjust each option later in Settings and Rendering. Your choices are saved on this browser.</p><div class="panelActions"><button value="no" autofocus>Use CPU options</button><button value="yes">Enable GPU acceleration</button></div></form>';
     document.body.append(dialog);
     const translate=()=>{
       const locale=window.NeuralEarthLocale;if(!locale)return;
@@ -56,7 +56,7 @@ window.TerrainGenerationControls=(()=>{
     const enabled=await new Promise(resolve=>{dialog.addEventListener('close',()=>resolve(dialog.returnValue==='yes'),{once:true});dialog.showModal()});
     window.removeEventListener('neural-locale-change',translate);
     dialog.remove();
-    preferences={...preferences,gpuAcceleration:enabled,erosionDefaultsVersion:1,rendering:{gpuRender:enabled,coarseGpu:enabled}};
+    preferences={...preferences,gpuAcceleration:enabled,erosionDefaultsVersion:2,rendering:{gpuRender:enabled,coarseGpu:enabled}};
     savePreferences(preferences);
     return {preferences,firstLaunch:true};
   }
@@ -72,21 +72,21 @@ window.TerrainGenerationControls=(()=>{
       continental_strength:.8,macro_scale_km:600,frequency_mult:[1,1,1,1,1],
       octaves:[4,2,4,4,4],cond_snr:natural?[.5,.5,.5,.5,.5]:[.05,.5,.5,.5,.5],drop_water_pct:.5,
       snr_adaptive_enabled:true,snr_detail_mode:'global',snr_altitude_gain:[1,1,1,1,1],snr_altitude_range_m:[500,3000],snr_driver_channel:'temperature',
-      snr_driver_gain:[1,1,1,1,1],snr_driver_range:[5,-10],snr_bins:16,snr_latitude_gain:1,snr_latitude_range:[0,75],snr_lod:Array(15).fill(0),orogen_plate_count:80,orogen_continent_count:profile==='orogen'?3:4,orogen_land_coverage:.3,orogen_continent_variety:.85,orogen_motion_strength:1,orogen_convergence_threshold:.75,orogen_roughness:.4,orogen_detail:100000,orogen_spread:5.0,orogen_warp:0.75,orogen_smoothing:0.1,orogen_hydraulic:0.5,orogen_thermal:0.1,orogen_glacial:0.5,orogen_sharpening:0.5,orogen_temperature_offset:0.0,orogen_precipitation_offset:0.0};
+      snr_driver_gain:[1,1,1,1,1],snr_driver_range:[5,-10],snr_bins:16,snr_latitude_gain:1,snr_latitude_range:[0,75],snr_lod:Array(15).fill(0),orogen_plate_count:80,orogen_continent_count:profile==='orogen'?3:4,orogen_land_coverage:.3,orogen_continent_variety:.85,orogen_roughness:.4,orogen_detail:100000,orogen_warp:0.75,orogen_smoothing:0.1,orogen_hydraulic:0.5,orogen_thermal:0.1,orogen_glacial:0.5,orogen_sharpening:0.5,orogen_temperature_offset:0.0,orogen_precipitation_offset:0.0};
   }
   function mount({onApply,onReset,currentSnapshot,onGeneratorChange}){
     const panel=document.createElement('details');panel.id='generationPanel';
     panel.innerHTML=`<summary>Generation settings <span id="generationSummary">Default profile</span></summary>
       <div class="generationBody"><div class="generationSources">
       <label>Elevation <select id="heightSource"><option value="natural">Natural</option><option value="native">Earth atlas</option><option value="orogen">Orogen</option><option value="natural-continental">Natural continental · experimental</option></select></label>
-      <label>Relief processing <select id="reliefPipeline"><option value="original">None</option><option value="orogen-gpu">Orogen · GPU</option><option value="orogen">Orogen · CPU</option><option value="city-gpu">City · GPU</option></select></label>
+      <label>Relief processing <select id="reliefPipeline"><option value="original">None</option><option value="orogen">Orogen · CPU</option><option value="city-gpu">City · GPU</option></select></label>
       <label>Climate <select id="climateSource"><option value="natural">Natural</option><option value="native">Terrestrial</option><option value="orogen">Orogen</option></select></label>
       <label>Continents <select id="continentalStyle"><option value="gondwana">Gondwana</option><option value="continents">3 continents</option><option value="earthlike">Terrestrial</option><option value="archipelago">Archipelago</option></select></label>
       <label>Continental strength <input id="continentalStrength" aria-label="Continental strength" type="text" inputmode="decimal" required></label>
       <label>Smoothing radius (km) <input id="macroScale" aria-label="Smoothing radius" type="text" inputmode="decimal" required></label>
       <label title="0: original population; 1: land only; 0.5: historical reference.">Land / sea bias <input id="dropWater" aria-label="Land / sea bias" type="text" inputmode="decimal" required></label></div>
       <small id="generationSourceHelp"></small>
-      <fieldset id="orogenParameters" hidden><legend>Orogen · plates</legend><div class="generationSources">${tectonicFields.map(([key,label])=>`<label>${label} <input id="${key}" aria-label="${label}" type="text" inputmode="decimal" required></label>`).join('')}</div><small>Original Orogen relief, superplates and seasonal climate. Plate settings apply to the Orogen initial source; relief processing and climate work with every source. Mesh vertices control detail and initial generation time. Save A / Show A compares configurations.</small></fieldset>
+      <fieldset id="orogenParameters" hidden><legend>Orogen · plates</legend><div class="generationSources">${tectonicFields.map(([key,label])=>`<label>${label} <input id="${key}" aria-label="${label}" type="text" inputmode="decimal" required></label>`).join('')}</div><small>Orogen v3 geological terrain and monthly climate. Plate settings apply to the Orogen initial source; relief processing and climate work with every source. Mesh vertices control detail and initial generation time. Save A / Show A compares configurations.</small></fieldset>
       <table class="generationChannels"><thead><tr><th>Channel</th>${channels.map(c=>`<th>${c}</th>`).join('')}</tr></thead><tbody>
       ${[['Frequency','frequency'],['Octaves','octaves'],['Allowed noise (SNR)','snr'],['Mountain noise multiplier','snrAltitude'],['Climate noise multiplier','snrDriver']].map(([label,key])=>`<tr><th>${label}</th>${channels.map((channel,i)=>`<td><input id="${key}${i}" aria-label="${label} · ${channel}" type="text" inputmode="${key==='octaves'?'numeric':'decimal'}" required></td>`).join('')}</tr>`).join('')}</tbody></table>
       <div class="generationSources"><label>Altitude ramp starts <input id="snrAltitudeLow" aria-label="SNR altitude start" type="text" inputmode="decimal"> m</label>
@@ -108,7 +108,7 @@ window.TerrainGenerationControls=(()=>{
     body.prepend(heading);
     const orogen=body.querySelector('#orogenParameters'),tectonics=orogen.querySelector('.generationSources');
     orogen.querySelector('legend').textContent='Orogen · source parameters';
-    for(const [title,fields,open] of [['Orogen plates',tectonicFields.slice(0,8),false],['Initial relief · shape',tectonicFields.slice(8,10),false],['Erosion Orogen',tectonicFields.slice(10,15),false],['Climate offsets',tectonicFields.slice(15),false]]){
+    for(const [title,fields,open] of [['Orogen plates',tectonicFields.slice(0,5),false],['Initial relief · shape',tectonicFields.slice(5,7),false],['Erosion Orogen',tectonicFields.slice(7,12),false],['Climate offsets',tectonicFields.slice(12),false]]){
       const section=document.createElement('details');section.className='advancedSettings';section.open=open;
       const summary=document.createElement('summary');summary.textContent=title;summary.dataset.generationSection=title;section.append(summary);
       const controls=document.createElement('div');controls.className='generationSources';
@@ -128,7 +128,7 @@ window.TerrainGenerationControls=(()=>{
     cityControls.innerHTML='<summary>City · GPU settings</summary><div class="generationSources">'+cityFields.map(([key,label])=>`<label>${label} <input id="${key}" aria-label="City erosion · ${label}" type="text" inputmode="decimal"></label>`).join('')+'</div><small>Hydraulic incision, thermal relaxation and diffusion. Strength 0 preserves relief; the engine preserves sea level and oceans.</small>';
     erosionSection.append(cityControls);
     const gpuControls=document.createElement('details');gpuControls.id='orogenGpuParameters';gpuControls.className='advancedSettings';gpuControls.open=true;
-    gpuControls.innerHTML='<summary>Orogen · optional GPU acceleration</summary><div class="generationSources">'+gpuFields.map(([key,label])=>`<label><input id="${key}" type="checkbox" aria-label="GPU · ${label}"> ${label}</label>`).join('')+'</div><small>GPU options follow your saved local settings. NVIDIA CUDA; unported stages run on CPU. GPU propagation and erosion change terrain shape. City is a separate erosion engine. Apply, then Save A / Show A to compare.</small>';
+    gpuControls.innerHTML='<summary>Orogen · optional GPU acceleration</summary><div class="generationSources">'+gpuFields.map(([key,label])=>`<label><input id="${key}" type="checkbox" aria-label="GPU · ${label}"> ${label}</label>`).join('')+'</div><small>CUDA accelerates spatial projection. Orogen v3 terrain, erosion and climate run on CPU. City is a separate erosion engine. Apply, then Save A / Show A to compare.</small>';
     erosionSection.after(gpuControls);
     const sourceSection=document.createElement('fieldset');sourceSection.id='sourceSettings';
     sourceSection.innerHTML='<legend>1 · World source</legend><div class="generationSources"><label>Generator <select id="generatorType"><option value="natural">noise</option><option value="custom">Custom</option><option value="orogen">Orogen</option><option value="mixed" disabled>Mixed sources · advanced</option></select></label><label id="customSourceLabel">Custom relief <select id="customSource"><option value="native">Continental atlas</option><option value="natural-continental">Procedural continents</option></select></label></div>';
@@ -212,7 +212,7 @@ window.TerrainGenerationControls=(()=>{
       placeholder:['Rain, snow, pressure…','Pluie, neige, pression…','降雨、降雪、气压…','Lluvia, nieve, presión…','Chuva, neve, pressão…'],
       searchLabel:['Find Orogen settings','Rechercher les paramètres Orogen','查找 Orogen 设置','Buscar ajustes de Orogen','Buscar configurações do Orogen'],
       section:['Section','Section','类别','Sección','Seção'],
-      help:['Source climate and Original Orogen biomes. Changes take effect with Apply.','Climat source et biomes Orogen d’origine. Les changements prennent effet après application.','源气候和原始 Orogen 生物群系。更改在应用后生效。','Clima de origen y biomas originales de Orogen. Los cambios se aplican al pulsar Aplicar.','Clima de origem e biomas originais do Orogen. As alterações entram em vigor ao aplicar.'],
+      help:['Orogen v3 monthly climate and biome settings. Changes take effect with Apply.','Climat source et biomes Orogen d’origine. Les changements prennent effet après application.','源气候和原始 Orogen 生物群系。更改在应用后生效。','Clima de origen y biomas originales de Orogen. Los cambios se aplican al pulsar Aplicar.','Clima de origem e biomas originais do Orogen. As alterações entram em vigor ao aplicar.'],
       wind:['Atmosphere & winds','Atmosphère et vents','大气与风','Atmósfera y vientos','Atmosfera e ventos'],
       ocean:['Ocean currents','Courants océaniques','洋流','Corrientes oceánicas','Correntes oceânicas'],
       temperature:['Temperature','Température','温度','Temperatura','Temperatura'],
@@ -459,7 +459,7 @@ window.TerrainGenerationControls=(()=>{
       const properties=Object.entries(schema.properties).filter(([id,spec])=>id.startsWith('orogen_')&&spec.group);
       if(!properties.length)return;
       const section=document.createElement('details');section.id='orogenClimateParameters';section.className='advancedSettings';
-      section.open=true;section.innerHTML='<summary>Climate parameters</summary><label class="climateSearch">Find <input id="orogenClimateSearch" type="search" placeholder="Rain, snow, pressure…" aria-label="Find Orogen settings"></label><label class="channelSelect">Section <select id="orogenClimateSection"></select></label><div class="climateFields"></div><small>Source climate and Original Orogen biomes. Changes take effect with Apply.</small>';
+      section.open=true;section.innerHTML='<summary>Climate parameters</summary><label class="climateSearch">Find <input id="orogenClimateSearch" type="search" placeholder="Rain, snow, pressure…" aria-label="Find Orogen settings"></label><label class="channelSelect">Section <select id="orogenClimateSection"></select></label><div class="climateFields"></div><small>Orogen v3 monthly climate and biome settings. Changes take effect with Apply.</small>';
       climateBody.querySelector('.generationActions').before(section);
       const select=section.querySelector('select'),container=section.querySelector('.climateFields'),groups=new Map();
       for(const [id,spec] of properties){
@@ -565,11 +565,10 @@ window.TerrainGenerationControls=(()=>{
       snrLatitudeGain:['Latitude multiplier','Multiplicateur de latitude','纬度倍数','Multiplicador de latitud','Multiplicador de latitude'],snrLatitudeLow:['Latitude ramp starts (°)','Début de la rampe de latitude (°)','纬度渐变起点（°）','Inicio de rampa de latitud (°)','Início da rampa de latitude (°)'],snrLatitudeHigh:['Latitude ramp ends (°)','Fin de la rampe de latitude (°)','纬度渐变终点（°）','Fin de rampa de latitud (°)','Fim da rampa de latitude (°)'],generationPreset:['SNR preset','Préréglage SNR','SNR 预设','Preajuste SNR','Predefinição SNR'],
       orogen_plate_count:['Plate count','Nombre de plaques','板块数量','Número de placas','Número de placas'],orogen_continent_count:['Continent count','Nombre de continents','大陆数量','Número de continentes','Número de continentes'],
       orogen_land_coverage:['Land coverage','Couverture terrestre','陆地覆盖率','Cobertura terrestre','Cobertura terrestre'],orogen_continent_variety:['Continent variety','Variété des continents','大陆多样性','Variedad de continentes','Variedade dos continentes'],
-      orogen_motion_strength:['Motion strength','Intensité du mouvement','运动强度','Intensidad del movimiento','Intensidade do movimento'],orogen_convergence_threshold:['Convergence threshold','Seuil de convergence','汇聚阈值','Umbral de convergencia','Limiar de convergência'],
-      orogen_detail:['Mesh vertices','Sommets du maillage','网格顶点','Vértices de malla','Vértices da malha'],orogen_spread:['Orogen propagation','Propagation Orogen','Orogen 传播','Propagación Orogen','Propagação Orogen'],
+      orogen_detail:['Mesh vertices','Sommets du maillage','网格顶点','Vértices de malla','Vértices da malha'],
       orogen_roughness:['Roughness','Rugosité','粗糙度','Rugosidad','Rugosidade'],orogen_warp:['Terrain warp','Déformation du terrain','地形扭曲','Deformación del terreno','Distorção do terreno'],orogen_smoothing:['Smoothing','Lissage','平滑','Suavizado','Suavização'],
       orogen_hydraulic:['Hydraulic erosion','Érosion hydraulique','水力侵蚀','Erosión hidráulica','Erosão hidráulica'],orogen_thermal:['Thermal erosion','Érosion thermique','热侵蚀','Erosión térmica','Erosão térmica'],orogen_glacial:['Glacial erosion','Érosion glaciaire','冰川侵蚀','Erosión glaciar','Erosão glacial'],orogen_sharpening:['Ridge sharpening','Accentuation des crêtes','山脊锐化','Acentuación de crestas','Realce das cristas'],
-      orogen_temperature_offset:['Temperature offset (°C)','Décalage de température (°C)','温度偏移（°C）','Desplazamiento de temperatura (°C)','Desvio de temperatura (°C)'],orogen_precipitation_offset:['Precipitation offset','Décalage des précipitations','降水偏移','Desplazamiento de precipitación','Desvio de precipitação'],
+      orogen_temperature_offset:['Greenhouse forcing (W/m²)','Forçage radiatif (W/m²)','辐射强迫（W/m²）','Forzamiento radiativo (W/m²)','Forçamento radiativo (W/m²)'],orogen_precipitation_offset:['Precipitation offset','Décalage des précipitations','降水偏移','Desplazamiento de precipitación','Desvio de precipitação'],
       city_erosion_strength:['Dose','Intensité','强度','Intensidad','Intensidade'],city_erosion_iterations:['Iterations','Itérations','迭代次数','Iteraciones','Iterações'],city_erosion_talus:['Talus slope','Pente de talus','堆积坡坡度','Pendiente de talud','Inclinação do talude'],city_erosion_motif_km:['Drainage scale (km)','Échelle de drainage (km)','排水尺度（km）','Escala de drenaje (km)','Escala de drenagem (km)'],
       orogen_gpu_relief:['Relief · plates, collisions, noise','Relief · plaques, collisions, bruit','地形 · 板块、碰撞、噪声','Relieve · placas, colisiones, ruido','Relevo · placas, colisões, ruído'],orogen_gpu_propagation:['Propagation · stress and distances','Propagation · contraintes et distances','传播 · 应力和距离','Propagación · tensión y distancias','Propagação · tensão e distâncias'],orogen_gpu_post:['Orogen postprocessing · local passes','Post-traitement Orogen · passes locales','Orogen 后处理 · 局部处理','Posprocesado Orogen · pasadas locales','Pós-processamento Orogen · passagens locais'],orogen_gpu_climate:['Climate · winds, currents, rain, temperature','Climat · vents, courants, pluie, température','气候 · 风、洋流、降雨、温度','Clima · vientos, corrientes, lluvia, temperatura','Clima · ventos, correntes, chuva, temperatura'],orogen_gpu_raster:['Projection · GPU spatial search','Projection · recherche spatiale GPU','投影 · GPU 空间搜索','Proyección · búsqueda espacial GPU','Projeção · busca espacial GPU'],
     };
@@ -632,7 +631,7 @@ window.TerrainGenerationControls=(()=>{
       for(let i=0;i<5;i++)for(const key of ['frequency','octaves']){const input=$(key+i);input.disabled=i===0?native:true;input.closest('label').hidden=input.disabled;}
       procedural.hidden=native;sourceChannel.value='0';procedural.querySelector('.channelSelect').hidden=true;selectSourceChannel();
       for(const section of orogen.querySelectorAll(':scope > details')){section.hidden=height!=='orogen';for(const input of section.querySelectorAll('input'))input.disabled=height!=='orogen';}
-      for(const id of ['orogen_warp','orogen_smoothing','orogen_hydraulic','orogen_thermal','orogen_glacial','orogen_sharpening','orogen_gpu_post']){$(id).disabled=!orogenErosion;$(id).closest('label').hidden=!orogenErosion;}
+      for(const id of ['orogen_warp','orogen_smoothing','orogen_hydraulic','orogen_thermal','orogen_glacial','orogen_sharpening']){$(id).disabled=!orogenErosion;$(id).closest('label').hidden=!orogenErosion;}
       for(const [id] of extraFields)$(id).disabled=false;
       refreshSourceHelp();
 
@@ -659,7 +658,7 @@ window.TerrainGenerationControls=(()=>{
       for(const [id] of gpuFields)$(id).checked=settings[id]??false;
       $('snrAdaptive').checked=settings.snr_adaptive_enabled??true;
       $('snrDetailMode').value=settings.snr_detail_mode||(settings.snr_lod?.some(v=>v>0)?'per-lod':'global');
-      $('reliefPipeline').value=settings.relief_pipeline==='orogen'&&settings.orogen_gpu_erosion?'orogen-gpu':settings.relief_pipeline;$('heightSource').value=settings.height_source;$('climateSource').value='orogen';$('continentalStyle').value=settings.continental_style;
+      $('reliefPipeline').value=settings.relief_pipeline;$('heightSource').value=settings.height_source;$('climateSource').value='orogen';$('continentalStyle').value=settings.continental_style;
       $('continentalStrength').value=settings.continental_strength;$('macroScale').value=settings.macro_scale_km;$('dropWater').value=settings.drop_water_pct;
       for(let i=0;i<5;i++){ $('frequency'+i).value=settings.frequency_mult[i];$('octaves'+i).value=settings.octaves[i];$('snr'+i).value=settings.cond_snr[i];$('snrAltitude'+i).value=settings.snr_altitude_gain[i];$('snrDriver'+i).value=settings.snr_driver_gain[i]; }
       $('snrAltitudeLow').value=settings.snr_altitude_range_m[0];$('snrAltitudeHigh').value=settings.snr_altitude_range_m[1];
@@ -675,7 +674,7 @@ window.TerrainGenerationControls=(()=>{
       return value;
     }
     function read(){
-      return {world_topology:$("worldTopology").value,world_diameter_km:number("worldDiameter",{minimum:10,maximum:100000}),...stageReferences,...Object.fromEntries(gpuFields.map(([id])=>[id,$(id).checked])),orogen_gpu_erosion:$('reliefPipeline').value==='orogen-gpu',...Object.fromEntries(cityFields.map(([id,label,minimum,maximum,step])=>[id,number(id,{minimum,maximum,integer:step===1})])),...Object.fromEntries(extraFields.map(([id,spec])=>[id,spec.color?JSON.parse($(id).dataset.rgb):number(id,spec)])),...Object.fromEntries(tectonicFields.map(([id,label,minimum,maximum,integer])=>[id,number(id,{minimum,maximum,integer})])),relief_pipeline:$('reliefPipeline').value==='orogen-gpu'?'orogen':$('reliefPipeline').value,height_source:$('heightSource').value,climate_source:$('climateSource').value,continental_style:$('continentalStyle').value,
+      return {world_topology:$("worldTopology").value,world_diameter_km:number("worldDiameter",{minimum:10,maximum:100000}),...stageReferences,...Object.fromEntries(gpuFields.map(([id])=>[id,$(id).checked])),...Object.fromEntries(cityFields.map(([id,label,minimum,maximum,step])=>[id,number(id,{minimum,maximum,integer:step===1})])),...Object.fromEntries(extraFields.map(([id,spec])=>[id,spec.color?JSON.parse($(id).dataset.rgb):number(id,spec)])),...Object.fromEntries(tectonicFields.map(([id,label,minimum,maximum,integer])=>[id,number(id,{minimum,maximum,integer})])),relief_pipeline:$('reliefPipeline').value,height_source:$('heightSource').value,climate_source:$('climateSource').value,continental_style:$('continentalStyle').value,
         snr_adaptive_enabled:$('snrAdaptive').checked,snr_detail_mode:$('snrDetailMode').value,continental_strength:number('continentalStrength'),macro_scale_km:number('macroScale',{minimum:0}),drop_water_pct:number('dropWater',{minimum:0,maximum:1}),
         frequency_mult:Array.from({length:5},(_,i)=>number('frequency'+i)),octaves:Array.from({length:5},(_,i)=>number('octaves'+i,{minimum:1,integer:true})),cond_snr:Array.from({length:5},(_,i)=>number('snr'+i,{positive:true})),
         snr_altitude_gain:Array.from({length:5},(_,i)=>number('snrAltitude'+i,{minimum:.03125,maximum:32})),
@@ -764,11 +763,10 @@ window.TerrainGenerationControls=(()=>{
       stagePanes.Erosion.append(erosionSection);
       const erosionOptions=$('orogen_hydraulic').closest('details');erosionSection.append(erosionOptions);
       erosionOptions.querySelector('.generationSources').prepend($('orogen_warp').closest('label'));
-      for(const id of ['orogen_gpu_post'])erosionSection.append($(id).closest('label'));
       climateBody.querySelector('.panelHeading').remove();climatePanel.querySelector(':scope > summary').hidden=true;climatePanel.open=true;
-      climateBody.querySelector('.generationActions').hidden=true;climateBody.prepend($('orogen_gpu_climate').closest('label'));
+      climateBody.querySelector('.generationActions').hidden=true;
       stagePanes.Climate.append(climatePanel);
-      gpuControls.querySelector('small').textContent='NVIDIA CUDA; GPU options follow your saved local settings. Parallel propagation may change relief.';
+      gpuControls.querySelector('small').textContent='CUDA accelerates projection. Orogen v3 terrain and monthly climate run on CPU.';
       for(const [name,label,scope] of [['Relief','relief','relief'],['Erosion','erosion','erosion'],['Climate','climate','climate']]){
         const footer=document.createElement('div');footer.className='stageActions';const status=document.createElement('small');status.id='stageStatus'+scope;status.setAttribute('role','status');
         const button=document.createElement('button');button.type='button';button.id='generate'+name;button.textContent='Generate '+label;button.onclick=()=>action(()=>submit(read(),draftBase,scope));footer.append(status,button);stagePanes[name].append(footer);

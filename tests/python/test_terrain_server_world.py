@@ -170,7 +170,7 @@ class ServerWorldConstructionTests(unittest.TestCase):
 
     def test_full_orogen_configuration_is_accepted_by_world_endpoint(self):
         settings=resolve_generation('orogen').settings
-        settings['orogen_temperature_equator']=33.
+        settings['orogen_temperature_offset']=10.
         settings['orogen_biome_color_af']=[.125,.5,.875]
         encoded=json.dumps(settings)
         self.assertGreater(len(encoded),8192)

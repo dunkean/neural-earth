@@ -43,7 +43,7 @@ window.installWasmPreferences=()=>{
   const control=window.TerrainGenerationControls;
   control.initializePreferences=async()=>({preferences:{...JSON.parse(localStorage.getItem(window.NeuralEarthRuntime.preferencesKey)||'{}'),gpuAcceleration:false,rendering:{gpuRender:false,coarseGpu:false}},firstLaunch:false,resetErosion:false});
   const defaults=control.defaults;
-  control.defaults=profile=>({...defaults(profile),height_source:'orogen',climate_source:'orogen',world_topology:'sphere',snr_adaptive_enabled:false,...Object.fromEntries(['relief','propagation','post','climate','erosion','raster'].map(stage=>['orogen_gpu_'+stage,false]))});
+  control.defaults=profile=>({...defaults(profile),height_source:'orogen',climate_source:'orogen',world_topology:'sphere',snr_adaptive_enabled:false,...Object.fromEntries(['raster'].map(stage=>['orogen_gpu_'+stage,false]))});
   // The existing controls keep one WASM capability boundary rather than a second UI.
   const mount=control.mount;
   control.mount=options=>{

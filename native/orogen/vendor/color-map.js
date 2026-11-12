@@ -69,12 +69,12 @@ function altitudeThresholds(classId) {
 
 // Satellite-view biome color: realistic land colors based on Köppen class
 // and elevation, with ocean delegated to the standard ocean palette.
-export function biomeColor(koppenId, elevation) {
+export function biomeColor(koppenId, elevation, physicalKm = false) {
     // Ocean
     if (koppenId === 0 || elevation <= 0) return elevationToColor(elevation);
 
     const base = BIOME_COLORS[koppenId] || [0.30, 0.50, 0.20];
-    const hKm = elevToHeightKm(elevation);
+    const hKm = physicalKm ? elevation : elevToHeightKm(elevation);
     const [alpineLine, snowLine] = altitudeThresholds(koppenId);
 
     let r = base[0], g = base[1], b = base[2];

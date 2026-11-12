@@ -1697,6 +1697,7 @@ def renderer_script():
 
 @app.get('/terrain_render3d.js')
 @app.get('/terrain_render_v2.js')
+@app.get('/terrain_magna_satellite.js')
 @app.get('/terrain_forest_brushes.js')
 @app.get('/forest-brushes.bin')
 def render3d_assets():
@@ -2211,10 +2212,11 @@ def selected_neural_chart():
 def amplification_mode(mode='hybrid', *, required=True):
     # Lazy registry: a missing experimental module must not prevent startup.
     from importlib import import_module
-    registry={'hybrid':('terrain_hybrid','sample_hybrid','hybrid-drainage-erosion','experimental-hybrid-amplification'),
+    registry={'magna':('terrain_magna','sample_magna','magna-noise-ground','experimental-magna-relief'),
+              'hybrid':('terrain_hybrid','sample_hybrid','hybrid-drainage-erosion','experimental-hybrid-amplification'),
               'mse':('terrain_amplification','sample_amplified','multiscale-erosion','experimental-erosion-amplification'),
               'phasor':('terrain_phasor','sample_phasor','phasor-noise','experimental-phasor-amplification')}
-    if mode not in registry:raise ValueError('amplify_mode must be hybrid, phasor or mse')
+    if mode not in registry:raise ValueError('amplify_mode must be hybrid, phasor, mse or magna')
     name,sampler,label,source_kind=registry[mode]
     try:
         module=import_module(name)
@@ -2237,14 +2239,14 @@ def selected_amplification_mode(raw=...):
         raw=request.args.get('amplify_mode',...)
         if raw is ... and request.is_json:raw=(request.get_json(silent=True) or {}).get('amplify_mode',...)
     mode='hybrid' if raw is ... else raw
-    if mode not in ('hybrid','phasor','mse'):raise ValueError('amplify_mode must be hybrid, phasor or mse')
+    if mode not in ('hybrid','phasor','mse','magna'):raise ValueError('amplify_mode must be hybrid, phasor, mse or magna')
     if raw is not ...:amplification_mode(mode)
     return mode
 
 
 def selected_amplification(raw=None, mode=None):
     if mode is None:mode=selected_amplification_mode()
-    if mode not in ('hybrid','phasor','mse'):raise ValueError('amplify_mode must be hybrid, phasor or mse')
+    if mode not in ('hybrid','phasor','mse','magna'):raise ValueError('amplify_mode must be hybrid, phasor, mse or magna')
     if raw is None and has_request_context():
         raw=request.args.get('amplify')
         if raw is None and request.is_json:raw=(request.get_json(silent=True) or {}).get('amplify')
@@ -2267,7 +2269,7 @@ def request_amplification():
 
 def amplification_capability():
     modes={}
-    for mode in ('hybrid','phasor','mse'):
+    for mode in ('hybrid','phasor','mse','magna'):
         spec=amplification_mode(mode,required=False)
         modes[mode]={key:spec[key] for key in ('available','version','stages','reason') if key in spec}
     return dict(available=any(s['available'] for s in modes.values()),modes=modes,
@@ -2283,7 +2285,7 @@ def request_tile_key(seed,lod,tx,ty,world_profile=None,source_lod=None,coarse_in
 def tile_key(seed, lod, tx, ty, world_profile=None, amplify=0., amplify_mode='hybrid'):
     # Pure amplification identity: never consult request.args in a worker.
     from terrain_lod_interpolation import interpolation_suffix
-    if amplify_mode not in ('hybrid','phasor','mse'):raise ValueError('amplify_mode must be hybrid, phasor or mse')
+    if amplify_mode not in ('hybrid','phasor','mse','magna'):raise ValueError('amplify_mode must be hybrid, phasor, mse or magna')
     key=f'{VERSION}/{generation_profile(world_profile)}/{seed}/{lod}/{tx}/{ty}'
     intensity=selected_amplification(0. if amplify is None else amplify,amplify_mode) if lod<0 else 0.
     if intensity:
@@ -2530,6 +2532,8 @@ def physical_tile(seed, lod, tx, ty, *, return_arrays=False):
                 if amplify_mode in ('phasor','hybrid') and not getattr(spec['module'],'KEEP_PROCEDURAL_BASE',amplify_mode!='hybrid'):
                     report['height_filter']=report['height_filter'].replace('+procedural-sparse-convolution-octaves','')
                     report['procedural_octaves']=0
+                if amplify_mode=='magna':
+                    report.update(height_filter='canonical-native+signed-sqrt-c2-coast+magna-derivative-noise+physical-ground',procedural_octaves=len(spec['module'].WAVELENGTHS),refinement_version=spec['version'])
                 if 'stages' in spec:report['amplification_stages']=spec['stages']
             floor=relief_floor(amplify_mode if amplify else 'classic')
             if lod<floor:
@@ -2984,17 +2988,17 @@ def _tile_headers(response, report, cache_hit):
 
 
 @lru_cache(maxsize=2)
-def physical_overview(seed, world_profile, identity, bounds):
+def physical_overview(seed, world_profile, identity, bounds, width=2048, height=1024):
     # Display palettes share one immutable atlas; switching styles never samples
     # the generator or climate again. Identity protects regenerated worlds.
     x0,y0,x1,y1=bounds
-    xs=x0+(np.arange(2048)+.5)*(x1-x0)/2048
-    ys=y0+(np.arange(1024)+.5)*(y1-y0)/1024
+    xs=x0+(np.arange(width)+.5)*(x1-x0)/width
+    ys=y0+(np.arange(height)+.5)*(y1-y0)/height
     macro=conditioning_preview(seed,world_profile,xs,ys)
     elevation=np.asarray(macro['elev'],np.float32)
     climate=np.asarray(macro['climate'],np.float32)
     elevation.flags.writeable=False;climate.flags.writeable=False
-    return elevation,climate,(x1-x0)/2048
+    return elevation,climate,(x1-x0)/width
 
 
 # Display-dependent overviews (lighting, contours, Render settings) are not
@@ -3057,6 +3061,9 @@ def overview(seed):
         render_settings=parse_render_settings(request.args.get('render_settings')) if material_mode else None
         suffix=lighting_suffix(lighting)+lighting_suffix(contours)+(lighting_suffix(render_settings) if material_mode else '')
         if mode in ('render','soil','pedology')+RENDER_V2_MODES:suffix+='.appearance-'+APPEARANCE_IDENTITY
+        # Satellite's CPU canopy integration is only a background preview.
+        # Native WebGPU tiles supply screen-resolution detail independently.
+        if mode in RENDER_V2_MODES:suffix+='.preview512-v1'
     except ValueError as exc:
         return jsonify(error=str(exc)),400
     directory = CACHE/wp/str(seed)
@@ -3091,7 +3098,7 @@ def overview(seed):
     def compute():
         jobs.check_current_interest()
         x0,y0,x1,y1=metadata_snapshot['overview_bounds']
-        width,height=2048,1024
+        width,height=(512,256) if mode in RENDER_V2_MODES else (2048,1024)
         xs=x0+(np.arange(width)+.5)*(x1-x0)/width
         ys=y0+(np.arange(height)+.5)*(y1-y0)/height
         if mode in SNR_MODES:
@@ -3104,7 +3111,7 @@ def overview(seed):
             return render_orogen_layer(atlas, mode, xs, ys), None, (x1-x0)/width
         # A worldwide preview cannot monopolize the compute lane with thousands
         # of learned windows. The incremental coarse worker replaces it later.
-        value=physical_overview(seed,wp,identity,tuple(metadata_snapshot['overview_bounds']))
+        value=physical_overview(seed,wp,identity,tuple(metadata_snapshot['overview_bounds']),width,height)
         jobs.check_current_interest()
         return value
     def finalize(value):
@@ -3116,8 +3123,9 @@ def overview(seed):
                 rgb=(np.clip(rgb,0,1)*255).astype(np.uint8)
         elif mode in ('orogen-biomes','orogen-koppen','render','soil')+RENDER_V2_MODES:
             x0,y0,x1,y1=metadata_snapshot['overview_bounds']
-            xs=x0+(np.arange(2048)+.5)*(x1-x0)/2048
-            ys=y0+(np.arange(1024)+.5)*(y1-y0)/1024
+            height,width=elevation.shape
+            xs=x0+(np.arange(width)+.5)*(x1-x0)/width
+            ys=y0+(np.arange(height)+.5)*(y1-y0)/height
             if mode == 'orogen-koppen':
                 rgb=physical_koppen_colors(seed,wp,xs,ys,elevation)
             elif mode in RENDER_V2_MODES:
@@ -3126,19 +3134,19 @@ def overview(seed):
                 # colour with the light in the key rather than relighting it.
                 rgb=overview_albedo((identity,APPEARANCE_IDENTITY,wp,seed,mode,
                     json.dumps(render_settings,sort_keys=True),json.dumps(lighting,sort_keys=True)),
-                    lambda:colorize_surface(atlas,xs,ys,elevation,((x1-x0)/2048,(y1-y0)/1024),
+                    lambda:colorize_surface(atlas,xs,ys,elevation,((x1-x0)/width,(y1-y0)/height),
                         settings,render_settings,mode=mode,lighting=lighting))
             elif mode in ('render','soil'):
                 atlas,settings=biome_atlas(seed,wp)
                 albedo=overview_albedo((identity,APPEARANCE_IDENTITY,wp,seed,mode,json.dumps(render_settings,sort_keys=True)),
-                    lambda:colorize_surface(atlas,xs,ys,elevation,((x1-x0)/2048,(y1-y0)/1024),settings,render_settings,mode=mode))
+                    lambda:colorize_surface(atlas,xs,ys,elevation,((x1-x0)/width,(y1-y0)/height),settings,render_settings,mode=mode))
                 from terrain_lighting import relief_intensity
-                rgb=albedo*np.where(elevation<0,1,relief_intensity(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting))[...,None]
+                rgb=albedo*np.where(elevation<0,1,relief_intensity(elevation,((x1-x0)/width,(y1-y0)/height),lighting))[...,None]
             else:
                 fields=physical_biome_fields(seed,wp,xs,ys,elevation)
                 rgb=colorize_biomes(elevation,fields,resolution)
                 from terrain_lighting import relief_intensity
-                light=relief_intensity(elevation,((x1-x0)/2048,(y1-y0)/1024),lighting)
+                light=relief_intensity(elevation,((x1-x0)/width,(y1-y0)/height),lighting)
                 rgb*=np.where(elevation<0,1,light)[...,None]
         elif mode in STYLE_MODES:
             x0,y0,x1,y1=metadata_snapshot['overview_bounds']

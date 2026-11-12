@@ -2,7 +2,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),http=require('node:http');
 const {loadPlaywright,browserExecutable}=require('../../tools/platform.cjs');
 const root=path.resolve(__dirname,'../..');
-const scripts=['terrain_render_controls.js','terrain_lighting.js','terrain_forest_brushes.js','terrain_render3d.js','terrain_render_v2.js','terrain_renderer.js'];
+const scripts=['terrain_render_controls.js','terrain_lighting.js','terrain_forest_brushes.js','terrain_render3d.js','terrain_magna_satellite.js','terrain_render_v2.js','terrain_renderer.js'];
 const html='<canvas id="map"></canvas>'+scripts.map(s=>`<script src="/${s}"></script>`).join('');
 (async()=>{
  const server=http.createServer((req,res)=>{const f=new URL(req.url,'http://x').pathname.slice(1);res.setHeader('Content-Type',scripts.includes(f)?'application/javascript':'text/html');res.end(scripts.includes(f)?fs.readFileSync(path.join(root,'web',f)):html);});await new Promise(r=>server.listen(0,'127.0.0.1',r));let browser;

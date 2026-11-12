@@ -136,14 +136,14 @@ class GenerationRegistryTests(unittest.TestCase):
         self.assertEqual(list(self.root.iterdir()), [])
 
     def test_orogen_climate_palette_and_thresholds_replay_and_route_to_generator(self):
-        overrides={'orogen_temperature_equator':33., 'orogen_biome_tropical_snow':4.25,
-                   'orogen_biome_color_af':[.125,.5,.875], 'orogen_precip_shadow_reach_km':3200.}
+        overrides={'orogen_temperature_offset':10., 'orogen_biome_tropical_snow':4.25,
+                   'orogen_biome_color_af':[.125,.5,.875], 'orogen_v3_rain_lee_recover_km':500.}
         token=generation.register_generation('orogen',overrides)
         descriptor=generation.resolve_generation(token)
         for key,value in overrides.items():
             self.assertEqual(descriptor.settings[key],value)
             self.assertEqual(descriptor.bootstrap_options[key.removeprefix('orogen_')],value)
-        self.assertNotEqual(token,generation.register_generation('orogen',{'orogen_temperature_equator':32.}))
+        self.assertNotEqual(token,generation.register_generation('orogen',{'orogen_temperature_offset':8.}))
         for invalid in ([.1,.2], [.1,.2,2.], [.1,float('nan'),.2]):
             with self.assertRaises(ValueError):
                 generation.register_generation('orogen',{'orogen_biome_color_af':invalid})
@@ -159,7 +159,7 @@ class GenerationRegistryTests(unittest.TestCase):
         descriptor=generation.resolve_generation(token)
         self.assertEqual(descriptor.profile,token)
         self.assertEqual(descriptor.settings['orogen_detail'],20000)
-        self.assertEqual(descriptor.settings['orogen_temperature_equator'],28.)
+        self.assertEqual(descriptor.settings['orogen_temperature_offset'],0.)
         self.assertEqual(descriptor.settings['orogen_biome_tropical_snow'],5.5)
 
     def test_city_erosion_routes_every_source_and_replays_own_parameters(self):

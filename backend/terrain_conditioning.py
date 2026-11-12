@@ -23,7 +23,7 @@ from terrain_generation import resolve_generation, GENERATION_VERSION
 from terrain_geometry import reference_coordinates
 
 BOOTSTRAP_CONDITIONING_VERSION = "native-bootstrap-worldclim-v2"
-OROGEN_CLIMATE_VERSION = "orogen-worldclim-v2; thermal harmonic, precipitation half-year monthly lower bound"
+OROGEN_CLIMATE_VERSION = "orogen-v3-worldclim-monthly-v1; BIO1/BIO4/BIO12/BIO15 from twelve physical months"
 WORLD_PROFILES = ("natural", "terrestrial-gondwana", "terrestrial-continents",
                   "terrestrial-earthlike", "terrestrial-archipelago", "orogen")
 COARSE_RESOLUTION = 7680
@@ -449,9 +449,15 @@ class GenerationConditioning:
         if s["climate_source"] == "orogen":
             from terrain_orogen_layers import sample
             # Orogen temperature already includes its own lapse adjustment.
-            raw[1:] = orogen_bioclim(*(sample(self.heightmap, self.heightmap.layers[name], xs, ys)
-                                      for name in ('temperature_summer', 'temperature_winter',
-                                                   'precip_summer', 'precip_winter')))
+            # V3 derives these from all twelve months before atlas projection.
+            # A seasonal fixture/provider can still supply the four historical fields.
+            names = ('bio1', 'bio4', 'bio12', 'bio15')
+            if all(name in self.heightmap.layers for name in names):
+                raw[1:] = np.stack([sample(self.heightmap, self.heightmap.layers[name], xs, ys) for name in names])
+            else:
+                raw[1:] = orogen_bioclim(*(sample(self.heightmap, self.heightmap.layers[name], xs, ys)
+                                          for name in ('temperature_summer', 'temperature_winter',
+                                                       'precip_summer', 'precip_winter')))
         return raw
 
     def finalize(self, raw):

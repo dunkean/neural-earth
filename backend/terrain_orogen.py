@@ -1,4 +1,4 @@
-"""Persist the original Orogen relief and seasonal climate as a CUDA atlas.
+"""Persist Orogen v3 geological relief and monthly climate as a CUDA atlas.
 
 The global graph pipeline runs on CPU; optional City WebGPU erosion precedes
 climate on the retained graph. CUDA rasterizes its original triangles and the
@@ -13,8 +13,6 @@ import json
 from pathlib import Path
 import shutil
 import subprocess
-from terrain_generation_session import check_generation, cancellable_process, run_process
-import tempfile
 import threading
 import time
 import zipfile
@@ -23,14 +21,14 @@ import numpy as np
 import torch
 from scipy.spatial import cKDTree
 
-from terrain_bootstrap import WorldHeightmap, WORLD_BOUNDS, STYLES, CACHE_ROOT, _seed, _sha_file, _json_bytes, _atomic
+from terrain_bootstrap import WorldHeightmap, WORLD_BOUNDS, STYLES, CACHE_ROOT, _seed, _sha_file, _json_bytes
 from terrain_device import select_cuda_device
 import terrain_array_io as array_io
 
 # Keep the storage namespace readable for saved immutable stage references.
 # Source digests invalidate every newly generated atlas and stage automatically.
-VERSION = 'orogen-full-pipeline-v7'
-HYPSOMETRY_RULE = 'coastal-slope-v1: ocean 10000*e; land 6000*t^4*(5-4*t)+1000*t*(1-t)^4'
+VERSION = 'orogen-v3-pipeline-v1'
+HYPSOMETRY_RULE = 'Orogen-v3: physical kilometres to signed metres; no nonlinear coastal conversion'
 WIDTH, HEIGHT = 2048, 1024
 ROOT = REPO_ROOT
 NATIVE = ROOT / 'native' / 'orogen'
@@ -54,8 +52,9 @@ def implementation_identity():
                 node_sha256=_sha_file(node), torch_version=str(torch.__version__),
                 torch_cuda=torch.version.cuda, cuda_device=selected, cuda_driver=selection['driver'],
                 raster_width=WIDTH, raster_height=HEIGHT,
-                height_convention='signed-metres; sea iff height<0',
-                relief='original-Orogen-superplates-relief-climate; CUDA-spherical-barycentric-rasterization')
+                height_convention='signed-metres; explicit connected ocean mask; sea level 0 m',
+                relief='Orogen-v3-present-geology-finish-monthly-climate; CUDA-spherical-barycentric-rasterization',
+                upstream_revision='ed466f9db71292e912d8d0160e689a67a994f2d9')
 
 
 _FILE_DIGESTS = {}
@@ -162,27 +161,13 @@ def sphere_raster(width, height):
 
 
 def _metres(elevation):
-    """Map native elevation to metres without a zero-slope coastal plain.
-
-    The bounded coastal term gives a finite 1000 m/unit land slope at zero.
-    It adds at most 81.92 m, vanishes at the peak and preserves native relief
-    ordering and the exact sea level. No neural details are filtered here.
-    """
-    elevation=np.asarray(elevation)
-    t=np.clip(elevation,0.,1.)
-    land=6000*t**4*(5-4*t)+1000*t*(1-t)**4
-    return np.where(elevation<=0,elevation*10000,land).astype(np.float32)
+    """V3 supplies physical kilometres, including coasts and peaks above 6 km."""
+    return (np.asarray(elevation, dtype=np.float64) * 1000).astype(np.float32)
 
 
 def _elevation(metres):
-    """Inverse of the calibrated convention; physical imports keep their units."""
-    metres=np.asarray(metres)
-    lo,hi=np.zeros_like(metres,dtype=np.float64),np.ones_like(metres,dtype=np.float64)
-    for _ in range(30):
-        mid=(lo+hi)*.5
-        below=6000*mid**4*(5-4*mid)+1000*mid*(1-mid)**4<metres
-        lo=np.where(below,mid,lo);hi=np.where(below,hi,mid)
-    return np.where(metres<=0,metres/10000,(lo+hi)*.5).astype(np.float32)
+    """Physical imports have no clipping, coastal uplift or inverse curve."""
+    return (np.asarray(metres, dtype=np.float64) / 1000).astype(np.float32)
 
 
 def _graph_fields(directory):
@@ -218,181 +203,29 @@ def _nearest_regions(points, xyz, config):
     return cKDTree(points).query(xyz,k=4,workers=-1)[1]
 
 
-def _run_city_pipeline(node, directory, request, width, height, device, base, config):
-    from terrain_orogen_cuda import rasterize
-    from terrain_city_erosion import erode
-    started=time.perf_counter()
-    request['externalErosion']=True
-    (directory/'request.json').write_bytes(_json_bytes(request))
-    with (directory/'node.log').open('w+b') as log, cancellable_process(
-        [node,str(NATIVE/'pipeline.mjs'),str(directory/'request.json'),str(directory)],
-        stdin=subprocess.PIPE,stdout=log,stderr=log) as process:
-        while not (directory/'relief.ready').exists():
-            check_generation()
-            if process.poll() is not None or time.perf_counter()-started>600:
-                log.seek(0)
-                raise RuntimeError('Orogen relief stage failed: '+log.read().decode(errors='replace')[-4000:])
-            time.sleep(.02)
-        native_seconds=time.perf_counter()-started
-        _,points,triangles,fields=_graph_fields(directory)
-        at=time.perf_counter()
-        xyz=sphere_raster(width,height)
-        nearest=_nearest_regions(points,xyz,config)
-        projection_seconds=time.perf_counter()-at
-        at=time.perf_counter()
-        if base is None:
-            initial,_=rasterize(points,triangles,nearest,xyz,{'elevation':fields['elevation']},device)
-            raw=_metres(initial['elevation']).reshape(height,width)
-        else:
-            raw=np.asarray(base,dtype=np.float32).copy()
-        initial_cuda_seconds=time.perf_counter()-at
-        eroded,metadata=erode(raw,strength=config['city_erosion_strength'],iterations=config['city_erosion_iterations'],
-            talus=config['city_erosion_talus'],motif_km=config['city_erosion_motif_km'])
-        at=time.perf_counter()
-        elevation=_atlas_to_elevation(eroded,points,fields['elevation'])
-        elevation.tofile(directory/'external-elevation.f32')
-        metadata['graph_resampling_seconds']=time.perf_counter()-at
-        at=time.perf_counter()
-        process.communicate(_json_bytes(dict(elevationFile=str(directory/'external-elevation.f32'))),timeout=600)
-        native_seconds+=time.perf_counter()-at
-        if process.returncode:
-            log.seek(0)
-            raise RuntimeError('Orogen climate stage failed: '+log.read().decode(errors='replace')[-4000:])
-        return eroded,metadata,(points,triangles,nearest,xyz),native_seconds,projection_seconds,initial_cuda_seconds,raw
-
-
-
 def generate_atlas(seed, style='earthlike', *, width=WIDTH, height=HEIGHT, include_layers=False, options=None):
-    """Uncached generation for benchmarks/QA; production dimensions are fixed."""
-    seed = _seed(seed)
+    """Run the v3 relief/finish/monthly-climate chain at a requested resolution."""
     if style not in STYLES:
         raise ValueError(f'Unknown Orogen style {style!r}')
     if width != 2*height or height < 16 or width > 4096:
         raise ValueError('Orogen raster must be 2:1, with height >=16 and width <=4096')
-    identity = implementation_identity()
-    verify_implementation_identity(identity)
+    import terrain_orogen_stages as stages
+    verify_implementation_identity()
+    seed = _seed(seed)
     config = style_config(style, options)
-    # Mix every u64 bit before entering upstream's numeric JavaScript RNG.
-    digest = hashlib.sha256(f'orogen-tectonic-cuda-v1:{seed}'.encode()).digest()
-    sparse_seed = seed if seed <= 0x7fffffff else int.from_bytes(digest[:4], 'little') & 0x7fffffff
-    started = time.perf_counter()
-    device = torch.device('cuda', identity['cuda_device']['index'])
-    before = torch.cuda.memory_allocated(device)
-    use_city = config['relief_pipeline']=='city-gpu' and config['city_erosion_strength']>0
-    city_metadata = None
-    city_geometry = None
-    initial_cuda_seconds = 0.
-    base = initial_raster(seed, style, config, width, height)
-    gpu_metadata = None
-    use_gpu = config.get('orogen_gpu_identity',{}).get('available',False) and any(
-        config['orogen_gpu_'+stage] for stage in ('relief','propagation','post','climate','erosion'))
-    with tempfile.TemporaryDirectory(prefix='orogen-pipeline-') as temporary:
-        directory = Path(temporary)
-        request=dict(seed=sparse_seed,N=config['detail'],P=config['plate_count'],jitter=.75,
-            nMag=config['roughness'],numContinents=config['continent_count'],
-            continentSizeVariety=config['continent_variety'],landCoverage=config['land_coverage'],
-            smoothing=config['smoothing'],terrainWarp=config['warp'],hydraulicErosion=config['hydraulic'],
-            thermalErosion=config['thermal'],glacialErosion=config['glacial'],ridgeSharpening=config['sharpening'],
-            temperatureOffset=config['temperature_offset'],precipitationOffset=config['precipitation_offset'],
-            threshold=config['convergence_threshold'],motion=config['motion_strength'],spread=config['spread'],
-            skipPost=config['relief_pipeline']!='orogen')
-        from terrain_generation import OROGEN_CLIMATE_PARAMETERS
-        request['climateSettings']={key.removeprefix('orogen_'):config[key.removeprefix('orogen_')]
-                                   for key in OROGEN_CLIMATE_PARAMETERS}
-        if base is not None:
-            base=np.asarray(base,dtype='<f4');base.tofile(directory/'initial.f32')
-            request.update(inputFile=str(directory/'initial.f32'),imageWidth=width,imageHeight=height)
-        if use_gpu:
-            from terrain_orogen_gpu import run as run_gpu
-            external = {}
-            def city_callback():
-                from terrain_orogen_cuda import rasterize
-                from terrain_city_erosion import erode
-                _,p,t,f=_graph_fields(directory)
-                at=time.perf_counter();xyz=sphere_raster(width,height)
-                nearest=_nearest_regions(p,xyz,config)
-                external['projection_seconds']=time.perf_counter()-at
-                at=time.perf_counter()
-                if base is None:
-                    initial,_=rasterize(p,t,nearest,xyz,{'elevation':f['elevation']},device)
-                    initial=_metres(initial['elevation']).reshape(height,width)
-                else: initial=np.asarray(base,dtype=np.float32).copy()
-                external['initial_cuda_seconds']=time.perf_counter()-at
-                eroded,meta=erode(initial,strength=config['city_erosion_strength'],iterations=config['city_erosion_iterations'],
-                                  talus=config['city_erosion_talus'],motif_km=config['city_erosion_motif_km'])
-                at=time.perf_counter()
-                _atlas_to_elevation(eroded,p,f['elevation']).tofile(directory/'external-elevation.f32')
-                meta['graph_resampling_seconds']=time.perf_counter()-at
-                external.update(raw=eroded,initial=initial,metadata=meta,geometry=(p,t,nearest,xyz))
-                return dict(elevationFile=str(directory/'external-elevation.f32')),None
-            flags={stage:config['orogen_gpu_'+stage] for stage in ('relief','propagation','post','climate','erosion')}
-            gpu_metadata,_=run_gpu(shutil.which('node'),directory,request,flags,city_callback if use_city else None)
-            if use_city:
-                city_raw,city_initial,city_metadata=external['raw'],external['initial'],external['metadata']
-                city_geometry=external['geometry'];projection_seconds=external['projection_seconds']
-                initial_cuda_seconds=external['initial_cuda_seconds'];coarse_seconds=gpu_metadata['timings']['seconds']
-        elif use_city:
-            city_raw,city_metadata,city_geometry,coarse_seconds,projection_seconds,initial_cuda_seconds,city_initial = _run_city_pipeline(
-                shutil.which('node'),directory,request,width,height,device,base,config)
-        else:
-            (directory/'request.json').write_bytes(_json_bytes(request))
-            result = run_process([shutil.which('node'), str(NATIVE/'pipeline.mjs'),
-                                     str(directory/'request.json'), str(directory)],
-                                    check=False, capture_output=True, text=True, timeout=600)
-            if result.returncode:
-                raise RuntimeError(f'Orogen pipeline failed: {result.stderr.strip()}')
-        graph,points,triangles,fields=_graph_fields(directory)
-    if city_geometry is None:
-        coarse_seconds = time.perf_counter()-started
-        at=time.perf_counter()
-        xyz = sphere_raster(width, height)
-        indices = _nearest_regions(points,xyz,config)
-        projection_seconds = time.perf_counter()-at
-    else:
-        _,_,indices,xyz=city_geometry
-    from terrain_orogen_cuda import rasterize
-    at=time.perf_counter()
-    fields,fallback = rasterize(points,triangles,indices,xyz,fields,device)
-    gpu_seconds = time.perf_counter()-at
-    layers={k:v.reshape(height,width) for k,v in fields.items()}
-    raw=_metres(layers.pop('elevation'))
-    if use_city:
-        raw=city_raw
-        layers['city_erosion_delta_m']=(raw-city_initial).astype(np.float32)
-    elif base is not None and config['relief_pipeline']!='orogen': raw=base.copy()
-    layers.setdefault('boundaries',np.zeros_like(raw));layers.setdefault('convergence',np.zeros_like(raw))
-    belt=np.maximum(layers.get('tectonic',np.zeros_like(raw)),0).astype(np.float32)
-    layers['uplift']=belt
-    if not np.isfinite(raw).all() or any(not np.isfinite(v).all() for v in layers.values()):
-        raise RuntimeError('Orogen produced non-finite fields')
-    ocean=raw<0
-    metadata=dict(requested_seed_u64=str(seed),selected_seed_u64=str(seed),selected_attempt=0,
-        style=style,generator_version=VERSION,native_config=dict(**config,sparse_seed=sparse_seed,
-        backend='original-JS-global; CUDA-barycentric-atlas'+('; City-WebGPU-surface' if use_city else '')),attempts=[],
-        raster=dict(width=width,height=height,dtype='<f4',projection='equirectangular',samples='pixel-centres',
-            y_axis='south',sea_level_m=0,longitude_axis='atan2(z,x)',reconstruction='spherical-bilinear-at-read'),
-        hypsometry=dict(rule=HYPSOMETRY_RULE),
-        sign_preserved=True,generation_seconds=time.perf_counter()-started,
-        timings=dict(coarse_seconds=coarse_seconds,projection_seconds=projection_seconds,cuda_seconds=gpu_seconds),
-        original_pipeline=graph['timing'],original_elevation_timing=graph.get('elevationTiming',[]),
-        original_post_timing=graph.get('postTiming',[]),projection_fallback_pixels=fallback,
-        cuda_resident_baseline_bytes=before,diagnostics=dict(land_fraction=float(np.mean(raw>0)),
-            highland_land_fraction=float(np.sum(raw>2000)/max(1,np.sum(raw>0)))))
-    if city_metadata is not None:
-        metadata['erosion']=city_metadata
-        metadata['timings'].update(city_erosion_seconds=city_metadata['seconds'],
-                                  initial_cuda_seconds=initial_cuda_seconds,
-                                  graph_resampling_seconds=city_metadata['graph_resampling_seconds'])
-    if gpu_metadata is not None:
-        metadata['gpu_pipeline']=gpu_metadata
-        metadata['native_config']['backend']+='; opt-in CUDA graph stages'
-    elif 'orogen_gpu_identity' in config:
-        metadata['gpu_pipeline']=dict(identity=config['orogen_gpu_identity'],fallback=not config['orogen_gpu_identity']['available'])
-    if config.get('orogen_gpu_raster'):
-        metadata['timings']['nearest_backend']='CUDA-grid' if config['orogen_gpu_identity']['available'] else 'CPU-cKDTree'
-    if include_layers:
-        return raw, ocean, metadata, belt, layers
-    return raw, ocean, metadata, belt
+    begun = time.perf_counter()
+    artifacts = {}
+    settings = stages._settings(config, style)
+    for stage in stages.STAGE_KEYS:
+        parent = artifacts.get('relief' if stage == 'erosion' else 'erosion') if stage != 'relief' else None
+        arrays, details = stages._execute(stage, seed, style, config, width, height, parent, artifacts.get('relief'))
+        namespace = dict(stage=stage, seed=seed, width=width, height=height, parent=parent['id'] if parent else None,
+                         settings={k:settings[k] for k in sorted(stages.STAGE_KEYS[stage])})
+        artifacts[stage] = dict(id=hashlib.sha256(_json_bytes(namespace)).hexdigest(),
+                                arrays=arrays, metadata=dict(namespace=namespace, **details))
+    result = stages.compose(seed, style, config, width, height, artifacts, 'erosion')
+    result[2]['generation_seconds'] = time.perf_counter() - begun
+    return result if include_layers else result[:4]
 
 
 class OrogenHeightmap(WorldHeightmap):

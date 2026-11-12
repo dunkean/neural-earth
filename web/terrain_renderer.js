@@ -857,6 +857,7 @@
     ${r3?v2ForestMaterial():''}
     ${v2&&r3?v2ForestTarget(r3.shaders.forestExpected):r3?.shaders.forestExpected||''}
     ${v2?.canopyMeanShader||''}
+    ${window.TerrainMagnaSatellite?.coarseShader||''}
     fn v2CoarseResponse(rgb:vec3<f32>,roughness:f32,occlusion:f32,l:vec3<f32>,l2:vec3<f32>)->vec3<f32>{
       var m:GroundMaterial;m.albedo=groundToLinear(rgb);m.normal=vec3<f32>(0.,1.,0.);m.roughness=roughness;m.occlusion=occlusion;
       return groundToLinear(shadeTerrainGround(m,vec3<f32>(0.,1.,0.),l,l2,params.lighting.x));
@@ -931,6 +932,7 @@
         if(beachWeight>0.){response=mix(response,v2CoarseResponse(r3Sediment,roughness,1.,l,l2),beachWeight);}
         // Light-dependent flat response, still HDR. The display fragment adds
         // normalized macro relief and the shoulder exactly once.
+        ${window.TerrainMagnaSatellite?'if(params.field.z == -8.){textureStore(albedo,vec2<i32>(id.xy),vec4<f32>(magnaCoarseSatellite(e,p,height,gradient,population.rgb,l,l2),canopy));return;}':''}
         textureStore(albedo,vec2<i32>(id.xy),vec4<f32>(groundToDisplay(response),canopy));return;
       }`:''}
       textureStore(albedo,vec2<i32>(id.xy),vec4<f32>(land,surfaceSeaIce(point,clim(p,21),clim(p,24),r)));

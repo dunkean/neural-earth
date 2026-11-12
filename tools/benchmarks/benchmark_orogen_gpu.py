@@ -1,4 +1,4 @@
-"""Compare explicit Orogen GPU presets against the historical CPU defaults."""
+"""Compare Orogen v3 CPU and CUDA spatial projection, without neural models."""
 
 from pathlib import Path as _BootstrapPath
 import sys as _bootstrap_sys
@@ -18,13 +18,7 @@ import numpy as np
 from benchmark_orogen import preview
 import terrain_orogen as orogen
 
-PRESETS = {
-    'cpu': (),
-    'climate': ('climate','raster'),
-    'local': ('relief','post','climate','raster'),
-    'full': ('relief','propagation','post','erosion','climate','raster'),
-    'city': ('relief','propagation','post','climate','raster'),
-}
+PRESETS = {'cpu': (), 'projection': ('raster',), 'city': ('raster',)}
 
 
 def main():

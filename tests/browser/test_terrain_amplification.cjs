@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm'),http=require('node:http');
 const {test}=require('node:test'),{loadPlaywright,browserExecutable}=require('../../tools/platform.cjs');
 const root=require('node:path').resolve(__dirname,'../..'),read=name=>fs.readFileSync(root+'/web/'+name,'utf8');
-const capability={available:true,modes:{hybrid:{available:true,version:'same-v1'},phasor:{available:true,version:'same-v1'},mse:{available:true,version:'same-v1'}}};
+const capability={available:true,modes:{hybrid:{available:true,version:'same-v1'},phasor:{available:true,version:'same-v1'},mse:{available:true,version:'same-v1'},magna:{available:true,version:'same-v1'}}};
 function controls(search='',saved=null,kind='python',legacy=true){
   const storage=new Map(saved?[[legacy?'neural-earth-amplification-v1':'neural-earth-amplification-v2',JSON.stringify(saved)]]:[]);
   const context={window:{NeuralEarthRuntime:{kind}},location:{search},URLSearchParams,storage,localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)}};
@@ -21,15 +21,15 @@ test('mode defaults, old URLs, v1 migration, shared state and WASM capability',(
   assert.equal(m.get().mode,'hybrid');assert.equal(m.effective(),0);m.compare();assert.equal(m.effective(),1.7);
   assert.equal(JSON.parse(migrated.storage.get('neural-earth-amplification-v2')).mode,'hybrid');
   const restored=controls('',a.get(),'python',false).window.TerrainAmplification;restored.setSupport(capability);assert.equal(restored.effectiveMode(),'phasor');
-  for(const legacy of [true,false])for(const mode of ['mse','phasor','hybrid']){const explicit=controls('',{mode,intensity:.8},'python',legacy).window.TerrainAmplification;explicit.setSupport(capability);assert.equal(explicit.effectiveMode(),mode);}
+  for(const legacy of [true,false])for(const mode of ['mse','phasor','hybrid','magna']){const explicit=controls('',{mode,intensity:.8},'python',legacy).window.TerrainAmplification;explicit.setSupport(capability);assert.equal(explicit.effectiveMode(),mode);}
   const legacyShare=controls().window.TerrainAmplification;legacyShare.setSupport(capability);legacyShare.set({enabled:true,intensity:.5});assert.equal(legacyShare.effectiveMode(),'hybrid');
   legacyShare.writeParams(p);assert.equal(p.get('amplify_mode'),'hybrid');
   const wasm=controls('?amplify=1&amplify_mode=phasor',null,'wasm').window.TerrainAmplification;wasm.setSupport(capability);assert.equal(wasm.effective(),0);assert.equal(wasm.effectiveMode(),'off');
   a.set({mode:'off',intensity:1.35});a.writeParams(p);assert.equal(p.has('amplify'),false);assert.equal(p.has('amplify_mode'),false);
 });
-test('four-way cycling preserves intensity and ignores unavailable modes',()=>{
+test('five-way cycling preserves intensity and ignores unavailable modes',()=>{
   const a=controls().window.TerrainAmplification;a.setSupport(capability);a.set({mode:'off',intensity:.65});
-  for(const mode of ['hybrid','phasor','mse','off','hybrid']){a.cycle();assert.equal(a.effectiveMode(),mode);assert.equal(a.get().intensity,.65);}
+  for(const mode of ['hybrid','phasor','mse','magna','off','hybrid']){a.cycle();assert.equal(a.effectiveMode(),mode);assert.equal(a.get().intensity,.65);}
   a.setSupport({available:true,modes:{mse:{available:false},phasor:{available:true}}});
   assert.equal(a.effectiveMode(),'off');a.cycle();assert.equal(a.effectiveMode(),'phasor');a.compare();assert.equal(a.effectiveMode(),'off');
 });
@@ -74,7 +74,7 @@ function viewer(){
   c.TerrainLOD=require('../../web/terrain_lod.js');const start=source.indexOf('function planTerrainRegion('),end=source.indexOf('\nfunction ',start+10);vm.runInContext(source.slice(start,end),c);
   c.window.TerrainAmplification.setSupport(capability);return c;
 }
-test('before/Hybrid/Phasor/MSE keys separate even with identical module versions',()=>{
+test('before/Hybrid/Phasor/MSE/Magna keys separate even with identical module versions',()=>{
   const c=viewer(),a=c.window.TerrainAmplification;a.set({mode:'mse',intensity:1});
   const mse=c.taskFor(-2,0,0,0),coarse=c.taskFor(0,0,0,0);a.set({mode:'phasor',intensity:1});const phasor=c.taskFor(-2,0,0,0);
   assert.notEqual(mse.key,phasor.key);assert.match(mse.key,/amp-mse-same-v1-1.00/);assert.match(phasor.key,/amp-phasor-same-v1-1.00/);
@@ -84,6 +84,7 @@ test('before/Hybrid/Phasor/MSE keys separate even with identical module versions
   a.set({mode:'hybrid',intensity:1});const hybrid=c.taskFor(-2,0,0,0);
   assert.match(hybrid.key,/amp-hybrid-same-v1-1.00/);assert.equal(new Set([before.key,mse.key,phasor.key,hybrid.key]).size,4);
   assert.equal(c.isCurrentTile({...hybrid,gpu:true}),true);assert.equal(c.isCurrentTile({...phasor,gpu:true}),false);
+  a.set({mode:'magna',intensity:1});const magna=c.taskFor(-2,0,0,0);assert.match(magna.key,/amp-magna-same-v1-1.00/);assert.equal(new Set([before.key,mse.key,phasor.key,hybrid.key,magna.key]).size,5);assert.equal(c.isCurrentTile({...magna,gpu:true}),true);
 });
 test('delayed negative-LOD comparisons keep previous coverage until replacements arrive (PNG and GPU)',()=>{
   const LOD=require('../../web/terrain_lod.js'),span=256*7.5;
@@ -125,10 +126,10 @@ test('a forced Render LOD excludes finer cached history',()=>{
 });
 
 test('camera views at/below each relief floor ignore finer history and retain ready parents',()=>{
-  for(const mode of ['off','hybrid','phasor','mse'])for(const gap of [0,3,4])for(const automatic of [false,true]){
+  for(const mode of ['off','hybrid','phasor','mse','magna'])for(const gap of [0,3,4])for(const automatic of [false,true]){
     const c=viewer(),a=c.window.TerrainAmplification;
     Object.assign(c,{forcedView:null,MIN_LOD:-12,MAX_LOD:11,continuousRefinement:()=>automatic,refinementPolicy:()=>({target:-12}),cacheLodGap:()=>gap});
-    c.world.relief_floors={classic:-6,hybrid:-4,phasor:-5,mse:-6};a.set({mode,intensity:1});
+    c.world.relief_floors={classic:-6,hybrid:-4,phasor:-5,mse:-6,magna:-6};a.set({mode,intensity:1});
     const floor=c.world.relief_floors[mode==='off'?'classic':mode];
     assert.equal(c.minimumDisplayLod(floor),floor);assert.equal(c.minimumDisplayLod(-8),-8);
     const tile=(lod,tx=-1)=>({...c.taskFor(lod,tx,-1,0),gpu:true,heights:new Float32Array(1)});
@@ -154,7 +155,7 @@ test('controls keyboard, badge and amplified Render/Render3D shaders',async t=>{
     await page.evaluate(()=>{TerrainAmplification.mount(document.getElementById('pane'),()=>{});});
     assert.equal(await page.locator('#amplificationSettings').isVisible(),false);
     await page.evaluate(capability=>TerrainAmplification.setSupport(capability),capability);
-    assert.deepEqual(await page.locator('#amplificationMode option').evaluateAll(options=>options.map(o=>o.value)),['off','hybrid','phasor','mse']);
+    assert.deepEqual(await page.locator('#amplificationMode option').evaluateAll(options=>options.map(o=>o.value)),['off','hybrid','phasor','mse','magna']);
     assert.equal(await page.locator('#amplificationMode option[value=off]').textContent(),'Classique (raffinement actuel)');
     await page.selectOption('#amplificationMode','phasor');
     await page.locator('#amplificationIntensity').fill('1.4');await page.locator('body').click();await page.keyboard.press('b');
@@ -167,7 +168,7 @@ test('controls keyboard, badge and amplified Render/Render3D shaders',async t=>{
     }
     await page.selectOption('#ui-language','fr');
     await page.evaluate(()=>TerrainAmplification.set({mode:'off',intensity:1.4}));
-    for(const mode of ['hybrid','phasor','mse','off']){await page.keyboard.press('Shift+B');assert.equal(await page.evaluate(()=>TerrainAmplification.effectiveMode()),mode);}
+    for(const mode of ['hybrid','phasor','mse','magna','off']){await page.keyboard.press('Shift+B');assert.equal(await page.evaluate(()=>TerrainAmplification.effectiveMode()),mode);}
     await page.click('#amplificationCycle');assert.equal(await page.evaluate(()=>TerrainAmplification.effectiveMode()),'hybrid');
     await page.evaluate(()=>TerrainAmplification.displayed(['hybrid']));assert.match(await page.locator('#amplificationBadge').textContent(),/Hybride/);
     await page.evaluate(()=>TerrainAmplification.setSupport({available:false,modes:{hybrid:{available:false,reason:'hybrid dependency missing'},phasor:{available:false},mse:{available:false}}}));

@@ -15,7 +15,7 @@ def rasterize(points, triangles, nearest, xyz, fields, device):
     inverse=torch.linalg.inv(matrices)
     fan=torch.as_tensor(fan,device=device)
     names=list(fields); data=torch.as_tensor(np.stack([fields[k] for k in names],axis=1),device=device)
-    categorical={'plates','crust','boundaries','koppen','superPlates'}
+    categorical={'plates','crust','boundaries','koppen','superPlates','ocean_mask','lake_mask','geology_rock','geology_belt_kind','geology_craton','geology_backarc','presentBeltKind','presentCraton','farming_kind'}
     nearest_only=torch.as_tensor([k in categorical or k.startswith('koppen_color_') for k in names],device=device)
     # Fields stay resident and transfer once; per-chunk, per-field copies
     # each synchronized the device.

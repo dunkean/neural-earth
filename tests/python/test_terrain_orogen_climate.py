@@ -22,12 +22,17 @@ from terrain_orogen_layers import render
 
 class OrogenBioclimTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which('node'), 'Orogen Node runtime unavailable')
-    def test_zero_global_rainfall_percentile_has_finite_normalization(self):
-        module = (_REPO_ROOT / 'native/orogen/vendor/climate-util.js').resolve().as_uri()
-        script = f"import {{percentile}} from {json.dumps(module)}; const p=new Float32Array(20); const scale=percentile(p,.95); console.log(JSON.stringify([scale,...p.map(v=>Math.max(0,v/scale))]));"
+    def test_v3_bioclim_uses_all_months_and_dry_worlds_stay_finite(self):
+        module = (_REPO_ROOT / 'native/orogen/climate.mjs').resolve().as_uri()
+        temperatures=np.array([1,2,4,9,17,25,31,27,19,11,5,2],np.float64)
+        rain=np.array([0,0,0,25,60,1700,450,30,2,0,0,0],np.float64)
+        script = f"import {{bioclim}} from {json.dumps(module)}; console.log(JSON.stringify([bioclim({json.dumps(temperatures.tolist())},{json.dumps(rain.tolist())}),bioclim(Array(12).fill(15),Array(12).fill(0))]));"
         result = subprocess.run(['node', '--input-type=module', '-e', script],
                                 check=True, capture_output=True, text=True)
-        np.testing.assert_array_equal(json.loads(result.stdout), [1] + [0] * 20)
+        actual,dry=json.loads(result.stdout)
+        expected=[temperatures.mean(),temperatures.std(ddof=1)*100,rain.sum(),rain.std(ddof=1)/(rain.mean()+1)*100]
+        np.testing.assert_allclose(actual,expected,rtol=1e-12)
+        np.testing.assert_array_equal(dry,[15,0,0,0])
 
     def test_matches_worldclim_monthly_reference_in_physical_units(self):
         ts = np.array([[28., 15., -20.]], np.float32)

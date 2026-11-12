@@ -29,6 +29,7 @@ from flask import Flask, jsonify, request, send_from_directory
 from terrain_diffusion.inference.world_pipeline import WorldPipeline
 from terrain_diffusion.inference.relief_map import get_relief_map
 from terrain_inference import configure_world
+from backend.terrain_model_loading import MODEL_LOAD_LOCK
 
 OUTPUT = OUTPUT_ROOT
 OUTPUT.mkdir(parents=True, exist_ok=True)
@@ -81,7 +82,7 @@ def load_pipeline(seed, device=None):
             torch.set_num_threads(8)
             # Weight version counters must remain available for the immutable eval
             # cache, even when the caller already uses torch.inference_mode().
-            with torch.inference_mode(False), torch.cuda.device(index):
+            with MODEL_LOAD_LOCK, torch.inference_mode(False), torch.cuda.device(index):
                 loaded = WorldPipeline.from_pretrained(
                     resolve_model_source(), seed=seed, torch_compile=False, dtype='bf16',
                     latents_batch_size=16, log_mode='info', cache_limit=512 * 1024 * 1024,

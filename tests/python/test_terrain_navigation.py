@@ -486,6 +486,29 @@ class ProtocolTests(unittest.TestCase):
         self.assertEqual(response.status_code,400)
         metadata.assert_not_called()
 
+    def test_satellite_overview_is_bounded_and_uses_matching_physical_axes(self):
+        from PIL import Image
+        import io
+        self.server.physical_overview.cache_clear()
+        self.addCleanup(self.server.physical_overview.cache_clear)
+        bounds=[-20e6,-10e6,20e6,10e6]
+        def physical(seed,profile,xs,ys):
+            self.assertEqual((len(xs),len(ys)),(512,256))
+            return dict(elev=np.ones((len(ys),len(xs)),np.float32),climate=np.zeros((5,len(ys),len(xs)),np.float32))
+        def material(atlas,xs,ys,elevation,resolution,*args,**kwargs):
+            self.assertEqual(elevation.shape,(len(ys),len(xs)))
+            self.assertEqual(resolution,(40e6/512,20e6/256))
+            return np.full((*elevation.shape,3),.5,np.float32)
+        with patch.object(self.server,'metadata',return_value=dict(overview_bounds=bounds,world_identity='bounded-satellite')),\
+             patch.object(self.server,'conditioning_preview',side_effect=physical),\
+             patch.object(self.server,'biome_atlas',return_value=(object(),{})),\
+             patch.object(self.server,'colorize_surface',side_effect=material):
+            response=self.client.get('/api/overview/natural-v1/9398.png?mode=render-v2&world_profile=orogen')
+            self.assertEqual(response.status_code,200)
+            with Image.open(io.BytesIO(response.data)) as image:
+                self.assertEqual(image.size,(512,256))
+            response.close()
+
     def test_overview_identity_receipts_are_per_display_mode(self):
         self.server.physical_overview.cache_clear()
         self.addCleanup(self.server.physical_overview.cache_clear)

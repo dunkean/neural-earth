@@ -1,8 +1,9 @@
 # Terrain amplification
 
 Experimental geometric detail below the 30 m neural DEM, from LOD -1 (15 m) down to LOD -12 (7.32 mm).
-Four modes share one tile pipeline: the existing **classic** refinement, and three amplification modes,
-**hybrid** (recommended), **Phasor** and **MSE**. All are deterministic by seed and seamless across tiles.
+Five modes share one tile pipeline: the existing **classic** refinement, plus
+**hybrid** (recommended), **Phasor**, **MSE** and [**Magna Urbis Noise + physical ground**](methods/magna-satellite.md).
+All are deterministic by seed and seamless across tiles.
 This page explains the generation path and how to use it. Reference details (headers, payload layout,
 cache keys) are in [Layers](layers.md#experimental-terrain-amplification) and
 [Architecture](architecture.md#rendering-and-polar-sampling).

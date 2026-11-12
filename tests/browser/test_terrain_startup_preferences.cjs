@@ -5,14 +5,14 @@ const {loadPlaywright,browserExecutable,pythonExecutable}=require(root+'/tools/p
 const {chromium}=loadPlaywright();
 const schema=JSON.parse(require('node:child_process').execFileSync(pythonExecutable(),['-c','import json; from terrain_generation import generator_schema; print(json.dumps(generator_schema()))'],{encoding:'utf8'}));
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGM0LJrHwMDAxAAGAA7JAUW48M0QAAAAAElFTkSuQmCC','base64');
-const gpuKeys=['relief','propagation','post','climate','erosion','raster'].map(stage=>'orogen_gpu_'+stage);
+const gpuKeys=['raster'].map(stage=>'orogen_gpu_'+stage);
 const storageKey='neural-earth-preferences-v1';
 
 (async()=>{
  const browser=await chromium.launch({executablePath:browserExecutable(),headless:true});
  try{
   for(const enabled of [true,false]){
-   const context=await browser.newContext(),page=await context.newPage(),errors=[],worldRequests=[];
+   const context=await browser.newContext(),page=await context.newPage(),errors=[],worldRequests=[],generationRequests=[];
    let holdFirstWorld=true,releaseFirstWorld;
    const firstWorldGate=new Promise(resolve=>{releaseFirstWorld=resolve});
    page.on('pageerror',error=>errors.push(error.message));
@@ -28,7 +28,7 @@ const storageKey='neural-earth-preferences-v1';
      if(holdFirstWorld)await firstWorldGate;
      return route.fulfill({json:{seed:'42',version:'test',cache_profile:'test',world_profile:profile,generation_profile:profile,generation_schema:schema,generation_settings:settings,world_bounds:[-20e6,-10e6,20e6,10e6],overview_bounds:[-20e6,-10e6,20e6,10e6],overview:'/overview.png',gpu:'Mock'}});
     }
-    if(u.pathname==='/api/generation/run')return route.fulfill({json:{world_profile:route.request().postDataJSON().profile,generation_settings:route.request().postDataJSON().settings}});
+    if(u.pathname==='/api/generation/run'){const data=route.request().postDataJSON();generationRequests.push(data);return route.fulfill({json:{world_profile:data.profile,generation_settings:data.settings}});}
     if(u.pathname==='/api/view')return route.fulfill({json:{accepted:true}});
     if(u.pathname==='/api/status')return route.fulfill({json:{scheduler:{queued:0,computing:0,encoding:0}}});
     return route.fulfill({contentType:'image/png',body:png});
@@ -48,9 +48,12 @@ const storageKey='neural-earth-preferences-v1';
    assert.equal(await page.inputValue('#worldGenerator'),'orogen','Menubar selection does not wait for the world response');
    assert.equal(await orogenButton.getAttribute('aria-pressed'),'true');
    assert.equal(await page.evaluate(()=>world),null,'Initial world request is still held');
-   assert.equal(await page.inputValue('#reliefPipeline'),enabled?'orogen-gpu':'orogen','GPU choice is reflected while generating');
+   assert.match(await page.inputValue('#seed'),/^[0-9]+$/,'Seed is visible before generation returns');
+   assert.equal(await page.inputValue('#reliefPipeline'),'orogen','GPU choice is reflected while generating');
    holdFirstWorld=false;releaseFirstWorld();
    await page.waitForFunction(()=>world?.seed==='42'&&rendererReady);
+   assert.equal(await page.inputValue('#mapMode'),'render-v2','Satellite is the desktop default');
+   assert.match(await page.locator('#mapMode option[value=render-v2]').textContent(),/Satellite.*Magna Urbis/);
    const initial=worldRequests[0];
    assert.equal(initial.profile,'orogen');
    assert.equal(initial.settings.orogen_detail,100000);
@@ -60,10 +63,15 @@ const storageKey='neural-earth-preferences-v1';
    for(const key of gpuKeys)assert.equal(initial.settings[key],enabled,key+' is applied before generation');
    for(const id of ['gpuRender','coarseGpu'])assert.equal(await page.isChecked('#'+id),enabled);
    assert.equal(await page.inputValue('#generatorType'),'orogen');
-   assert.equal(await page.inputValue('#reliefPipeline'),enabled?'orogen-gpu':'orogen');
-   for(const key of gpuKeys.filter(key=>key!=='orogen_gpu_erosion'))assert.equal(await page.isChecked('#'+key),enabled);
+   assert.equal(await page.inputValue('#reliefPipeline'),'orogen');
+   for(const key of gpuKeys)assert.equal(await page.isChecked('#'+key),enabled);
    assert.equal(await page.getByRole('button',{name:'Orogen',exact:true}).getAttribute('aria-pressed'),'true');
    assert.equal(await page.evaluate(()=>document.body.textContent.includes('Tectonic')),false);
+
+   await page.locator('#seed').fill('');
+   await page.locator('#apply').click();
+   await page.waitForFunction(()=>world?.seed==='42'&&!generationPending);
+   assert.match(generationRequests.at(-1).seed,/^[0-9]+$/,'Generating with an empty field chooses a seed');
 
    // The prompt is one-time, and the complete settings are restored on a new visit.
    await page.goto('https://startup.test/');
@@ -73,24 +81,21 @@ const storageKey='neural-earth-preferences-v1';
    for(const key of gpuKeys)assert.equal(worldRequests.at(-1).settings[key],enabled);
    await page.locator('#generationPanel > summary').click();
    await page.locator('#orogen_detail').fill('123000');
-   await page.locator('#orogen_gpu_relief').setChecked(!enabled);
+   await page.locator('#orogen_gpu_raster').setChecked(!enabled);
    await page.locator('#tabErosion').click();
-   await page.selectOption('#reliefPipeline',enabled?'orogen':'orogen-gpu');
+   await page.selectOption('#reliefPipeline','orogen');
    const stored=await page.evaluate(key=>JSON.parse(localStorage.getItem(key)),storageKey);
    assert.equal(stored.generation.settings.orogen_detail,123000);
-   assert.equal(stored.generation.settings.orogen_gpu_relief,!enabled);
-   assert.equal(stored.generation.settings.orogen_gpu_erosion,!enabled);
+   assert.equal(stored.generation.settings.orogen_gpu_raster,!enabled);
    assert.equal('orogen_relief_stage' in stored.generation.settings,false);
    await page.reload();
    await page.waitForFunction(()=>world?.seed==='42');
    assert.equal(worldRequests.at(-1).settings.orogen_detail,123000,'Reload preserves local drafts over the URL produced by this tab');
-   assert.equal(worldRequests.at(-1).settings.orogen_gpu_relief,!enabled);
-   assert.equal(worldRequests.at(-1).settings.orogen_gpu_erosion,!enabled);
+   assert.equal(worldRequests.at(-1).settings.orogen_gpu_raster,!enabled);
    await page.goto('https://startup.test/');
    await page.waitForFunction(()=>world?.seed==='42');
    assert.equal(worldRequests.at(-1).settings.orogen_detail,123000);
-   assert.equal(worldRequests.at(-1).settings.orogen_gpu_relief,!enabled);
-   assert.equal(worldRequests.at(-1).settings.orogen_gpu_erosion,!enabled);
+   assert.equal(worldRequests.at(-1).settings.orogen_gpu_raster,!enabled);
    assert.equal(await page.locator('#gpuWelcome').count(),0);
 
    // An explicit generation link still controls the imported world after onboarding.
@@ -102,18 +107,18 @@ const storageKey='neural-earth-preferences-v1';
 
    // Every UI profile defaults to active Orogen erosion, using the saved GPU answer.
    const defaults=await page.evaluate(()=>['orogen','natural','terrestrial-earthlike'].map(profile=>generationControls.defaults(profile)));
-   for(const settings of defaults){assert.equal(settings.relief_pipeline,'orogen');assert.equal(settings.orogen_gpu_erosion,enabled);}
+   for(const settings of defaults){assert.equal(settings.relief_pipeline,'orogen');assert.equal(settings.orogen_gpu_raster,enabled);}
 
    // Repair the old stored None setting, including the old URL still open in that browser.
-   const legacy={...schema.defaults_by_profile.orogen,relief_pipeline:'original',orogen_gpu_erosion:!enabled};
+   const legacy={...schema.defaults_by_profile.orogen,relief_pipeline:'original',orogen_gpu_raster:!enabled};
    await page.evaluate(({key,enabled,settings})=>localStorage.setItem(key,JSON.stringify({gpuAcceleration:enabled,generation:{profile:'orogen',settings}})),{key:storageKey,enabled,settings:legacy});
    await page.goto('https://startup.test/?profile=orogen&generation='+encodeURIComponent(JSON.stringify(legacy)));
    await page.waitForFunction(()=>world?.seed==='42');
    assert.equal(await page.locator('#gpuWelcome').count(),0,'Existing GPU answer is retained');
    assert.equal(worldRequests.at(-1).settings.relief_pipeline,'orogen','Old None erosion is repaired');
-   assert.equal(worldRequests.at(-1).settings.orogen_gpu_erosion,enabled);
-   assert.equal(await page.inputValue('#reliefPipeline'),enabled?'orogen-gpu':'orogen');
-   assert.equal(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)).erosionDefaultsVersion,storageKey),1);
+   assert.equal(worldRequests.at(-1).settings.orogen_gpu_raster,enabled);
+   assert.equal(await page.inputValue('#reliefPipeline'),'orogen');
+   assert.equal(await page.evaluate(key=>JSON.parse(localStorage.getItem(key)).erosionDefaultsVersion,storageKey),2);
 
    // The repair is one-time: a later explicit choice to disable erosion still persists.
    await page.locator('#generationPanel > summary').click();
@@ -131,8 +136,8 @@ const storageKey='neural-earth-preferences-v1';
    await page.locator('#gpuWelcome button[value='+(enabled?'yes':'no')+']').click();
    await page.waitForFunction(()=>world?.seed==='42');
    assert.equal(worldRequests.at(-1).settings.relief_pipeline,'orogen');
-   assert.equal(worldRequests.at(-1).settings.orogen_gpu_erosion,enabled);
-   assert.equal(await page.inputValue('#reliefPipeline'),enabled?'orogen-gpu':'orogen');
+   assert.equal(worldRequests.at(-1).settings.orogen_gpu_raster,enabled);
+   assert.equal(await page.inputValue('#reliefPipeline'),'orogen');
 
    // The launcher's --gpu/--cpu answers the first-launch question; a saved answer wins afterwards.
    await page.evaluate(key=>localStorage.removeItem(key),storageKey);

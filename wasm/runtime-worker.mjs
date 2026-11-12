@@ -24,7 +24,7 @@ const ready=async()=>{
   await loading;
 };
 const defaults=()=>({...schema.defaults_by_profile.orogen,world_topology:'sphere',height_source:'orogen',climate_source:'orogen',snr_adaptive_enabled:false,
-  ...Object.fromEntries(['relief','propagation','post','climate','erosion','raster'].map(k=>['orogen_gpu_'+k,false]))});
+  ...Object.fromEntries(['raster'].map(k=>['orogen_gpu_'+k,false]))});
 function validate(input={}) {
   const s={...defaults(),...input};
   if(s.world_topology!=='sphere'||s.height_source!=='orogen'||s.climate_source!=='orogen')throw Error('This browser build supports spherical Orogen worlds.');
